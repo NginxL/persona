@@ -140,3 +140,35 @@ describe("a task card's status (#11090)", () => {
     expect(pill).toEqual({ label: t("lib-state-labels.working"), className: expect.stringContaining("text-orange") });
   });
 });
+
+/** A task card's own classes and its markup from there on. */
+function card(todos: Todo[], id: string): { box: string[]; inner: string } {
+  Object.assign(fake, { todos, sessions: [], machines });
+  const html = renderToStaticMarkup(<Home onNewAgent={() => {}} onToggleSidebar={() => {}} />);
+  Object.assign(fake, { todos: [] });
+  const at = html.indexOf(`data-task="${id}"`);
+  return { box: /class="([^"]*)"/.exec(html.slice(html.lastIndexOf("<div ", at), at))![1]!.split(" "), inner: html.slice(at) };
+}
+const classOf = (html: string, tag: RegExp) => tag.exec(html)?.[1]?.split(" ") ?? [];
+const zOf = (classes: string[], prefix: string) => Number(/(\d+)\]?$/.exec(classes.find((c) => c.startsWith(prefix)) ?? "")?.[1] ?? NaN);
+
+describe("a task card on a touch screen (#11442)", () => {
+  it("opens from anywhere on it: the title link's overlay spans the card, the PR link above it", () => {
+    const { box, inner } = card([todo("a", { stage: "develop", pr_url: "https://example.com/pull/7", agents: [on("s1")] })], "a");
+    expect(box).toEqual(expect.arrayContaining(["pointer-coarse:relative", "pointer-coarse:isolate"]));
+    const title = classOf(inner, /<a href="\/todos\?id=a" class="([^"]*)"/);
+    expect(title).toEqual(expect.arrayContaining(["pointer-coarse:after:absolute", "pointer-coarse:after:inset-0"]));
+    // the stage bar's dots are positioned too: the overlay is above them, so a tap on a dot opens the task as well
+    expect(zOf(title, "pointer-coarse:after:z-")).toBeGreaterThan(0);
+    // the PR link keeps its own tap
+    const pr = classOf(inner, /<a href="https:\/\/example\.com\/pull\/7"[^>]* class="([^"]*)"/);
+    expect(pr).toContain("pointer-coarse:relative");
+    expect(zOf(pr, "pointer-coarse:z-")).toBeGreaterThan(zOf(title, "pointer-coarse:after:z-"));
+  });
+
+  it("is as it was under a mouse: only the title is the link", () => {
+    const { box, inner } = card([todo("a", { agents: [on("s1")] })], "a");
+    expect(box).not.toContain("relative");
+    expect(classOf(inner, /<a href="\/todos\?id=a" class="([^"]*)"/).some((c) => c.startsWith("after:"))).toBe(false);
+  });
+});

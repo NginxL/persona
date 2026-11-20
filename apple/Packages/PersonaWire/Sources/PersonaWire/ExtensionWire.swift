@@ -7759,14 +7759,17 @@ public nonisolated struct ExtensionMessagingAccount: Codable, Hashable, Sendable
     public var id: String
     public var name: String?
     public var avatar: String?
+    /// Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+    public var avatarUrl: String?
     public var tenant: String?
     public var signedIn: Bool
     public var unread: Int?
 
-    public init(id: String = "", name: String? = nil, avatar: String? = nil, tenant: String? = nil, signedIn: Bool = false, unread: Int? = nil) {
+    public init(id: String = "", name: String? = nil, avatar: String? = nil, avatarUrl: String? = nil, tenant: String? = nil, signedIn: Bool = false, unread: Int? = nil) {
         self.id = id
         self.name = name
         self.avatar = avatar
+        self.avatarUrl = avatarUrl
         self.tenant = tenant
         self.signedIn = signedIn
         self.unread = unread
@@ -7776,6 +7779,7 @@ public nonisolated struct ExtensionMessagingAccount: Codable, Hashable, Sendable
         case id
         case name
         case avatar
+        case avatarUrl = "avatar_url"
         case tenant
         case signedIn = "signed_in"
         case unread
@@ -7786,6 +7790,7 @@ public nonisolated struct ExtensionMessagingAccount: Codable, Hashable, Sendable
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = try? c.decodeIfPresent(String.self, forKey: .name)
         self.avatar = try? c.decodeIfPresent(String.self, forKey: .avatar)
+        self.avatarUrl = try? c.decodeIfPresent(String.self, forKey: .avatarUrl)
         self.tenant = try? c.decodeIfPresent(String.self, forKey: .tenant)
         self.signedIn = (try? c.decodeIfPresent(Bool.self, forKey: .signedIn)) ?? false
         self.unread = try? c.decodeIfPresent(Int.self, forKey: .unread)
@@ -7826,6 +7831,8 @@ public nonisolated struct ExtensionMessagingConversation: Codable, Hashable, Sen
     public var id: String
     public var name: String
     public var avatar: String?
+    /// Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+    public var avatarUrl: String?
     public var kind: String
     public var unread: Int
     public var markedUnread: Bool?
@@ -7839,10 +7846,11 @@ public nonisolated struct ExtensionMessagingConversation: Codable, Hashable, Sen
     public var readPosition: String?
     public var mentionPosition: String?
 
-    public init(id: String = "", name: String = "", avatar: String? = nil, kind: String = "", unread: Int = 0, markedUnread: Bool? = nil, mentioned: Bool? = nil, muted: Bool? = nil, pinned: Bool? = nil, preview: String = "", previewSender: String? = nil, previewMine: Bool? = nil, updatedAt: String? = nil, readPosition: String? = nil, mentionPosition: String? = nil) {
+    public init(id: String = "", name: String = "", avatar: String? = nil, avatarUrl: String? = nil, kind: String = "", unread: Int = 0, markedUnread: Bool? = nil, mentioned: Bool? = nil, muted: Bool? = nil, pinned: Bool? = nil, preview: String = "", previewSender: String? = nil, previewMine: Bool? = nil, updatedAt: String? = nil, readPosition: String? = nil, mentionPosition: String? = nil) {
         self.id = id
         self.name = name
         self.avatar = avatar
+        self.avatarUrl = avatarUrl
         self.kind = kind
         self.unread = unread
         self.markedUnread = markedUnread
@@ -7861,6 +7869,7 @@ public nonisolated struct ExtensionMessagingConversation: Codable, Hashable, Sen
         case id
         case name
         case avatar
+        case avatarUrl = "avatar_url"
         case kind
         case unread
         case markedUnread = "marked_unread"
@@ -7880,6 +7889,7 @@ public nonisolated struct ExtensionMessagingConversation: Codable, Hashable, Sen
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.avatar = try? c.decodeIfPresent(String.self, forKey: .avatar)
+        self.avatarUrl = try? c.decodeIfPresent(String.self, forKey: .avatarUrl)
         self.kind = (try? c.decodeIfPresent(String.self, forKey: .kind)) ?? ""
         self.unread = (try? c.decodeIfPresent(Int.self, forKey: .unread)) ?? 0
         self.markedUnread = try? c.decodeIfPresent(Bool.self, forKey: .markedUnread)
@@ -7924,12 +7934,15 @@ public nonisolated struct ExtensionMessagingPerson: Codable, Hashable, Sendable 
     public var id: String?
     public var name: String
     public var avatar: String?
+    /// Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+    public var avatarUrl: String?
     public var kind: String?
 
-    public init(id: String? = nil, name: String = "", avatar: String? = nil, kind: String? = nil) {
+    public init(id: String? = nil, name: String = "", avatar: String? = nil, avatarUrl: String? = nil, kind: String? = nil) {
         self.id = id
         self.name = name
         self.avatar = avatar
+        self.avatarUrl = avatarUrl
         self.kind = kind
     }
 
@@ -7937,6 +7950,7 @@ public nonisolated struct ExtensionMessagingPerson: Codable, Hashable, Sendable 
         case id
         case name
         case avatar
+        case avatarUrl = "avatar_url"
         case kind
     }
 
@@ -7945,6 +7959,7 @@ public nonisolated struct ExtensionMessagingPerson: Codable, Hashable, Sendable 
         self.id = try? c.decodeIfPresent(String.self, forKey: .id)
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.avatar = try? c.decodeIfPresent(String.self, forKey: .avatar)
+        self.avatarUrl = try? c.decodeIfPresent(String.self, forKey: .avatarUrl)
         self.kind = try? c.decodeIfPresent(String.self, forKey: .kind)
     }
 }
@@ -9443,6 +9458,8 @@ public nonisolated struct ExtensionMessagingProfile: Codable, Hashable, Sendable
     public var id: String
     public var name: String
     public var avatar: String?
+    /// Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+    public var avatarUrl: String?
     public var cover: String?
     public var kind: String?
     public var subtitle: String?
@@ -9451,10 +9468,11 @@ public nonisolated struct ExtensionMessagingProfile: Codable, Hashable, Sendable
     public var fields: [ExtensionMessagingProfileField]?
     public var canChat: Bool?
 
-    public init(id: String = "", name: String = "", avatar: String? = nil, cover: String? = nil, kind: String? = nil, subtitle: String? = nil, status: String? = nil, description: String? = nil, fields: [ExtensionMessagingProfileField]? = nil, canChat: Bool? = nil) {
+    public init(id: String = "", name: String = "", avatar: String? = nil, avatarUrl: String? = nil, cover: String? = nil, kind: String? = nil, subtitle: String? = nil, status: String? = nil, description: String? = nil, fields: [ExtensionMessagingProfileField]? = nil, canChat: Bool? = nil) {
         self.id = id
         self.name = name
         self.avatar = avatar
+        self.avatarUrl = avatarUrl
         self.cover = cover
         self.kind = kind
         self.subtitle = subtitle
@@ -9468,6 +9486,7 @@ public nonisolated struct ExtensionMessagingProfile: Codable, Hashable, Sendable
         case id
         case name
         case avatar
+        case avatarUrl = "avatar_url"
         case cover
         case kind
         case subtitle
@@ -9482,6 +9501,7 @@ public nonisolated struct ExtensionMessagingProfile: Codable, Hashable, Sendable
         self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? ""
         self.name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         self.avatar = try? c.decodeIfPresent(String.self, forKey: .avatar)
+        self.avatarUrl = try? c.decodeIfPresent(String.self, forKey: .avatarUrl)
         self.cover = try? c.decodeIfPresent(String.self, forKey: .cover)
         self.kind = try? c.decodeIfPresent(String.self, forKey: .kind)
         self.subtitle = try? c.decodeIfPresent(String.self, forKey: .subtitle)

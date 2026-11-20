@@ -34,7 +34,7 @@ test("AC1: an offline saved-hub launch keeps its owner, partition and saved addr
 
 test("AC2: a failed connection remains retryable without clearing or overwriting its saved hub", async () => {
   const main = await source("main.ts");
-  const connect = section(main, "connect: async", "await setup.loadFile");
+  const connect = section(main, "connect: async", "await setup.loadURL(SETUP_URL)");
   const failure = connect.slice(connect.lastIndexOf("} catch (error)"));
   assert.match(failure, /generation !== hubWindow\.generation/, "obsolete failures must remain generation-guarded");
   assert.doesNotMatch(failure, /store\(\)\.update/, "a failed load must not persist a replacement or empty address");
@@ -98,7 +98,7 @@ test("AC3: an old-generation failure cannot destroy the replacement's lifecycle 
   const showMain = section(main, "async function showMain", "async function showSetup");
   const loadFailure = showMain.slice(showMain.indexOf("} catch (error) {", showMain.indexOf("await current.loadURL")));
   assert.match(loadFailure, /if \(owner === hub && generation === hubWindow\.generation\) throw error;/, "only the current owner may escalate its load failure");
-  const connect = section(main, "connect: async", "await setup.loadFile");
+  const connect = section(main, "connect: async", "await setup.loadURL(SETUP_URL)");
   assert.ok(connect.indexOf("generation !== hubWindow.generation") < connect.indexOf("await store().update({ hub: next.url.href })"), "stale loads must be rejected before persistence");
 });
 
@@ -113,14 +113,14 @@ test("AC4: quitting during pending startup cannot reopen recovery", async () => 
 
 test("AC4: closing setup during a pending retry cannot reopen it when that attempt fails", async () => {
   const main = await source("main.ts");
-  const connect = section(main, "connect: async", "await setup.loadFile");
+  const connect = section(main, "connect: async", "await setup.loadURL(SETUP_URL)");
   const failure = connect.slice(connect.lastIndexOf("} catch (error)"));
   assert.doesNotMatch(failure, /showSetup\(\)/, "a failed pending retry must not recreate setup after the person closed its last window");
 });
 
 test("AC4: a queued connection cannot start after its setup window has closed", async () => {
   const main = await source("main.ts");
-  const connect = section(main, "connect: async", "await setup.loadFile");
+  const connect = section(main, "connect: async", "await setup.loadURL(SETUP_URL)");
   const run = section(connect, "const run = async", "const result = previous");
   const guard = run.indexOf("if (quitting || setup.isDestroyed())");
   assert.notEqual(guard, -1, "a queued submission must check that its setup still exists before starting another generation");

@@ -58,7 +58,7 @@ const usage = `usage:
                            unless hub.json says assistant.external (token: stdin or PERSONA_ASSISTANT_TOKEN)
   personad assistant drop-shared-tables [--yes]  drop the built-in manager's old tables from the hub's database, once
                            its data moved into its own (without --yes: list them)
-  personad assistant north-star [--date YYYY-MM-DD] [--split RFC3339] [--tz Area/City] [--brief en]
+  personad assistant north-star [--date YYYY-MM-DD] [--split RFC3339] [--tz Area/City] [--brief en] [--weekly]
                            read the interruption and availability north star from the databases, read-only
   personad assistant search-reindex  empty the built-in manager's chat search index: it reads its chats again from
                            the start (personad manager search-reindex for a manager made in the app)

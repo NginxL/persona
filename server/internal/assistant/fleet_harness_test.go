@@ -58,6 +58,10 @@ type fleetNode struct {
 	connected         time.Time
 	// away: its node is not connected (Summary and List say not reachable); its sessions stay as last listed.
 	away bool
+	// shownUntil: shown as before until then while its node is away (Shown, devices.Shown.Until); unlisted: its node
+	// has given no list on this connection yet (Shown's Listed false).
+	shownUntil time.Time
+	unlisted   bool
 	// call answers the node's methods (nil: {}); calls are the ones it got.
 	call  func(method string, params json.RawMessage) (any, error)
 	calls []fleetCall
@@ -162,6 +166,17 @@ func (d *fleetDevs) Summary(id string) (devices.Summary, bool) {
 		return devices.Summary{}, false
 	}
 	return devices.Summary{ID: id, Name: n.name, Home: n.home, HomeReal: n.homeReal, Trust: n.trust, Online: !n.away, Reachable: !n.away}, true
+}
+
+// Shown is the node's shownUntil and unlisted, as the devices say them.
+func (d *fleetDevs) Shown(id string) (devices.Shown, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := d.machines[id]
+	if n == nil {
+		return devices.Shown{}, false
+	}
+	return devices.Shown{Listed: !n.unlisted, Until: n.shownUntil}, true
 }
 
 func (d *fleetDevs) Sessions(id string) ([]proto.Session, bool) {

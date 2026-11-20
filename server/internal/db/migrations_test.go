@@ -26,8 +26,12 @@ import (
 var bothSets = []string{"0001_init.sql", "0071_sent_messages.sql", "0241_sent_echo.sql"}
 
 // sharedNumbers are numbers both sets use for different migrations, frozen: two lines of work took 421 at once
-// (#5751). Harmless, since each set records its own part; no other number is in both sets.
-var sharedNumbers = map[int64][2]string{421: {"0421_hub_settings.sql", "0421_machine_usage.sql"}}
+// (#5751), and the hub's 0532 (#9485) reused a manager number (kept as it is, #11425). Harmless, since each set
+// records its own part; no other number is in both sets.
+var sharedNumbers = map[int64][2]string{
+	421: {"0421_hub_settings.sql", "0421_machine_usage.sql"},
+	532: {"0532_device_token_scopes.sql", "0532_machine_usage_history.sql"},
+}
 
 // lastNumbered is the last migration numbered by hand, and numberedFiles how many numbered files each set has, both
 // frozen: every migration after them is named YYYYMMDDHHMMSS_<name>.sql, the UTC second it was written (`date -u
@@ -35,7 +39,7 @@ var sharedNumbers = map[int64][2]string{421: {"0421_hub_settings.sql", "0421_mac
 // migrationVersion, #10618). scripts/ci/migration_freeze.py keeps the same numbered files by name.
 const lastNumbered = 561
 
-var numberedFiles = map[string]int{"hub": 35, "manager": 87}
+var numberedFiles = map[string]int{"hub": 36, "manager": 87}
 
 // firstStamp is when migrations began to be timestamped, and stampAhead how far after now a timestamp may be: one
 // further ahead (a typo in the year, a clock set wrong) would sort after every migration written until then, so new
@@ -225,8 +229,8 @@ func TestMigrationNameProblems(t *testing.T) {
 		{"the first second", in("hub", "20261118000000_probe.sql"), nil},
 		{"a day ahead", in("hub", "30000101120000_probe.sql"), nil},
 		{"next number", in("manager", "0562_probe.sql"), []string{"numbers stopped at 0561", "88 numbered migrations, 87"}},
-		{"a gap", in("hub", "0559_probe.sql"), []string{"36 numbered migrations, 35"}},
-		{"a number in both sets", in("hub", "0561_probe.sql"), []string{"36 numbered migrations, 35", "561 is in both sets (0561_probe.sql, 0561_model_usage.sql)"}},
+		{"a gap", in("hub", "0559_probe.sql"), []string{"37 numbered migrations, 36"}},
+		{"a number in both sets", in("hub", "0561_probe.sql"), []string{"37 numbered migrations, 36", "561 is in both sets (0561_probe.sql, 0561_model_usage.sql)"}},
 		{"upper case", in("hub", "29991231235000_Probe.sql"), []string{"in lower case"}},
 		{"three digits", in("hub", "562_probe.sql"), []string{"in lower case"}},
 		{"a minute", in("hub", "299912312350_probe.sql"), []string{"in lower case"}},

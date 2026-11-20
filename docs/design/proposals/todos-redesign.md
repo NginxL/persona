@@ -604,6 +604,7 @@ here.
 | Notes | 说明 | the owner's words on the to-do | shipped |
 | What you asked · Done when | 你的要求 · 完成标准 | the brief and its criteria | new |
 | Steps · Keep Steps · Suggested | 步骤 · 保留步骤 · 建议 | pieces of a to-do | new, context-keyed: "Steps" reads 步数 (health) today |
+| Suggested (⋯ › Sort By) | 推荐顺序 | the list's default order inside each section: the hub's | new, context-keyed apart from suggested steps (建议) |
 | Results | 成果 | what the work produced, with its outcome | new |
 | Conversation | 对话 | the to-do's timeline | new, context-keyed: "Conversation" reads 处理对话 elsewhere |
 | Work details | 工作细节 | how code work is done (Agents audience) | new |

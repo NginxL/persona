@@ -74,6 +74,9 @@ type chanLive struct {
 	sentCard   [32]byte
 	backoff    time.Duration
 	quietUntil time.Time
+	// kit is the progress card as a CardKit entity, streamed into (feishu_stream.go); nil before it is sent, or for
+	// a card sent as a message. Under mu.
+	kit *cardKit
 	// What the progress card shows besides the steps, noted as the items come (liveNote): the calls with no result
 	// yet (oldest first), how many calls, the files read and changed, the subagents.
 	open         []openCall

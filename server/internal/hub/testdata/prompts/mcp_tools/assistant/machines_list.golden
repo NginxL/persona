@@ -1,6 +1,6 @@
 {
   "name": "machines_list",
-  "description": "List the user's computers and their observed connection state, system information, resource availability, working agents, failing launchers and node version status. Use this before choosing where to start work. Resource samples older than 30 seconds are not current. Null values have an accompanying reason; do not infer missing facts or rank computers from incomplete data.",
+  "description": "List computers' connection, system, resources, agents, launcher failures and node builds. Samples over 30 seconds old are stale. Nulls have reasons; do not infer or rank.",
   "input_schema": {
     "type": "object",
     "properties": {}

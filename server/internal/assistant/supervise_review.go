@@ -170,6 +170,11 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 		// Its supervisor is a task leader's agent, whose supervision messages do not know parked_due (task_leader.go).
 		return "", fmt.Errorf("task %s is supervised by a task leader agent: parking applies to tasks a conversation supervises", t.ID)
 	}
+	if verdict == reviewParked {
+		if err := s.verifyParkInteraction(t, park.Evidence); err != nil {
+			return "", err
+		}
+	}
 	over, refused, parks := false, false, 0
 	var waiting *OwnerWait // accepted while the work stopped on the owner's decision: refused, nothing written (#1277)
 	judgedDone := false    // it was waiting for review: the judge had found it done
@@ -373,6 +378,7 @@ func (s *Service) toolTaskReview(ctx context.Context, self string, args json.Raw
 			"if they are waiting for it, and hand out or schedule anything that follows (deploy, TestFlight, closing an issue).", t.ID) + against, nil
 	case reviewNeedsUser:
 		conclusion.Outcome, conclusion.Reason, conclusion.Recommend, conclusion.Decision = outcomeDecide, decision.Reason, decision.Recommend, decision
+		conclusion.Check = scheduledCheckOf(ctx) // raised by a recurring check (escalateScheduledTodo), never by a model's call
 		reversible := false
 		switch {
 		case !deadline.IsZero():

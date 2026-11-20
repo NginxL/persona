@@ -439,6 +439,27 @@ class OutboxMessageSenderTest {
         sender.close()
     }
 
+    @Test fun aLateComposerReplyKeepsANewerRetryAndAnOwnerDiscard() = runTest {
+        val store = MemoryOutboxStore()
+        val sender = OutboxMessageSender(scope, store, FakeTransport(online = false), backgroundScope)
+        runCurrent()
+        store.enqueue(OutboxEntry("visible", session, "hello", state = OutboxState.Refused, createdAt = 100))
+        val sending = ComposerDelivery(DeliveryState.Sending)
+        val sent = ComposerDelivery(DeliveryState.Sent)
+        sender.recordComposerDelivery("visible", sending, "first")
+        sender.recordComposerDelivery("visible", ComposerDelivery(DeliveryState.Refused), "first", MessageTransportResult.NotSent)
+        sender.recordComposerDelivery("visible", sending, "second")
+        sender.recordComposerDelivery("visible", sent, "first", MessageTransportResult.Accepted)
+        assertEquals(OutboxState.Sending, store.state("visible"))
+        assertEquals("second", store.entries.value.single().operationId)
+
+        sender.recordComposerDelivery("visible", ComposerDelivery(DeliveryState.Unknown), "second", MessageTransportResult.NoReceipt)
+        assertTrue(sender.discard("visible"))
+        sender.recordComposerDelivery("visible", sent, "second", MessageTransportResult.Accepted)
+        assertEquals(OutboxState.Cancelled, store.state("visible"))
+        sender.close()
+    }
+
     @Test fun catchUpChecksAllUncertainStatesBeforeSendingAndUsesTheSameOperationId() = runTest {
         val store = MemoryOutboxStore()
         listOf(OutboxState.Sending, OutboxState.Unknown, OutboxState.Verifying).forEachIndexed { index, state ->

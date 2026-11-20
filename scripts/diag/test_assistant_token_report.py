@@ -242,6 +242,21 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn("private", out.getvalue())
         self.assertIn("?", out.getvalue())
 
+    def test_codex_since_keeps_submicrosecond_precision(self):
+        rows = [{"type": "session_meta", "payload": {}}]
+        for total, (timestamp, output) in enumerate([
+            ("2026-11-20T08:00:00Z", 400),
+            ("2026-11-20T09:00:00.000000001+01:00", 2),
+            ("2026-11-20T08:00:00.000000002Z", 3),
+            ("unknown", 500),
+        ], start=1):
+            rows.append({"type": "event_msg", "timestamp": timestamp,
+                         "payload": {"type": "token_count", "info": {"total_token_usage": {"total_tokens": total},
+                             "last_token_usage": {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": output}}}})
+        filtered = self.run_lines(rows, since="2026-11-20T08:00:00.000000001Z")
+        self.assertEqual((filtered["total"]["model_calls"], filtered["total"]["output_tokens"]), (2, 5))
+        self.assertEqual(self.run_lines(rows)["total"]["output_tokens"], 905)
+
     def test_codex_environment_context_is_not_a_new_round(self):
         def ev(payload):
             return {"type": "event_msg", "payload": payload}

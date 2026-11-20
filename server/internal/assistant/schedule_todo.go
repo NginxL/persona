@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -12,12 +13,14 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // ScheduleTodoAssessment describes observable evidence, not acceptance of the work.
 type ScheduleTodoAssessment struct {
-	TodoID     string `json:"todo_id"`
-	State      string `json:"state"` // pending, progress, no_progress, unknown, error, inactive, not_run, superseded
+	TodoID string `json:"todo_id"`
+	// pending, baseline, progress, working, no_progress, unknown, error, inactive, not_run, superseded
+	State      string `json:"state"`
 	NoProgress int    `json:"no_progress,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 }
@@ -28,6 +31,11 @@ type scheduleTodoSnapshot struct {
 	Report     string            `json:"report,omitempty"`
 	Unknown    bool              `json:"unknown,omitempty"`
 	Unreadable map[string]bool   `json:"unreadable,omitempty"` // Agent identities whose evidence could not be read
+	// Calls: each Agent's distinct tool calls in its latest turn, hashed (scheduleCallKeys); At: when it was read. The
+	// next check tells new work from waits and repeats by them (scheduledTodoWork).
+	Calls map[string][]string           `json:"calls,omitempty"`
+	At    time.Time                     `json:"at,omitzero"`
+	seen  map[string][]scheduleToolCall // the latest turns' calls as read, for comparing; not kept
 }
 
 func (v scheduleTodoSnapshot) validate() error {
@@ -57,8 +65,12 @@ type scheduleTodoProgress struct {
 	Snapshot   scheduleTodoSnapshot   `json:"snapshot"`
 	Assessment ScheduleTodoAssessment `json:"assessment"`
 	NoProgress int                    `json:"no_progress"`
-	Signaled   bool                   `json:"signaled,omitempty"`
-	Escalated  bool                   `json:"escalated,omitempty"`
+	// Since: when the evidence the streak's first no-progress run compared with was read; Calls: the tool calls its
+	// runs saw, all waits or repeats. Zero without a streak.
+	Since     time.Time `json:"since,omitzero"`
+	Calls     int       `json:"calls,omitempty"`
+	Signaled  bool      `json:"signaled,omitempty"`
+	Escalated bool      `json:"escalated,omitempty"`
 	// Kept before creating the review, so a failed final marker write can recognize its own decision.
 	EscalationRun string `json:"escalation_run,omitempty"`
 }
@@ -118,7 +130,8 @@ func evidenceHash(v any) string {
 }
 
 func (s *Service) scheduledTodoSnapshot(ctx context.Context, task Task, run ScheduleRun) (scheduleTodoSnapshot, bool) {
-	out := scheduleTodoSnapshot{Answers: map[string]string{}, Criteria: map[string]string{}}
+	// Read before the turns are: a call made while they are read is in them, or comes after this time.
+	out := scheduleTodoSnapshot{Answers: map[string]string{}, Criteria: map[string]string{}, At: time.Now().UTC()}
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		out.Unknown = true
 		return out, true
@@ -174,6 +187,12 @@ func (s *Service) scheduledTodoSnapshot(ctx context.Context, task Task, run Sche
 			// Hash the pair, not a NUL-delimited string that JSONB cannot store.
 			out.Answers[key] = evidenceHash(answer)
 		}
+		if calls := scheduleCalls(items); len(calls) > 0 {
+			if out.seen == nil {
+				out.seen, out.Calls = map[string][]scheduleToolCall{}, map[string][]string{}
+			}
+			out.seen[key], out.Calls[key] = calls, scheduleCallKeys(calls)
+		}
 	}
 	return out, true
 }
@@ -208,7 +227,69 @@ func retainTodoEvidence(before, after scheduleTodoSnapshot) scheduleTodoSnapshot
 	if out.Report == "" {
 		out.Report = before.Report
 	}
+	// An Agent whose turn could not be read keeps the calls it had, so its next repeat is still one.
+	out.Calls = maps.Clone(before.Calls)
+	if out.Calls == nil && len(after.Calls) > 0 {
+		out.Calls = map[string][]string{}
+	}
+	maps.Copy(out.Calls, after.Calls)
 	return out
+}
+
+// scheduledRunReply is a linked run's own reply, its assessment's explanation (and so the reason of the owner decision a
+// second no-progress run raises, escalateScheduledTodo); "" when it cannot be told apart, and the assessment then says
+// what the hub saw (todo_no_evidence). The reply is the one to the run's own prompt (runReply). A run in its source
+// conversation shares that conversation with its other work: its supervision messages, the owner's words, the runs of
+// other schedules sent there. Two linked runs due in the same minute are answered one after the other, and both
+// watchers see the conversation settle after the second answer, so that conversation's latest turn put one run's
+// reply on the other's to-do (#11553). Only a run in a conversation of its own, where nothing else goes and a run is
+// skipped rather than stacked on the last one, still falls back to the latest turn when its prompt is not on the page.
+func (s *Service) scheduledRunReply(ctx context.Context, task Task, run ScheduleRun) string {
+	items, ok := s.taskStateItems(ctx, run.MachineID, run.SessionID)
+	if !ok {
+		return ""
+	}
+	if reply, found := runReply(items, task.stateRunKey); found || run.Conversation == "source" {
+		return reply
+	}
+	_, last := splitLastTurn(items)
+	_, reply := turnExchange(last)
+	return reply
+}
+
+// runReply is the reply in items to the prompt the hub sent for the run whose key is key (runKeyIn): the last reply
+// after that prompt, up to the next message that opened a turn of its own. found says whether that prompt is in items;
+// with it, reply is "" when nothing answered it, or when its turn was not its own: the prompt was queued into another
+// turn, or another message was queued into its turn, and a reply after that answers both.
+func runReply(items []proto.Item, key string) (reply string, found bool) {
+	if key == "" {
+		return "", false
+	}
+	i := len(items) - 1
+	for i >= 0 && runKeyIn(items[i]) != key {
+		i--
+	}
+	if i < 0 {
+		return "", false
+	}
+	if items[i].Queued {
+		return "", true
+	}
+	for _, it := range items[i+1:] {
+		if it.Kind != proto.KindText || strings.TrimSpace(it.Text) == "" {
+			continue
+		}
+		switch it.Role {
+		case "user":
+			if it.Queued {
+				return "", true
+			}
+			return reply, true
+		case "assistant":
+			reply = strings.TrimSpace(it.Text)
+		}
+	}
+	return reply, true
 }
 
 func (s *Service) finishScheduledTodo(ctx context.Context, task Task, run ScheduleRun) {
@@ -222,9 +303,7 @@ func (s *Service) finishScheduledTodo(ctx context.Context, task Task, run Schedu
 	}
 	reason := run.Error
 	if reason == "" {
-		if items, ok := s.lastTurnItems(ctx, run.MachineID, run.SessionID); ok {
-			_, reason = turnExchange(items)
-		}
+		reason = s.scheduledRunReply(ctx, task, run)
 	}
 	reason = clip(oneLine(strings.ReplaceAll(reason, "\x00", "")), 500)
 	sc, err := s.lockedSchedule(ctx)
@@ -260,6 +339,10 @@ func (s *Service) finishScheduledTodo(ctx context.Context, task Task, run Schedu
 		result := ScheduleTodoAssessment{TodoID: task.TodoID, State: "no_progress", Reason: reason}
 		progress := scheduleTodoProgress{Run: run.ID, At: run.At, Snapshot: after}
 		before := task.todoBefore
+		// The first run since the link only sets the baseline: compared with what was there just before it was sent,
+		// it would judge only its own few seconds, and an Agent at work rarely writes in those (#11587).
+		first := cur.TodoProgress == nil
+		var since time.Time // when the baseline's evidence was read: tool calls after it are new
 		if old := cur.TodoProgress; old != nil {
 			oldIndex := slices.IndexFunc(sc.runs, func(r ScheduleRun) bool { return r.ID == old.Run })
 			if old.At.After(run.At) || old.Run != run.ID && old.At.Equal(run.At) &&
@@ -267,6 +350,8 @@ func (s *Service) finishScheduledTodo(ctx context.Context, task Task, run Schedu
 				result.State = "superseded"
 			} else {
 				progress.NoProgress, progress.Signaled, progress.Escalated = old.NoProgress, old.Signaled, old.Escalated
+				progress.Since, progress.Calls = old.Since, old.Calls
+				since = scheduleSince(old.Snapshot, old.At)
 				progress.EscalationRun = old.EscalationRun
 				if progress.EscalationRun == "" && old.NoProgress >= 2 {
 					progress.EscalationRun = old.Run // recover a partial write made before this field existed
@@ -289,22 +374,45 @@ func (s *Service) finishScheduledTodo(ctx context.Context, task Task, run Schedu
 				before = &baseline
 			}
 		}
+		lang, loc := s.lang(ctx), s.location(ctx)
+		var work scheduleWork
+		if !first && before != nil {
+			work = scheduledTodoWork(*before, after, since)
+		}
+		restart := func() { // progress, or nothing to judge: the streak starts over
+			progress.NoProgress, progress.Signaled, progress.Escalated = 0, false, false
+			progress.EscalationRun, progress.Since, progress.Calls = "", time.Time{}, 0
+		}
 		switch {
 		case result.State == "superseded":
 		case !active || !cur.Enabled:
 			result.State = "inactive"
-			progress.NoProgress, progress.Signaled, progress.Escalated = 0, false, false
-			progress.EscalationRun = ""
+			restart()
+		case first:
+			result.State, result.Reason = "baseline", i18n.T(lang, "assistant-schedule.todo_baseline")
+			restart()
 		case before == nil:
 			result.State = "unknown"
 		case scheduledTodoAdvanced(*before, after):
 			result.State = "progress"
-			progress.NoProgress, progress.Signaled, progress.Escalated = 0, false, false
-			progress.EscalationRun = ""
+			restart()
+		case work.work > 0:
+			// Tool calls that are neither waits nor repeats: the Agent works, though it has not written yet.
+			result.State, result.Reason = "working", scheduleWorkingReason(lang, loc, since, run.At, work)
+			restart()
 		case before.Unknown || after.Unknown || task.todoBefore != nil && task.todoBefore.Unknown:
 			result.State = "unknown"
 		default:
+			if progress.NoProgress == 0 || progress.Since.IsZero() {
+				progress.Since = cmp.Or(since, run.At)
+			}
+			if progress.NoProgress == 0 {
+				progress.Calls = 0
+			}
 			progress.NoProgress++
+			progress.Calls += work.calls
+			// What was seen, not the run's own summary, which often says the work goes on fine.
+			result.Reason = scheduleEvidence(lang, loc, progress.Since, run.At, progress.Calls)
 		}
 		if result.State == "no_progress" && progress.NoProgress >= 2 && progress.EscalationRun == "" {
 			progress.EscalationRun = run.ID
@@ -372,10 +480,16 @@ func (s *Service) scheduledTodoSaveFailed(ctx context.Context, task Task, run Sc
 		sc.mu.Unlock()
 	}
 	s.broadcastSchedule()
-	// A failed write must reach supervision; a committed assessment keeps its evidence and count.
-	s.signal(superviseSignal{Todo: task.TodoID, Kind: sigReport, Report: upReportBlocked,
-		Key: run.ID + ":progress_error", At: run.At, Machine: run.MachineID, Session: run.SessionID,
-		Detail: detail + "\n" + run.ID})
+	// A failed write must reach supervision; a committed assessment keeps its evidence and count. It is the hub's
+	// check that failed, about the task's Agent, not the conversation the run went to (#11587).
+	g := superviseSignal{Todo: task.TodoID, Kind: sigCheck, Report: checkErrorReport,
+		Key: run.ID + ":progress_error", At: run.At, Detail: detail + "\n" + run.ID}
+	if t, ok := s.todoNow(task.TodoID); ok {
+		if ag := scheduleAgent(t); ag.SessionID != "" {
+			g.Machine, g.Session = ag.MachineID, ag.SessionID
+		}
+	}
+	s.signal(g)
 }
 
 func (s *Service) escalateScheduledTodo(ctx context.Context, task Task, run ScheduleRun, result ScheduleTodoAssessment) {
@@ -392,9 +506,21 @@ func (s *Service) escalateScheduledTodo(ctx context.Context, task Task, run Sche
 	detail := i18n.T(lang, "assistant-schedule.todo_stalled", i18n.Args{
 		"name": task.labelIn(lang), "count": result.NoProgress, "reason": result.Reason,
 	})
+	// How long nothing new came: from the streak's baseline to this run's own read of the evidence. A run sent while
+	// the one before it was still being read (each in a new chat) starts before that baseline was read.
+	quiet := time.Duration(0)
+	if seen := cmp.Or(progress.Snapshot.At, run.At); !progress.Since.IsZero() && seen.After(progress.Since) {
+		quiet = seen.Sub(progress.Since)
+	}
 	if !progress.Signaled {
-		s.signal(superviseSignal{Todo: t.ID, Kind: sigReport, Report: upReportBlocked,
-			Key: run.ID, At: run.At, Machine: run.MachineID, Session: run.SessionID, Detail: detail + "\n" + run.ID})
+		// The hub's check, about the task's Agent: its computer and session, not those of the conversation the run
+		// went to, and never worded as the Agent's own report (#11587).
+		g := superviseSignal{Todo: t.ID, Kind: sigCheck, Report: checkNoProgressReport, Key: run.ID, At: run.At,
+			Detail: detail + "\n" + run.ID, Minutes: int(quiet.Minutes())}
+		if ag := scheduleAgent(t); ag.SessionID != "" {
+			g.Machine, g.Session = ag.MachineID, ag.SessionID
+		}
+		s.signal(g)
 		progress.Signaled = true
 	}
 	// A committed review is the outcome; its marker may still need saving after a partial write or restart.
@@ -404,8 +530,10 @@ func (s *Service) escalateScheduledTodo(ctx context.Context, task Task, run Sche
 			progress.Escalated = review.Verdict == reviewNeedsUser && strings.HasSuffix(review.Note, "\n"+progress.EscalationRun)
 		}
 	}
-	// Never overwrite another question already waiting for the owner.
-	if result.NoProgress >= 2 && !progress.Escalated && t.Supervision.State != reviewNeedsUser {
+	// Never overwrite another question already waiting for the owner, and ask only once the task went without progress
+	// for as long as the no_progress signal waits (scheduleAskAfter): two short windows are no reason on a long task.
+	due := quiet > 0 && quiet >= s.scheduleAskAfter(t)
+	if result.NoProgress >= 2 && due && !progress.Escalated && t.Supervision.State != reviewNeedsUser {
 		change := i18n.T(lang, "assistant-schedule.todo_change")
 		wait := i18n.T(lang, "assistant-schedule.todo_wait")
 		args, _ := json.Marshal(map[string]any{
@@ -427,7 +555,8 @@ func (s *Service) escalateScheduledTodo(ctx context.Context, task Task, run Sche
 		} else if supervisor == "" {
 			supervisor = t.Origin
 		}
-		if _, err := s.toolTaskReview(ctx, supervisor, args); err != nil {
+		// Marked as the check's: the owner's answer goes to the supervisor, not the Agent at work (checkDecided).
+		if _, err := s.toolTaskReview(withScheduledCheck(ctx, task.ID), supervisor, args); err != nil {
 			s.logf("task %s: no-progress decision: %v", task.ID, err)
 		} else {
 			progress.Escalated = true

@@ -264,7 +264,7 @@ func TestReviewerHiddenFromTheSessionList(t *testing.T) {
 	if got := ids(s.publishList("box")); !slices.Equal(got, []string{"worker", "reviewer"}) {
 		t.Fatalf("before the link: %v", got)
 	}
-	if err := s.linkReviewer(ctx, todo.ID, "box", "reviewer", reviewCopy, "rv_1"); err != nil {
+	if err := s.linkReviewer(ctx, todo.ID, "box", "reviewer", reviewCopy, "claude", "rv_1"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ids(s.publishList("box")); !slices.Equal(got, []string{"worker"}) {

@@ -511,7 +511,20 @@ func Launch(ctx context.Context, name string, args []string, ticket string) erro
 		argv = codexBypassArgs(argv)
 	}
 	env = withoutEnv(env, []string{codexBypassEnv})
+	if agent == "codex" {
+		// The provider wrapper is another native process boundary. Resolve npm's
+		// shim too; never let cmd.exe parse the first message on this final hop.
+		exe, env, err = codexStartProgram(exe, true, env)
+		if err != nil {
+			return fmt.Errorf("%s %w", codexStartError, err)
+		}
+	}
 	exe, argv, env, _ = launchExec(agent, exe, argv, env)
+	if agent == "codex" {
+		if err := codexStartCommandLine(argv); err != nil {
+			return fmt.Errorf("%s %w", codexStartError, err)
+		}
+	}
 	return osproc.Exec(exe, argv, env)
 }
 

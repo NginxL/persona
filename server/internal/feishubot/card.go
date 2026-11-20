@@ -38,15 +38,18 @@ type plain struct {
 
 func text(s string) plain { return plain{Tag: "plain_text", Content: s} }
 
-// Header colors.
+// Header colors. A header's color is the card's state (docs/extensions/bots.md "How the cards look"): orange, the
+// owner is to act; red, urgent or failed; blue, under way or only to know; green, done; grey, over. Tags take the same
+// names, and Neutral (grey) for what only says the card's kind.
 const (
-	Blue   = "blue"
-	Green  = "green"
-	Orange = "orange"
-	Red    = "red"
-	Grey   = "grey"
-	Purple = "purple"
-	Wathet = "wathet"
+	Blue    = "blue"
+	Green   = "green"
+	Orange  = "orange"
+	Red     = "red"
+	Grey    = "grey"
+	Purple  = "purple"
+	Wathet  = "wathet"
+	Neutral = "neutral"
 )
 
 // NewCard starts a card; an empty title leaves the header out. summary is what the chat list shows for it (an

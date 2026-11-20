@@ -559,7 +559,7 @@ private fun ChatPage(
         conversationLauncher = conversationLauncher, conversationModel = conversationModel, glassAgent = glass && agentChat,
         onFailed = onFailed, onCleared = { refs -> linkContexts = linkContexts.filterNot { ref -> refs.any { it.id == ref.id } } })
     // Chat content (group A): the message menu, the image viewer, photos and paths in messages, the API error retry.
-    val messageMenu = remember { MessageMenuState() }
+    val messageMenu = remember(key) { MessageMenuState() }
     // A swipe to the left quotes (iOS #1058) wherever the long-press menu's "Quote" is offered.
     val quoteTarget: (MessageTarget) -> Unit = { target ->
         // Over the box as a quote that goes with the next message, the draft left as it is (iOS #986).
@@ -971,7 +971,11 @@ private fun ChatPage(
                                 showBar = linkInset.value <= 0f, callJumps = callJumps)
                         }
                     },
-                    bottomBar = {
+                    bottomBar = footer@ {
+                        if (messageMenu.forwardPick.selected != null) {
+                            ForwardPickFooter(messageMenu.forwardPick, snapshot.items, Modifier.onSizeChanged { footerHeight = it.height })
+                            return@footer
+                        }
                         Column(Modifier.onSizeChanged { footerHeight = it.height }) {
                             if (renderStyle == ChatRenderStyle.Assistant && (status.submitting || status.processing ||
                                     (status.unconfirmed && sendReceipts.isNotEmpty()))) StatusLine(status)
@@ -1135,8 +1139,8 @@ private fun ChatPage(
                                         }
                                         if (linkContexts.isEmpty()) ComposerSuggestion(session, composer, onSend = { text -> send(text) })
                                         // One line each while the link card peeks: the whole cards left no room for the composer.
-                                        if (linkContexts.isNotEmpty()) ComposerContextCards(linkContexts, compact = linkInset.value > 0f) { ref ->
-                                            linkContexts = linkContexts.filterNot { it.id == ref.id }
+                                        if (linkContexts.isNotEmpty()) ComposerContextCards(linkContexts, compact = linkInset.value > 0f) { removed ->
+                                            linkContexts = linkContexts - removed.toSet()
                                         }
                                     }, onOverlay = { composerOverlay = it }, agentName = session?.agentLabel ?: "Claude",
                                     canInterrupt = session?.canInterrupt ?: true,
@@ -1246,11 +1250,18 @@ internal fun ChatJumpToLatest(
     JumpToLatest(count, onClick, Modifier.sizeIn(minWidth = Tokens.MinTouch.android, minHeight = Tokens.MinTouch.android))
 }
 
+private val composerContextMaxHeight = 140.dp
+
 /** The contexts the next message carries, over the composer (a chat's, and New chat's sessions picked with @); a longer list scrolls. */
 @Composable
-internal fun ComposerContextCards(contexts: List<ChatLinkContext>, compact: Boolean = false, onRemove: (ChatLinkContext) -> Unit) {
-    Column(Modifier.heightIn(max = 140.dp).verticalScroll(rememberScrollState())) {
-        contexts.forEach { ref -> ChatContextCard(ref, compact = compact, lines = if (contexts.size == 1) 2 else 1) { onRemove(ref) } }
+internal fun ComposerContextCards(contexts: List<ChatLinkContext>, compact: Boolean = false, onRemove: (List<ChatLinkContext>) -> Unit) {
+    // Give the batch preview room at larger text sizes without hiding the input on short screens.
+    val maxHeight = if (!compact && contexts.size > 1 && contexts.any { it.isForward }) {
+        val scaled = composerContextMaxHeight * LocalDensity.current.fontScale.coerceIn(1f, 2f)
+        scaled.coerceAtMost((androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp / 3).coerceAtLeast(composerContextMaxHeight))
+    } else composerContextMaxHeight
+    Column(Modifier.heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
+        ForwardComposerCards(contexts, compact, onRemove = onRemove)
     }
 }
 

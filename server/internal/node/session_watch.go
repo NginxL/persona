@@ -68,7 +68,7 @@ func (n *Node) watch(id string, since int) error {
 func (n *Node) watchFor(parent context.Context, id string, since int) error {
 	f, err := n.file(id)
 	if err != nil {
-		if !n.startingSession(id) {
+		if !n.knownSession(id) {
 			return err
 		}
 		// A session that just started has no transcript until claude writes its first line: watch once it exists,

@@ -67,7 +67,7 @@ func checkStartSpeed(params map[string]any, agent startAgent, resume string) err
 // card or Start edit is accepted, and validates the resulting speed.
 func (s *Service) fitPlanTaskSpeed(ctx context.Context, t *PlanTask) (startAgent, error) {
 	params := map[string]any{"launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "speed": t.Speed, "tier": t.Tier}
-	own, err := s.resolveStart(ctx, params)
+	own, err := s.resolveStart(ctx, params, false)
 	if err != nil {
 		return startAgent{}, err
 	}

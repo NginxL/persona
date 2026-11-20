@@ -55,6 +55,24 @@ it("says why a typed folder cannot be added", () => {
  expect(hiddenPatternError("~/work/*/", original.rules)).toBe(t("hidden-agent-dirs.pattern_exists"));
  expect(hiddenPatternError("*botfarm*", original.rules)).toBe("");
 });
+it("adds a new rule as Block unless Hide is chosen, and switches an existing rule's action (#10053)", async () => {
+ await show();
+ const picker = (label: string) => host.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+ // A rule saved before blocking (no action) hides.
+ expect(picker(`${t("hidden-agent-dirs.action")}: ~/work/*`).value).toBe("hide");
+ expect(picker(t("hidden-agent-dirs.action")).value).toBe("block");
+ const input = host.querySelector<HTMLInputElement>(`input[aria-label="${t("hidden-agent-dirs.pattern")}"]`)!;
+ const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+ await act(async () => { setter.call(input, "~/.bots/runs"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+ const add = [...host.querySelectorAll("button")].find((b) => b.textContent === t("hidden-agent-dirs.add"))!;
+ await act(async () => add.click());
+ expect(calls[1]).toMatchObject({ method: "PUT", json: { rules: [...original.rules, { pattern: "~/.bots/runs", enabled: true, action: "block" }] } });
+ await act(async () => calls[1].resolve(calls[1].json));
+ expect(host.textContent).toContain(t("hidden-agent-dirs.enabled_block"));
+ const first = picker(`${t("hidden-agent-dirs.action")}: ~/work/*`);
+ await act(async () => { first.value = "block"; first.dispatchEvent(new Event("change", { bubbles: true })); });
+ expect(calls[2]).toMatchObject({ method: "PUT", json: { rules: [{ ...original.rules[0], action: "block" }, original.rules[1], { pattern: "~/.bots/runs", enabled: true, action: "block" }] } });
+});
 // #8584: input that cleans to the root or to a pattern matching every folder is refused, not silently dropped;
 // only blank input says nothing.
 it("refuses the root and patterns that match every folder", () => {

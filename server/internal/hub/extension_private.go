@@ -2,6 +2,7 @@ package hub
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -64,13 +65,19 @@ func (h *Hub) hiddenFromExtensions(ix proto.Interaction) bool {
 }
 
 // extensionReadable wraps a route of one conversation ({mid}/{sid}): an extension's token is answered 404, as for a
-// conversation there is not, when it is a health-space conversation or one the hub does not list. Anyone else, and an
+// conversation there is not, when it is a health-space conversation or one the hub does not list (unless it was given
+// it as a history row lately, sessions_history.go). Anyone else, and an
 // unknown machine (the route's own 404), go on to next.
 func (h *Hub) extensionReadable(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if restrictedAgentData(r) {
 			if m := h.localMachine(r.PathValue("mid")); m != nil {
-				if s, ok := m.session(r.PathValue("sid")); !ok || healthSession(&s) {
+				s, ok := m.session(r.PathValue("sid"))
+				if !ok && h.historyReads.readable(m.cfg.ID, r.PathValue("sid"), time.Now()) {
+					next(w, r) // a history row it was given (sessions_history.go), never a health-space one
+					return
+				}
+				if !ok || healthSession(&s) {
 					writeErr(w, http.StatusNotFound, errDeleteUnknown) // "No such session"
 					return
 				}

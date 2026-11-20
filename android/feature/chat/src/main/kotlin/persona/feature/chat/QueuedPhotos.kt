@@ -11,6 +11,7 @@ import java.util.Base64
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 /** Photos restored as ordinary composer attachments, and how many of them could not be restored. */
@@ -43,20 +44,27 @@ internal fun restoredPhotos(context: Context, payloads: List<ImagePayload>,
  * A failed read or write leaves only that photo out. The original filename stays visible in the target composer.
  */
 internal suspend fun forwardedPhotos(context: Context, paths: List<String>, read: suspend (String) -> ImagePayload,
-    share: (File) -> Uri = { FileProvider.getUriForFile(context, "${context.packageName}.chat.files", it) }): RestoredPhotos =
-    withContext(Dispatchers.IO) {
-        val attachments = mutableListOf<ComposerAttachment>()
-        var lost = 0
-        for (path in paths) {
-            val payload = try { read(path) } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { null }
-            val restored = payload?.let { restoredPhotos(context, listOf(it), share) }
-            val attachment = restored?.attachments?.singleOrNull()
-            if (attachment == null) lost++
-            else attachments += attachment.copy(name = path.trimEnd('/').substringAfterLast('/').ifEmpty { attachment.name })
+    share: (File) -> Uri = { FileProvider.getUriForFile(context, "${context.packageName}.chat.files", it) }): RestoredPhotos {
+    val attachments = mutableListOf<ComposerAttachment>()
+    try {
+        return withContext(Dispatchers.IO) {
+            var lost = 0
+            for (path in paths) {
+                val payload = try { read(path) } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { null }
+                val restored = payload?.let { restoredPhotos(context, listOf(it), share) }
+                val attachment = restored?.attachments?.singleOrNull()
+                if (attachment == null) lost++
+                else attachments += attachment.copy(name = path.trimEnd('/').substringAfterLast('/').ifEmpty { attachment.name })
+            }
+            RestoredPhotos(attachments, lost)
         }
-        RestoredPhotos(attachments, lost)
+    } catch (cancelled: CancellationException) {
+        // Returning to the caller can be cancelled after one or more files have already been staged.
+        withContext(NonCancellable) { discardForwardedPhotos(context, RestoredPhotos(attachments)) }
+        throw cancelled
     }
+}
 
 /**
  * Adds forwarded photos to the target's existing draft, up to its free media places. Returns the attachments rejected by

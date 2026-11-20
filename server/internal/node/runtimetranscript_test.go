@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // paseoHello is a runtime running Claude Code and other agents through their SDKs (Paseo, docs/integrations/paseo.md).
@@ -625,6 +627,98 @@ func TestRuntimeSessionForksFromItsTranscript(t *testing.T) {
 }
 
 // session.seen goes to a runtime that keeps an unread mark of its own (caps.seen, #6299); any other is answered here.
+func TestRuntimeNativeForkListsAgentAndAssistantBranches(t *testing.T) {
+	n, hub := runtimeNode(t)
+	rt := dialRuntime(t, n, map[string]any{"runtime": "agy", "launcher": "agy",
+		"caps": map[string]any{"fork": true, "send": true, "assistant": true}})
+	const agent, assistant = "agy-agent", "agy-assistant"
+	const reply = "4@identity#1"
+	work := t.TempDir()
+	assistantDir := filepath.Join(work, ".persona", "health")
+	n.state.put(assistant, sessionState{Cwd: assistantDir, Launcher: "agy", Model: "test-model", AppMode: "plan", IsMain: true, TaskID: "source-task"})
+	rt.mu.Lock()
+	rt.answer = func(method string, params json.RawMessage) (any, error) {
+		var input struct {
+			ID        string `json:"session_id"`
+			At        string `json:"at_item_id"`
+			Assistant bool   `json:"assistant"`
+			Text      string `json:"text"`
+		}
+		_ = json.Unmarshal(params, &input)
+		id := input.ID
+		switch method {
+		case "session.fork":
+			if input.At != reply || (id != agent && id != assistant) {
+				return nil, &rpc.Error{Code: "fork_mismatch", Message: "Reply not found"}
+			}
+			if input.Assistant != (id == assistant) {
+				return nil, fmt.Errorf("unexpected assistant flag for %s: %t", id, input.Assistant)
+			}
+			cwd := work
+			if id == assistant {
+				cwd = assistantDir
+			}
+			return map[string]any{"session_id": id + "-fork", "session": proto.Session{
+				SessionID: id + "-fork", Cwd: cwd, Title: "Example branch", Launcher: "agy", Status: proto.StatusIdle,
+			}}, nil
+		case "session.items":
+			return nil, &rpc.Error{Code: "not_found", Message: "Conversation not found"}
+		case "session.send":
+			if input.Assistant && id == assistant+"-fork" && input.Text == "Continue the branch" {
+				return map[string]any{"ok": true}, nil
+			}
+		}
+		return nil, fmt.Errorf("unexpected method %s", method)
+	}
+	rt.mu.Unlock()
+	if err := rt.peer.Notify("runtime.sessions", map[string]any{"sessions": []proto.Session{
+		{SessionID: agent, Cwd: work}, {SessionID: assistant, Cwd: assistantDir},
+		{SessionID: "agy-starting", Starting: true}, {SessionID: "agy-child", IsSubagent: true},
+		{SessionID: "agy-codex", Agent: "codex"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "runtime listed", func() bool { return listed(t, n)[assistant].SessionID != "" })
+	rows := listed(t, n)
+	for _, id := range []string{agent, assistant} {
+		if row := rows[id]; !row.CanFork || row.Capabilities == nil || !row.Capabilities.Fork {
+			t.Fatalf("%s is not forkable: %+v", id, row)
+		}
+		out, err := nodeCall(t, n, "session.fork", map[string]string{"session_id": id, "at_item_id": reply})
+		want := id + "-fork"
+		if err != nil || string(out) != `{"session_id":"`+want+`"}` {
+			t.Fatalf("fork %s: %s, %v", id, out, err)
+		}
+		waitFor(t, "branch published", func() bool {
+			return slices.ContainsFunc(hub.lastList(), func(row proto.Session) bool {
+				return row.SessionID == want && row.Cwd == rows[id].Cwd && row.CanFork && row.Title == "Example branch"
+			})
+		})
+	}
+	if st, ok := n.state.get(assistant + "-fork"); !ok || !n.runtimeAssistant(assistant+"-fork") ||
+		st.Launcher != "agy" || st.Model != "test-model" || st.AppMode != "plan" || st.IsMain || st.TaskID != "" {
+		t.Fatalf("assistant branch state: %+v", st)
+	}
+	if _, err := nodeCallWithoutAttestation(t, n, "session.send", map[string]string{
+		"session_id": assistant + "-fork", "client_msg_id": "branch-follow-up", "text": "Continue the branch",
+	}); err != nil {
+		t.Fatalf("continue assistant branch before origin backfill: %v", err)
+	}
+	for _, id := range []string{"agy-starting", "agy-child", "agy-codex"} {
+		if rows[id].CanFork {
+			t.Fatalf("%s is forkable", id)
+		}
+		if _, err := nodeCall(t, n, "session.fork", map[string]string{"session_id": id}); rpcCode(err) != "fork_unsupported" {
+			t.Fatalf("fork %s: %v", id, err)
+		}
+	}
+	for id, code := range map[string]string{agent: "fork_mismatch", "agy-missing": "not_found"} {
+		if _, err := nodeCall(t, n, "session.fork", map[string]string{"session_id": id, "at_item_id": "stale"}); rpcCode(err) != code {
+			t.Fatalf("fork %s: %v, want %s", id, err, code)
+		}
+	}
+}
+
 func TestRuntimeSeenGoesToARuntimeThatAsks(t *testing.T) {
 	for _, asks := range []bool{true, false} {
 		n, _ := runtimeNode(t)

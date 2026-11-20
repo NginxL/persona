@@ -83,6 +83,10 @@ func (h *Hub) assistantRoutesRelayed(api *http.ServeMux) {
 		}
 		by := h.byRequest
 		switch {
+		case pattern == directionSessionFilingRoute:
+			// The selected/default manager owns the direction book. Its 404 for a session on another
+			// manager's computer is the route's contract, not a reason to relay to that computer's manager.
+			by = h.byRequest
 		case strings.Contains(pattern, "/machines/{mid}/"):
 			by = h.byMachine
 		case strings.Contains(pattern, "/sessions/{mid}/{sid}/"):
@@ -268,6 +272,29 @@ func (l assistantLink) deviceCallFrom(ctx context.Context, from string, p assist
 			}
 		}
 		return json.Marshal(map[string]any{"session": s, "ok": ok})
+	}
+	if strings.HasPrefix(p.Method, "task.workspace.") && p.Method != "task.workspace.capabilities" || p.Method == devicewire.MethodStartBackendSession {
+		identity := p.Params
+		if p.Method == devicewire.MethodStartBackendSession {
+			var in struct {
+				Workspace json.RawMessage `json:"backend_workspace"`
+			}
+			if err := json.Unmarshal(identity, &in); err != nil {
+				return nil, err
+			}
+			identity = in.Workspace
+		}
+		var named struct {
+			Plan struct {
+				Source struct {
+					Manager   string `json:"manager"`
+					MachineID string `json:"machine_id"`
+				} `json:"source"`
+			} `json:"plan"`
+		}
+		if json.Unmarshal(identity, &named) != nil || named.Plan.Source.Manager != from || named.Plan.Source.MachineID != p.Device {
+			return nil, &rpc.Error{Code: "invalid_params", Message: "workspace routing identity mismatch"}
+		}
 	}
 	var out json.RawMessage
 	if err := m.call(ctx, p.Method, p.Params, &out); err != nil {

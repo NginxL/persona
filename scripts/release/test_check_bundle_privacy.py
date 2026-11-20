@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import io
 import ipaddress
+import os
 from pathlib import Path
 import plistlib
 import shutil
@@ -636,19 +637,38 @@ class GoDependenciesTests(unittest.TestCase):
                 code, _ = self.scan(bad + "/dl", words=(bad + "/dl",), config={"publish": {"site_url": bad}})
                 self.assertNotEqual(code, 0)
 
-    def test_published_binary_accepts_only_the_exact_configured_update_url(self):
-        # publish.update_url (#4522): the binaries carry it instead of <site>/dl, exactly as configured.
+    def test_published_binary_accepts_the_configured_update_url_and_site_feed(self):
+        # publish.update_url (#4522): the binaries carry it, while the site itself still legitimately serves /dl.
         url = "https://releases.example.test/owner/repo/releases/latest/download"
-        words = ("releases.example.test",)
+        words = ("releases.example.test", "site.example.test")
         config = {"publish": {"site_url": "https://site.example.test", "update_url": url + "/"}}
-        code, output = self.scan(url, words=words, config=config)
+        code, output = self.scan(url + "\nhttps://site.example.test/dl", words=words, config=config)
         self.assertEqual(code, 0, output)
         for text in (url + "/private", url + "?token=placeholder", "https://releases.example.test/owner",
-                     "https://site.example.test/dl", "person@releases.example.test"):
+                     "person@releases.example.test"):
             with self.subTest(text=text):
                 code, output = self.scan(text, words=words + ("site.example.test",), config=config)
                 self.assertNotEqual(code, 0)
                 self.assertIn("private value", output)
+
+    def test_published_binary_scan_uses_the_inherited_update_url_override(self):
+        configured = "https://configured.example.test/releases/latest/download"
+        override = "https://override.example.test/releases/latest/download"
+        config = {"publish": {"update_url": configured}}
+        with patch.dict(os.environ, {"PERSONA_UPDATE_URL": override}):
+            code, output = self.scan(override, words=("override.example.test",), config=config)
+            self.assertEqual(code, 0, output)
+            self.assertEqual(cbp.public_download_url(config), (override, "/releases/latest/download"))
+
+    def test_published_binary_scan_allows_override_and_site_dl_feeds(self):
+        configured = "https://configured.example.test/releases/latest/download"
+        override = "https://override.example.test/releases/latest/download"
+        site = "https://site.example.test"
+        config = {"publish": {"site_url": site, "update_url": configured}}
+        with patch.dict(os.environ, {"PERSONA_UPDATE_URL": override}):
+            code, output = self.scan(override + "\n" + site + "/dl", words=("override.example.test", "site.example.test"), config=config)
+            self.assertEqual(code, 0, output)
+            self.assertEqual(cbp.public_download_urls(config), [(override, "/releases/latest/download"), (site + "/dl", "/dl")])
 
     def test_the_app_ssh_algorithm_names_are_not_emails(self):
         names = "\n".join(a + "@" + d for a, d in (("aes256-gcm", "openssh.com"), ("curve25519-sha256", "libssh.org"),

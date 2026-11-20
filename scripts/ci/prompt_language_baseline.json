@@ -60,19 +60,6 @@
       "assistant/workspace_mention.md"
     ]
   },
-  "bot": {
-    "count": 1,
-    "files": [
-      "bot/message.md"
-    ]
-  },
-  "channel": {
-    "count": 2,
-    "files": [
-      "channel/answer_again.md",
-      "channel/message.md"
-    ]
-  },
   "kb": {
     "count": 13,
     "files": [
@@ -143,13 +130,6 @@
       "mcp/voice/meeting_delegate_task.md",
       "mcp/voice/search_knowledge.md",
       "mcp/voice/send_to_agent.md"
-    ]
-  },
-  "shared": {
-    "count": 2,
-    "files": [
-      "shared/kb_blocks.md",
-      "shared/user_rules.md"
     ]
   }
 }

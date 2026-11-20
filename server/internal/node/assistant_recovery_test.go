@@ -995,3 +995,80 @@ func TestAssistantPendingFailureUsesTheReplacementProcess(t *testing.T) {
 		t.Fatalf("the replacement's pending failure was dropped: %d recovery send(s), want 2", got)
 	}
 }
+
+// A task's explicit execution choice keeps the same-model retry, then surfaces the error without a model switch.
+func TestTaskExecutionEachTurnCanRetryWithoutModelFallback(t *testing.T) {
+	f := cliTest(t)
+	retryResult := filepath.Join(f.dir, "retry-result")
+	t.Setenv("CLI_FAKE_RETRY_RESULT_GATE", retryResult)
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+claudeLikeCLI), 0700); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	execution := modelExecution{Strict: true}
+	var id string
+	var process *assistantProc
+	for turn := 1; turn <= 3; turn++ {
+		// Every turn and its retry receive the same transient failure from the fake process.
+		if err := os.WriteFile(filepath.Join(f.dir, "attempts"), []byte("0\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		next, err := f.n.assistantSend(t.Context(), id, cwd, "claude", "task request", nil, "", "", execution)
+		if err != nil || (id != "" && next != id) {
+			t.Fatalf("send turn %d: previous=%q next=%q error=%v", turn, id, next, err)
+		}
+		id = next
+		cliWait(t, "the same-model retry", func() bool {
+			return strings.Count(f.file("user.jsonl"), `"type":"user"`) >= 2*turn
+		})
+		// Exercise result handling after the recovery send returns. Early results take the pending-failure path.
+		cliWait(t, "the recovery send to return", func() bool {
+			f.n.mu.Lock()
+			defer f.n.mu.Unlock()
+			recovery := f.n.recoveries[id]
+			return recovery != nil && !recovery.running
+		})
+		if err := os.WriteFile(retryResult, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		f.idle(t, id)
+		if err := os.Remove(retryResult); err != nil {
+			t.Fatal(err)
+		}
+		if count := strings.Count(f.file("user.jsonl"), `"type":"user"`); count != 2*turn {
+			t.Fatalf("turn %d ended after %d total attempts, want %d", turn, count, 2*turn)
+		}
+		p := f.proc(id)
+		if p == nil {
+			t.Fatalf("turn %d lost its process", turn)
+		}
+		if turn == 1 {
+			process = p
+		} else if p != process {
+			t.Fatalf("turn %d replaced the process", turn)
+		}
+		p.mu.Lock()
+		model, failure, recovery := p.model, p.turnError, p.turnRecovery
+		p.mu.Unlock()
+		if !model.Strict || model.Model == "fallback-model" || !strings.Contains(failure, "503") {
+			t.Errorf("turn %d ended with model %+v and error %q", turn, model, failure)
+		}
+		if recovery != nil {
+			t.Errorf("turn %d left its exhausted recovery on the idle process", turn)
+		}
+		rows := f.n.assistantSessions()
+		if len(rows) != 1 || rows[0].SessionID != id || rows[0].TurnErrorKind != proto.TurnErrorUser || !strings.Contains(rows[0].TurnError, "503") {
+			t.Fatalf("turn %d exposed a failure for generic continuation: %+v", turn, rows)
+		}
+	}
+	if strings.Contains(f.file("cli-argv"), "--model fallback-model") {
+		t.Fatal("task silently changed models")
+	}
+	ctx := withClientMsgID(t.Context(), "model-retry:"+id+":1:1")
+	if _, err := f.n.assistantSend(ctx, id, "", "", "Continue", nil, "", ""); !errors.Is(err, errAssistantRecoveryCancelled) {
+		t.Fatalf("stale manager continuation was not refused: %v", err)
+	}
+	if count := strings.Count(f.file("user.jsonl"), `"type":"user"`); count != 6 {
+		t.Fatalf("stale manager continuation reached the conversation: %d total sends", count)
+	}
+}

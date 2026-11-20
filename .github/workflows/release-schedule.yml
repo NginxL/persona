@@ -47,23 +47,34 @@ jobs:
           test -n "$GH_TOKEN" || { echo 'persona-release is missing RELEASE_PR_TOKEN; no release PR or branch was created' >&2; exit 1; }
           test "$CHANNEL" = release || test "$CHANNEL" = beta
           commit="$(git rev-parse HEAD)"
-          stable="$(gh release view --repo "$REPOSITORY" --json tagName --jq .tagName)"
+          stable="$(gh api "repos/$REPOSITORY/releases/latest" --jq .tag_name)"
           previous="$(git rev-parse "$stable^{commit}")"
           git log --format=%s "$stable..$commit" --no-merges > release-subjects.txt
+          # Any orphaned release branch reserves its version, including one whose earlier PR was closed. Never
+          # recreate that branch with a different source before this reservation has been applied.
+          git ls-remote --heads "https://github.com/$REPOSITORY.git" 'refs/heads/release/*' | cut -f2 | sed 's#refs/heads/release/##' > release-reserved.txt
           if [[ "$CHANNEL" = beta ]]; then
             current="$(gh release download beta-channel --repo "$REPOSITORY" --pattern latest.json --output - 2>/dev/null || true)"
             if [[ -n "$current" ]]; then
               previous="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["commit"])' <<< "$current")"
             fi
           fi
-          version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" schedule-version --stable-tag "$stable" --commit "$commit" --previous-commit "$previous" --subjects release-subjects.txt)"
-          if [[ "$CHANNEL" = beta ]] && gh release view "v$version" --repo "$REPOSITORY" --json tagName >/dev/null 2>&1; then
-            version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel beta next-version --stable-tag "$stable")"
+          version_command=(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel "$CHANNEL" schedule-version --stable-tag "$stable" --commit "$commit" --previous-commit "$previous" --subjects release-subjects.txt --reserved)
+          while IFS= read -r reserved_version || [[ -n "$reserved_version" ]]; do
+            version_command+=("$reserved_version")
+          done < release-reserved.txt
+          version="$("${version_command[@]}")"
+          if [[ "$CHANNEL" = beta ]] && gh api "repos/$REPOSITORY/releases/tags/v$version" >/dev/null 2>&1; then
+            version_command=(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel beta next-version --stable-tag "$stable" --reserved)
+            while IFS= read -r reserved_version || [[ -n "$reserved_version" ]]; do
+              version_command+=("$reserved_version")
+            done < release-reserved.txt
+            version="$("${version_command[@]}")"
           fi
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]] || exit 0
           branch="release/$version"
           title="release: v$version"
-          if [[ "$(gh pr list --repo "$REPOSITORY" --state open --head "$branch" --json number --jq length)" -gt 0 ]]; then
+          if [[ "$(gh api "repos/$REPOSITORY/pulls?state=open&base=main&per_page=100" --jq --arg branch "$branch" "[.[] | select(.head.ref == \$branch)] | length")" -gt 0 ]]; then
             echo "Release PR already exists for $version; do not duplicate it."
             exit 0
           fi
@@ -71,7 +82,11 @@ jobs:
             # A previous failed scheduler owns this version. Never overwrite its different source: allocate the next one.
             echo "$branch has no open PR; preserve its failed source and select a new immutable version."
             git ls-remote --heads "https://github.com/$REPOSITORY.git" 'refs/heads/release/*' | cut -f2 | sed 's#refs/heads/release/##' > release-reserved.txt
-            version="$(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel beta next-version --stable-tag "$stable" --reserved $(tr '\n' ' ' < release-reserved.txt))"
+            version_command=(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel beta next-version --stable-tag "$stable" --reserved)
+            while IFS= read -r reserved_version || [[ -n "$reserved_version" ]]; do
+              version_command+=("$reserved_version")
+            done < release-reserved.txt
+            version="$("${version_command[@]}")"
             branch="release/$version"
             title="release: v$version"
           fi

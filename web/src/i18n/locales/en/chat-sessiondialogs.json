@@ -7,6 +7,8 @@
   "rename": "Rename",
   "tab_name": "herdr tab name",
   "session_name": "Session name",
+  "name": "Name",
+  "rename_hint_unified": "Updates the herdr tab and, where supported, the CLI session name.",
   "rename_hint_assistant": "Only changes this chat's title in Persona.",
   "rename_hint_agent": "The tab name syncs to herdr. The session name uses Claude's /rename, so claude --resume on the computer shows it too.",
   "space_renamed": "Space renamed",

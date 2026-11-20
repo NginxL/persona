@@ -4,7 +4,7 @@ import { t } from "../i18n";
 import { api, ApiError } from "../lib/api";
 import { useStore } from "../lib/store";
 import { loadTaskRepositories, repositoryRequestOptions, type RepositoryLayout, type TaskRepository } from "../lib/task-repositories";
-import { useRepositoryRequestContext } from "./TaskRepositoryBindingsEditor";
+import { useRepositoryRequestContext } from "../lib/use-repository-request-context";
 import { loadWorkspaceRules, previewWorkspaceNaming, RULE_FIELDS, rulesPatch, sameRules, saveWorkspaceRules, WORKSPACE_NAMING_VERSION,
   type NamingDiagnostic, type WorkspaceNamingPreview as Preview, type WorkspaceNamingSettings, type WorkspaceRules } from "../lib/workspace-naming";
 import { settingsInputClass } from "../views/settings/SettingsParts";

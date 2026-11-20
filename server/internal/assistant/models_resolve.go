@@ -18,6 +18,10 @@ import (
 func (s *Service) modelBaseline(ctx context.Context, p ModelPurpose) (ModelBinding, string, error) {
 	l := s.requestCtxLang(ctx)
 	if p.Parent != "" {
+		if isTaskPurpose(p.ID) && p.Parent == "assistant" {
+			b, err := s.taskModelBaseline(ctx, p.MachineID)
+			return b, p.Parent, err
+		}
 		b, err := s.resolveModel(ctx, p.Parent)
 		return b, p.Parent, err
 	}

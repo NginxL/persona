@@ -272,6 +272,13 @@ func (s *Service) ownSettings() []ownSetting {
 			Value: "true or false"},
 			get: func(ctx context.Context) (string, error) { return fmt.Sprint(s.mainSupervisesOwnTasks(ctx)), nil },
 			set: s.setMainSupervisesOwnTasks},
+		{Setting: Setting{Key: "assistant.supervision_batch_minutes", Title: "Routine supervision batching per recipient", Actions: getSet,
+			About: "0 (the default) keeps the existing supervision gather and shared spacing. A nonzero interval batches routine signals independently for each final recipient conversation, anchored at that recipient's first routine signal. needs_you, ask, escalated, decide, decision_reply, park_decided, owner_cannot_answer, recheck, undecidable and failed bypass the batch after the existing 15-second gather; any one of them releases that recipient's whole digest. Due batches still use the recipient's existing busy queue",
+			Value: "a whole number from 0 to 1440 minutes"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(supervisionBatchMinutesOf(s.settings(ctx))), nil
+			},
+			set: s.setSupervisionBatchMinutes},
 		{Setting: Setting{Key: "assistant.background_supervisor_keeps_context", Title: "The background supervisor keeps every round in context", Actions: getSet,
 			About: "off (the default): each round of the background supervisor starts from its first turn, in the same conversation: " +
 				"it reads its start brief and that round's supervision message, with only the tools supervision uses; what " +
@@ -461,7 +468,7 @@ var settingTitles = map[string]string{standingAuthorizationsKey: "title_standing
 	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
 	"assistant.recording_days": "title_recording_days", "assistant.done_needs_delivery": "title_done_needs_delivery",
 	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context",
-	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "model_profiles.tiers": "title_model_tiers",
+	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "assistant.supervision_batch_minutes": "title_supervision_batch_minutes", "model_profiles.tiers": "title_model_tiers",
 	"assistant.load_all_tools":                "title_load_all_tools",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
 	"assistant.meeting_attendance_default":    "title_meeting_attendance_default", "assistant.minutes_days": "title_minutes_days",

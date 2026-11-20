@@ -986,6 +986,333 @@ struct AvatarSyncTests {
         #expect(work.chosen == "aurora" && s.current.id == "aurora" && s.chosenID == "aurora")
     }
 
+    /// The URL comes back, but replies still belong to the visit that sent the request.
+    @Test func anOldPutCannotBecomeTheRollbackAfterReturningToTheSameHub() async throws {
+        let home = try LookHub(ids: ["nwverse", "aurora"], chosen: "persona")
+        let work = try LookHub(url: "https://other.invalid", chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(home.client)
+        let frog = try pick(s, "nwverse")
+        let answer = Gate()
+        let slow = answer.client(home.fake, answerFirst: true) { $0.method == "PUT" }
+        let first = Task { await s.choose(frog, api: slow) }
+        try await answer.untilHeld()
+        await s.refresh(work.client)
+        home.chosen = "aurora"
+        await s.refresh(home.client)
+        answer.open()
+        await first.value
+        home.refuse = URLError(.networkConnectionLost)
+        await s.choose(.builtin, api: home.client)
+        #expect(s.current.id == "aurora" && s.chosenID == "aurora")
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "aurora")
+    }
+
+    @Test func anOldListCannotRewriteTheCatalogAfterReturningToTheSameHub() async throws {
+        let home = try LookHub(ids: ["nwverse"], chosen: "nwverse")
+        let work = try LookHub(url: "https://other.invalid", chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(home.client)
+        home.ids = ["aurora"]
+        home.chosen = "aurora"
+        let gate = Gate()
+        let slow = gate.client(home.fake, answerFirst: true) { $0.path == "/api/v1/looks" }
+        let first = Task { await s.refresh(slow) }
+        try await gate.untilHeld()
+        s.switchHub(work.client)
+        s.switchHub(home.client)
+        gate.open()
+        await first.value
+        let again = PersonaStore(root: root, defaults: defaults)
+        #expect(s.offered.map(\.id) == ["persona", "nwverse"])
+        #expect(again.offered == s.offered && again.current.id == "nwverse")
+        #expect(s.error == nil)
+    }
+
+    @Test func anUploadFromAnEarlierVisitCannotChooseHereOnReturn() async throws {
+        let home = try LookHub(ids: ["nwverse", "u-abc12345"], chosen: "persona")
+        let work = try LookHub(url: "https://other.invalid", chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(home.client)
+        home.fake.on("POST", "/api/v1/looks/uploads") { _ in
+            Data(#"{"look":{"id":"u-abc12345","source":"hub","name":"Milk Frog","app_icon":"persona","rev":"r1","bytes":10,"uploaded":true},"current":{"id":"u-abc12345","effective":"u-abc12345"}}"#.utf8)
+        }
+        let gate = Gate()
+        let slow = gate.client(home.fake, answerFirst: true) { $0.method == "POST" }
+        let upload = AvatarUploadModel(image: Self.image(), deps: .init(api: { slow }, store: { s }))
+        upload.name = "Milk Frog"
+        let pending = Task { await upload.upload() }
+        try await gate.untilHeld()
+        await s.refresh(work.client)
+        home.chosen = "nwverse"
+        await s.refresh(home.client)
+        gate.open()
+        _ = await pending.value
+        #expect(s.current.id == "nwverse" && home.puts.isEmpty)
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "nwverse")
+    }
+
+    @Test func aNewRevisionCanFinishBeforeAnOlderDownloadOfTheSameID() async throws {
+        let hub = try LookHub(chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(hub.client)
+        let first = try pick(s, "nwverse")
+        let gate = Gate()
+        let slow = gate.client(hub.fake) { $0.path.hasSuffix("/dot/idle.png") }
+        let downloading = Task { await s.download(first, slow) }
+        try await gate.untilHeld()
+        hub.chosen = first.id
+        hub.rev = "r2"
+        let reading = Task { await s.refresh(hub.client) }
+        try await until("the current revision is ready while the old file is held") { s.current.rev == "r2" }
+        gate.open()
+        await downloading.value
+        await reading.value
+        #expect(s.current.rev == "r2" && s.isOnPhone(s.current))
+        #expect(PersonaStore(root: root, defaults: defaults).current.rev == "r2")
+    }
+
+
+    /// A local choice accepted after an upload began stays visible if the older upload response arrives last.
+    @Test func anUploadAnswerCannotReplaceANewerAcceptedTap() async throws {
+        let hub = try LookHub(ids: ["nwverse", "u-abc12345"], chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(hub.client)
+        hub.fake.on("POST", "/api/v1/looks/uploads") { [unowned hub] _ in
+            hub.chosen = "u-abc12345"
+            return Data(#"{"look":{"id":"u-abc12345","source":"hub","name":"Milk Frog","app_icon":"persona","rev":"r1","bytes":10,"uploaded":true},"current":{"id":"u-abc12345","effective":"u-abc12345"}}"#.utf8)
+        }
+        let gate = Gate()
+        let slow = gate.client(hub.fake, answerFirst: true) { $0.method == "POST" }
+        let upload = AvatarUploadModel(image: Self.image(), deps: .init(api: { slow }, store: { s }))
+        upload.name = "Milk Frog"
+        let pending = Task { await upload.upload() }
+        try await gate.untilHeld()
+        await s.choose(try pick(s, "nwverse"), api: hub.client)
+        gate.open()
+        #expect(await pending.value)
+        #expect(hub.chosen == "nwverse" && s.current.id == "nwverse")
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "nwverse")
+        let made = try pick(s, "u-abc12345")
+        #expect(s.isOnPhone(made))
+    }
+
+    /// Dropping an earlier visit's file request cannot fail the same pack on the newly selected hub.
+    @Test func aNewHubDoesNotInheritTheSamePackagesOldDownload() async throws {
+        let home = try LookHub(chosen: "persona")
+        let work = try LookHub(url: "https://other.invalid", chosen: "nwverse")
+        let (s, root, defaults) = store()
+        await s.refresh(home.client)
+        let p = try pick(s, "nwverse")
+        let old = Gate()
+        let slow = old.client(home.fake) { $0.path.hasSuffix("/dot/idle.png") }
+        let download = Task { await s.download(p, slow) }
+        try await old.untilHeld()
+        let switching = Task { await s.refresh(work.client) }
+        try await until("the new hub's package is on screen") { s.current.id == p.id }
+        old.open(failing: URLError(.networkConnectionLost))
+        await download.value
+        await switching.value
+        #expect(s.current.id == p.id && s.error == nil)
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == p.id)
+    }
+
+
+    @Test func anOlderFilesFailureDoesNotChangeANewerTapOrItsError() async throws {
+        let hub = try LookHub(ids: ["nwverse", "aurora"], chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(hub.client)
+        let frozen = Gate()
+        let slow = frozen.client(hub.fake) { $0.path.hasSuffix("/dot/idle.png") }
+        let frog = try pick(s, "nwverse")
+        let older = Task { await s.choose(frog, api: slow) }
+        try await frozen.untilHeld()
+        await s.choose(try pick(s, "aurora"), api: hub.client)
+        frozen.open(failing: URLError(.networkConnectionLost))
+        await older.value
+        #expect(s.current.id == "aurora" && s.error == nil && hub.chosen == "aurora")
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "aurora")
+    }
+
+
+    @Test func aDeferredSocketPushCannotReplayOnAnotherVisitToTheSameURL() async throws {
+        let home = try LookHub(ids: ["nwverse", "aurora"], chosen: "nwverse")
+        let other = try LookHub(url: "https://other.invalid", chosen: "persona")
+        let (s, root, defaults) = store()
+        let folder = FileManager.default.temporaryDirectory.appending(path: "avatar-sync-model-\(UUID().uuidString)")
+        let model = AppModel(stateFolder: folder, personas: s)
+        defer { for link in model.links { link.live.disconnect() } }
+        connect(model, home.client)
+        await s.refresh(model.api)
+        await s.download(try pick(s, "aurora"), home.client)
+        var shown: [String] = []
+        s.onChange = { shown.append(s.current.id) }
+        let ev = try #require(ServerEvent.decode(Data(#"{"type":"look","id":"aurora","effective":"aurora"}"#.utf8)))
+        model.handle(ev.stamped(""), group: "")
+        s.switchHub(other.client)
+        s.switchHub(home.client)
+        await s.refresh(home.client)
+        #expect(shown.isEmpty && s.current.id == "nwverse")
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "nwverse")
+    }
+
+
+    /// A PUT already on the wire can still reach the server after leaving its visit and returning. The new tap
+    /// waits its turn on that server; only the new visit's answer can update this phone.
+    @Test func returningToAHubOrdersNewWritesBehindItsOutstandingPut() async throws {
+        let home = try LookHub(ids: ["nwverse", "aurora"], chosen: "persona")
+        let other = try LookHub(url: "https://other.invalid", chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(home.client)
+        let frog = try pick(s, "nwverse"), aurora = try pick(s, "aurora")
+        await s.download(frog, home.client)
+        await s.download(aurora, home.client)
+        let gate = Gate()
+        let slow = gate.client(home.fake) { $0.method == "PUT" }
+        let first = Task { await s.choose(frog, api: slow) }
+        try await gate.untilHeld()
+        s.switchHub(other.client)
+        await s.refresh(home.client)
+        let newest = Task { await s.choose(aurora, api: home.client) }
+        try await until("the new tap is visible while the first write is held") { s.current.id == "aurora" }
+        gate.open()
+        await first.value
+        await newest.value
+        #expect(home.puts.map { $0["id"]?.string } == ["nwverse", "aurora"])
+        #expect(home.chosen == "aurora" && s.current.id == "aurora")
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "aurora")
+    }
+
+
+    @Test func aMissingLegacyPackKeepsItsPreferenceApartFromTheLaunchCache() async throws {
+        let home = try LookHub(chosen: "nwverse")
+        let legacy = FakeHub(url: "https://legacy.invalid")
+        let (s, root, defaults) = store()
+        await s.refresh(home.client)
+        legacy.on("GET", "/api/v1/personas", json: #"{"personas":[]}"#)
+        await s.refresh(legacy.client)
+        let again = PersonaStore(root: root, defaults: defaults)
+        #expect(again.current.isBuiltin && again.chosenID == "nwverse")
+        #expect(defaults.string(forKey: PersonaStore.chosenKey) == Persona.builtinID)
+        #expect(!FileManager.default.fileExists(atPath: root.appending(path: ".shown.json").path(percentEncoded: false)))
+
+        legacy.on("GET", "/api/v1/personas", json: #"{"personas":[{"id":"nwverse","rev":"r1","bytes":10,"manifest":\#(LookHub.manifest("nwverse"))}]}"#)
+        for f in try PersonaTests.decode().files { legacy.on("GET", "/api/v1/personas/nwverse/\(f)", json: "png:\(f)") }
+        await again.refresh(legacy.client)
+        #expect(again.current.id == "nwverse" && again.isOnPhone(again.current))
+        let blank = try LookHub(url: "https://blank.invalid", chosen: nil)
+        await again.refresh(blank.client)
+        #expect(blank.puts.isEmpty && again.current.isBuiltin)
+    }
+
+
+    @Test func aPutsEchoCanShowTheDefaultWhileItsChosenIDIsUnavailable() async throws {
+        let hub = try LookHub(ids: ["nwverse", "aurora"], chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(hub.client)
+        let gate = Gate()
+        let slow = gate.client(hub.fake, answerFirst: true) { $0.method == "PUT" }
+        let frog = try pick(s, "nwverse")
+        let choosing = Task { await s.choose(frog, api: slow) }
+        try await gate.untilHeld()
+        await s.follow("nwverse", effective: "persona", api: hub.client)
+        #expect(s.current.isBuiltin)
+        hub.chosen = "aurora"
+        await s.follow("aurora", effective: "aurora", api: hub.client)
+        gate.open()
+        await choosing.value
+        hub.refuse = URLError(.networkConnectionLost)
+        await s.choose(.builtin, api: hub.client)
+        #expect(s.current.id == "aurora" && s.chosenID == "aurora")
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "aurora")
+    }
+
+
+    @Test func aSocketPushReceivedBeforeASettingsTapCannotDropItsPendingDownload() async throws {
+        let hub = try LookHub(ids: ["nwverse", "aurora"], chosen: "persona")
+        let (s, root, defaults) = store()
+        let folder = FileManager.default.temporaryDirectory.appending(path: "avatar-sync-model-\(UUID().uuidString)")
+        let model = AppModel(stateFolder: folder, personas: s)
+        defer { for link in model.links { link.live.disconnect() } }
+        connect(model, hub.client)
+        await s.refresh(model.api)
+        await s.download(try pick(s, "nwverse"), hub.client)
+        let aurora = try pick(s, "aurora")
+        let files = Gate()
+        let slow = files.client(hub.fake) { $0.path.hasPrefix("/api/v1/personas/aurora/") }
+        let event = try #require(ServerEvent.decode(Data(#"{"type":"look","id":"nwverse","effective":"nwverse"}"#.utf8)))
+        hub.chosen = "nwverse"
+        model.handle(event.stamped(""), group: "")
+        let tapped = s.tap(aurora, api: slow) // same main-actor turn, as the Settings button
+        try await files.untilHeld()
+        files.open()
+        await tapped?.value
+        #expect(hub.puts.map { $0["id"]?.string } == ["aurora"])
+        #expect(hub.chosen == "aurora" && s.current.id == "aurora")
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "aurora")
+    }
+
+    /// Holds a successful upload response after the hub has created and selected the pack.
+    private func holdNewUpload(on hub: LookHub, store: PersonaStore) -> (AvatarUploadModel, Gate) {
+        hub.fake.on("POST", "/api/v1/looks/uploads") { [unowned hub] _ in
+            hub.ids.append("u-abc12345")
+            hub.chosen = "u-abc12345"
+            try hub.serveFiles()
+            return Data(#"{"look":{"id":"u-abc12345","source":"hub","name":"Milk Frog","app_icon":"persona","rev":"r1","bytes":10,"uploaded":true},"current":{"id":"u-abc12345","effective":"u-abc12345"}}"#.utf8)
+        }
+        let gate = Gate()
+        let slow = gate.client(hub.fake, answerFirst: true) { $0.method == "POST" }
+        let upload = AvatarUploadModel(image: Self.image(), deps: .init(api: { slow }, store: { store }))
+        upload.name = "Milk Frog"
+        return (upload, gate)
+    }
+
+    @Test func anUploadsFreshCatalogCanReportANewerChoiceWithoutASocketEcho() async throws {
+        let hub = try LookHub(ids: ["nwverse"], chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(hub.client)
+        let initialReads = hub.fake.sent("GET", "/api/v1/looks").count
+        let (upload, gate) = holdNewUpload(on: hub, store: s)
+        let posting = Task { await upload.upload() }
+        try await gate.untilHeld()
+        hub.chosen = "nwverse" // a different device; this client missed both pushes
+        gate.open()
+        #expect(await posting.value)
+        #expect(hub.fake.sent("GET", "/api/v1/looks").count == initialReads + 1)
+        let made = try pick(s, "u-abc12345")
+        #expect(hub.puts.isEmpty && s.isOnPhone(made))
+        #expect(s.current.id == "nwverse" && PersonaStore(root: root, defaults: defaults).current.id == "nwverse")
+    }
+
+    @Test func retryingAnUploadsFailedFileKeepsTheChoiceFromItsFreshCatalog() async throws {
+        let hub = try LookHub(ids: ["nwverse"], chosen: "persona")
+        let (s, root, defaults) = store()
+        await s.refresh(hub.client)
+        let (upload, gate) = holdNewUpload(on: hub, store: s)
+        let first = Task { await upload.upload() }
+        try await gate.untilHeld()
+        hub.chosen = "nwverse"
+        let file = "/api/v1/personas/u-abc12345/dot/idle.png"
+        hub.fake.on("GET", file) { _ in throw URLError(.networkConnectionLost) }
+        gate.open()
+        #expect(!(await first.value))
+        #expect(hub.fake.sent("GET", file).count == 1)
+        #expect(upload.made?.id == "u-abc12345" && upload.canUpload)
+        #expect(s.current.id == "nwverse")
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "nwverse")
+
+        let reads = hub.fake.sent("GET", "/api/v1/looks").count
+        hub.fake.on("GET", file, json: "complete")
+        #expect(await upload.upload())
+        #expect(hub.fake.sent("POST", "/api/v1/looks/uploads").count == 1 && hub.puts.isEmpty)
+        #expect(hub.fake.sent("GET", "/api/v1/looks").count == reads)
+        #expect(hub.fake.sent("GET", file).count == 2)
+        let made = try pick(s, "u-abc12345")
+        #expect(s.isOnPhone(made))
+        #expect(s.current.id == "nwverse")
+        #expect(PersonaStore(root: root, defaults: defaults).current.id == "nwverse")
+    }
+
     // MARK: Demo Mode and the push
 
     @Test func demoModeReadsAndSendsNothing() async throws {

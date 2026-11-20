@@ -45,6 +45,7 @@
   "open_elsewhere_agents_list": "This tab is on Claude Code’s agents list. Open the terminal, pick a session with the arrow keys and press Enter, then send. Nothing was sent.",
   "modes_on_computer": "This Claude session runs in Claude on the computer (its desktop app or another terminal). Change its mode, effort or model there.",
   "modes_not_running": "This agent isn’t running. Resume it from its terminal page, then change this.",
+  "effort_change_pending": "The message was not sent because the thinking effort change has not been confirmed. If the change failed, choose a thinking effort again.",
   "agent_stopped": "This agent has stopped. Its conversation and terminal stay; it doesn’t take messages, and nothing was sent. To run it again, use Resume on its terminal page.",
   "resume_not_allowed": "This agent cannot be resumed automatically. Use Resume on its terminal page.",
   "stop_not_saved": "The stop state could not be saved. Nothing was started, stopped or closed; try again.",

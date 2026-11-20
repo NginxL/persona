@@ -117,6 +117,48 @@ class ForwardShotsTest {
 
     @After fun clear() { ForwardPlacements.home = emptyList() }
 
+    @Test fun adjacentForwardsInOnePendingMessageHaveOneCard() {
+        val next = ForwardMessage.ref("第二条回复", draft.source.copy(item = "r#5"), res)
+        rule.setContent {
+            PersonaTheme {
+                PendingForwardBubble(forwardMessage(note, listOf(forward, next), res), "pending")
+            }
+        }
+        rule.onNodeWithTag("forward-group", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText(note, useUnmergedTree = true).assertExists()
+    }
+
+    @Test fun droppingAGroupKeepsOtherOriginsAndTheUnrelatedQuote() {
+        val sameChat = forward.copy(url = forward.url.substringBefore('?') + "?at=second", msg = "second", text = "Second")
+        val otherChat = forward.copy(url = "persona://session/studio/other?at=third", msg = "third", text = "Third")
+        val quote = ChatLinkContext(ChatLinkContext.QUOTE, "A quote", "", "Read later")
+        var contexts by mutableStateOf(listOf(forward, sameChat, quote, otherChat))
+        rule.setContent {
+            PersonaTheme(reduceMotion = true) {
+                Column { ForwardComposerCards(contexts, onRemove = { contexts = contexts - it.toSet() }) }
+            }
+        }
+        rule.onNodeWithTag("forward-group-bar", useUnmergedTree = true).assertExists()
+        rule.onNode(androidx.compose.ui.test.hasContentDescription(res.getString(R.string.chat_forward_remove)) and
+            hasAnyAncestor(androidx.compose.ui.test.hasTestTag("forward-group-bar")), useUnmergedTree = true).performClick()
+        assertEquals(listOf(quote, otherChat), contexts)
+        rule.onNodeWithTag("forward-group-bar", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test fun aGroupWithoutItsOriginalChatExpandsOnlyTheTappedMessage() {
+        val expanded = "Original entry " + "continued ".repeat(170) + "last detail"
+        val second = forward.copy(url = forward.url.substringBefore('?') + "?at=second", msg = "second", text = expanded)
+        rule.setContent {
+            PersonaTheme(reduceMotion = true) {
+                OutboxBubble(forward.xml() + "\n" + second.xml() + "\n\na note", "pending")
+            }
+        }
+        rule.onNodeWithText("last detail", substring = true, useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("Original entry", substring = true, useUnmergedTree = true).performClick()
+        rule.onNodeWithText("last detail", substring = true, useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("a note", useUnmergedTree = true).assertExists()
+    }
+
     private fun shots(style: AppStyle, dark: Boolean, large: Boolean = false) {
         var scene by mutableStateOf(Scene.Menu)
         val menu = MessageMenuState()
@@ -146,7 +188,7 @@ class ForwardShotsTest {
                                     }
                                     if (scene == Scene.Menu) MessageMenuSheet(menu, writes = true, onQuote = {}, onEdit = {}, onContext = {},
                                         onForward = {}, onNotice = {})
-                                    else ForwardSheet(draft, forwarding, complete = { ForwardCompletion(forward, RestoredPhotos()) }, onDismiss = {}, onPicked = { _, _ -> })
+                                    else ForwardSheet(listOf(draft), forwarding, complete = { listOf(ForwardPlacement(forward)) }, onDismiss = {}, onPicked = { _, _ -> })
                                 }
                                 Scene.Composer -> Column(Modifier.testTag("shot").fillMaxSize()) {
                                     Column(Modifier.fillMaxWidth().padding(Tokens.Space.l)) {
@@ -210,29 +252,12 @@ class ForwardShotsTest {
     private fun sheetTexts(): List<String> = rule.onAllNodes(hasAnyAncestor(isDialog()), useUnmergedTree = true).fetchSemanticsNodes()
         .flatMap { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text } }
 
-    /** Every window, sheets and their scrim included (captureToImage can crop the Activity for a dialog). */
-    @Suppress("UNCHECKED_CAST")
     private fun capture(name: String) {
         rule.waitForIdle()
-        // Replies parse their Markdown off the main thread (ChatMarkdownCache) and show plain text until then: give it real
-        // time, as ReplyBlocksShotsTest does, or `code` is captured with its backticks.
+        // Replies parse Markdown off the main thread and initially show its source.
         Thread.sleep(200)
         rule.waitForIdle()
-        val bitmap = rule.runOnIdle {
-            val global = Class.forName("android.view.WindowManagerGlobal")
-            val instance = global.getMethod("getInstance").invoke(null)
-            val views = global.getDeclaredField("mViews").apply { isAccessible = true }.get(instance) as List<View>
-            Bitmap.createBitmap(views.first().width, views.first().height, Bitmap.Config.ARGB_8888).also { image ->
-                val canvas = Canvas(image)
-                views.forEach { view ->
-                    val position = IntArray(2).also { view.getLocationOnScreen(it) }
-                    canvas.save()
-                    canvas.translate(position[0].toFloat(), position[1].toFloat())
-                    view.draw(canvas)
-                    canvas.restore()
-                }
-            }
-        }
+        val bitmap = rule.runOnIdle { forwardWindowBitmap() }
         val directory = File(System.getProperty("persona.shots") ?: "build/forward-shots").also { it.mkdirs() }
         File(directory, "$name.png").outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
     }
@@ -258,7 +283,7 @@ class ForwardShotsTest {
                 val shown = remember(sameHub) { ChatForwarding(forwarding.agents, forwarding.machines, forwarding.assistant, { sameHub },
                     forwarding.conversationTitle, forwarding.memory, forwarding.openChat, forwarding.openPersonaHome, forwarding.openNewAgent) }
                 androidx.compose.runtime.key(sameHub) {
-                    ForwardSheet(draft, shown, complete = { ForwardCompletion(forward, RestoredPhotos()) }, onDismiss = {}, onPicked = { _, _ -> })
+                    ForwardSheet(listOf(draft), shown, complete = { listOf(ForwardPlacement(forward)) }, onDismiss = {}, onPicked = { _, _ -> })
                 }
             }
         }
@@ -272,21 +297,39 @@ class ForwardShotsTest {
 
     /** A tap on a target reads the forward, remembers the target and hands both on; the chat it came from is never offered. */
     @Test fun pickingATargetRemembersItAndHandsItOn() {
-        var picked: Pair<ForwardTarget, ForwardCompletion>? = null
+        var picked: Pair<ForwardTarget, List<ForwardPlacement>>? = null
         var gone = false
         rule.setContent {
             CompositionLocalProvider(LocalRippleConfiguration provides null) {
                 PersonaTheme(reduceMotion = true) {
-                    if (!gone) ForwardSheet(draft, forwarding, complete = { ForwardCompletion(forward, RestoredPhotos()) }, onDismiss = { gone = true }, onPicked = { t, r -> picked = t to r })
+                    if (!gone) ForwardSheet(listOf(draft), forwarding, complete = { listOf(ForwardPlacement(forward)) }, onDismiss = { gone = true }, onPicked = { t, r -> picked = t to r })
                 }
             }
         }
         settle()
         rule.onNodeWithTag("forward-session-login", useUnmergedTree = true).performClick()
         settle()
-        assertEquals(ForwardTarget.Chat(SessionKey("studio", "login")) to ForwardCompletion(forward, RestoredPhotos()), picked)
+        assertEquals(ForwardTarget.Chat(SessionKey("studio", "login")) to listOf(ForwardPlacement(forward)), picked)
         assertTrue(gone)
         assertEquals("session:studio/login", memory.list.first())
         assertTrue(rule.onAllNodesWithText("博客迁移到 Astro", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+    }
+}
+
+/** Compose dialogs own a window outside the Activity. Include both in forward flow screenshots. */
+@Suppress("UNCHECKED_CAST")
+internal fun forwardWindowBitmap(): Bitmap {
+    val global = Class.forName("android.view.WindowManagerGlobal")
+    val instance = global.getMethod("getInstance").invoke(null)
+    val views = global.getDeclaredField("mViews").apply { isAccessible = true }.get(instance) as List<View>
+    return Bitmap.createBitmap(views.first().width, views.first().height, Bitmap.Config.ARGB_8888).also { image ->
+        val canvas = Canvas(image)
+        views.forEach { view ->
+            val position = IntArray(2).also { view.getLocationOnScreen(it) }
+            canvas.save()
+            canvas.translate(position[0].toFloat(), position[1].toFloat())
+            view.draw(canvas)
+            canvas.restore()
+        }
     }
 }

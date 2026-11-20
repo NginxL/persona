@@ -158,7 +158,7 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 		for i, p := range f.Progress {
 			stage := ""
 			if p.StageKind != "general" {
-				stage = stageBar(l, p.Stage)
+				stage = stageBar(l, p.Stage, false) // open work: never done
 			}
 			md := fmt.Sprintf("**%d** %s\n%s", i+1, feishubot.EscapeMarkdown(clip(oneLine(p.Title), 60)), stage+briefLink(l, todoLink(f.web, p.ID)))
 			working = append(working, briefBlock{md: md, plain: fmt.Sprintf("%d. %s", i+1, clip(oneLine(p.Title), 60))})

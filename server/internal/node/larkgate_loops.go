@@ -24,8 +24,8 @@ func literalLarkLoopCommands(cmd string, gates []proto.CommandGate) ([]string, b
 	var commands []string
 	resolved := false
 	loops, steps, size := 0, 0, 0
-	var visit func(*syntax.Stmt) bool
-	visit = func(stmt *syntax.Stmt) bool {
+	var visit func(*syntax.Stmt, bool) bool
+	visit = func(stmt *syntax.Stmt, top bool) bool {
 		steps++
 		// Bound Cartesian products of nested lists and duplicated command text.
 		if steps > 256 || stmt.Background || stmt.Coprocess || stmt.Negated {
@@ -60,7 +60,7 @@ func literalLarkLoopCommands(cmd string, gates []proto.CommandGate) ([]string, b
 			for _, value := range values {
 				vars[name] = value
 				for _, body := range n.Do {
-					if !visit(body) {
+					if !visit(body, false) {
 						return false
 					}
 				}
@@ -68,10 +68,15 @@ func literalLarkLoopCommands(cmd string, gates []proto.CommandGate) ([]string, b
 			delete(vars, name) // later uses need their own proven binding
 			return true
 		case *syntax.BinaryCmd:
-			return visit(n.X) && visit(n.Y)
+			if n.Op == syntax.AndStmt || n.Op == syntax.OrStmt {
+				// The right arm may be skipped. An assignment there must not replace a binding used by a later loop:
+				// the old value (or no value) remains reachable, so the expansion stays conservative.
+				return visit(n.X, top) && visit(n.Y, false)
+			}
+			return visit(n.X, false) && visit(n.Y, false) // a pipe's assignments do not reach the parent shell
 		case *syntax.Block:
 			for _, body := range n.Stmts {
-				if !visit(body) {
+				if !visit(body, false) {
 					return false
 				}
 			}
@@ -79,14 +84,20 @@ func literalLarkLoopCommands(cmd string, gates []proto.CommandGate) ([]string, b
 		case *syntax.IfClause:
 			for clause := n; clause != nil; clause = clause.Else {
 				for _, body := range append(append([]*syntax.Stmt{}, clause.Cond...), clause.Then...) {
-					if !visit(body) {
+					if !visit(body, false) {
 						return false
 					}
 				}
 			}
 			return true
 		case *syntax.CallExpr:
-			if len(n.Assigns) != 0 || len(n.Args) == 0 {
+			if len(n.Args) == 0 {
+				if !top || len(stmt.Redirs) != 0 || !bindLiteralLoopAssignments(n.Assigns, vars, cmd) {
+					return false
+				}
+				return true
+			}
+			if !literalLoopEnvAssignments(n.Assigns) {
 				return false
 			}
 			words := make([]string, len(n.Args))
@@ -134,7 +145,7 @@ func literalLarkLoopCommands(cmd string, gates []proto.CommandGate) ([]string, b
 			}
 			// These commands cannot mutate a binding in the parent shell. Unknown
 			// builtins/functions and all assignment/declaration forms fall back.
-			ordinary := map[string]bool{"[": true, ":": true, "false": true, "ls": true, "git": true, "go": true, "pwd": true, "sleep": true, "cat": true, "tee": true}[name] ||
+			ordinary := map[string]bool{"[": true, ":": true, "false": true, "cd": true, "ls": true, "git": true, "go": true, "pwd": true, "sleep": true, "cat": true, "tee": true, "python": true, "python3": true, "sha256sum": true}[name] ||
 				larkFilters[name] && name != "printf" && name != "cd"
 			external := (filepath.IsAbs(name) || strings.HasPrefix(name, "~/")) && !commandShells[base] && !indirectLarkCommand(base)
 			if !gated && !ordinary && !external {
@@ -146,14 +157,24 @@ func literalLarkLoopCommands(cmd string, gates []proto.CommandGate) ([]string, b
 			}
 			var replacements []replacement
 			valid := true
+			envValues := map[*syntax.Word]bool{}
+			for _, a := range n.Assigns {
+				envValues[a.Value] = true
+			}
 			syntax.Walk(stmt, func(node syntax.Node) bool {
 				if r, ok := node.(*syntax.Redirect); ok && r.Hdoc != nil {
-					valid = false
+					// A literal heredoc is preserved byte for byte. Expansion in an unquoted body makes the whole
+					// binding attempt opaque; a quoted body is data and needs no variable replacement.
+					_, dynamic := executionWord(r.Hdoc)
+					valid = valid && !dynamic
 					return false
 				}
 				word, ok := node.(*syntax.Word)
 				if !ok {
 					return valid
+				}
+				if envValues[word] {
+					return false // invocation-local environment values stay for the nested classifier
 				}
 				value, changed, ok := literalLoopWord(word, vars)
 				if !ok {
@@ -188,11 +209,45 @@ func literalLarkLoopCommands(cmd string, gates []proto.CommandGate) ([]string, b
 		}
 	}
 	for _, stmt := range tree.Stmts {
-		if !visit(stmt) {
+		if !visit(stmt, true) {
 			return nil, false
 		}
 	}
 	return commands, loops > 0 && resolved
+}
+
+// bindLiteralLoopAssignments records only top-level scalar assignments whose value is one literal executable word.
+// They have the same lifetime as a literal for-list binding. Anything dynamic or multiword stays for the normal gate.
+func bindLiteralLoopAssignments(assigns []*syntax.Assign, vars map[string]string, cmd string) bool {
+	if len(assigns) == 0 {
+		return false
+	}
+	for _, a := range assigns {
+		if a.Name == nil || a.Append || a.Index != nil || a.Array != nil || a.Value == nil || a.Name.Value == "IFS" || larkExecutableEnv[a.Name.Value] {
+			return false
+		}
+		value, dynamic := executionWord(a.Value)
+		if home, ok := larkHomeWord(a.Value, cmd); ok {
+			value, dynamic = home, false
+		}
+		if dynamic || !safeLiteralCommand(value) {
+			return false
+		}
+		vars[a.Name.Value] = value
+	}
+	return true
+}
+
+// literalLoopEnvAssignments permits environment prefixes on one invocation without treating them as persistent
+// bindings. Their values are classified normally, including any nested command; executable-loading variables and
+// IFS remain opaque because they can change what the expanded words mean.
+func literalLoopEnvAssignments(assigns []*syntax.Assign) bool {
+	for _, a := range assigns {
+		if a.Name == nil || a.Append || a.Index != nil || a.Array != nil || a.Value == nil || a.Name.Value == "IFS" || larkExecutableEnv[a.Name.Value] {
+			return false
+		}
+	}
+	return true
 }
 
 // literalLoopWord removes shell quotes and substitutes only plain scalar loop

@@ -969,7 +969,8 @@
         "done": {"type": "boolean", "description": "The owner marked it done."},
         "updated_at": {"type": "string", "format": "date-time"},
         "state": {"type": "string", "enum": ["open", "merged", "closed"], "description": "Where the conversation stands at the source, as the source records it (a pull request or issue: open, merged or closed); omitted when the source has no such state. A fact, not the owner's done flag: the selection does not read it; the knowledge base keeps it on the chat, finishes projects whose chats have all ended and leaves ended chats out of the assistant's snapshot."},
-        "state_at": {"type": "string", "format": "date-time", "description": "When the conversation got to state; omitted when unknown."}
+        "state_at": {"type": "string", "format": "date-time", "description": "When the conversation got to state; omitted when unknown."},
+        "source_url": {"type": "string", "description": "Stable HTTP(S) link to the conversation at its source, when available."}
       },
       "required": ["id", "name", "kind"]
     },

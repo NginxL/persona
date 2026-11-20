@@ -94,6 +94,13 @@ export class ApiError extends Error {
   }
 }
 
+/** A computer's 404 not_found about a session's history (#11450): it carries the computer's `reason`, or its words in
+ * `detail`. The hub's own 404 (an unknown computer, a missing route) carries neither, and may answer otherwise later. */
+export function sessionHistoryNotFound(e: unknown): e is ApiError {
+  return e instanceof ApiError && e.status === 404 && e.code === "not_found" &&
+    (typeof e.body.reason === "string" || typeof e.body.detail === "string");
+}
+
 let onUnauthorized: () => void = () => {};
 /** What a 401 does from now on; returns what it did before, for a caller that sets it only for a while. */
 export function handleUnauthorized(fn: () => void): () => void {

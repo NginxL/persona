@@ -158,22 +158,6 @@ func stageOf(text string) (stage, pr string) {
 	return stage, pr
 }
 
-// taskStageKind defaults to code without criteria; a linked change is stronger evidence than a read-only start.
-// Plan permission alone is not read-only: code tasks start in plan mode to get a plan approved first.
-func taskStageKind(readonly bool, doneWhen []string, pr string) string {
-	if pr != "" {
-		return "code"
-	}
-	criteria := strings.TrimSpace(strings.Join(doneWhen, "\n"))
-	if readonly || criteria != "" && generalTaskWords.MatchString(criteria) && !codeTaskWords.MatchString(criteria) {
-		return "general"
-	}
-	return "code"
-}
-
-var codeTaskWords = lazyre.New(`(?i)\b(PR|MR|merge[ds]?|deploy(?:ed|ment)?|release[ds]?|fix(?:ed|es)?|bugs?|implement(?:ed|ation)?|code|tests?|commit(?:ted|s)?|builds?|features?|refactor(?:ed|ing)?)\b|修复|实现|代码|测试|提交|合并|合入|部署|上线|发布|功能|重构|编译`) // i18n-ignore: match what the agent or user wrote, not text shown
-var generalTaskWords = lazyre.New(`(?i)\b(research|investigate|report|plan|triage|cleanup|summary|analysis|doc review)\b|调研|报告|方案|分诊|清理|总结|分析`)                                                                                                   // i18n-ignore: match what the agent or user wrote, not text shown
-
 // advanceTaskReply handles progress and final answers identically, including the running-hub deploy check.
 func (s *Service) advanceTaskReply(ctx context.Context, t Todo, machine, session, text string) bool {
 	if urls := taskRepositoryReportLinks(text); len(urls) > 0 {
@@ -183,6 +167,9 @@ func (s *Service) advanceTaskReply(ctx context.Context, t Todo, machine, session
 	}
 	stage, pr := stageOf(text)
 	d, marked := deliveryMark(text)
+	if changeSeen(text, d, marked) {
+		s.restage(ctx, t.ID, func(st *todoStage) { st.Change = true }) // a commit, a branch or a held delivery: code work, PR link or not
+	}
 	if pr != "" {
 		s.learnRepoRoot(ctx, machine, session, pr)
 	} else if pr = s.prFromNumber(ctx, t, machine, session, text); pr != "" && stage == "develop" && !marked {
@@ -245,8 +232,12 @@ type reportBook struct {
 }
 
 type todoStage struct {
-	Stage    string        `json:"stage"`
-	Kind     string        `json:"stage_kind,omitempty"`
+	Stage string `json:"stage"`
+	Kind  string `json:"stage_kind,omitempty"`
+	// Readonly: its latest start handed it out read-only; Change: a reply showed a change made without its PR's link (a
+	// closeout's commit or branch, a delivery held at a PR or a merge). What taskStageKind keeps reading (restage).
+	Readonly bool          `json:"readonly,omitempty"`
+	Change   bool          `json:"change,omitempty"`
 	PR       string        `json:"pr,omitempty"`
 	PRs      []string      `json:"prs,omitempty"`       // the PRs named before PR, newest last, at most stagePRsKept (#6507)
 	Delivery *TodoDelivery `json:"delivery,omitempty"`  // delivery.go
@@ -274,8 +265,8 @@ const reportStagesKey = "assistant.todo_stages"
 
 // empty: st keeps nothing (its row can go).
 func (st todoStage) empty() bool {
-	return st.Stage == "" && st.Kind == "" && st.PR == "" && len(st.PRs) == 0 && st.Delivery == nil && st.Deploy == nil && !st.Verified &&
-		st.Check == nil && st.PRStatus == nil && len(st.EarlierPRStatus) == 0
+	return st.Stage == "" && st.Kind == "" && !st.Readonly && !st.Change && st.PR == "" && len(st.PRs) == 0 && st.Delivery == nil &&
+		st.Deploy == nil && !st.Verified && st.Check == nil && st.PRStatus == nil && len(st.EarlierPRStatus) == 0
 }
 
 // stagePRsKept bounds a task's earlier PRs (todoStage.PRs).
@@ -926,11 +917,10 @@ func (s *Service) reportItemView(l i18n.Lang, web string, stages map[string]todo
 		md.WriteString(" · " + feishubot.EscapeMarkdown(it.machine))
 	}
 	if t.StageKind != "general" {
-		stage := t.Stage
-		if stage == "" {
-			stage = stages[t.ID].Stage
+		if t.Stage == "" {
+			t.Stage = stages[t.ID].Stage
 		}
-		md.WriteString("\n" + stageBar(l, stage))
+		md.WriteString("\n" + stageBar(l, t.Stage, stageDone(t)))
 	}
 	if text := strings.TrimSpace(it.text); text != "" {
 		// Charts become numbers first, as the bot's answers and the briefing card do: clipMarkdown drops a persona-card
@@ -953,9 +943,17 @@ func (s *Service) reportItemView(l i18n.Lang, web string, stages map[string]todo
 	return md.String(), bs
 }
 
-// stageBar draws the stages with the one reached marked: ✅ before it, 🔵 on it, ⚪ after (none known: all ⚪).
-func stageBar(l i18n.Lang, stage string) string {
+// stageBar draws the stages with the one reached marked: ✅ before it, 🔵 on it, ⚪ after (none known: all ⚪). done: the
+// work ended there with nothing left to deploy (stageDone): the steps it went through, then Done, all ✅.
+func stageBar(l i18n.Lang, stage string, done bool) string {
 	at := stageIndex(stage)
+	if done && at >= 0 {
+		parts := make([]string, 0, at+2)
+		for _, st := range taskStages[:at+1] {
+			parts = append(parts, "✅"+i18n.T(l, "assistant-reports.stage_"+st))
+		}
+		return strings.Join(append(parts, "✅**"+i18n.T(l, "assistant-reports.stage_done")+"**"), " → ")
+	}
 	parts := make([]string, len(taskStages))
 	for i, st := range taskStages {
 		mark := "⚪"

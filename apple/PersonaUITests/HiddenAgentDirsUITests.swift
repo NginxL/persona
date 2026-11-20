@@ -1,7 +1,8 @@
 import XCTest
 
-/// #8578: Settings › Agent › Hidden Agent Folders, the Agents menu's temporary reveal, and a hidden folder's pending
-/// approval coming back once its rule is off. Against scripts/mock/mock_hub.py (`TEST_RUNNER_PERSONA_MOCK_HUB`), whose
+/// #8578: Settings › Agent › Agent Folders, the Agents menu's temporary reveal, and a hidden folder's pending
+/// approval coming back once its rule is off. #10053: a Block rule's Agent is gone even from Show hidden sessions, and
+/// the rule's action can be switched from the page. Against scripts/mock/mock_hub.py (`TEST_RUNNER_PERSONA_MOCK_HUB`), whose
 /// Mac Studio has one Agent in `/Users/me/code/photo-sync` with three pending cards. `TEST_RUNNER_PERSONA_SHOTS=<dir>`
 /// keeps `hidden-dirs-<look>-<step>.png`; `TEST_RUNNER_PERSONA_LOOKS` picks the looks (default `light,dark,ax5`).
 final class HiddenAgentDirsUITests: XCTestCase {
@@ -123,6 +124,32 @@ final class HiddenAgentDirsUITests: XCTestCase {
         bringIntoView(blocked, top: true)
         shot("13-blocked-config-folders")
         app.terminate()
+
+        // #10053: a Block rule. The mock lists nothing of the folder, as a node that blocks it: Show hidden sessions
+        // does not bring it back.
+        try putRules([[folder, true, "block"]])
+        launch(["-tab", "dev"])
+        XCTAssertTrue(app.buttons.matching(identifier: "agents.row").firstMatch.waitForExistence(timeout: 30), "Agents did not load")
+        sleep(2)
+        XCTAssertFalse(hiddenRow.exists, "a blocked folder's Agent is listed")
+        shot("14-agents-blocked")
+        openListMenu()
+        menuItem("Show hidden sessions").tap()
+        sleep(2)
+        XCTAssertFalse(hiddenRow.exists, "Show hidden sessions brought a blocked folder's Agent back")
+        shot("15-blocked-not-in-hidden")
+        openHiddenFoldersPage()
+        let picker = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Action: \(folder)")).firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 15), "no action picker for the rule:\n\(app.debugDescription)")
+        bringIntoView(picker)
+        shot("16-page-block-rule")
+        picker.tap()
+        let hideItem = app.buttons["Hide"].firstMatch
+        XCTAssertTrue(hideItem.waitForExistence(timeout: 5), "no Hide in the action menu:\n\(app.debugDescription)")
+        hideItem.tap()
+        XCTAssertTrue(waitFor { (try? self.rules().first?["action"] as? String) == "hide" }, "switching the rule to Hide did not save")
+        shot("17-page-switched-to-hide")
+        app.terminate()
         try putRules([])
     }
 
@@ -135,6 +162,16 @@ final class HiddenAgentDirsUITests: XCTestCase {
                                "-holdChromeOpen", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
             + (Self.looks[look] ?? []) + extra
         app.launchPinned()
+        allowNotificationsIfAsked()
+    }
+
+    /// A fresh install asks for notifications in a system alert over the list: the elements under it stay in the
+    /// hierarchy, so "gone" checks would never pass. The alert's second button allows, in any system language.
+    @MainActor private func allowNotificationsIfAsked() {
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        if alert.waitForExistence(timeout: 3), alert.buttons.count > 1 {
+            alert.buttons.element(boundBy: 1).tap()
+        }
     }
 
     /// The hidden folder's Agent anywhere in Agents: its row, or its cards in Needs You.
@@ -171,8 +208,8 @@ final class HiddenAgentDirsUITests: XCTestCase {
         XCTAssertTrue(agent.waitForExistence(timeout: 20), "no Settings › Agent:\n\(app.debugDescription)")
         bringIntoView(agent)
         agent.tap()
-        let page = app.buttons["Hidden Agent Folders"].firstMatch
-        XCTAssertTrue(page.waitForExistence(timeout: 10), "no Hidden Agent Folders row:\n\(app.debugDescription)")
+        let page = app.buttons["Agent Folders"].firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 10), "no Agent Folders row:\n\(app.debugDescription)")
         page.tap()
         // The computer picker starts on the first computer; pick Mac Studio.
         let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Machine'")).firstMatch
@@ -236,7 +273,12 @@ final class HiddenAgentDirsUITests: XCTestCase {
     }
 
     private func putRules(_ rules: [[Any]]) throws {
-        let body = ["rules": rules.map { ["pattern": $0[0], "enabled": $0[1]] }]
+        // [pattern, enabled] (a rule from before blocking: it hides) or [pattern, enabled, action].
+        let body = ["rules": rules.map { r -> [String: Any] in
+            var rule: [String: Any] = ["pattern": r[0], "enabled": r[1]]
+            if r.count > 2 { rule["action"] = r[2] }
+            return rule
+        }]
         try call("PUT", "/api/v1/machines/studio/agent-dirs/hidden", body: body)
     }
 

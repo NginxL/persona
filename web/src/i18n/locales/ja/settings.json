@@ -181,6 +181,9 @@
   "pi_too_title": "対象のコンピュータの pi も models.json なしでこのプロバイダを使えます",
   "show_botmux": "Agents に botmux セッションを表示",
   "show_botmux_hint": "このハブのデバイス間で同期します。非表示にしてもタスクには利用できます。",
+  "use_herdr_tab_name": "herdr のタブ名をセッション名として使う",
+  "use_herdr_tab_name_hint": "タブ名を優先して表示します。この設定は同じハブのデバイス間で同期されます。",
+  "herdr_tab_name_saving": "セッション名の設定を保存中…",
   "show_botmux_inventory": "コンピュータの「botmux セッションも表示」スイッチで、ハブに届くセッションを設定します。",
   "show_botmux_computers": "コンピュータを開く",
   "botmux_saving": "保存中…"

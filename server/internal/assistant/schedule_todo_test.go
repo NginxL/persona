@@ -3,6 +3,7 @@ package assistant
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,14 @@ func assessTodoRun(t *testing.T, s *Service, id string, change func()) (Schedule
 	return run, ScheduleTodoAssessment{}
 }
 
+// assessTodoBaseline runs task id's first linked check, which only sets the baseline the next one compares with.
+func assessTodoBaseline(t *testing.T, s *Service, id string) {
+	t.Helper()
+	if _, result := assessTodoRun(t, s, id, nil); result.State != "baseline" || result.NoProgress != 0 {
+		t.Fatalf("the first linked run was more than a baseline: %+v", result)
+	}
+}
+
 func TestScheduledTodoEvidenceAndStreakReset(t *testing.T) {
 	for _, kind := range []string{"answer", "criterion", "explicit report"} {
 		t.Run(kind, func(t *testing.T) {
@@ -54,6 +63,7 @@ func TestScheduledTodoEvidenceAndStreakReset(t *testing.T) {
 			})
 			task := todoProgressTask(todo.ID)
 			setTasks(s, task)
+			assessTodoBaseline(t, s, task.ID)
 			_, first := assessTodoRun(t, s, task.ID, nil)
 			if first.State != "no_progress" || first.NoProgress != 1 {
 				t.Fatalf("first: %+v", first)
@@ -93,6 +103,7 @@ func TestScheduledTodoRepeatedReportAndBookkeepingAreNotProgress(t *testing.T) {
 	setTasks(s, task)
 	report := TaskProgress{Kind: upReportProgress, Text: "Completed two batches", Step: 2, Steps: 10, At: time.Now()}
 	s.noteProgress(t.Context(), todo.ID, report)
+	assessTodoBaseline(t, s, task.ID)
 	assessTodoRun(t, s, task.ID, nil)
 	_, result := assessTodoRun(t, s, task.ID, func() {
 		cur, _ := s.todoNow(todo.ID)
@@ -115,6 +126,7 @@ func TestScheduledTodoUnknownEvidenceDoesNotCount(t *testing.T) {
 	s, f, todo := scheduledTodoFixture(t)
 	task := todoProgressTask(todo.ID)
 	setTasks(s, task)
+	assessTodoBaseline(t, s, task.ID)
 	assessTodoRun(t, s, task.ID, nil)
 	todo.Agents = []TodoAgent{{MachineID: "box", SessionID: "worker"}}
 	putTodo(s, todo)
@@ -147,6 +159,7 @@ func TestScheduledTodoProgressAfterUnknownReadResetsKnownStreak(t *testing.T) {
 	})
 	task := todoProgressTask(todo.ID)
 	setTasks(s, task)
+	assessTodoBaseline(t, s, task.ID)
 	assessTodoRun(t, s, task.ID, nil)
 	f.mu.Lock()
 	unreadable = true
@@ -176,6 +189,7 @@ func TestScheduledTodoPersistedStreakOutlivesHistoryAndRestart(t *testing.T) {
 	putTodo(s, todo)
 	task := todoProgressTask(todo.ID)
 	setTasks(s, task)
+	assessTodoBaseline(t, s, task.ID)
 	first, _ := assessTodoRun(t, s, task.ID, nil)
 	for i := 0; i <= maxRuns; i++ {
 		s.recordRun(ScheduleRun{RefID: "unrelated", Status: runOK})
@@ -188,6 +202,7 @@ func TestScheduledTodoPersistedStreakOutlivesHistoryAndRestart(t *testing.T) {
 	}
 	other, _ := newQuietServiceOn(t, store)
 	other.superviseTimes.gather = time.Hour
+	other.todoAskAfter = time.Nanosecond
 	putTodo(other, todo)
 	_, result := assessTodoRun(t, other, task.ID, nil)
 	if result.State != "no_progress" || result.NoProgress != 2 {
@@ -203,6 +218,7 @@ func TestScheduledTodoCompletionIsIdempotentAndOrdered(t *testing.T) {
 	s, _, todo := scheduledTodoFixture(t)
 	task := todoProgressTask(todo.ID)
 	setTasks(s, task)
+	assessTodoBaseline(t, s, task.ID)
 	first, _ := assessTodoRun(t, s, task.ID, nil)
 	s.finishScheduledTodo(t.Context(), task, first)
 	current, _ := taskByID(s, task.ID)
@@ -232,6 +248,7 @@ func TestScheduledTodoInactiveAndExistingDecisionGuards(t *testing.T) {
 			s, _, todo := scheduledTodoFixture(t)
 			task := todoProgressTask(todo.ID)
 			setTasks(s, task)
+			assessTodoBaseline(t, s, task.ID)
 			assessTodoRun(t, s, task.ID, nil)
 			_, result := assessTodoRun(t, s, task.ID, func() {
 				cur, _ := s.todoNow(todo.ID)
@@ -272,12 +289,14 @@ func TestScheduledTodoPersistenceFailureIsVisibleWithoutDoubleCount(t *testing.T
 			store := &scheduleWriteStore{Store: &memStore{}}
 			s, _ := newQuietServiceOn(t, store)
 			s.superviseTimes.gather = time.Hour
-			todo := Todo{ID: "write-failure", Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1"}}
+			todo := Todo{ID: "write-failure", Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1"},
+				Agents: []TodoAgent{{MachineID: "box", SessionID: "worker"}}}
 			putTodo(s, todo)
 			task := todoProgressTask(todo.ID)
+			setTasks(s, task)
+			assessTodoBaseline(t, s, task.ID)
 			before, _ := s.scheduledTodoSnapshot(t.Context(), task, ScheduleRun{})
 			task.todoBefore = &before
-			setTasks(s, task)
 			run := ScheduleRun{RefID: task.ID, Status: runOK, At: time.Now(), MachineID: "server", SessionID: "check",
 				TodoProgress: &ScheduleTodoAssessment{TodoID: todo.ID, State: "pending"}}
 			run.ID = s.recordRun(run)
@@ -287,33 +306,42 @@ func TestScheduledTodoPersistenceFailureIsVisibleWithoutDoubleCount(t *testing.T
 			s.finishScheduledTodo(t.Context(), task, run)
 			s.supervise.mu.Lock()
 			signals := len(s.supervise.pending)
-			blocked := false
+			told := false
 			for _, signal := range s.supervise.pending {
-				blocked = blocked || signal.Todo == todo.ID && signal.Report == upReportBlocked &&
-					strings.Contains(signal.Detail, run.ID)
+				// The hub's check failed, about the task's Agent: never the check run's own conversation.
+				told = told || signal.Todo == todo.ID && signal.Kind == sigCheck && signal.Report == checkErrorReport &&
+					strings.Contains(signal.Detail, run.ID) && signal.Machine == "box" && signal.Session == "worker"
 			}
 			s.supervise.mu.Unlock()
-			if signals == 0 || !blocked || !strings.Contains(logs.String(), "save to-do progress") {
-				t.Fatal("a failed assessment disappeared without a log and blocked supervisor signal")
+			if signals == 0 || !told || !strings.Contains(logs.String(), "save to-do progress") {
+				t.Fatal("a failed assessment disappeared without a log and a check signal to the supervisor")
+			}
+			runOf := func(runs []ScheduleRun) *ScheduleRun {
+				t.Helper()
+				i := slices.IndexFunc(runs, func(r ScheduleRun) bool { return r.ID == run.ID })
+				if i < 0 {
+					t.Fatal("the run under test is not in the history")
+				}
+				return &runs[i]
 			}
 			_, failedRuns := scheduleState(s)
 			wantState := "error"
 			if key == runsKey {
 				wantState = "no_progress"
 			}
-			if failedRuns[0].TodoProgress.State != wantState || failedRuns[0].TodoProgress.Reason == "" {
-				t.Fatalf("the failed write misrepresented the assessment: %+v", failedRuns[0].TodoProgress)
+			if failed := runOf(failedRuns); failed.TodoProgress.State != wantState || failed.TodoProgress.Reason == "" {
+				t.Fatalf("the failed write misrepresented the assessment: %+v", failed.TodoProgress)
 			}
 			if key == tasksKey {
 				cur, _ := taskByID(s, task.ID)
-				if cur.TodoProgress != nil {
+				if cur.TodoProgress == nil || cur.TodoProgress.Run == run.ID {
 					t.Fatal("a failed snapshot write published undurable no-progress evidence")
 				}
 				var persisted []ScheduleRun
 				if _, err := store.Setting(t.Context(), runsKey, &persisted); err != nil {
 					t.Fatal(err)
 				}
-				if len(persisted) != 1 || persisted[0].TodoProgress.State != "error" {
+				if len(persisted) != 2 || runOf(persisted).TodoProgress.State != "error" {
 					t.Fatal("the visible assessment error was not saved in run history")
 				}
 			}
@@ -334,8 +362,9 @@ func TestScheduledTodoPartialWriteReplayAfterRestart(t *testing.T) {
 	todo := Todo{ID: "partial-write", Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1"}}
 	putTodo(s, todo)
 	task := todoProgressTask(todo.ID)
-	task.todoBefore = &scheduleTodoSnapshot{}
 	setTasks(s, task)
+	assessTodoBaseline(t, s, task.ID)
+	task.todoBefore = &scheduleTodoSnapshot{}
 	run := ScheduleRun{RefID: task.ID, Status: runOK, At: time.Now(), MachineID: "server", SessionID: "check",
 		TodoProgress: &ScheduleTodoAssessment{TodoID: todo.ID, State: "pending"}}
 	run.ID = s.recordRun(run)
@@ -343,8 +372,9 @@ func TestScheduledTodoPartialWriteReplayAfterRestart(t *testing.T) {
 	s.finishScheduledTodo(t.Context(), task, run)
 	current, _ := taskByID(s, task.ID)
 	_, runs := scheduleState(s)
-	if *runs[0].TodoProgress != current.TodoProgress.Assessment {
-		t.Fatalf("history lost the committed assessment before restart: %+v %+v", runs[0].TodoProgress, current.TodoProgress)
+	i := slices.IndexFunc(runs, func(r ScheduleRun) bool { return r.ID == run.ID })
+	if i < 0 || *runs[i].TodoProgress != current.TodoProgress.Assessment {
+		t.Fatalf("history lost the committed assessment before restart: %+v %+v", runs, current.TodoProgress)
 	}
 	store.failWrites("")
 	other, _ := newQuietServiceOn(t, store)
@@ -366,10 +396,12 @@ func TestScheduledTodoHistoryFailureDoesNotSwallowEscalation(t *testing.T) {
 	store := &scheduleWriteStore{Store: &memStore{}}
 	s, _ := newQuietServiceOn(t, store)
 	s.superviseTimes.gather = time.Hour
+	s.todoAskAfter = time.Nanosecond
 	todo := Todo{ID: "history-failure", Origin: "conv1", Supervision: &Supervision{Supervisor: "conv1"}}
 	putTodo(s, todo)
 	task := todoProgressTask(todo.ID)
 	setTasks(s, task)
+	assessTodoBaseline(t, s, task.ID)
 	assessTodoRun(t, s, task.ID, nil)
 	run, result := assessTodoRun(t, s, task.ID, func() { store.failWrites(runsKey) })
 	current, _ := taskByID(s, task.ID)
@@ -402,7 +434,7 @@ func TestScheduledTodoOptionsAreLocalizedAndNeverAutoApplied(t *testing.T) {
 			ctx := t.Context()
 			before, _ := s.scheduledTodoSnapshot(ctx, task, ScheduleRun{})
 			task.todoBefore = &before
-			for i := 0; i < 2; i++ {
+			for i := 0; i < 3; i++ { // the baseline, then two runs without progress
 				run := ScheduleRun{RefID: task.ID, At: time.Now(), Status: runOK, MachineID: "server", SessionID: "check",
 					TodoProgress: &ScheduleTodoAssessment{TodoID: todo.ID, State: "pending"}}
 				run.ID = s.recordRun(run)
@@ -492,7 +524,8 @@ func TestScheduledTodoEditsKeepOrExplicitlyClearAssociation(t *testing.T) {
 }
 
 func TestScheduledTodoNonOutputDoesNotResetStreak(t *testing.T) {
-	for _, kind := range []string{"API error", "tool activity", "own summary", "released agent", "blocked report"} {
+	// A tool's result alone is no call; tool calls themselves are TestScheduledTodoToolCallsAreWorkWaitsAreNot's.
+	for _, kind := range []string{"API error", "tool result", "own summary", "released agent", "blocked report"} {
 		t.Run(kind, func(t *testing.T) {
 			s, f, todo := scheduledTodoFixture(t)
 			todo.Agents = []TodoAgent{{MachineID: "box", SessionID: "worker"}}
@@ -506,12 +539,13 @@ func TestScheduledTodoNonOutputDoesNotResetStreak(t *testing.T) {
 				task.MachineID, task.SessionID = "box", "worker"
 			}
 			setTasks(s, task)
+			assessTodoBaseline(t, s, task.ID)
 			_, result := assessTodoRun(t, s, task.ID, func() {
 				f.mu.Lock()
 				items = []proto.Item{{Kind: proto.KindText, Role: "assistant", Text: "Another status summary"}}
 				if kind == "API error" {
 					items[0].Text = "API Error: overloaded"
-				} else if kind == "tool activity" {
+				} else if kind == "tool result" {
 					items[0].Kind = proto.KindToolResult
 				}
 				f.mu.Unlock()

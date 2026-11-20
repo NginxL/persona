@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
@@ -68,6 +69,45 @@ test('cancel with no agy running starts none and resolves', async (t) => {
   assert.deepEqual(received(record), [], 'no agy process was started')
 })
 
+test('prompt inactivity resets only on updates for the active session', async (t) => {
+  const { record } = scratch(t)
+  const acp = new AgyAcpClient({ bin: process.execPath, args: [FAKE, '--record', record, 'acp'], promptInactivityMs: 350 })
+  t.after(() => acp.stop())
+  assert.deepEqual(await acp.prompt(SESSION, [{ type: 'text', text: 'updates' }]), { stopReason: 'end_turn' })
+  await assert.rejects(acp.prompt(SESSION, [{ type: 'text', text: 'unrelated-updates' }]), /prompt inactive for 350ms/)
+  await until('watchdog cancels the session', () => received(record).some((m) => m.method === 'session/cancel' &&
+    m.id === undefined && m.params.sessionId === SESSION), SLOW)
+  assert.equal(acp.pending.size, 0)
+})
+
+test('prompt inactivity pauses for permission and resumes after the answer', async (t) => {
+  const { record } = scratch(t)
+  let answerPermission
+  const acp = new AgyAcpClient({ bin: process.execPath, args: [FAKE, '--record', record, 'acp'], promptInactivityMs: 350,
+    onPermissionRequest: () => new Promise((resolve) => { answerPermission = resolve }) })
+  t.after(() => acp.stop())
+  const prompt = acp.prompt(SESSION, [{ type: 'text', text: 'ask' }])
+  const rejected = assert.rejects(prompt, /prompt inactive for 350ms/)
+  await until('permission request received', () => answerPermission, SLOW)
+  await delay(500)
+  assert.equal(acp.pending.size, 1)
+  assert.equal(received(record).some((m) => m.method === 'session/cancel'), false)
+  answerPermission(cancelled)
+  await rejected
+  assert.equal(acp.pending.size, 0)
+})
+
+test('a disabled prompt watchdog leaves cancellation to the caller', async (t) => {
+  const { record } = scratch(t)
+  const acp = new AgyAcpClient({ bin: process.execPath, args: [FAKE, '--record', record, 'acp'], promptInactivityMs: 0 })
+  t.after(() => acp.stop())
+  const prompt = acp.prompt(SESSION, [{ type: 'text', text: 'hold' }])
+  await until('prompt reached the agent', () => received(record).some((m) => m.method === 'session/prompt'), SLOW)
+  assert.equal(acp.pending.size, 1)
+  await acp.cancel(SESSION)
+  assert.deepEqual(await prompt, { stopReason: 'cancelled' })
+})
+
 /** The agy runtime on a fake node, with an executable fake agy; nobody answers a card on the phone. */
 async function agyRuntime(t, options = {}) {
   const { dir, record } = scratch(t)
@@ -97,8 +137,21 @@ async function agyRuntime(t, options = {}) {
     await until('inventory refreshed', () => n.all('runtime.sessions').length > before, SLOW)
     return status(pid)
   }
-  return { n, record, start, status, refresh }
+  return { n, record, start, status, refresh, idle: () => runtime.idle() }
 }
+
+test('a wedged prompt surfaces an error and the next send can recycle ACP', async (t) => {
+  const { n, record, start, idle } = await agyRuntime(t, { runtime: { promptInactivityMs: 350 } })
+  const pid = await start('ignore-cancel')
+  const row = () => n.last('runtime.sessions')?.sessions.find((session) => session.session_id === pid)
+  await until('timeout published', () => row()?.turn_error?.includes('prompt inactive'), SLOW)
+  assert.notEqual(row().status, 'working')
+  assert.equal(idle(), true)
+  await n.peer.call('session.send', { session_id: pid, text: 'reply' })
+  await until('next prompt completes', () => row()?.last_text === 'Finished.', SLOW)
+  assert.equal(row().turn_error, undefined)
+  assert.equal(received(record).filter((m) => m.started).length, 2)
+})
 
 /** agy's own conversation summary for SESSION in agyDir: what nativeWorking reads. */
 function nativeSummary(agyDir, status, stepCount) {

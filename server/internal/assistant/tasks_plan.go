@@ -82,6 +82,8 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	for i := range a.Tasks {
 		t := &a.Tasks[i]
 		t.WaitInputID = ""
+		t.BackendStartDigest = ""
+		t.WorkspaceError = nil
 		asked := strings.TrimSpace(t.Permission) // the caller's own, before read-only replaces it
 		if t.Readonly {
 			asked = ""
@@ -113,7 +115,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 			return "", fmt.Errorf("task %d: %w", i+1, err)
 		}
 		t.DoneWhen, t.ExpectMinutes = cleanDoneWhen(t.DoneWhen), max(0, min(t.ExpectMinutes, 24*60))
-		if t.Title == "" || t.Prompt == "" || t.Cwd == "" {
+		if t.Title == "" || t.Prompt == "" || t.Cwd == "" && !t.backendWorkspace() {
 			return "", fmt.Errorf("task %d: title, prompt and cwd are required", i+1)
 		}
 		t.Brief = nil // the hub's (planBriefs below), never the tool call's
@@ -235,7 +237,7 @@ func (s *Service) taskPlanFrom(ctx context.Context, machine, sessionID string, a
 	if scope == nil && !s.inHealth(ctx, sessionID) {
 		if round, inRound = s.scheduledRoundOf(ctx, machine, sessionID); inRound && round.grantEligible() && s.claudeConversation(ctx, machine, sessionID) {
 			for i := range a.Tasks { // the card offers to let this schedule start these by itself
-				a.Tasks[i].Schedule, a.Tasks[i].ScheduleTitle, a.Tasks[i].ScheduleBasis = round.ID, round.labelIn(s.lang(ctx)), round.grantBasis()
+				a.Tasks[i].Schedule, a.Tasks[i].ScheduleTitle, a.Tasks[i].ScheduleBasis = round.ID, round.labelIn(s.lang(ctx)), round.runGrantBasis
 			}
 		}
 	}

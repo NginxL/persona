@@ -19,6 +19,9 @@ nonisolated enum TodoStage: String, CaseIterable, Sendable {
         }
     }
 
+    /// The name of the step that ends the bar of work closed with nothing left to deploy (`stage_done`, #11590).
+    static var doneLabel: String { String(localized: "Done [Todo Stage Bar]") }
+
     /// How far along the six it is: 1 … 6.
     var stepNumber: Int { (Self.allCases.firstIndex(of: self) ?? 0) + 1 }
 
@@ -35,8 +38,9 @@ nonisolated enum TodoStage: String, CaseIterable, Sendable {
 nonisolated extension TodoItem {
     var isDone: Bool { doneAt != nil }
 
-    /// The stage the hub sent (`stage`), none when it sent none or one this build does not know (#2776).
-    var todoStage: TodoStage? { TodoStage(hub: stage) }
+    /// The stage the hub sent (`stage`), none when it sent none or one this build does not know (#2776), and none for
+    /// general work (`stage_kind`, #3380), whose status already says how it goes, as on the web and Android.
+    var todoStage: TodoStage? { stageKind == "general" ? nil : TodoStage(hub: stage) }
 
     /// The pull request its work is in (`pr_url`, #2768), when the hub sent a web address the in-app link sheet opens.
     var prLink: URL? {

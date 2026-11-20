@@ -3,9 +3,11 @@ package node
 import (
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -126,5 +128,116 @@ func TestAgyTrustKeys(t *testing.T) {
 		if got := agyTrustKeys(tc.screen); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: keys %v, want %v", name, got, tc.want)
 		}
+	}
+}
+
+// herdr reports agy by its process, and calls it idle, before agy's screen takes the terminal: the first message waits
+// for agy's input box (#11437), or the terminal echoes it and agy drops it.
+func TestAgyStartWaitsForAgyScreenBeforeTheFirstMessage(t *testing.T) {
+	withAgyTrustWait(t, 5*time.Second)
+	x := newWorkFirstFixture(t, agyAgent, func(submissions int, home string) any {
+		status := proto.StatusIdle
+		if submissions >= 1 {
+			status = proto.StatusWorking
+		}
+		return agentWithStatus(agyAgent, status)(submissions, home)
+	})
+	const shell = "~/work/example-project ❯ . ~/.persona/agent-start-example.sh\n"
+	x.f.setScreen("w1:p2", shell)
+	var drawn atomic.Bool
+	var reads atomic.Int32
+	x.f.after(func(c herdrCall) {
+		if c.Method != "pane.read" || drawn.Load() {
+			return
+		}
+		if reads.Add(1) == 4 { // agy draws its screen a moment after herdr saw its process
+			x.f.setScreen("w1:p2", agyIdleScreen)
+			drawn.Store(true)
+		}
+	})
+	var early atomic.Bool
+	x.f.after(func(c herdrCall) {
+		if c.Method == "agent.prompt" && !drawn.Load() {
+			early.Store(true)
+		}
+	})
+	x.start(t, agyAgent)
+	if early.Load() {
+		t.Fatal("the first message was typed while the pane still showed the shell")
+	}
+	if got := x.f.trace("agent.prompt"); len(got) != 1 {
+		t.Errorf("prompted %d times, want 1", len(got))
+	}
+	if got := x.f.trace("pane.send_keys"); len(got) != 0 {
+		t.Errorf("keys sent with no dialog: %v", got)
+	}
+}
+
+// agyNoticeScreen is agy's input box under its start notice, which swallows typed input until Esc (#11437).
+const agyNoticeScreen = " Antigravity CLI\n\n ┃ Auto is now the default agent mode\n ┃ Press Shift+Tab to switch agent modes, or change Agent Mode in /config.\n" +
+	" ┃ esc to dismiss\n────────\n> Auto mode: edits & safe commands auto-approved (shift+tab to cycle)\n────────\n? for shortcuts\n"
+
+// The start notice is dismissed with one Esc before the first message goes in.
+func TestAgyStartDismissesTheNoticeBeforeTheFirstMessage(t *testing.T) {
+	withAgyTrustWait(t, 5*time.Second)
+	x := newWorkFirstFixture(t, agyAgent, func(submissions int, home string) any {
+		status := proto.StatusIdle
+		if submissions >= 1 {
+			status = proto.StatusWorking
+		}
+		return agentWithStatus(agyAgent, status)(submissions, home)
+	})
+	x.f.screenSteps("w1:p2", func(c herdrCall) bool {
+		return c.Method == "pane.send_keys" && slices.Contains(keysOf(c), "escape")
+	}, agyNoticeScreen, agyIdleScreen)
+	x.start(t, agyAgent)
+	calls := x.f.trace("pane.send_keys", "agent.prompt")
+	if len(calls) != 2 || !strings.Contains(calls[0], `"escape"`) || !strings.Contains(calls[1], "agent.prompt") {
+		t.Fatalf("want one Esc, then the first message:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
+// A message typed into an agy or Cursor pane keeps its row working until herdr shows the turn, for workSentGrace.
+func TestWorkAgentStatusAfterASend(t *testing.T) {
+	n, _, _ := herdrNode(t)
+	now := time.Now()
+	idle := host.Agent{Agent: agyAgent, PaneID: "w1:p1", AgentStatus: proto.StatusIdle}
+	if got := n.liveStatus("agy-w1-p1", idle, now); got != proto.StatusIdle {
+		t.Fatalf("before a send: %q", got)
+	}
+	n.workSent.mark("w1:p1", now)
+	if got := n.liveStatus("agy-w1-p1", idle, now.Add(time.Second)); got != proto.StatusWorking {
+		t.Errorf("right after a send: %q, want working", got)
+	}
+	blocked := idle
+	blocked.AgentStatus = proto.StatusBlocked
+	if got := n.liveStatus("agy-w1-p1", blocked, now.Add(time.Second)); got != proto.StatusBlocked {
+		t.Errorf("blocked right after a send: %q, want blocked", got)
+	}
+	if got := n.liveStatus("agy-w1-p1", idle, now.Add(workSentGrace+time.Second)); got != proto.StatusIdle {
+		t.Errorf("after the grace: %q, want idle", got)
+	}
+	other := host.Agent{Agent: "claude", PaneID: "w1:p2", AgentStatus: proto.StatusIdle}
+	n.workSent.mark("w1:p2", now)
+	if got := n.workAgentStatus(other, now); got != proto.StatusWorking {
+		t.Errorf("workAgentStatus itself: %q", got)
+	}
+}
+
+// session.send to an agy pane marks it, so the row the hub lists reads working right after (#11437).
+func TestAgySendReadsWorkingUntilHerdrShowsTheTurn(t *testing.T) {
+	n, f, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, ""))
+	f.reply("agent.prompt", map[string]any{})
+	if _, err := request(t, n, "session.send", map[string]any{"session_id": agyTestRow, "text": "count to 300"}); err != nil {
+		t.Fatal(err)
+	}
+	a, ok := n.agent(agyTestRow)
+	if !ok {
+		t.Fatal("no agy row")
+	}
+	if got := n.liveStatus(agyTestRow, a, time.Now()); got != proto.StatusWorking {
+		t.Errorf("right after the send: %q, want working", got)
 	}
 }

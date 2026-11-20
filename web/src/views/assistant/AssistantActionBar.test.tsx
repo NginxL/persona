@@ -2,7 +2,7 @@
 import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { t } from "../../i18n";
+import { formatDate, t } from "../../i18n";
 import { getFeedState, loadFeed, type FeedItem, type TaskPlan } from "../../lib/feed";
 import { setAgentOpenMode } from "../../lib/agent-open";
 import { closePanel, getPanel } from "../../lib/panel";
@@ -764,6 +764,55 @@ describe("Assistant Needs you / In progress trays", () => {
       upsertSession({ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "working", status: "working", updated_at: "2026-11-10T08:05:00Z" });
     });
     expect(entries().map((button) => button.textContent)).toEqual([label.needs, `${label.running}1`]);
+  });
+
+  it("shows a released worker's verified pending prompt once and answers its exact card with its existing defer action", async () => {
+    const interactionID = "ix_read_only_permission";
+    const question = "Allow read-only access to the connector?";
+    const deadline = "2026-11-10T15:00:00Z";
+    todo = {
+      ...todo,
+      agents: [{ machine_id: "demo", session_id: "worker", linked_at: at, released_at: "2026-11-10T08:30:00Z" }],
+      supervision: {
+        supervisor: conversation, state: "parked",
+        parked: {
+          reason: "The connector preflight needs the owner's read-only decision", until: "2026-11-14T09:00:00Z", waiting_on: "external_event", count: 1,
+          evidence: { kind: "external_event", target: "Read-only connector preflight", url: "https://example.test/connector/permissions/4", wake: "The owner answers the existing prompt", interaction_id: interactionID },
+        },
+      },
+    } as unknown as Todo;
+    moreSessions = [{ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "idle", status: "idle", updated_at: at } as Session];
+    moreInteractions = [{
+      id: interactionID, machine_id: "demo", session_id: "worker", kind: "question", created_at: at,
+      questions: [{ question, options: [{ label: "Allow read-only" }, { label: "Later", action: "defer" }] }],
+      delegate: { what: "Read-only connector preflight", deadline },
+    } as Interaction];
+    await act(async () => {
+      await refresh();
+      upsertSession(moreSessions[0]);
+    });
+
+    expect(entry("needs").textContent).toBe(`${label.needs}1`);
+    act(() => entry("needs").click());
+    await openRows("task:tray-task");
+    expect(host.querySelectorAll('[data-needs-row="task:tray-task"]')).toHaveLength(1);
+    expect(host.querySelectorAll(`[data-card="${interactionID}"]`)).toHaveLength(1);
+    expect(host.querySelector("[data-parked-task-row]")).toBeNull();
+    const card = host.querySelector<HTMLElement>(`[data-card="${interactionID}"]`)!;
+    expect(card.textContent).toContain(question);
+    expect(card.querySelector("[data-delegate-context]")!.textContent).toContain(formatDate(deadline, { dateStyle: "medium", timeStyle: "short" }));
+    const defer = [...card.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Later")!;
+    const beforeAnswer = writes.length;
+    await act(async () => {
+      defer.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(writes.slice(beforeAnswer)).toEqual([`/api/v1/interactions/${interactionID}/resolve`]);
+    const answer = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === `/api/v1/interactions/${interactionID}/resolve` && init?.method === "POST");
+    expect(JSON.parse(String(answer?.[1]?.body))).toEqual({ answers: { [question]: "Later" } });
+    expect(todo.done_at).toBeUndefined();
+    expect(todo.supervision?.state).toBe("parked");
   });
 
   it("counts and lists an Agent's question once when two to-dos list that Agent, under the one the hub ties it to", async () => {

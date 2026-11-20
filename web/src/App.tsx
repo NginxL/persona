@@ -8,6 +8,7 @@ import { PerAssistant } from "./views/PerAssistant";
 import { lazyDialog, OverlayBoundary, useOpened } from "./views/LazyOverlay";
 import { navigationCrumb } from "./lib/error-reports";
 import { lazyPage, preloadPages } from "./lib/lazy-page";
+import type { ToastLiftProps } from "./ui/toast-lift";
 import { drawerA11y, focusBack, useDrawerDrag } from "./lib/drawer";
 import { acceptHubs, here, rememberHub, takeHubs } from "./lib/hubs";
 import { holdImportLink, takeImportLink } from "./lib/import-link";
@@ -35,7 +36,7 @@ import { focusables, trapTabIn } from "./ui/overlay";
 import { Empty } from "./views/session/files/parts";
 import { AgentsPage } from "./views/AgentsPage";
 import { ChatView } from "./views/chat/ChatView";
-import { preloadCloseoutEvidence } from "./views/chat/CloseoutCard";
+import { preloadCloseout } from "./views/chat/closeout-chunks";
 import { Home } from "./views/Home";
 import { PersonaAssistant } from "./views/PersonaAssistant";
 import { NewWorktreeHost } from "./views/NewWorktreeHost";
@@ -47,7 +48,6 @@ import { setAgentGrouping } from "./lib/sidebar-api";
 import type { WorkspaceTarget } from "./lib/workspace-target";
 import { ForwardHost } from "./views/chat/ForwardHost";
 import { onOpenNewAgent, type NewAgentPreset } from "./lib/new-agent";
-import { StartingAgent } from "./views/StartingAgent";
 import { closeHelp, useHelpOpen } from "./lib/shortcut-help";
 import { closePalette, openPalette, usePalette } from "./lib/palette";
 import { sidebarRail, sidebarShown, useLayout } from "./lib/layout";
@@ -90,7 +90,19 @@ const TodosView = lazyPage(() => import("./views/Todos").then((m) => m.TodosView
 const NotFound = lazyPage(() => import("./views/NotFound").then((m) => m.NotFound));
 // Keep the shortcut palette warm. The new-agent dialog loads only when opened.
 const Palette = lazyPage(() => import("./views/Palette").then((m) => m.Palette), { idle: true });
+// Where the toasts sit on a narrow screen (ui/toast-lift.tsx): off the first screen and out of the idle tier, which a
+// wide screen loads too; Shell loads it once the screen is narrow. A load that fails leaves the toasts at the bottom of
+// the page until the next toast tries again.
+const ToastLift = lazyPage(() => import("./ui/toast-lift").then((m) => m.ToastLift));
+function PhoneToasts(props: ToastLiftProps) {
+  return (
+    <OverlayBoundary open onClose={() => {}}>
+      <ToastLift {...props} />
+    </OverlayBoundary>
+  );
+}
 const NewAgent = lazyPage(() => import("./views/NewAgent").then((m) => m.NewAgent));
+const StartingAgent = lazyPage(() => import("./views/StartingAgent").then((m) => m.StartingAgent));
 const ShortcutHelpDialog = lazyDialog(() => import("./views/ShortcutHelp").then((m) => m.ShortcutHelp));
 // The keyboard opener stays in the eager shell even before this dialog's first load.
 function ShortcutHelp() {
@@ -199,7 +211,7 @@ export function App() {
           </Suspense>
         </PageBoundary>
       )}
-      <Toasts />
+      <Toasts lift={PhoneToasts} />
     </>
   );
 }
@@ -364,12 +376,15 @@ function Shell() {
   const [newAgent, setNewAgent] = useState(false);
   const [preset, setPreset] = useState<NewAgentPreset | null>(null);
   useEffect(() => preloadPages(), []);
-  useEffect(() => preloadCloseoutEvidence(), []);
+  useEffect(() => preloadCloseout(), []);
   useEffect(() => onOpenNewAgent((p) => {
     setPreset(p);
     setNewAgent(true);
   }), []);
   const openNewAgent = useCallback(() => setNewAgent(true), []);
+  useEffect(() => {
+    if (newAgent) void StartingAgent.preload().catch(() => {});
+  }, [newAgent]);
   const closeNewAgent = useCallback(() => {
     setNewAgent(false);
     setPreset(null);
@@ -379,6 +394,10 @@ function Shell() {
 
   // ── the sidebar: a column on a wide screen, a drawer over the page on a narrow one (#1996) ──
   const narrow = useMedia(NARROW);
+  // the toasts' placement, in before the first toast in practice
+  useEffect(() => {
+    if (narrow) void ToastLift.preload().catch(() => {});
+  }, [narrow]);
   const [drawer, setDrawer] = useState(false);
   const toggle = useCallback(() => setDrawer((d) => !d), []);
   const close = useCallback(() => setDrawer(false), []);
@@ -407,6 +426,13 @@ function Shell() {
   });
   // Back closes it first
   useCloseOnBack(drawer, close, narrow);
+  // Its Search hands over to the palette: closed in the same commit, the drawer's history entry becomes the palette's
+  // (lib/back-close.ts), so one Back closes the palette, and a pick's page replaces it with no copy of this page left under.
+  // (A wide screen has no drawer open to close.)
+  const searchFromSidebar = useCallback(() => {
+    close();
+    openPalette("jump");
+  }, [close]);
   // Esc closes it (a menu or a dialog over it closes first); Tab stays in it, like a dialog's
   useEffect(() => {
     if (!a11y.modal) return;
@@ -584,7 +610,7 @@ function Shell() {
         )}
         style={{ transitionTimingFunction: EASE }}
       >
-        {rail ? <SidebarRail route={route} onSearch={() => openPalette("jump")} onNewAgent={openNewAgent} /> : <Sidebar route={route} onSearch={() => openPalette("jump")} onNewAgent={openNewAgent} onNavigate={close} workspaceActions={workspaceActions} />}
+        {rail ? <SidebarRail route={route} onSearch={() => openPalette("jump")} onNewAgent={openNewAgent} /> : <Sidebar route={route} onSearch={searchFromSidebar} onNewAgent={openNewAgent} onNavigate={close} workspaceActions={workspaceActions} />}
         {!narrow && !rail && <SidebarResize column={sidebarId} />}
       </div>
       {/* the scrim fades out as well as in; a drag sets its opacity as it goes (lib/drawer.ts) */}
@@ -659,9 +685,21 @@ function Offline({ onToggleSidebar, trying }: { onToggleSidebar: () => void; try
 // A tab link whose tab is gone (closed, or herdr restarted with new ids) and no pane to fall back to.
 function TabGone({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+    <NoticePage onToggleSidebar={onToggleSidebar}>
       <p className="text-[13px] text-ink-2">{t("app.tab_gone")}</p>
-      <button type="button" onClick={onToggleSidebar} className="whitespace-nowrap rounded-control px-2.5 py-1.5 text-[12.5px] font-medium text-accent-ink hover:bg-hover lg:hidden">{t("app.open_sidebar")}</button>
+    </NoticePage>
+  );
+}
+
+// A notice in the middle of a page with no header of its own, under Offline's: the sidebar button where every page has
+// it. A wide screen shows the sidebar itself, and the notice stays as it was there.
+function NoticePage({ onToggleSidebar, children }: { onToggleSidebar: () => void; children: React.ReactNode }) {
+  return (
+    <div className="flex h-full flex-col">
+      <header className="flex h-14 shrink-0 items-center px-3 sm:px-4 lg:hidden">
+        <IconButton icon="sidebar" label={t("app.sidebar")} onClick={onToggleSidebar} />
+      </header>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">{children}</div>
     </div>
   );
 }
@@ -674,7 +712,7 @@ function SessionChoices({ mid, sid, onToggleSidebar }: { mid: string; sid: strin
   const link = resolveSessionLink(all, mid, sid, loaded);
   const candidates = link.kind === "ambiguous" ? link.candidates : [];
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+    <NoticePage onToggleSidebar={onToggleSidebar}>
       <p className="text-[13px] text-ink-2">{t("app.session_choices", { count: candidates.length, sid })}</p>
       <ul className="flex w-full max-w-96 flex-col gap-1">
         {candidates.map((s) => {
@@ -692,8 +730,7 @@ function SessionChoices({ mid, sid, onToggleSidebar }: { mid: string; sid: strin
           );
         })}
       </ul>
-      <button type="button" onClick={onToggleSidebar} className="whitespace-nowrap rounded-control px-2.5 py-1.5 text-[12.5px] font-medium text-accent-ink hover:bg-hover lg:hidden">{t("app.open_sidebar")}</button>
-    </div>
+    </NoticePage>
   );
 }
 

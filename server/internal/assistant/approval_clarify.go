@@ -81,7 +81,10 @@ var (
 	// clarificationPauseBudget is cumulative per card, not per question.
 	clarificationPauseBudget = 24 * time.Hour
 	clarifyQuestionRunes     = 1000
-	// approvalWaitingWindow is how long a prepared card stays pending after its decision window ended unanswered.
+	// approvalInitialWait bounds how long a prepared tool call holds its conversation's turn before returning the
+	// non-final waiting result. The owner still has the much longer waiting window to answer the retained card.
+	approvalInitialWait = 75 * time.Second
+	// approvalWaitingWindow is how long a prepared card stays pending after the original tool call returned unanswered.
 	approvalWaitingWindow = 24 * time.Hour
 )
 
@@ -171,6 +174,25 @@ func (s *Service) awaitPrepared(ctx context.Context, p *pending) (proto.Resoluti
 		}
 		return proto.Resolution{}, errApprovalClarifying
 	case <-ctx.Done():
+		s.fleet.mu.Lock()
+		settled := p.claimed || p.prepared.terminal
+		orphaned := false
+		if !settled && p.ix.Resumable && s.fleet.interactions[p.ix.ID] == p {
+			orphaned = s.orphanLocked(p)
+		}
+		s.fleet.mu.Unlock()
+		if settled {
+			// A final claim made concurrently with the disconnect wins, exactly as
+			// in the ordinary waiter. Wait for its outcome rather than orphaning a
+			// card that has already finished.
+			<-resolved
+			return terminal()
+		}
+		if orphaned {
+			// Match the ordinary hook waiter: a transient disconnect does not
+			// cancel a resumable card while its reconnect grace is running.
+			return proto.Resolution{Dismiss: true}, nil
+		}
 		s.endPrepared(p, "cancelled", "The approval was cancelled before the owner answered; nothing changed.")
 		return proto.Resolution{}, ctx.Err()
 	}
@@ -183,12 +205,29 @@ func (s *Service) startPreparedTimer(p *pending) {
 	if p.prepared == nil || p.prepared.terminal {
 		return
 	}
-	p.prepared.decisionTimer = time.AfterFunc(max(0, time.Until(p.ix.ExpiresAt)), func() {
+	wait := min(max(0, time.Until(p.ix.ExpiresAt)), approvalInitialWait)
+	p.prepared.decisionTimer = time.AfterFunc(wait, func() {
 		s.expirePrepared(p)
 	})
 }
 
 func (s *Service) expirePrepared(p *pending) {
+	s.fleet.mu.Lock()
+	orphaned := false
+	if a := p.prepared; p.ix.Resumable && a != nil && !a.clarified && !p.claimed &&
+		s.fleet.interactions[p.ix.ID] == p && a.caller.Err() != nil {
+		// The disconnect and initial-wait callbacks can race. Start the same
+		// reconnect grace here when the caller has gone but awaitPrepared has not
+		// yet observed it; a clarified card no longer has a caller to reconnect.
+		orphaned = s.orphanLocked(p)
+	}
+	s.fleet.mu.Unlock()
+	if orphaned {
+		// The initial-wait and reconnect-grace timers share the card. While the
+		// hook is detached, only the orphan timer may end it; a reconnect updates
+		// prepared.caller and lets a later initial wait complete normally.
+		return
+	}
 	if s.keepWaiting(p) {
 		return
 	}

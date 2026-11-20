@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,9 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/bus"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // A direction's lead conversation (#11392): kept listed however quiet, not deleted while it leads, still in the tree
@@ -145,6 +151,12 @@ func putNotesAnswer(t *testing.T, s *Service, body string, status int) notesAnsw
 // listedNotesAt is conv_lead's notes_at exactly as GET /api/v1/assistant/leaders writes it.
 func listedNotesAt(t *testing.T, s *Service) string {
 	t.Helper()
+	return strings.Trim(string(listedNotesAtRaw(t, s, "conv_lead")), `"`)
+}
+
+// listedNotesAtRaw is direction id's notes_at field as GET /api/v1/assistant/leaders writes it (nil: left out).
+func listedNotesAtRaw(t *testing.T, s *Service, id string) json.RawMessage {
+	t.Helper()
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/assistant/leaders", nil))
 	var list struct {
@@ -157,12 +169,12 @@ func listedNotesAt(t *testing.T, s *Service) string {
 		t.Fatal(err)
 	}
 	for _, l := range list.Leaders {
-		if l.ID == "conv_lead" {
-			return strings.Trim(string(l.NotesAt), `"`)
+		if l.ID == id {
+			return l.NotesAt
 		}
 	}
-	t.Fatalf("conv_lead not listed: %s", rec.Body)
-	return ""
+	t.Fatalf("%s not listed: %s", id, rec.Body)
+	return nil
 }
 
 // A notes save that says which notes_at it started from is refused with what is stored when that is no longer it,
@@ -236,11 +248,7 @@ func TestDirectionNotesWaitForAnIdleLead(t *testing.T) {
 	}
 	policyOf := func(s *Service) string {
 		t.Helper()
-		p := map[string]any{"session_id": "conv_lead", "text": "go on"} // as the owner's message is dispatched
-		if err := s.putSupervisionInstructions(ctx, "server", "conv_lead", p); err != nil {
-			t.Fatal(err)
-		}
-		return p["supervision_instructions"].(string)
+		return dispatchedPolicy(t, s, "conv_lead")
 	}
 	lead(proto.Session{Status: proto.StatusIdle})
 	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: v1.", nil); err != nil {
@@ -362,5 +370,986 @@ func TestLeadersApprovalComparesTheWholeList(t *testing.T) {
 	want := append(slices.Clone(ids[:4]), ids[5])
 	if out = propose(want, nil); !strings.HasPrefix(out, "assistant.leaders is") || !slices.Equal(leaders(), want) {
 		t.Fatalf("approved: %s %v", out, leaders())
+	}
+}
+
+// listLeads lists rows as Persona conversations on the assistant's computer (and nothing else there).
+func listLeads(f *fakeHub, rows ...proto.Session) {
+	for i := range rows {
+		rows[i].MachineID, rows[i].Assistant = "server", true
+	}
+	f.setSessions("server", rows...)
+}
+
+// ownerParams are what the hub asks for before it sends the owner's message params (nil: "go on") to conversation id
+// (assistant.send_params, as hub/send.go does): the role policy they carry, or their refusal. How the send went is the
+// test's to tell (hubSent).
+func ownerParams(t *testing.T, s *Service, id string, params map[string]any) (string, error) {
+	t.Helper()
+	b := &BusHub{svc: s, helloed: make(chan struct{})}
+	close(b.helloed) // the hub's hello is answered: the request does not wait for it
+	if params == nil {
+		params = map[string]any{"text": "go on"}
+	}
+	raw, err := json.Marshal(assistantwire.SendParams{MachineID: "server", SessionID: id, Params: params, Human: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := b.request(context.Background(), assistantwire.MethodSendParams, raw)
+	if err != nil {
+		return "", err
+	}
+	sent, _ := out.(map[string]any)["params"].(map[string]any)
+	policy, _ := sent["supervision_instructions"].(string)
+	return policy, nil
+}
+
+// ownerPolicy is the role policy the owner's next message to conversation id carries; the hub has yet to tell how it
+// went (hubSent).
+func ownerPolicy(t *testing.T, s *Service, id string) string {
+	t.Helper()
+	policy, err := ownerParams(t, s, id, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return policy
+}
+
+// hubSent is the hub's notice of how the owner's message to conversation id went (session.assistant_sent), naming no
+// message: one sent without a client_msg_id, or an older hub's notice.
+func hubSent(s *Service, id, outcome string) {
+	hubSentID(s, id, "", outcome)
+}
+
+// hubSentID is the hub's notice of how the owner's message msg (its client_msg_id) to conversation id went.
+func hubSentID(s *Service, id, msg, outcome string) {
+	s.ConversationSent(context.Background(), ConversationSent{MachineID: "server", SessionID: id, Outcome: outcome, ClientMsgID: msg})
+}
+
+// ownerMessage is the role policy the owner's message msg (its client_msg_id) to conversation id is sent with; the hub
+// has yet to tell how it went (hubSentID).
+func ownerMessage(t *testing.T, s *Service, id, msg string) string {
+	t.Helper()
+	policy, err := ownerParams(t, s, id, map[string]any{"text": "go on", "client_msg_id": msg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return policy
+}
+
+// within waits for c, failing the test after a bound instead of hanging when a regression never sends.
+func within[T any](t *testing.T, c <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-c:
+		return v
+	case <-time.After(30 * time.Second):
+		t.Fatalf("%s never came", what)
+		var zero T
+		return zero
+	}
+}
+
+// dispatchedPolicy is the role policy the owner's next message to conversation id is sent with, which the node takes.
+func dispatchedPolicy(t *testing.T, s *Service, id string) string {
+	t.Helper()
+	policy := ownerPolicy(t, s, id)
+	hubSent(s, id, assistantwire.ConversationDelivered)
+	return policy
+}
+
+// managerSend is the manager's own message to conversation id (call), with the role policy it carried and the node's
+// answer.
+func managerSend(s *Service, id string) (string, error) {
+	p := map[string]any{"session_id": id, "text": "a supervision message"}
+	err := s.call(context.Background(), "server", DeviceSessionSend, p, nil)
+	policy, _ := p["supervision_instructions"].(string)
+	return policy, err
+}
+
+// nodePolicy is the role policy the node's own next message to conversation id runs on (assistant.model), which is
+// the block the lead is taken to run: asking moves nothing.
+func nodePolicy(t *testing.T, s *Service, id string) string {
+	t.Helper()
+	out, ok, err := s.NodeAnswer(context.Background(), "server", "assistant.model", json.RawMessage(`{"session_id":"`+id+`"}`))
+	if !ok || err != nil {
+		t.Fatalf("assistant.model: %v %v", ok, err)
+	}
+	m, _ := out.(map[string]any)
+	policy, _ := m["supervision_instructions"].(string)
+	if policy == "" {
+		t.Fatalf("assistant.model gave no role policy: %v", out)
+	}
+	return policy
+}
+
+// nodeRefuses is the node's answer to a send it refuses before it reaches the conversation, as it refuses a new role
+// for a process at work.
+func nodeRefuses(string, json.RawMessage) (any, error) {
+	return nil, &rpc.Error{Code: "busy", Message: "busy", Data: json.RawMessage(`{"delivered":"none"}`)}
+}
+
+func nodeTakes(string, json.RawMessage) (any, error) { return map[string]any{"ok": true}, nil }
+
+// A direction ended and made again does not bring back the notes block it had before it ended: once unpinned, an idle
+// send restarts the conversation on the plain policy (it still supervises its task), so after the owner clears the
+// notes and pins it again, a message that finds it working is sent on that plain policy, with no role change for the
+// node to refuse.
+func TestDirectionNotesInEffectFollowTheConversationAcrossItsEnd(t *testing.T) {
+	s, f := notesEnv(t)
+	ctx := context.Background()
+	plain := prompts.RenderSupervisionInstructions()
+	todo, err := s.createTodo(ctx, "Ship the build", "", "conv_lead", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.superviseTodo(ctx, todo.ID, "conv_lead", []string{"Shipped"}, 30)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: the store build number.", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := dispatchedPolicy(t, s, "conv_lead"); !strings.Contains(got, "Readings: the store build number.") {
+		t.Fatalf("lead: %q", got)
+	}
+	if ended, err := s.endDirection(ctx, "conv_lead"); err != nil || !ended {
+		t.Fatalf("end: %v %v", ended, err)
+	}
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != plain {
+		t.Fatalf("unpinned: %q", got)
+	}
+	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.makeDirection(ctx, "conv_lead", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != plain {
+		t.Fatalf("pinned again while it works: the policy changed to %q", strings.TrimPrefix(got, plain))
+	}
+}
+
+// A lead with no block in effect recorded yet (from before #11392, or never sent to since) keeps what it runs on when
+// the owner's first save or first clear comes while it works; the first idle send then carries the notes as they are.
+func TestDirectionNotesFirstSaveWhileTheLeadWorks(t *testing.T) {
+	s, f := notesEnv(t)
+	ctx := context.Background()
+	plain := prompts.RenderSupervisionInstructions()
+	// conv_other has notes from before any block in effect was recorded: every send so far carried them.
+	at := time.Now().UTC()
+	s.directions.mu.Lock()
+	s.directions.m["conv_other"].Notes, s.directions.m["conv_other"].NotesAt = "Infra rule: back up first.", &at
+	s.directions.mu.Unlock()
+	withOld := plain + "\n\n" + prompts.RenderDirectionNotes(s.directionPrompt(ctx, "conv_other"))
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking},
+		proto.Session{SessionID: "conv_other", Status: proto.StatusWorking})
+	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: v1.", nil); err != nil { // its first notes
+		t.Fatal(err)
+	}
+	if _, _, err := s.setDirectionNotes(ctx, "conv_other", "", nil); err != nil { // its first clear
+		t.Fatal(err)
+	}
+	if got := dispatchedPolicy(t, s, "conv_lead"); got != plain {
+		t.Fatalf("first save while it works: %q", strings.TrimPrefix(got, plain))
+	}
+	if got := dispatchedPolicy(t, s, "conv_other"); got != withOld {
+		t.Fatalf("first clear while it works: %q", strings.TrimPrefix(got, plain))
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle},
+		proto.Session{SessionID: "conv_other", Status: proto.StatusIdle})
+	if got := dispatchedPolicy(t, s, "conv_lead"); !strings.Contains(got, "Readings: v1.") {
+		t.Fatalf("idle: %q", got)
+	}
+	if got := dispatchedPolicy(t, s, "conv_other"); got != plain {
+		t.Fatalf("idle after the clear: %q", got)
+	}
+}
+
+// A notes_at is never issued twice, also across a clear: an editor that opened the notes before the clear is refused
+// even when the next save comes in the same millisecond as the one it read, and an older record keeps its time too.
+func TestNotesAtIsNeverIssuedTwiceAcrossAClear(t *testing.T) {
+	s, _ := notesEnv(t)
+	clock := time.Date(2026, 11, 20, 1, 2, 3, 0, time.UTC)
+	s.directions.mu.Lock()
+	s.directions.now = func() time.Time { return clock }
+	s.directions.mu.Unlock()
+	first := putNotesAnswer(t, s, `{"notes":"Readings: A."}`, http.StatusOK)
+	putNotesAnswer(t, s, `{"notes":""}`, http.StatusOK)
+	second := putNotesAnswer(t, s, `{"notes":"Readings: B."}`, http.StatusOK)
+	if !second.NotesAt.After(*first.NotesAt) {
+		t.Fatalf("issued again: %v then %v", first.NotesAt, second.NotesAt)
+	}
+	stale := putNotesAnswer(t, s, `{"notes":"Readings: C.","notes_at":"`+first.NotesAt.Format(time.RFC3339Nano)+`"}`, http.StatusConflict)
+	if stale.Notes != "Readings: B." {
+		t.Fatalf("stale editor: %+v", stale)
+	}
+	// An older record has only NotesAt: cleared and saved again at the same instant, it still moves on.
+	old := clock.Add(time.Hour)
+	s.directions.mu.Lock()
+	d := s.directions.m["conv_lead"]
+	d.Notes, d.NotesAt, d.NotesLastAt = "Readings: old.", &old, nil
+	s.directions.now = func() time.Time { return old }
+	s.directions.mu.Unlock()
+	putNotesAnswer(t, s, `{"notes":""}`, http.StatusOK)
+	if again := putNotesAnswer(t, s, `{"notes":"Readings: D."}`, http.StatusOK); !again.NotesAt.After(old) {
+		t.Fatalf("older record issued again: %v", again.NotesAt)
+	}
+}
+
+// A notes block a send carried counts as given only once the node took that send. When the node refuses it (the lead
+// had just started a turn its session row did not show yet), the block before it is put back, so the next messages of
+// that turn keep the policy the lead runs on. The owner's message is settled by the hub's notice of how it sent it,
+// the manager's own send by the node's answer; a send the node took keeps the new block.
+func TestDirectionNotesCountAsGivenOnlyOnceTheNodeTookTheSend(t *testing.T) {
+	s, f := notesEnv(t)
+	ctx := context.Background()
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: v1.", nil); err != nil {
+		t.Fatal(err)
+	}
+	v1 := dispatchedPolicy(t, s, "conv_lead")
+	// The owner saves v2 and sends; the row still reads idle, but the node already sees a turn and refuses it.
+	if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: v2.", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := ownerPolicy(t, s, "conv_lead"); !strings.Contains(got, "Readings: v2.") {
+		t.Fatalf("idle send: %q", got)
+	}
+	hubSent(s, "conv_lead", assistantwire.ConversationFailed)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+		t.Fatalf("the rest of the turn after a refused message: %q", got)
+	}
+	// The manager's own send, refused the same way.
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	f.answerNode(DeviceSessionSend, nodeRefuses)
+	if _, err := managerSend(s, "conv_lead"); err == nil {
+		t.Fatal("the refused send went")
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+		t.Fatalf("the rest of the turn after a refused manager send: %q", got)
+	}
+	// Taken: the new block stays.
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	f.answerNode(DeviceSessionSend, nodeTakes)
+	if _, err := managerSend(s, "conv_lead"); err != nil {
+		t.Fatal(err)
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); !strings.Contains(got, "Readings: v2.") {
+		t.Fatalf("after a taken send: %q", got)
+	}
+}
+
+// A notes block is settled by the outcome of the send that carried it, not by whichever outcome for its conversation
+// comes first (#11392). The manager's own send, carrying the block the lead runs on, is in flight while the owner
+// saves new notes and sends a message that moves the block; the two outcomes then come in either order, and the lead
+// is taken to run the block of the send the node took.
+func TestDirectionNotesSettledByTheSendThatCarriedThem(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		managerTaken bool   // the earlier send: the manager's
+		owner        string // the later: the owner's message, as the hub reports it
+		want         string // the notes the lead runs after both
+	}{
+		{"the earlier send taken then the later refused", true, assistantwire.ConversationFailed, "Readings: v1."},
+		{"the earlier send refused then the later taken", false, assistantwire.ConversationDelivered, "Readings: v2."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := notesEnv(t)
+			ctx := context.Background()
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+			if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: v1.", nil); err != nil {
+				t.Fatal(err)
+			}
+			v1 := dispatchedPolicy(t, s, "conv_lead")
+			// The manager's send is in flight: its policy step is done and the node has it.
+			arrived, release := make(chan struct{}, 1), make(chan struct{})
+			f.mu.Lock()
+			f.beforeSend = func() { arrived <- struct{}{}; <-release }
+			f.mu.Unlock()
+			if tc.managerTaken {
+				f.answerNode(DeviceSessionSend, nodeTakes)
+			} else {
+				f.answerNode(DeviceSessionSend, nodeRefuses)
+			}
+			type sent struct {
+				policy string
+				err    error
+			}
+			done := make(chan sent, 1)
+			go func() {
+				policy, err := managerSend(s, "conv_lead")
+				done <- sent{policy, err}
+			}()
+			within(t, arrived, "the manager's send")
+			if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: v2.", nil); err != nil {
+				t.Fatal(err)
+			}
+			if got := ownerPolicy(t, s, "conv_lead"); !strings.Contains(got, "Readings: v2.") {
+				t.Fatalf("the owner's message: %q", got)
+			}
+			close(release)
+			if m := within(t, done, "the node's answer"); m.policy != v1 || (m.err == nil) != tc.managerTaken {
+				t.Fatalf("the manager's send: %v, carrying %q", m.err, m.policy)
+			}
+			hubSent(s, "conv_lead", tc.owner)
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+			if got := nodePolicy(t, s, "conv_lead"); !strings.Contains(got, tc.want) {
+				t.Fatalf("taken to run %q, want %s", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()), tc.want)
+			}
+		})
+	}
+}
+
+// Only a send whose outcome is reported moves the notes block in effect, and each such send reports it (#11392):
+// assistant.answer_again through call, and a message whose parameters were made but that was refused before it left
+// as not taken; the node's own request for what its message runs on (assistant.model) does not move it. Each time,
+// the block the lead is then taken to run is the one its process got.
+func TestDirectionNotesMovedOnlyBySendsThatReportTheirOutcome(t *testing.T) {
+	ctx := context.Background()
+	start := func(t *testing.T, row proto.Session) (*Service, *fakeHub, string) {
+		t.Helper()
+		s, f := notesEnv(t)
+		row.SessionID, row.Agent = "conv_lead", "claude"
+		listLeads(f, row)
+		if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: v1.", nil); err != nil {
+			t.Fatal(err)
+		}
+		return s, f, dispatchedPolicy(t, s, "conv_lead")
+	}
+	saveV2 := func(t *testing.T, s *Service) {
+		t.Helper()
+		if _, _, err := s.setDirectionNotes(ctx, "conv_lead", "Readings: v2.", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	working := func(f *fakeHub) {
+		listLeads(f, proto.Session{SessionID: "conv_lead", Agent: "claude", Status: proto.StatusWorking})
+	}
+
+	t.Run("answer again", func(t *testing.T) {
+		s, f, _ := start(t, proto.Session{Status: proto.StatusDone})
+		const ask = "Summarize today's usage."
+		if _, err := ownerParams(t, s, "conv_lead", map[string]any{"client_msg_id": "app-user-input", "text": ask}); err != nil {
+			t.Fatal(err)
+		}
+		hubSent(s, "conv_lead", assistantwire.ConversationDelivered)
+		// The turn ends without a reply, and the owner saves v2 meanwhile: the manager asks for the reply again.
+		saveV2(t, s)
+		f.setItems(
+			proto.Item{ID: "u1#0", Seq: 1, Role: "user", Kind: proto.KindText, Text: ask, ClientMsgID: "app-user-input"},
+			proto.Item{ID: "t2#0", Seq: 2, Role: "assistant", Kind: proto.KindToolUse, ToolUseID: "tool", ToolName: "Bash"},
+			proto.Item{ID: "r3#0", Seq: 3, Role: "user", Kind: proto.KindToolResult, ToolUseID: "tool", Text: "24 requests"},
+		)
+		var again []string
+		f.answerNode(assistantwire.DeviceAssistantAnswerAgain, func(_ string, raw json.RawMessage) (any, error) {
+			var p struct {
+				Policy string `json:"supervision_instructions"`
+			}
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, err
+			}
+			again = append(again, p.Policy)
+			return map[string]any{}, nil
+		})
+		s.assistantTurnSettled(ctx, "server", "conv_lead")
+		if len(again) != 1 {
+			t.Fatalf("answer_again sends: %d", len(again))
+		}
+		// The owner's next message fails before it reaches the conversation (its computer is briefly offline).
+		ownerPolicy(t, s, "conv_lead")
+		hubSent(s, "conv_lead", assistantwire.ConversationFailed)
+		working(f)
+		if got := nodePolicy(t, s, "conv_lead"); got != again[0] {
+			t.Fatalf("taken to run %q, but answer_again gave it %q", got, again[0])
+		}
+	})
+
+	t.Run("the owner's message refused before it left", func(t *testing.T) {
+		s, f, v1 := start(t, proto.Session{Status: proto.StatusIdle})
+		saveV2(t, s)
+		if _, err := ownerParams(t, s, "conv_lead", map[string]any{"text": "go on", "model": "not a model id!"}); err == nil {
+			t.Fatal("a bad model was taken")
+		}
+		working(f)
+		if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+			t.Fatalf("taken to run %q after a refused message", got)
+		}
+	})
+
+	t.Run("the manager's send refused before it left", func(t *testing.T) {
+		s, f, v1 := start(t, proto.Session{Status: proto.StatusIdle})
+		saveV2(t, s)
+		f.mu.Lock()
+		f.sessions["mac"], f.catalogNodes = nil, true // another of the owner's computers, the only one the provider serves
+		f.mu.Unlock()
+		addProvider(t, s, `{"name":"box","base_url":"https://gw.example.com","model":"m1","api_key":"sk-test-box-000000","share":"selected","scope_machines":["mac"]}`)
+		p := map[string]any{"session_id": "conv_lead", "launcher": "box", "text": "a supervision message"}
+		if err := s.call(ctx, "server", DeviceSessionSend, p, nil); codeOf(err) != proto.CodeLauncherOutOfScope {
+			t.Fatalf("a send on a launcher out of scope: %v", err)
+		}
+		working(f)
+		if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+			t.Fatalf("taken to run %q after a refused send", got)
+		}
+	})
+
+	t.Run("the node's own message", func(t *testing.T) {
+		s, f, v1 := start(t, proto.Session{Status: proto.StatusIdle})
+		saveV2(t, s)
+		own := nodePolicy(t, s, "conv_lead") // the node asks what its own message runs on, and sends it
+		if own != v1 {
+			t.Fatalf("the node's own message moved the block: %q", own)
+		}
+		// The owner's next message moves it, and fails before it reaches the conversation.
+		if got := ownerPolicy(t, s, "conv_lead"); !strings.Contains(got, "Readings: v2.") {
+			t.Fatalf("the owner's message: %q", got)
+		}
+		hubSent(s, "conv_lead", assistantwire.ConversationFailed)
+		working(f)
+		if got := nodePolicy(t, s, "conv_lead"); got != own {
+			t.Fatalf("taken to run %q, but the node's own message gave it %q", got, own)
+		}
+	})
+}
+
+// saveLeadNotes saves notes for the lead, as the owner's editor does.
+func saveLeadNotes(t *testing.T, s *Service, notes string) {
+	t.Helper()
+	if _, _, err := s.setDirectionNotes(context.Background(), "conv_lead", notes, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setClock puts the directions on a clock the test moves.
+func setClock(s *Service, at time.Time) {
+	s.directions.mu.Lock()
+	s.directions.now = func() time.Time { return at }
+	s.directions.mu.Unlock()
+}
+
+// The hub's notice names the owner's message it is about, and settles that message only (#11392): a message whose
+// notice never comes (the hub answered a retry from its record, or the notice was lost) takes no one else's. Here the
+// next message comes a minute later, moves the block and is refused: its own notice puts the block back.
+func TestDirectionNotesOwnerNoticeSettlesItsOwnMessage(t *testing.T) {
+	s, f := notesEnv(t)
+	at := time.Date(2026, 11, 20, 1, 2, 3, 0, time.UTC)
+	setClock(s, at)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v1.")
+	v1 := ownerMessage(t, s, "conv_lead", "m-1")
+	hubSentID(s, "conv_lead", "m-1", assistantwire.ConversationDelivered)
+	ownerMessage(t, s, "conv_lead", "m-2") // its notice never comes
+	setClock(s, at.Add(time.Minute))
+	saveLeadNotes(t, s, "Readings: v2.")
+	if got := ownerMessage(t, s, "conv_lead", "m-3"); !strings.Contains(got, "Readings: v2.") {
+		t.Fatalf("the next message: %q", got)
+	}
+	hubSentID(s, "conv_lead", "m-3", assistantwire.ConversationFailed)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+		t.Fatalf("taken to run %q after its own refusal", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	// The rest of the turn keeps the policy the lead runs on.
+	if got := ownerMessage(t, s, "conv_lead", "m-4"); got != v1 {
+		t.Fatalf("a later message of the turn: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	hubSentID(s, "conv_lead", "m-4", assistantwire.ConversationDelivered)
+}
+
+// A second request for parameters of a message the manager already gave them for is the hub's retry, which the hub may
+// answer from its record without sending it or telling how it went: it moves nothing and waits for no notice.
+func TestDirectionNotesReplayedMessageMovesNothing(t *testing.T) {
+	s, f := notesEnv(t)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v1.")
+	v1 := ownerMessage(t, s, "conv_lead", "m-1")
+	hubSentID(s, "conv_lead", "m-1", assistantwire.ConversationDelivered)
+	saveLeadNotes(t, s, "Readings: v2.")
+	if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v1 {
+		t.Fatalf("the replay moved the block: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	// The next message moves it, and is refused: the block before it is the one the lead runs.
+	if got := ownerMessage(t, s, "conv_lead", "m-2"); !strings.Contains(got, "Readings: v2.") {
+		t.Fatalf("the next message: %q", got)
+	}
+	hubSentID(s, "conv_lead", "m-2", assistantwire.ConversationFailed)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+}
+
+// An older hub names no message in its notice: the oldest message still waiting for one is settled, as before.
+func TestDirectionNotesOlderHubNoticeWithoutAnID(t *testing.T) {
+	s, f := notesEnv(t)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v1.")
+	v1 := ownerMessage(t, s, "conv_lead", "m-1")
+	hubSent(s, "conv_lead", assistantwire.ConversationDelivered)
+	saveLeadNotes(t, s, "Readings: v2.")
+	if got := ownerMessage(t, s, "conv_lead", "m-2"); !strings.Contains(got, "Readings: v2.") {
+		t.Fatalf("the next message: %q", got)
+	}
+	hubSent(s, "conv_lead", assistantwire.ConversationFailed)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+}
+
+// The manager's own send that provably never reached the computer is not taken, and the block it moved is put back
+// (#11392): a computer offline or not one of the hub's, a call cancelled or not written before it left, the bus down or
+// suspended, a conversation that is gone, and a refusal the devices layer answers before the computer is reached,
+// also in the forms the bus gives them back (busError). A send that may have gone in keeps its block, as before.
+func TestDirectionNotesSendThatNeverReachedTheComputerIsNotTaken(t *testing.T) {
+	fromBus := func(code string) error { return busError(&rpc.Error{Code: code, Message: code}) }
+	for _, tc := range []struct {
+		name  string
+		err   error
+		taken bool
+	}{
+		{"offline", fmt.Errorf("server: %w", apierr.ErrOffline), false},
+		{"offline, from the bus", fromBus(CodeMachineOffline), false},
+		{"not one of the hub's", fmt.Errorf("%w %q", ErrNoDevice, "server"), false},
+		{"not one of the hub's, from the bus", fromBus(CodeNoDevice), false},
+		{"cancelled before it left", rpc.NotSent(context.Canceled), false},
+		{"its time ran out before it left", rpc.NotSent(context.DeadlineExceeded), false},
+		{"not written behind a long write", fmt.Errorf("%w (%w)", context.DeadlineExceeded, rpc.ErrNotWritten), false},
+		{"the bus down", bus.ErrOffline, false},
+		{"the bus suspended", rpc.ErrSuspended, false},
+		{"node_outdated from the devices layer", &rpc.Error{Code: proto.CodeNodeOutdated, Message: "update Persona on this computer"}, false},
+		{"the conversation is gone", errors.New("conversation conv_lead is gone"), false},
+		// It may have gone in: the block stays.
+		{"cancelled after it was written", context.Canceled, true},
+		{"its time ran out with the request out", context.DeadlineExceeded, true},
+		{"the link dropped while it went", rpc.ErrDropped, true},
+		{"the hub's deadline with the node on it", &rpc.Error{Code: devicewire.CodeDeadline, Message: "deadline"}, true},
+		{"the node's link closed while it went, from the bus", fromBus(CodeNodeClosed), true},
+		{"the node may have typed it", &rpc.Error{Code: "send_failed", Message: "send failed", Data: json.RawMessage(`{"delivered":"unknown"}`)}, true},
+		{"a node error without a code", &rpc.Error{Message: "the pane closed"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := notesEnv(t)
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+			saveLeadNotes(t, s, "Readings: v1.")
+			v1 := dispatchedPolicy(t, s, "conv_lead")
+			saveLeadNotes(t, s, "Readings: v2.")
+			f.answerNode(DeviceSessionSend, func(string, json.RawMessage) (any, error) { return nil, tc.err })
+			v2, err := managerSend(s, "conv_lead")
+			if err == nil || !strings.Contains(v2, "Readings: v2.") {
+				t.Fatalf("the send: %v, carrying %q", err, v2)
+			}
+			want := v1
+			if tc.taken {
+				want = v2
+			}
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+			if got := nodePolicy(t, s, "conv_lead"); got != want {
+				t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+			}
+		})
+	}
+}
+
+// The hub's retry of the owner's message that it really sends (#11392): the first attempt reached nothing (the hub
+// stopped before it claimed it, or it typed nothing and its notice was lost), so the one notice that comes is the
+// retry's. While the first attempt still waits for a notice, the retry carries the block the first attempt carried and
+// the notice settles that move: taken, the lead runs it; refused, the block before it is put back. A retry late in the
+// wait waits a whole wait again, as the hub waits for it as long as for any send.
+func TestDirectionNotesRetryTheHubSendsSettlesTheBlockItCarried(t *testing.T) {
+	at := time.Date(2026, 11, 20, 1, 2, 3, 0, time.UTC)
+	for _, tc := range []struct {
+		name    string
+		later   time.Duration // the retry comes this long after the first attempt, and its notice two minutes after it
+		outcome string        // the retry's notice
+		taken   bool
+	}{
+		{"the first attempt never claimed, the retry taken", 0, assistantwire.ConversationDelivered, true},
+		{"the first attempt's notice lost, the retry taken late", 9 * time.Minute, assistantwire.ConversationDelivered, true},
+		{"the retry refused", 0, assistantwire.ConversationFailed, false},
+		{"the retry refused late", 9 * time.Minute, assistantwire.ConversationFailed, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := notesEnv(t)
+			setClock(s, at)
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+			saveLeadNotes(t, s, "Readings: v1.")
+			v1 := ownerMessage(t, s, "conv_lead", "m-0")
+			hubSentID(s, "conv_lead", "m-0", assistantwire.ConversationDelivered)
+			saveLeadNotes(t, s, "Readings: v2.")
+			v2 := ownerMessage(t, s, "conv_lead", "m-1") // no notice comes for it
+			if !strings.Contains(v2, "Readings: v2.") {
+				t.Fatalf("the first attempt: %q", strings.TrimPrefix(v2, prompts.RenderSupervisionInstructions()))
+			}
+			setClock(s, at.Add(tc.later))
+			if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v2 {
+				t.Fatalf("the retry carries %q, not the first attempt's block", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+			}
+			setClock(s, at.Add(tc.later+2*time.Minute))
+			hubSentID(s, "conv_lead", "m-1", tc.outcome)
+			want := v1
+			if tc.taken {
+				want = v2
+			}
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+			if got := nodePolicy(t, s, "conv_lead"); got != want {
+				t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+			}
+			// The rest of the turn carries what the lead runs.
+			if got := ownerMessage(t, s, "conv_lead", "m-2"); got != want {
+				t.Fatalf("a later message of the turn: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+			}
+		})
+	}
+}
+
+// A retry the hub answers from its record sends nothing and brings no notice (the first attempt went, and its notice
+// was lost): it moves nothing, though the owner saved new notes meanwhile. The first attempt's block is kept once its
+// notice can no longer come, and the new notes wait for the next message that finds the lead idle.
+func TestDirectionNotesRetryAnsweredFromTheRecordMovesNothing(t *testing.T) {
+	s, f := notesEnv(t)
+	at := time.Date(2026, 11, 20, 1, 2, 3, 0, time.UTC)
+	setClock(s, at)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v1.")
+	v1 := ownerMessage(t, s, "conv_lead", "m-0")
+	hubSentID(s, "conv_lead", "m-0", assistantwire.ConversationDelivered)
+	saveLeadNotes(t, s, "Readings: v2.")
+	v2 := ownerMessage(t, s, "conv_lead", "m-1") // it goes; its notice is lost
+	saveLeadNotes(t, s, "Readings: v3.")
+	setClock(s, at.Add(time.Minute))
+	if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v2 {
+		t.Fatalf("the retry carries %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	setClock(s, at.Add(notesOwnerWait))
+	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+		t.Fatalf("while a notice can still come: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	setClock(s, at.Add(time.Minute+notesOwnerWait))
+	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
+		t.Fatalf("once none can: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	if got := ownerMessage(t, s, "conv_lead", "m-2"); !strings.Contains(got, "Readings: v3.") {
+		t.Fatalf("the next idle message: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+}
+
+// A retry whose first attempt's move is no longer in flight (a later message moved the block again and was taken)
+// carries the last confirmed block, the one the lead runs, and its notice moves nothing.
+func TestDirectionNotesRetryAfterALaterMessageWasTaken(t *testing.T) {
+	s, f := notesEnv(t)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v1.")
+	ownerMessage(t, s, "conv_lead", "m-0")
+	hubSentID(s, "conv_lead", "m-0", assistantwire.ConversationDelivered)
+	saveLeadNotes(t, s, "Readings: v2.")
+	ownerMessage(t, s, "conv_lead", "m-1") // no notice comes for it
+	saveLeadNotes(t, s, "Readings: v3.")
+	v3 := ownerMessage(t, s, "conv_lead", "m-2")
+	hubSentID(s, "conv_lead", "m-2", assistantwire.ConversationDelivered)
+	if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v3 {
+		t.Fatalf("the retry carries %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	hubSentID(s, "conv_lead", "m-1", assistantwire.ConversationDelivered)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); got != v3 {
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+}
+
+// noticeBus has the hub's notices reach s as the bus takes them: read off the connection they came on (queueEvent
+// stamps it), then handed to ConversationSent as event hands them, here at once rather than on a goroutine of their
+// own. hello is the hub's answer to a new connection's hello (onHello).
+type noticeBus struct {
+	t *testing.T
+	b *BusHub
+	s *Service
+}
+
+func newNoticeBus(t *testing.T, s *Service) *noticeBus {
+	b := NewBusHub(BusOptions{Logf: t.Logf})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // what onHello starts once a connection is up never starts: none is
+	b.mu.Lock()
+	b.svc, b.ctx = s, ctx
+	b.mu.Unlock()
+	return &noticeBus{t, b, s}
+}
+
+func (n *noticeBus) hello() {
+	n.t.Helper()
+	if err := n.b.onHello(json.RawMessage(`{}`)); err != nil {
+		n.t.Fatal(err)
+	}
+}
+
+// read is the notice of how the owner's message msg (its client_msg_id; "" none) to the lead went, as the bus reads it
+// off the current connection; handle hands it on.
+func (n *noticeBus) read(msg, outcome string) busEvent {
+	n.t.Helper()
+	raw, err := json.Marshal(ConversationSent{MachineID: "server", SessionID: "conv_lead", Outcome: outcome, ClientMsgID: msg})
+	if err != nil {
+		n.t.Fatal(err)
+	}
+	n.b.queueEvent(assistantwire.EventConversationSent, raw)
+	ev := <-n.b.events
+	n.b.pending.Add(-1)
+	return ev
+}
+
+func (n *noticeBus) handle(ev busEvent) {
+	n.t.Helper()
+	var p ConversationSent
+	if err := json.Unmarshal(ev.params, &p); err != nil {
+		n.t.Fatal(err)
+	}
+	n.s.ConversationSent(ev.ctx(context.Background()), p)
+}
+
+func (n *noticeBus) sent(msg, outcome string) { n.handle(n.read(msg, outcome)) }
+
+// Once the hub has named a message in a notice on a connection, a notice on it that names none is about a message sent
+// without an id (here one sent just before the manager restarted, which it does not know): it settles no message that
+// has one. A new connection, which may be to an older hub that names none, falls back to the oldest message waiting,
+// also when a named notice of the connection before it is handled after the new hello.
+func TestDirectionNotesNoticeWithoutAnIDOnceTheHubNamesMessages(t *testing.T) {
+	s, f := notesEnv(t)
+	hub := newNoticeBus(t, s)
+	hub.hello()
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v1.")
+	ownerMessage(t, s, "conv_lead", "m-0")
+	hub.sent("m-0", assistantwire.ConversationDelivered)
+	saveLeadNotes(t, s, "Readings: v2.")
+	v2 := ownerMessage(t, s, "conv_lead", "m-1")
+	hub.sent("", assistantwire.ConversationFailed) // the earlier message without an id
+	hub.sent("m-1", assistantwire.ConversationDelivered)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	late := hub.read("m-x", assistantwire.ConversationDelivered) // read on this connection, handled after the next hello
+	hub.hello()
+	hub.handle(late)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v3.")
+	if got := ownerMessage(t, s, "conv_lead", "m-2"); !strings.Contains(got, "Readings: v3.") {
+		t.Fatalf("the next message: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	hub.sent("", assistantwire.ConversationFailed) // an older hub's notice for it
+	// The lead runs v2, and the rest of its turn carries it.
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := ownerMessage(t, s, "conv_lead", "m-3"); got != v2 {
+		t.Fatalf("after a new connection, a message of the turn carries %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	hub.sent("", assistantwire.ConversationDelivered)
+}
+
+// Messages with and without ids wait side by side, each with its own move, the one with an id the older: each notice
+// settles its own message, whatever order the notices come in, never the oldest one waiting.
+func TestDirectionNotesMessagesWithAndWithoutIDs(t *testing.T) {
+	const failed, delivered = assistantwire.ConversationFailed, assistantwire.ConversationDelivered
+	for _, tc := range []struct {
+		name          string
+		namedFirst    bool   // the notice of the message with an id comes first
+		first, second string // the outcomes, in the order their notices come
+		after, want   string // the notes the lead is taken to run after the first notice, and after both
+	}{
+		{"the one without an id refused, then the other taken", false, failed, delivered, "v1", "v2"},
+		{"the one without an id taken, then the other refused", false, delivered, failed, "v3", "v3"},
+		{"the one with an id refused, then the other taken", true, failed, delivered, "v1", "v3"},
+		{"both refused", true, failed, failed, "v1", "v1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := notesEnv(t)
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+			saveLeadNotes(t, s, "Readings: v1.")
+			ownerMessage(t, s, "conv_lead", "m-0")
+			hubSentID(s, "conv_lead", "m-0", delivered)
+			saveLeadNotes(t, s, "Readings: v2.")
+			if got := ownerMessage(t, s, "conv_lead", "m-1"); !strings.Contains(got, "Readings: v2.") {
+				t.Fatalf("the message with an id: %q", got)
+			}
+			saveLeadNotes(t, s, "Readings: v3.")
+			if got := ownerPolicy(t, s, "conv_lead"); !strings.Contains(got, "Readings: v3.") { // without an id
+				t.Fatalf("the message without an id: %q", got)
+			}
+			notice := func(named bool, outcome string) {
+				if named {
+					hubSentID(s, "conv_lead", "m-1", outcome)
+				} else {
+					hubSent(s, "conv_lead", outcome)
+				}
+			}
+			expect := func(what, want string) {
+				t.Helper()
+				if got := nodePolicy(t, s, "conv_lead"); !strings.Contains(got, "Readings: "+want+".") {
+					t.Fatalf("%s: taken to run %q, want %s", what, strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()), want)
+				}
+			}
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+			notice(tc.namedFirst, tc.first)
+			expect("after the first notice", tc.after)
+			notice(!tc.namedFirst, tc.second)
+			expect("after both", tc.want)
+		})
+	}
+}
+
+// A retry of the owner's message whose first attempt reached nothing, while a later message that moved the block again
+// is still in flight (it went in; its notice has not come), carries the block in effect, the later message's, not its
+// own older one: found idle, the lead would otherwise be restarted on a block the manager no longer holds.
+func TestDirectionNotesRetryWhileALaterMoveIsInFlight(t *testing.T) {
+	for _, outcome := range []string{assistantwire.ConversationDelivered, assistantwire.ConversationFailed} {
+		t.Run(outcome, func(t *testing.T) {
+			s, f := notesEnv(t)
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+			saveLeadNotes(t, s, "Readings: v1.")
+			ownerMessage(t, s, "conv_lead", "m-0")
+			hubSentID(s, "conv_lead", "m-0", assistantwire.ConversationDelivered)
+			saveLeadNotes(t, s, "Readings: v2.")
+			ownerMessage(t, s, "conv_lead", "m-1") // never claimed
+			saveLeadNotes(t, s, "Readings: v3.")
+			v3 := ownerMessage(t, s, "conv_lead", "m-2") // it goes in; its notice comes later
+			if got := ownerMessage(t, s, "conv_lead", "m-1"); got != v3 {
+				t.Fatalf("the retry carries %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+			}
+			hubSentID(s, "conv_lead", "m-1", outcome)
+			hubSentID(s, "conv_lead", "m-2", assistantwire.ConversationDelivered)
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+			if got := nodePolicy(t, s, "conv_lead"); got != v3 {
+				t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+			}
+		})
+	}
+}
+
+// A retry tied to its first attempt whose parameters are refused settles nothing: the hub sends nothing for it, and the
+// first attempt keeps waiting for its own notice on its own clock, its block kept once that can no longer come.
+func TestDirectionNotesRetryRefusedSettlesNothing(t *testing.T) {
+	s, f := notesEnv(t)
+	at := time.Date(2026, 11, 20, 1, 2, 3, 0, time.UTC)
+	setClock(s, at)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v1.")
+	v1 := ownerMessage(t, s, "conv_lead", "m-0")
+	hubSentID(s, "conv_lead", "m-0", assistantwire.ConversationDelivered)
+	saveLeadNotes(t, s, "Readings: v2.")
+	v2 := ownerMessage(t, s, "conv_lead", "m-1") // it goes; its notice is lost
+	setClock(s, at.Add(9*time.Minute))
+	if _, err := ownerParams(t, s, "conv_lead", map[string]any{"text": "go on", "client_msg_id": "m-1", "model": "not a model id!"}); err == nil {
+		t.Fatal("a bad model was taken")
+	}
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+		t.Fatalf("while the first attempt waits: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	setClock(s, at.Add(notesOwnerWait))
+	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
+		t.Fatalf("once its notice can no longer come: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+}
+
+// A notice of an outcome the hub never learned (unknown: the link dropped after the message went) counts as taken: the
+// message may be in, so its block stays, and the rest of the turn carries it.
+func TestDirectionNotesNoticeOfAnUnknownOutcomeKeepsTheBlock(t *testing.T) {
+	s, f := notesEnv(t)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v1.")
+	ownerMessage(t, s, "conv_lead", "m-0")
+	hubSentID(s, "conv_lead", "m-0", assistantwire.ConversationDelivered)
+	saveLeadNotes(t, s, "Readings: v2.")
+	v2 := ownerMessage(t, s, "conv_lead", "m-1")
+	hubSentID(s, "conv_lead", "m-1", assistantwire.ConversationUnknown)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
+		t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	if got := ownerMessage(t, s, "conv_lead", "m-2"); got != v2 {
+		t.Fatalf("a later message of the turn: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+}
+
+// A send whose outcome nobody reports (the node's own message, assistant.model) takes the last confirmed block, not
+// one a send still in flight moved: the owner's message that moved it may yet be refused, and the block before it put
+// back while the process runs what the node's own message gave it.
+func TestDirectionNotesSendWithoutAHandleTakesTheConfirmedBlock(t *testing.T) {
+	for _, outcome := range []string{assistantwire.ConversationFailed, assistantwire.ConversationDelivered} {
+		t.Run(outcome, func(t *testing.T) {
+			s, f := notesEnv(t)
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+			saveLeadNotes(t, s, "Readings: v1.")
+			v1 := ownerMessage(t, s, "conv_lead", "m-1")
+			hubSentID(s, "conv_lead", "m-1", assistantwire.ConversationDelivered)
+			saveLeadNotes(t, s, "Readings: v2.")
+			v2 := ownerMessage(t, s, "conv_lead", "m-2") // in flight
+			if own := nodePolicy(t, s, "conv_lead"); own != v1 {
+				t.Fatalf("the node's own message took a block in flight: %q", strings.TrimPrefix(own, prompts.RenderSupervisionInstructions()))
+			}
+			hubSentID(s, "conv_lead", "m-2", outcome)
+			listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+			want := v1
+			if outcome == assistantwire.ConversationDelivered {
+				want = v2
+			}
+			if got := nodePolicy(t, s, "conv_lead"); got != want {
+				t.Fatalf("taken to run %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+			}
+		})
+	}
+}
+
+// A send whose outcome is never learned keeps the block it carried (#11392): the owner's message whose notice never
+// comes is taken for confirmed once its notice can no longer come (until then a send nobody reports takes the block
+// before it), and a message whose notice reaches a restarted manager keeps its block too.
+func TestDirectionNotesKeptWhenTheOutcomeIsNeverLearned(t *testing.T) {
+	s, f := notesEnv(t)
+	at := time.Date(2026, 11, 20, 1, 2, 3, 0, time.UTC)
+	setClock(s, at)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v1.")
+	v1 := ownerMessage(t, s, "conv_lead", "m-1")
+	hubSentID(s, "conv_lead", "m-1", assistantwire.ConversationDelivered)
+	saveLeadNotes(t, s, "Readings: v2.")
+	v2 := ownerMessage(t, s, "conv_lead", "m-2") // no notice comes for it
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	setClock(s, at.Add(notesOwnerWait-time.Second))
+	if got := nodePolicy(t, s, "conv_lead"); got != v1 {
+		t.Fatalf("while its notice can still come: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	setClock(s, at.Add(notesOwnerWait))
+	if got := nodePolicy(t, s, "conv_lead"); got != v2 {
+		t.Fatalf("once it can no longer come: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+	// A manager restart between a send and its outcome: the block is kept, and the restarted manager settles nothing.
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusIdle})
+	saveLeadNotes(t, s, "Readings: v3.")
+	v3 := ownerMessage(t, s, "conv_lead", "m-3")
+	s2 := newServiceOn(t, f, s.store())
+	hubSentID(s2, "conv_lead", "m-3", assistantwire.ConversationFailed)
+	listLeads(f, proto.Session{SessionID: "conv_lead", Status: proto.StatusWorking})
+	if got := nodePolicy(t, s2, "conv_lead"); got != v3 || !strings.Contains(v3, "Readings: v3.") {
+		t.Fatalf("after a restart: %q", strings.TrimPrefix(got, prompts.RenderSupervisionInstructions()))
+	}
+}
+
+// GET /api/v1/assistant/leaders lists notes_at as null for a direction without notes, the value a save sends back, so
+// two editors of an empty direction that both echo it are told apart: the first saves, the second gets 409.
+func TestLeadersListNotesAtNullWithoutNotes(t *testing.T) {
+	s, _ := notesEnv(t)
+	listed := listedNotesAtRaw(t, s, "conv_lead")
+	if listed == nil {
+		t.Fatal("notes_at without notes is left out, want null")
+	} else if string(listed) != "null" {
+		t.Fatalf("notes_at without notes: %s, want null", listed)
+	}
+	putNotesAnswer(t, s, `{"notes":"Readings: A.","notes_at":`+string(listed)+`}`, http.StatusOK)
+	if got := putNotesAnswer(t, s, `{"notes":"Readings: B.","notes_at":`+string(listed)+`}`, http.StatusConflict); got.Notes != "Readings: A." {
+		t.Fatalf("second editor: %+v", got)
 	}
 }

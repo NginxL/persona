@@ -45,8 +45,8 @@ final class LarkMedia {
     // MARK: Bytes
 
     /// Raw bytes of a media URL (hub-relative or absolute), from disk when seen before.
-    func data(_ url: String, size: Int? = nil) async throws -> Data {
-        let key = cacheKey(url, size: size)
+    func data(_ url: String, size: Int? = nil, using origin: APIClient? = nil) async throws -> Data {
+        let key = Self.cacheKey(url, size: size, origin: origin)
         let file = dir.appending(path: key)
         if let d = await Task.detached(priority: .userInitiated, operation: { try? Data(contentsOf: file) }).value { return d }
         let d: Data
@@ -56,7 +56,7 @@ final class LarkMedia {
             guard ((resp as? HTTPURLResponse)?.statusCode ?? 200) < 400 else { throw URLError(.badServerResponse) }
             d = body
         } else {
-            guard var api = AppModel.shared.api else { throw URLError(.userAuthenticationRequired) }
+            guard var api = origin ?? AppModel.shared.api else { throw URLError(.userAuthenticationRequired) }
             api.session = APIClient.uncachedSession
             var path = url
             var query: [String: String] = [:]
@@ -90,15 +90,17 @@ final class LarkMedia {
 
     // MARK: Images
 
-    func cached(_ url: String, size: Int? = nil) -> UIImage? { images.object(forKey: cacheKey(url, size: size) as NSString) }
+    func cached(_ url: String, size: Int? = nil, using origin: APIClient? = nil) -> UIImage? {
+        images.object(forKey: Self.cacheKey(url, size: size, origin: origin) as NSString)
+    }
 
     /// Decoded image, downsampled to `maxPixel` on its long edge (thumbnails are fetched at `size` when the hub can).
-    func image(_ url: String, size: Int? = nil, maxPixel: CGFloat = 1600) async -> UIImage? {
-        let key = cacheKey(url, size: size)
+    func image(_ url: String, size: Int? = nil, maxPixel: CGFloat = 1600, using origin: APIClient? = nil) async -> UIImage? {
+        let key = Self.cacheKey(url, size: size, origin: origin)
         if let img = images.object(forKey: key as NSString) { return img }
         if let t = inflight[key] { return await t.value }
         let t = Task<UIImage?, Never> {
-            guard let d = try? await self.data(url, size: size) else { return nil }
+            guard let d = try? await self.data(url, size: size, using: origin) else { return nil }
             return await Task.detached(priority: .userInitiated) { Self.decode(d, maxPixel: maxPixel) }.value
         }
         inflight[key] = t
@@ -123,8 +125,15 @@ final class LarkMedia {
     private func cacheKey(_ url: String, size: Int?) -> String { Self.cacheKey(url, size: size) }
 
     /// The name the bytes of `url` are kept under: a URL that names a manager (`url(_:manager:)`) is its own entry.
-    nonisolated static func cacheKey(_ url: String, size: Int?) -> String {
-        let digest = SHA256.hash(data: Data((url + "#" + String(size ?? 0)).utf8))
+    nonisolated static func cacheKey(_ url: String, size: Int?, origin: APIClient? = nil) -> String {
+        let resource = url + "#" + String(size ?? 0)
+        let key: String
+        if let origin {
+            key = [origin.group, origin.config.url.absoluteString, origin.managerID ?? "", resource].joined(separator: "\0")
+        } else {
+            key = resource
+        }
+        let digest = SHA256.hash(data: Data(key.utf8))
         return digest.prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -265,9 +274,34 @@ struct LarkAvatarImage: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     /// The URL that failed to load: the initial instead of a broken picture.
     @State private var failedURL: String?
+    @Environment(\.larkManager) private var manager
+    @Environment(\.larkGroup) private var group
+
+    // A previously cached messaging row may still contain the old HTTPS value.
+    // Resolve it using the row's hub and manager before any image loader sees it.
+    private var picture: String? {
+        guard let url else { return nil }
+        if url.hasPrefix("/") { return url }
+        if let scheme = URLComponents(string: url)?.scheme?.lowercased(), ["http", "https"].contains(scheme) {
+            guard let api = AppModel.shared.larkAPI(group: group, manager: manager) else { return nil }
+            return Self.cachedPicture(url, using: api)
+        }
+        return url
+    }
+
+    static func cachedPicture(_ url: String, using api: APIClient) -> String? {
+        if let source = api.messagingSource { return MessagingShape.avatar(["avatar": url], source: source, account: nil) }
+        if let manager = api.managerID, !MessagingSources.hasRead(api.config.url, manager: manager) { return nil }
+        return url
+    }
 
     var body: some View {
-        if let url, !url.isEmpty, failedURL != url {
+        let path = picture
+        if let url = path, url.hasPrefix("/api/v1/avatars/") || url.hasPrefix("/api/v1/messaging/") {
+            let origin = AppModel.shared.larkAPI(group: group, manager: manager)
+            ChatAvatar(url: origin.map { _ in LarkMedia.url(url, manager: manager) }, name: name,
+                       size: size * Theme.sizeScale(typeSize), origin: origin)
+        } else if let url = path, !url.isEmpty, failedURL != url {
             let points = size * Theme.sizeScale(typeSize)
             LarkRemoteImage(url: url, size: url.hasPrefix("/") ? larkThumbEdge(points: points) : nil, maxPixel: points * 3) {
                 failedURL = url

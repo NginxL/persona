@@ -46,5 +46,5 @@
   "continue_label": "（「{title}」）",
   "continue_placeholder_to": "接下来让 {agent} 做什么？",
   "continue_failed_plain": "没发出去，打开对话看原因。",
-  "arrange_cards": "整理卡片"
+  "arrange": "整理总览"
 }

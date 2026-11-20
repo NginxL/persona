@@ -3,8 +3,9 @@
 
 Three places decide what a change affects: scripts/ci/paths.py picks CI's lanes, scripts/test/check-fast.sh picks the
 local fast checks, and the PR watcher (scripts/operations/pr_watch_verify.py) picks the lanes it verifies a PR with.
-The watcher reads paths.py itself; check-fast keeps its own map in bash. This compares the three for one path at a
-time and names every disagreement that ALLOWED does not explain. It checks two things:
+The watcher reads paths.py itself; check-fast reads its own table (scripts/ci/check_fast_map.py) and adds what it finds
+at run time. This compares the three for one path at a time and names every disagreement that ALLOWED does not
+explain. It checks two things:
 
 - Lanes. A check-fast check counts for a CI lane when it runs a fast part of that lane's work (FAST_LANES): the web
   check for web, Go tests and builds for server, the integration and sdk/ts tests for runtimes. A CI lane check-fast

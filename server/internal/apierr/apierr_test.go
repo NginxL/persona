@@ -48,6 +48,54 @@ func TestCallNotFoundIs404(t *testing.T) {
 	}
 }
 
+// A session's history the node can't read says why (data.reason, #11388): reason stays in the body, error is the
+// sentence for it in the request's language and detail the node's words; with no language the node's words stay the
+// error. A not_found with no or an unknown reason (an older node, a runtime's own answer, a missing file) keeps the
+// plain summary. The sentences are for everyday users: they never say the history was deleted (a configuration
+// directory the node missed looks the same) nor name the node or its transcript.
+func TestCallNotFoundReason(t *testing.T) {
+	const words = "transcript for session 11111111-2222-3333-4444-555555555555 not found"
+	for reason, key := range map[string]string{
+		proto.NotFoundNoTranscript:   "apierr-apierr.session_no_transcript",
+		proto.NotFoundUnknownSession: "apierr-apierr.session_unknown",
+		"":                           "http-status.not_found",
+		"gone_elsewhere":             "http-status.not_found",
+	} {
+		var data json.RawMessage
+		if reason != "" {
+			data, _ = json.Marshal(map[string]string{"reason": reason})
+		}
+		refusal := func() error {
+			return fmt.Errorf("session.items: %w", &rpc.Error{Code: proto.CodeNotFound, Message: words, Data: data})
+		}
+		for _, lang := range []i18n.Lang{i18n.En, i18n.ZhHans, i18n.Ja} {
+			want := i18n.T(lang, key)
+			if want == "" || want == key {
+				t.Fatalf("%s: no %s sentence for %s", lang, key, reason)
+			}
+			if key != "http-status.not_found" {
+				if want == i18n.T(lang, "http-status.not_found") {
+					t.Errorf("%s %s: the plain summary", lang, reason)
+				}
+				if l := strings.ToLower(want); strings.Contains(l, "delet") || strings.ContainsAny(want, "删削") ||
+					strings.Contains(l, "node") || strings.Contains(l, "transcript") || strings.Contains(want, "ノード") || strings.Contains(want, "节点") {
+					t.Errorf("%s %s: %q", lang, reason, want)
+				}
+			}
+			rec := httptest.NewRecorder()
+			body := call(t, langWriter{rec, lang}, rec, refusal())
+			if rec.Code != http.StatusNotFound || body["code"] != "not_found" || body["retryable"] != false || body["error"] != want ||
+				body["detail"] != words || reason != "" && body["reason"] != reason {
+				t.Errorf("%s %q: %d %v", lang, reason, rec.Code, body)
+			}
+		}
+		rec := httptest.NewRecorder()
+		if body := call(t, rec, rec, refusal()); body["error"] != words || reason != "" && body["reason"] != reason {
+			t.Errorf("no language %q: %v", reason, body)
+		}
+	}
+}
+
 // A start the node refused on its request, with nothing to name: a launcher that cannot be read-only, a directory whose
 // name cannot be typed into a terminal. The hub words both, for a session's start_error and an HTTP answer.
 func TestPlainStartRefusalLocalization(t *testing.T) {

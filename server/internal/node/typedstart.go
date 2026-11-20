@@ -154,6 +154,10 @@ func (n *Node) typeStartMode(ctx context.Context, launch host.Launcher, created 
 		}
 		return nil, err
 	}
+	backend := backendLaunchFrom(ctx)
+	if backend != nil {
+		cmd = cdThen(backend.executor.journal.Plan.RootPath, cmd, shells...)
+	}
 	useStartFile := n.typesStartFile(launch, shells...)
 	t := &typedStart{launch: launch, created: created, line: cmd}
 	bash := ""
@@ -178,6 +182,15 @@ func (n *Node) typeStartMode(ctx context.Context, launch host.Launcher, created 
 		t.path = path
 	}
 	t.line = startLineChoice(cmd, t.path, anchor, bash, useStartFile, shells...)
+	if backend != nil {
+		if err := backend.beforeDispatch(anchor); err != nil {
+			t.done()
+			if closeOnError {
+				n.closeNewTab(ctx, launch, created, ws)
+			}
+			return nil, err
+		}
+	}
 	if err := launch.Run(ctx, created.Pane, t.line); err != nil {
 		t.done()
 		if closeOnError {

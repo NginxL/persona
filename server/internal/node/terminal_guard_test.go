@@ -30,6 +30,8 @@ var paneClosers = map[string]string{
 	"closeFinished":     "panes.close_finished: the user's Close finished terminals (stopped.go)",
 	"closeFinishedPane": "a finished Agent's terminal after its grace period, rechecked under its recovery lock (finished_close.go, #10111)",
 	"closeStalledTab":   "the user's retry of a stalled Orca start: its kept tab, with no agent in it, whose one launch is used (#9534)",
+	"closeWorktreeShells": "the empty first shell of an Agent's worktree, no Agent in it, once that Agent's own tab is open " +
+		"there (personatab.go)",
 }
 
 func TestOnlyUserActionsClosePanes(t *testing.T) {

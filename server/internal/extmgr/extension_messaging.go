@@ -117,8 +117,13 @@ func (ps *extensions) messagingSources() []wire.MessagingSource {
 
 // messagingSource is the running extension that has the source, nil when none does.
 func (ps *extensions) messagingSource(source string) *hubExtension {
+	hp, _ := ps.messagingOwner(source)
+	return hp
+}
+
+func (ps *extensions) messagingOwner(source string) (*hubExtension, wire.MessagingItem) {
 	if ps == nil {
-		return nil
+		return nil, wire.MessagingItem{}
 	}
 	for _, p := range ps.reg.List() {
 		if !p.Record.Enabled || p.Problem != "" {
@@ -127,13 +132,13 @@ func (ps *extensions) messagingSource(source string) *hubExtension {
 		for _, it := range p.Manifest.Messaging() {
 			if it.ID == source {
 				if hp := ps.get(p.Record.ID); hp != nil && hp.proc != nil && hp.proxy != nil {
-					return hp
+					return hp, it
 				}
-				return nil
+				return nil, wire.MessagingItem{}
 			}
 		}
 	}
-	return nil
+	return nil, wire.MessagingItem{}
 }
 
 func (h *Manager) messagingRoutes(api *http.ServeMux) {
@@ -157,7 +162,7 @@ func (h *Manager) serveMessaging(w http.ResponseWriter, r *http.Request) {
 		writeErrCode(w, http.StatusNotFound, "not_found", errors.New("no such messaging route"))
 		return
 	}
-	hp := h.extensions.messagingSource(source)
+	hp, item := h.extensions.messagingOwner(source)
 	if hp == nil {
 		writeErrCode(w, http.StatusNotFound, "not_found", errors.New("no messaging source "+strconv.Quote(source)))
 		return
@@ -179,12 +184,12 @@ func (h *Manager) serveMessaging(w http.ResponseWriter, r *http.Request) {
 	r.Header.Set("X-Persona-Role", p.Role)
 	// No receipt for sends (docs "Sends are not repeated"): one would keep a refusal the user can fix (the switch off,
 	// a sealed token expired) and replay it for the client_id; the extension drops a repeat by its client_id itself.
-	h.messagingAnswer(w, r, hp, rt)
+	h.messagingAnswer(w, r, hp, rt, slices.Contains(item.Capabilities, "accounts"))
 }
 
 // messagingAnswer passes the extension's answer on: as it is for bytes, errors and unchecked routes; a checked 2xx
 // only when it holds to its schema definition (502 extension_bad_response otherwise, logged).
-func (h *Manager) messagingAnswer(w http.ResponseWriter, r *http.Request, hp *hubExtension, rt messagingRoute) {
+func (h *Manager) messagingAnswer(w http.ResponseWriter, r *http.Request, hp *hubExtension, rt messagingRoute, multiple bool) {
 	if rt.Answer == "" {
 		hp.serveExtensionHTTP(w, r)
 		return
@@ -213,6 +218,21 @@ func (h *Manager) messagingAnswer(w http.ResponseWriter, r *http.Request, hp *hu
 		}
 		rec.body.Reset()
 		rec.body.Write(fitted)
+	}
+	source := r.PathValue("source")
+	account := r.URL.Query().Get("account")
+	// An older multi-account page may omit its account. Only a successful
+	// read with relative pictures needs a second, explicitly pinned read:
+	// the source's default could change between reading the page and GET me.
+	if addMessagingAvatars(rec, rt.Answer, source, account, multiple) && account == "" && r.Method == http.MethodGet {
+		if current := defaultMessagingAccount(r.Context(), hp, source); current != "" {
+			pinned := r.Clone(r.Context())
+			q := pinned.URL.Query()
+			q.Set("account", current)
+			pinned.URL.RawQuery = q.Encode()
+			h.messagingAnswer(w, pinned, hp, rt, multiple)
+			return
+		}
 	}
 	rec.copyTo(w)
 }

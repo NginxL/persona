@@ -202,7 +202,8 @@ private fun launchIndex(it: Item, calls: Map<String, String>, at: Map<String, In
 private fun itemUsage(it: Item, reports: Boolean): List<TokenUsage> =
     (it.usage + it.fold?.usage.orEmpty()).filter { it.report == reports }
 
-private fun isUserMessage(it: Item) =
+/** A user text or photo that opens an exchange; an image returned by a tool belongs to its work. */
+fun isUserMessage(it: Item) =
     it.role == "user" && (it.kind == "text" || (it.kind == "image" && it.toolUseId == null))
 
 /** A background task's notice, or a subagent's report as its call's result, that woke the idle agent: what opens a turn in [buildBlocks]. */

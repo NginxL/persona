@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log"
 	"maps"
 	"path/filepath"
 	"sort"
@@ -109,9 +110,14 @@ func (n *Node) launchers(ctx context.Context) ([]proto.Launcher, error) {
 	// hub's 30 s on every ask while this lock held each one behind it. The shell's output so far is the list.
 	cmd := loginShell(ctx, launcherScript)
 	killGroupOnCancel(cmd)
+	began := time.Now()
 	out, err := cmd.Output()
-	if err != nil && len(out) == 0 {
-		return nil, fmt.Errorf("list launchers: %w", err)
+	if !strings.Contains(string(out), launcherBegin) {
+		// The shell ended before the script ran (the 20 s cap on a slow rc file, an rc file that exits): what it printed
+		// is the rc files' own, and says nothing of the launchers. Parsed, it was plain claude alone, which replaced the
+		// last list for a minute: every other launcher unknown, and the hub moved their conversations to claude (#11580).
+		return lastLaunchers(fmt.Errorf("list launchers: the login shell ended before listing them after %v: %v",
+			time.Since(began).Round(time.Millisecond), err))
 	}
 	list, codex, settings, scripts := mergeLaunchers(string(out))
 	launcherCache.Lock()
@@ -119,6 +125,19 @@ func (n *Node) launchers(ctx context.Context) ([]proto.Launcher, error) {
 	launcherCache.scripts = scripts
 	launcherCache.Unlock()
 	return list, nil
+}
+
+// lastLaunchers answers a failed read of the login shell (launchers): the last list, kept for another minute so the
+// next try is not on every ask while a slow shell stays slow; the error only when there has been no list yet.
+func lastLaunchers(failed error) ([]proto.Launcher, error) {
+	launcherCache.Lock()
+	defer launcherCache.Unlock()
+	if launcherCache.list == nil {
+		return nil, failed
+	}
+	log.Printf("node: %v; keeping the last %d launchers", failed, len(launcherCache.list))
+	launcherCache.at = time.Now()
+	return launcherCache.list, nil
 }
 
 // mergeLaunchers is launcherScript's output as the launcher list: the helper's, then the aliases it does not name,

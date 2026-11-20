@@ -94,6 +94,16 @@ const (
 	FeishuText = "feishu.text"
 	// FeishuUpdateCard: {message_id, card} → {}.
 	FeishuUpdateCard = "feishu.update_card"
+	// FeishuCardCreate: {card} → {card_id}: a card entity (CardKit) made of the card (JSON 2.0); FeishuPost sends it with
+	// feishubot.CardEntityContent(card_id) as its card, and FeishuUpdateCard still updates that message whole.
+	FeishuCardCreate = "feishu.card_create"
+	// FeishuCardUpdate: {card_id, card, sequence} → {}: the whole card written into an entity. FeishuCardStream:
+	// {card_id, element, text, sequence} → {}: an element's whole text streamed into it (feishubot.StreamClosed tells
+	// one that stopped streaming). FeishuCardSettings: {card_id, streaming, sequence} → {}: its streaming turned on or
+	// off. A write's sequence must be larger than the entity's last; errors carry Feishu's code.
+	FeishuCardUpdate   = "feishu.card_update"
+	FeishuCardStream   = "feishu.card_stream"
+	FeishuCardSettings = "feishu.card_settings"
 	// FeishuPin: {message_id, exclusive?} → {}: one of the bot's messages in the owner's private chat pinned there;
 	// exclusive takes off the other pins the bot made in that chat (never the owner's own) (#1961, the workbench).
 	FeishuPin = "feishu.pin"

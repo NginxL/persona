@@ -124,6 +124,13 @@ type Interaction struct {
 	// CanClarify advertises an assistant-owned prepared approval whose owner may ask a question without resolving it.
 	// Only the authoritative creation path sets it; older clients ignore it and keep their existing Allow/Deny behavior.
 	CanClarify bool `json:"can_clarify,omitempty"`
+	// Detachable is a node command gate's request to release its initial hook while the owner decides. The manager
+	// honors it only for a permission in one of its assistant conversations with complete input and ExecutionCwd;
+	// a later Allow creates a one-time grant for the exact original call rather than executing it in another process.
+	Detachable bool `json:"detachable,omitempty"`
+	// ExecutionCwd is where this command actually runs, which can differ from the conversation's display directory
+	// (Cwd). The node sets it for a detachable command; the manager requires it and includes it in the exact-call grant.
+	ExecutionCwd string `json:"execution_cwd,omitempty"`
 	// Dialog is the screen's dialog read on the hub (screen interactions); answers name an option and are checked
 	// against Dialog.Rev before any key is pressed. Absent when the screen shows no dialog it could read.
 	Dialog *dialogwire.Dialog `json:"dialog,omitempty"`
@@ -279,6 +286,12 @@ type Resolution struct {
 	// Options answer a multi-select screen dialog (Dialog.Multi): the keys of the options to have checked when it is
 	// sent, the rest unchecked; Text is its free-text field (empty: left unchecked).
 	Options []string `json:"options,omitempty"`
+	// Pending marks a non-final dismissal of a detachable command's initial hook: the owner has not decided, nothing
+	// ran, and the card remains pending. The originating conversation receives the final outcome separately.
+	Pending bool `json:"pending,omitempty"`
+	// ApprovalID identifies the authoritative card behind a pending result or a consumed one-time continuation grant.
+	// It is empty on an ordinary answer to the card currently being waited on.
+	ApprovalID string `json:"approval_id,omitempty"`
 	// Values are the card's Fields as filled in on the phone, by key.
 	Values map[string]string `json:"values,omitempty"`
 }

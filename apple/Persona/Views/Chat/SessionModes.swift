@@ -386,6 +386,20 @@ nonisolated enum SessionModes {
     }
     static func effortLabel(_ id: String?) -> String? { id.map { effort($0)?.title ?? $0 } }
 
+    struct EffortChange: Equatable, Sendable {
+        var label: String
+        var failed: Bool
+        var symbol: String { failed ? Theme.Icon.error : Theme.Icon.time }
+        var spoken: String {
+            failed ? String(localized: "Thinking effort change failed") : String(localized: "Thinking effort after this turn: \(label)")
+        }
+    }
+
+    static func effortChange(_ session: Session?) -> EffortChange? {
+        guard let label = effortLabel(session?.pendingEffort) else { return nil }
+        return EffortChange(label: label, failed: session?.effortChangeFailed == true)
+    }
+
     /// The shell composer's model button's two words (#1091, #1117), ChatGPT's "6.1 Sol Medium": the model, drawn in the text's
     /// ink, and the effort, in the quieter ink after it.
     struct ComposerTitle: Equatable, Sendable {
@@ -393,11 +407,12 @@ nonisolated enum SessionModes {
         var effort: String?
         /// The workflow mark after the effort (#1307): ultracode on, or a Codex thread at "ultra".
         var mark: Ultracode.Mark? = nil
+        var effortChange: EffortChange? = nil
         /// For VoiceOver and the UI tests: "Opus 5.5 High", "Opus 5.5 High, ultracode on".
         var spoken: String {
             let words = effort.map { "\(model) \($0)" } ?? model
-            guard let extra = mark?.spoken else { return words }
-            return words + String(localized: ", ", comment: "List separator") + extra
+            return [words, mark?.spoken, effortChange?.spoken].compactMap { $0 }
+                .joined(separator: String(localized: ", ", comment: "List separator"))
         }
     }
 
@@ -462,6 +477,7 @@ struct SessionModeBar: View {
         // A session that lists its own modes (#8261) is always in one of them: no mode reported is its own approval.
         let mode = SessionModes.current(session)
         let effort = session?.effort
+        let effortChange = SessionModes.effortChange(session)
         HStack(spacing: Theme.Space.s) {
             if session?.setsEffortOnly != true || session?.canSwitchListedModes == true {
                 Menu {
@@ -490,6 +506,12 @@ struct SessionModeBar: View {
                     }
                 }
                 .pickerStyle(.inline)
+                if let effortChange {
+                    Label(effortChange.spoken, systemImage: effortChange.symbol)
+                }
+                if let effort, effortChange != nil || model.canKeepOutboxEffort(key, effort: effort) {
+                    Button("Keep Current Effort") { Task { await model.keepCurrentEffort(key, effort: effort) } }
+                }
                 if !UltracodeMenuSection.leadsEffort { UltracodeMenuSection(key: key, session: session) }
                 // The model in the same chip (#3119, the web's #2434): Claude Code takes `/model`, typed by the node.
                 // A session whose node takes the model (#6294) offers its launcher's list once read (`offersModels`).
@@ -515,7 +537,7 @@ struct SessionModeBar: View {
             } label: {
                 ModeChip(symbol: SessionModes.effort(effort)?.symbol ?? Theme.Icon.effort,
                          text: effort.map { String(localized: "Thinking \(SessionModes.effortLabel($0) ?? $0) [Session Modes e77236]") } ?? String(localized: "Thinking Effort"), tint: .secondary, known: effort != nil,
-                         mark: Ultracode.chipMark(session))
+                         mark: Ultracode.chipMark(session), effortChange: effortChange)
             }
             .labelOnlyMenu()
             .accessibilityLabel(effortSpoken)
@@ -533,8 +555,8 @@ struct SessionModeBar: View {
         let words = SessionModes.offersModels(session, list: RunningModelLists.shared.models(key, session))
             ? String(localized: "Thinking effort and model: \(SessionModes.effortLabel(effort) ?? String(localized: "Unknown [Session Modes 4d8c1c]")), \(SessionModes.modelName(session?.model) ?? String(localized: "Unknown model"))")
             : String(localized: "Thinking effort: \(SessionModes.effortLabel(effort) ?? String(localized: "Unknown [Session Modes 4d8c1c]"))")
-        guard let extra = Ultracode.chipMark(session)?.spoken else { return words }
-        return words + String(localized: ", ", comment: "List separator") + extra
+        return [words, Ultracode.chipMark(session)?.spoken, SessionModes.effortChange(session)?.spoken]
+            .compactMap { $0 }.joined(separator: String(localized: ", ", comment: "List separator"))
     }
 
     private func change(mode: String? = nil, effort: String? = nil, model picked: String? = nil) {
@@ -546,7 +568,7 @@ struct SessionModeBar: View {
         let newModel = picked.flatMap { SessionModes.modelPatch($0, current: session?.model, list: list) }
         if picked != nil, newModel == nil { return } // the model it runs already
         let modeChanged = mode.map { SessionModes.appliesPick(session, to: $0) } ?? false
-        let effortChanged = effort.map { $0 != session?.effort } ?? false
+        let effortChanged = effort.map { $0 != session?.effort || session?.pendingEffort != nil } ?? false
         guard modeChanged || effortChanged || newModel != nil, !changing else { return }
         changing = true
         Task {
@@ -587,7 +609,10 @@ struct SessionModesMenu: View {
     static func title(_ session: Session?, setsModes: Bool) -> SessionModes.ComposerTitle? {
         var title = SessionModes.composerTitle(model: SessionModes.modelName(session?.model),
                                                effort: setsModes ? SessionModes.effortLabel(session?.effort) : nil)
-        if setsModes { title?.mark = Ultracode.chipMark(session) }
+        if setsModes {
+            title?.mark = Ultracode.chipMark(session)
+            title?.effortChange = SessionModes.effortChange(session)
+        }
         return title
     }
 
@@ -679,6 +704,13 @@ struct SessionModesMenu: View {
             // the menu lists its items the other way round, `UltracodeMenuSection.leadsEffort`).
             if UltracodeMenuSection.leadsEffort { UltracodeMenuSection(key: key, session: session) }
             Section("Thinking Effort") { // switches, so the title is drawn (#4322, `MenuChoice`)
+                let effortChange = SessionModes.effortChange(session)
+                if let effortChange {
+                    Label(effortChange.spoken, systemImage: effortChange.symbol)
+                }
+                if let effort, effortChange != nil || model.canKeepOutboxEffort(key, effort: effort) {
+                    Button("Keep Current Effort") { Task { await model.keepCurrentEffort(key, effort: effort) } }
+                }
                 ForEach(SessionModes.effortOptions(session)) { o in
                     MenuChoice(id: o.id, selected: effort ?? "", pick: { change(effort: $0) }) {
                         Label { Text(o.title); Text(o.detail) } icon: { ThemedIcon(o.symbol) }
@@ -724,7 +756,7 @@ struct SessionModesMenu: View {
             return
         }
         let modeChanged = mode.map { SessionModes.appliesPick(session, to: $0) } ?? false
-        let effortChanged = effort.map { $0 != session?.effort } ?? false
+        let effortChanged = effort.map { $0 != session?.effort || session?.pendingEffort != nil } ?? false
         guard modeChanged || effortChanged else { return }
         Task { await model.setModes(key, permissionMode: mode, effort: effort) }
     }
@@ -893,6 +925,7 @@ struct ModeChip: View {
     /// The workflow mark after the label (#1307): ultracode on, or a Codex thread at "ultra". The chip's menu says it
     /// to VoiceOver (`SessionModeBar.effortSpoken`).
     var mark: Ultracode.Mark? = nil
+    var effortChange: SessionModes.EffortChange? = nil
 
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
@@ -900,6 +933,9 @@ struct ModeChip: View {
             Text(text).lineLimit(1)
             if mark != nil {
                 UltracodeMark(font: Theme.Font.labelStrong, spoken: nil).transition(.opacity)
+            }
+            if let effortChange {
+                ThemedIcon(effortChange.symbol).foregroundStyle(.secondary).accessibilityHidden(true)
             }
             ThemedIcon(Theme.Icon.choices).font(Theme.Font.labelHeavy).imageScale(.small).opacity(0.6)
         }

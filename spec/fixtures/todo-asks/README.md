@@ -66,8 +66,10 @@ round (`2026-11-09T09:00:00Z`) is a screen that is behind, and `todo_other` is n
 - **Nothing a client cannot undo by mistake.** A decision has no one action, so an empty answer is 400 rather than its
   recommendation; one answer per call (400 otherwise); a receipt goes only with `undo`.
 - **Not delivered is still answered.** Words or an option no Agent can receive are recorded and handed to the to-do's
-  supervisor, answering `delivered: "none"`; any other failure to send takes nothing (502 `accept_not_taken`, 423 when
-  a node refused with its own code), as on the accept route.
+  supervisor, answering `delivered: "none"`; any other failure to send that typed nothing takes nothing (502
+  `accept_not_taken`, 423 when a node refused with its own code, both `delivered: "none"`), as on the accept route. A
+  send that may have reached the Agent, or did before the decision could be recorded, is 502 `send_in_doubt` instead
+  (`spec/fixtures/todo-writes`).
 - **A run's ask is its session's**: 409 `answer_in_session`; its card answers it (`POST /api/v1/interactions/{id}/resolve`).
 - **An id of no known form** (or naming a to-do that is no step of this one) is 404 `ask_not_found`.
 

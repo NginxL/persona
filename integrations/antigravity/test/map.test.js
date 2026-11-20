@@ -207,7 +207,8 @@ describe('antigravity transcript and tool mapping', () => {
     assert.deepEqual(uses.map((use) => results.get(use.tool_use_id)), ['first', undefined, 'second', 'third', 'fourth'])
   })
 
-  it('omits unresolvable step.media image items while preserving Read ViewedImages metadata and user attached_images', () => {
+  it('opts into lazy tool media without changing Read metadata, user attachments, or turn pagination', () => {
+    const inline = { mime_type: 'image/gif', data: 'R0lGODlh' }
     const steps = [
       {
         step_index: 0,
@@ -240,6 +241,8 @@ describe('antigravity transcript and tool mapping', () => {
         media: [
           { mime_type: 'image/png', uri: '/work/shots/ui.png' },
           { mime_type: 'application/pdf', uri: '/work/spec.pdf' },
+          inline,
+          { mime_type: 'image/png' },
         ],
       },
       {
@@ -304,6 +307,20 @@ describe('antigravity transcript and tool mapping', () => {
       const paged = page(items, { turns: 1 }, { history: 'h', toSeq })
       assert.equal(paged.has_more, false, `full=${full}: single turn must not be split by tool media`)
       assert.equal(paged.items[0].id, userItems[0].id)
+
+      const mapped = stepsToItems(steps, { full, includeMedia: true })
+      const images = mapped.items.filter((item) => item.kind === 'image')
+      const expected = [[0, 0, 'png'], [0, 2, 'gif'], [1, 0, 'jpeg'], [2, 0, 'webp']]
+      assert.deepEqual(images, expected.map(([resultIndex, mediaIndex, format]) => {
+        const { id, seq, tool_use_id, ts } = results[resultIndex]
+        return { id: id.replace(/#0$/, `#media${mediaIndex}`), seq, role: 'assistant', kind: 'image', tool_use_id, ts,
+          image: { mime: `image/${format}`, data: '', lazy: true } }
+      }))
+      assert.equal(mapped.media, undefined)
+      assert.equal(stepsToItems(steps, { includeMedia: true, mediaItemId: images[1].id }).media, inline)
+      assert.equal(stepsToItems(steps, { mediaItemId: images[1].id }).media, undefined)
+      const withMedia = page(mapped.items, { turns: 1 }, { history: 'h', toSeq: mapped.toSeq })
+      assert.deepEqual({ ...withMedia, items: withMedia.items.filter((item) => item.kind !== 'image') }, paged)
     }
 
     // Photo-only user uploads carried via <attached_images> still produce the user text item without lazy image items.
@@ -317,7 +334,7 @@ describe('antigravity transcript and tool mapping', () => {
         content: '<USER_REQUEST>\n<attached_images>\n/tmp/only-photo.png\n</attached_images>\n</USER_REQUEST>',
         media: [{ mime_type: 'image/png', uri: '/tmp/only-photo.png' }],
       },
-    ])
+    ], { includeMedia: true })
     assert.equal(photoOnly.items.length, 1)
     assert.equal(photoOnly.items[0].kind, 'text')
     assert.equal(photoOnly.items[0].text, '<attached_images>\n/tmp/only-photo.png\n</attached_images>')

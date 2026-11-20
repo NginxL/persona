@@ -2674,12 +2674,14 @@ type MessagingMe struct {
 }
 
 type MessagingAccount struct {
-	ID       string `json:"id"`
-	Name     string `json:"name,omitempty"`
-	Avatar   string `json:"avatar,omitempty"`
-	Tenant   string `json:"tenant,omitempty"`
-	SignedIn bool   `json:"signed_in"`
-	Unread   int    `json:"unread,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name,omitempty"`
+	Avatar string `json:"avatar,omitempty"`
+	// Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+	AvatarURL string `json:"avatar_url,omitempty"`
+	Tenant    string `json:"tenant,omitempty"`
+	SignedIn  bool   `json:"signed_in"`
+	Unread    int    `json:"unread,omitempty"`
 }
 
 type MessagingAccounts struct {
@@ -2699,9 +2701,11 @@ const (
 var MessagingConversationKinds = []string{"direct", "group", "topic_group", "bot"}
 
 type MessagingConversation struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Avatar          string    `json:"avatar,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Avatar string `json:"avatar,omitempty"`
+	// Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+	AvatarURL       string    `json:"avatar_url,omitempty"`
 	Kind            string    `json:"kind"`
 	Unread          int       `json:"unread"`
 	MarkedUnread    bool      `json:"marked_unread,omitempty"`
@@ -2726,7 +2730,9 @@ type MessagingPerson struct {
 	ID     string `json:"id,omitempty"`
 	Name   string `json:"name"`
 	Avatar string `json:"avatar,omitempty"`
-	Kind   string `json:"kind,omitempty"`
+	// Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+	AvatarURL string `json:"avatar_url,omitempty"`
+	Kind      string `json:"kind,omitempty"`
 }
 
 type MessagingMembers struct {
@@ -3046,9 +3052,11 @@ type MessagingProfileField struct {
 }
 
 type MessagingProfile struct {
-	ID          string                  `json:"id"`
-	Name        string                  `json:"name"`
-	Avatar      string                  `json:"avatar,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Avatar string `json:"avatar,omitempty"`
+	// Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+	AvatarURL   string                  `json:"avatar_url,omitempty"`
 	Cover       string                  `json:"cover,omitempty"`
 	Kind        string                  `json:"kind,omitempty"`
 	Subtitle    string                  `json:"subtitle,omitempty"`
@@ -4029,6 +4037,8 @@ type ConnectorArchiveChat struct {
 	State string `json:"state,omitempty"`
 	// When the conversation got to state; omitted when unknown.
 	StateAt time.Time `json:"state_at,omitzero"`
+	// Stable HTTP(S) link to the conversation at its source, when available.
+	SourceURL string `json:"source_url,omitempty"`
 }
 
 // ConnectorArchiveMessage: one archived message. The archive only appends: a message without at, or without text and
@@ -4700,6 +4710,10 @@ type KBEntry struct {
 	// A recording's imported meeting: the id of the meetings item it overlaps, as the meetings list has it (#8872);
 	// absent on other kinds, before a match and from an older hub.
 	MeetingID string `json:"meeting_id,omitempty"`
+	// Reference-only for a project that stores pointers. Omitted means full.
+	ProjectMode string              `json:"project_mode,omitempty"`
+	Freshness   *KBProjectFreshness `json:"freshness,omitempty"`
+	Sources     []KBProjectSource   `json:"sources,omitempty"`
 }
 
 // KBRecentParams: kb.recent (kb.read): what came in from every source in [since, until), newest first, across kinds:
@@ -4760,6 +4774,57 @@ type KBDetail struct {
 	// A person's profiles by writer ("user", "ext:<id>"), as written; summary shows them too
 	// (docs/assistant/knowledge.md "Person profiles").
 	Profiles map[string]KBProfileRecord `json:"profiles,omitempty"`
+	// Reference-only for a project that stores pointers. Omitted means full.
+	ProjectMode string              `json:"project_mode,omitempty"`
+	Freshness   *KBProjectFreshness `json:"freshness,omitempty"`
+	Sources     []KBProjectSource   `json:"sources,omitempty"`
+}
+
+type KBProjectSource struct {
+	// Canonical source identity shared across project views.
+	ID   string   `json:"id"`
+	URL  string   `json:"url,omitempty"`
+	Refs []string `json:"refs,omitempty"`
+	// State observed at the source, such as merged.
+	DeliveryState string    `json:"delivery_state,omitempty"`
+	DeliveryAt    time.Time `json:"delivery_at,omitzero"`
+	// Unverified when only source delivery facts are available.
+	EnvironmentVerification string `json:"environment_verification,omitempty"`
+}
+
+type KBProjectFreshness struct {
+	NeedsReview bool                               `json:"needs_review"`
+	TimelineEnd int64                              `json:"timeline_end"`
+	Evidence    []KBProjectEvidenceRef             `json:"evidence,omitempty"`
+	Fields      map[string]KBProjectFieldFreshness `json:"fields"`
+}
+
+type KBProjectFieldFreshness struct {
+	// Omitted when historical authorship is unknown.
+	Writer       string           `json:"writer,omitempty"`
+	Source       string           `json:"source,omitempty"`
+	Cutoff       *KBProjectCutoff `json:"cutoff,omitempty"`
+	LockReason   string           `json:"lock_reason,omitempty"`
+	ReviewBy     string           `json:"review_by"`
+	NeedsReview  bool             `json:"needs_review"`
+	ReviewReason string           `json:"review_reason,omitempty"`
+	// Omitted when the gap cannot be counted.
+	UncoveredEvidenceCount *int `json:"uncovered_evidence_count,omitempty"`
+}
+
+type KBProjectCutoff struct {
+	TimelineFrom    int64 `json:"timeline_from"`
+	TimelineThrough int64 `json:"timeline_through"`
+	// True if earlier timeline entries were outside this refresh window.
+	TimelineTruncated bool                   `json:"timeline_truncated,omitempty"`
+	Sources           []KBProjectEvidenceRef `json:"sources,omitempty"`
+}
+
+type KBProjectEvidenceRef struct {
+	Ref string `json:"ref"`
+	// Opaque revision of this input.
+	Position string `json:"position"`
+	SourceID string `json:"source_id,omitempty"`
 }
 
 type KBProfileRecord struct {
@@ -6782,6 +6847,11 @@ var newDef = map[string]func() any{
 	"KBGetParams":                   func() any { return new(KBGetParams) },
 	"KBGetResult":                   func() any { return new(KBGetResult) },
 	"KBDetail":                      func() any { return new(KBDetail) },
+	"KBProjectSource":               func() any { return new(KBProjectSource) },
+	"KBProjectFreshness":            func() any { return new(KBProjectFreshness) },
+	"KBProjectFieldFreshness":       func() any { return new(KBProjectFieldFreshness) },
+	"KBProjectCutoff":               func() any { return new(KBProjectCutoff) },
+	"KBProjectEvidenceRef":          func() any { return new(KBProjectEvidenceRef) },
 	"KBProfileRecord":               func() any { return new(KBProfileRecord) },
 	"KBPersonProfile":               func() any { return new(KBPersonProfile) },
 	"KBProfileItem":                 func() any { return new(KBProfileItem) },

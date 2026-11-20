@@ -3,7 +3,7 @@
 // those Agents are on. One case per line of the issue's acceptance, then the rules' edges: pieces at any depth, a
 // `part_of` loop, quiet tasks, and the page's "Not done", which stays as it is. The data is made up.
 import { describe, expect, it } from "vitest";
-import type { Session } from "./types";
+import type { Interaction, Session } from "./types";
 import { makeSessionLookup, type Todo } from "./todos";
 import { ownerBadge, triage, triageTodos, waitsOnOwner } from "./todo-triage";
 
@@ -71,6 +71,29 @@ describe("the sidebar's To-dos badge, the issue's acceptance (#11085)", () => {
 
   it("counts a personal to-do no Agent was ever on", () => {
     expect(counted([personal("own")])).toEqual(["own"]);
+  });
+
+  it("keeps one badge count and calls the task agent_asks only while its exact linked interaction is pending", () => {
+    const ix = { id: "ix-owner", machine_id: "m", session_id: "worker", kind: "question", created_at: hoursAgo(1) } as Interaction;
+    const linked = task("linked", {
+      agents: [{ ...agent("worker"), released_at: hoursAgo(0) }],
+      supervision: {
+        supervisor: "conv", state: "parked",
+        parked: { reason: "Owner permission", waiting_on: "external_event", until: hoursAgo(-4), count: 1,
+          evidence: { kind: "external_event", target: "Read-only permission", wake: "The owner answers", interaction_id: ix.id } },
+      },
+    });
+    const sessions = [session("worker", "idle")];
+    const pendingTodo = { ...linked, view: { phase: "needs_you", section: "needs_you", reason: "agent_asks", rank: 0,
+      asks: [{ id: "run:worker", kind: "question", home: "run", interaction: ix.id }] } } as Todo;
+    const pending = makeSessionLookup(sessions);
+    expect(waitsOnOwner(pendingTodo, triage(pendingTodo, pending, NOW))).toBe("agent_asks");
+    expect([...ownerBadge([pendingTodo], pending, NOW)]).toEqual(["linked"]);
+    const resolved = makeSessionLookup(sessions);
+    expect(waitsOnOwner(pendingTodo, triage(pendingTodo, makeSessionLookup(sessions, []), NOW))).toBeNull();
+    expect(waitsOnOwner(linked, triage(linked, resolved, NOW))).toBeNull();
+    // The existing no-Agent-on-it badge rule still counts the parked task once; the link does not change that policy.
+    expect([...ownerBadge([linked], resolved, NOW)]).toEqual(["linked"]);
   });
 });
 

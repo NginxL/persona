@@ -36,6 +36,9 @@ type switchShare struct {
 	// so a record written meanwhile goes after the ones before it.
 	// restarts: the restarts in another permission mode waiting for a session's turn to end (mode_restart.go).
 	restarts   map[string]*modeRestart
+	efforts    map[string]effortChange   // queued terminal effort changes (effort_change.go)
+	confirmed  map[string]terminalEffort // last confirmed effort of a managed Claude pane
+	modesInput typingLocks               // serializes terminal mode and effort changes across hub connections
 	held       map[string]sessionState
 	to         *Node
 	delivering bool

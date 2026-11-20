@@ -6,9 +6,9 @@ that keep one chat current. `continuity` already owns what a batch of items does
 decodes hub bytes into `continuity`'s inputs. Neither decides *when* to ask for a page, *when* to re-open a socket,
 *when* to declare a subscription stalled, or *when* a chat is caught up. That decision layer is `sync`.
 
-Nothing here is implemented. This document is source-reading only: no production network, WebSocket, persistence
-or client change, and no device or simulator claim. The behavioral reference is iOS (decision 7 of the parent
-plan); Android and HarmonyOS differences are recorded, not resolved.
+The behavioral reference is iOS (decision 7 of the parent plan). The initial pure Rust driver (#9783) implements
+single-group reconnect backoff, the event cursor and lifecycle. Its [fixture manifest](../../spec/fixtures/sync-driver/README.md)
+records the host evidence and the boundary with native code. The remaining sections describe the broader design.
 
 **Who it serves**: everyone who uses the phone apps, indirectly, exactly as the parent plan. Nothing the user sees
 changes. The goal is that reconnects, catch-ups and foreground resumes behave identically on every phone because
@@ -20,7 +20,7 @@ they are decided in one place.
 | --- | --- | --- |
 | `transport` | Bytes → typed events (`ItemsResponse`, `NewerResponse`, fold range, `items` frame). | Yes (`native/app-core`, #7385). |
 | `continuity` | One chat's items, `covered`, `hasMore`, opened folds; what a batch leaves to do (`Gap.none / fill / reload`) and the immediate `fetch_after` / `fetch_latest` / `subscribe` actions. | Yes (`persona_core::continuity`, 38 cases / 94 steps). |
-| `sync` (this design) | Socket lifecycle (open, drop, grace, reconnect with backoff), the event-resume cursor, per-chat subscription lifecycle, when to turn a `Gap` into a request and when to collapse duplicate requests, stalled-subscription detection and catch-up pacing, background prefetch scheduling, catch-up completion (the "Updating…" barrier), and foreground/background transitions. | No. |
+| `sync` (this design) | Socket lifecycle (open, drop, grace, reconnect with backoff), the event-resume cursor, per-chat subscription lifecycle, when to turn a `Gap` into a request and when to collapse duplicate requests, stalled-subscription detection and catch-up pacing, background prefetch scheduling, catch-up completion (the "Updating…" barrier), and foreground/background transitions. | Socket lifecycle, cursor and foreground/background transitions only (#9783). |
 | Outbox and sends | Retry of a *write* through a gap (`OpRetry`, op ids), pending bubbles. | No — a separate later domain; only the seam is named here. |
 | Storage | `ChatCache`, `AgentSync`'s rev ledger, the launch snapshot. | Phase 4 (`docs/plans/plan-rust-core-phase4-storage.md`, #9085). |
 
@@ -422,14 +422,15 @@ follows iOS, and a genuine cross-client behavioral difference is filed separatel
 
 ## 7. What the next agent can implement directly
 
-1. Create `spec/fixtures/sync-driver/` with the files in section 3.3, expectations written from the cited Swift
-   sources, plus the Go/structure self-check analogous to `sync_scenarios_test.go`.
-2. Implement `persona_core::sync` (`SyncDriver`, `SyncInput`, `SyncEffect`) as a pure module reusing
-   `persona_core::continuity` for chat batches; `cargo test` replays every `sync-driver` case.
+1. Extend the first three topics in `spec/fixtures/sync-driver/` with the remaining section 3.3 cases. Write the
+   expectations from the cited Swift sources and add each case to the replay and negative checks.
+2. Extend `persona_core::sync` at the per-chat request boundary, reusing `persona_core::continuity` for chat
+   batches. The existing driver hands the host the full-refresh or resumed-replay decision.
 3. Wire `Action::WirePayload` → `transport` → `SyncInput::Frame` in the runtime, and surface `SyncEffect`s through
    the existing effect channel; regenerate codecs (a wire-type change ships its regenerated codecs).
 4. Only then: the iOS adapter behind a protocol with the native path as shadow reference (migration rules 3–4),
    reusing the #8970 continuity-adapter seam, and the existing `spec/fixtures/sync` stories as the end-to-end
    acceptance (already replayed by `SyncScenarioTests`).
 
-No device, simulator, or physical-network claim is made anywhere in this design; all evidence is source reading.
+The first three topics completed under #9783 use behavior constants and injected jitter. Production random-source
+selection, per-chat scheduling and runtime integration remain open. Physical-device cells are **blocked: no physical device**.

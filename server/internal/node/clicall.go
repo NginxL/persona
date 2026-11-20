@@ -186,6 +186,7 @@ func (n *Node) runtimeAssistantChat(h *runtimeConn, session string) bool {
 
 type assistantPrepareState struct {
 	connectors []string
+	workGuide  bool
 	clis       map[string]string // command name → connector id
 }
 
@@ -278,27 +279,48 @@ func (n *Node) taskCodexCaller(thread string) string {
 // signedInConnectors are this directory's signed-in connectors as of its last assistant.prepare: whose built-in
 // skills the assistant gets (assistantskills.Requires). An unprepared directory gets none.
 func (n *Node) signedInConnectors(cwd string) []string {
-	key := assistantPrepareDir(cwd)
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return slices.Clone(n.assistantPrepared[key].connectors)
+	return n.skillSelection(cwd).Connectors
 }
 
-// syncAssistantSkills puts the assistant's skills in its directory (cwd): the user's, and the built-in ones whose
-// connector is signed in; a connector's command line is on the assistant's PATH while it is. A runtime's directory (.agents/skills) is
-// kept the same once it is there.
-func (n *Node) syncAssistantSkills(cwd string) {
-	conns := n.signedInConnectors(cwd)
-	dirs := []string{filepath.Join(cwd, ".claude", "skills")}
-	if st, err := os.Stat(filepath.Join(cwd, ".agents", "skills")); err == nil && st.IsDir() {
-		dirs = append(dirs, filepath.Join(cwd, ".agents", "skills"))
+func (n *Node) skillSelection(cwd string) assistantskills.Selection {
+	key := assistantPrepareDir(cwd)
+	n.mu.Lock()
+	state, prepared := n.assistantPrepared[key]
+	n.mu.Unlock()
+	if !prepared {
+		// A resumed process may precede the first prepare after a node restart.
+		// Only Persona's own installation stamp can carry the guide across it.
+		state.workGuide = assistantskills.WorkGuideInstalled(filepath.Join(cwd, ".claude", "skills"))
 	}
+	return assistantskills.Selection{Connectors: slices.Clone(state.connectors), WorkGuide: state.workGuide}
+}
+
+// syncRuntimeSkillDir refreshes one runtime's native skills when an Assistant starts.
+func (n *Node) syncRuntimeSkillDir(cwd, dir string) {
+	n.assistantSkillsMu.Lock()
+	defer n.assistantSkillsMu.Unlock()
+	if err := assistantskills.Sync(dir, assistantskills.UserDir(), n.skillSelection(cwd), n.logger.Printf); err != nil {
+		n.logger.Printf("assistant: skills: %v", err)
+	}
+}
+
+// syncAssistantSkills provisions native skills and connector commands during prepare.
+// Before switching to the compact instructions, both runtimes must have the guide.
+func (n *Node) syncAssistantSkills(cwd string) error {
+	selection := n.skillSelection(cwd)
+	dirs := []string{filepath.Join(cwd, ".claude", "skills")}
+	agentDir := filepath.Join(cwd, ".agents", "skills")
+	if st, err := os.Stat(agentDir); selection.WorkGuide || (err == nil && st.IsDir()) {
+		dirs = append(dirs, agentDir)
+	}
+	var syncErr error
 	for _, d := range dirs {
-		if err := assistantskills.Sync(d, assistantskills.UserDir(), conns, n.logger.Printf); err != nil {
-			n.logger.Printf("assistant: skills: %v", err)
+		if err := assistantskills.Sync(d, assistantskills.UserDir(), selection, n.logger.Printf); err != nil {
+			syncErr = errors.Join(syncErr, err)
 		}
 	}
 	n.writeCLIs(cwd, n.connectorCLIs(cwd))
+	return syncErr
 }
 
 // connectorCLIs are this directory's signed-in connectors' command lines as of its last assistant.prepare.

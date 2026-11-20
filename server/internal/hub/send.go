@@ -371,7 +371,7 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		status, body, outcome := h.deliverOnce(ctx, m, p)
 		body = withLauncherNote(status, body, note)
 		if assistantConv {
-			h.conversationSent(m.cfg.ID, sid, status, body, outcome)
+			h.conversationSent(m.cfg.ID, sid, "", status, body, outcome)
 		}
 		modelSent(status)
 		if status == http.StatusOK && fresh {
@@ -413,7 +413,7 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		f.status, f.body, outcome = h.deliverOnce(ctx, m, p)
 		f.body = withLauncherNote(f.status, f.body, note)
 		if assistantConv {
-			h.conversationSent(m.cfg.ID, sid, f.status, f.body, outcome)
+			h.conversationSent(m.cfg.ID, sid, id, f.status, f.body, outcome)
 		}
 		if assistantConv && (outcome == sendUnknown || f.status >= http.StatusInternalServerError) && asSent != nil {
 			// Nothing was typed, or the connection ended before the outcome was known: the manager keeps the message,
@@ -493,9 +493,10 @@ func (h *Hub) deliverOnce(ctx context.Context, m *Machine, p map[string]any) (in
 }
 
 // conversationSent tells the conversation's manager how an app's message to it went, delivered or not (the north
-// star's availability, docs/assistant/north-star.md): only a send that ran, not a retry answered from its record.
-func (h *Hub) conversationSent(mid, sid string, status int, body []byte, outcome string) {
-	r := assistantwire.ConversationSent{MachineID: mid, SessionID: sid, Outcome: assistantwire.ConversationFailed}
+// star's availability, docs/assistant/north-star.md): only a send that ran, not a retry answered from its record. It
+// names the message by its client_msg_id id ("" none), which its manager settles a direction's notes block by (#11392).
+func (h *Hub) conversationSent(mid, sid, id string, status int, body []byte, outcome string) {
+	r := assistantwire.ConversationSent{MachineID: mid, SessionID: sid, Outcome: assistantwire.ConversationFailed, ClientMsgID: id}
 	switch {
 	case status == http.StatusOK:
 		r.Outcome = assistantwire.ConversationDelivered

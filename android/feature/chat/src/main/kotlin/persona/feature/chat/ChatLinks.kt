@@ -300,7 +300,11 @@ data class ChatLinkContext(
 internal fun linkMessage(draft: String, contexts: List<ChatLinkContext>, resources: Resources): String =
     if (contexts.isEmpty()) draft
     else contexts.joinToString("\n") { it.xml() } + "\n\n" + draft.ifBlank {
-        resources.getString(if (contexts.any { it.isForward }) R.string.chat_forward_no_note else R.string.chat_links_context_default)
+        resources.getString(when (contexts.count { it.isForward }) {
+            0 -> R.string.chat_links_context_default
+            1 -> R.string.chat_forward_no_note
+            else -> R.string.chat_forward_several_no_note
+        })
     }
 
 /** A message carrying [forwards] before [note] (#3901), as a chat's send writes it: for Persona's new-conversation composer. */
@@ -340,8 +344,12 @@ private const val CONTEXTS_V4 = "contexts-v4"
 internal fun withQuote(contexts: List<ChatLinkContext>, quote: ChatLinkContext): List<ChatLinkContext> {
     if (quote.msg.isEmpty()) return contexts + quote
     val already = contexts.any {
-        it.kind == quote.kind && it.msg == quote.msg &&
-            (quote.kind != ChatLinkContext.QUOTE || (it.part == quote.part && (quote.part.isEmpty() || it.text == quote.text)))
+        it.kind == quote.kind && it.msg == quote.msg && when (quote.kind) {
+            ChatLinkContext.QUOTE -> it.part == quote.part && (quote.part.isEmpty() || it.text == quote.text)
+            // Message IDs belong to their source transcript. A destination can already hold another chat's msg-1.
+            ChatLinkContext.FORWARD -> it.url == quote.url || ForwardMessage.origin(quote)?.sameChat(ForwardMessage.origin(it)) == true
+            else -> true
+        }
     }
     return if (already) contexts else contexts + quote
 }

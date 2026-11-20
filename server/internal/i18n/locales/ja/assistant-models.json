@@ -145,5 +145,8 @@
   "err_candidates_extension_only": "候補モデルを持てるのは拡張機能の用途だけです",
   "err_candidates_invalid": "候補モデル：「extension」「off」「custom」のいずれかを選び、「custom」のときだけプロバイダーとモデルを重複なく並べてください",
   "err_candidates_count": "候補モデル：1〜{most} 個並べてください",
-  "err_candidates_not_callable": "{provider} は直接呼び出せないため候補にできません。直接 API のプロバイダーか、アドレスとキーのあるプロバイダーを選んでください"
+  "err_candidates_not_callable": "{provider} は直接呼び出せないため候補にできません。直接 API のプロバイダーか、アドレスとキーのあるプロバイダーを選んでください",
+  "candidate_not_offered": "設定済みのモデルプロバイダーはこのモデルを提供していません",
+  "candidate_not_direct": "プロバイダー {provider} は直接呼び出せません",
+  "candidate_provider_gone": "プロバイダー {provider} は削除されたか、直接呼び出せません"
 }

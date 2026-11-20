@@ -102,11 +102,21 @@ export function openOverlay(onClose: () => void): () => void {
   };
 }
 
+/** How long one Back may take to land (its popstate) before what waits for it goes on anyway. */
+const BACK_MS = 500;
+
+/** Runs `then` once the next Back lands (its popstate: true), or after `ms` without one (false). */
+export function afterBack(then: (popped: boolean) => void, ms = BACK_MS): void {
+  const timer = setTimeout(() => (removeEventListener("popstate", pop), then(false)), ms);
+  const pop = () => (clearTimeout(timer), removeEventListener("popstate", pop), then(true));
+  addEventListener("popstate", pop);
+}
+
 /** For the page's first load, before anything draws: an entry that still carries an overlay's marker is one the last
  *  load left behind (a reload with the side panel open, #5134). The overlay is gone, so its entry would only make the
  *  first Back do nothing. On the address it opened on, go back off it (more than once for overlays stacked on each
  *  other); on another (the page moved under it), take the marker off and stay. `ms`: how long one Back may take. */
-export async function settleOverlayEntry(ms = 500): Promise<void> {
+export async function settleOverlayEntry(ms = BACK_MS): Promise<void> {
   const marked = () => {
     const st = history.state as Record<string, unknown> | null;
     return onOverlayEntry(st) ? st : null;
@@ -116,9 +126,7 @@ export async function settleOverlayEntry(ms = 500): Promise<void> {
     if (!st) return;
     if (st[AT] !== location.href) break;
     const popped = await new Promise<boolean>((done) => {
-      const timer = setTimeout(() => (removeEventListener("popstate", pop), done(false)), ms);
-      const pop = () => (clearTimeout(timer), removeEventListener("popstate", pop), done(true));
-      addEventListener("popstate", pop);
+      afterBack(done, ms);
       history.back();
     });
     if (!popped) break; // nothing under it (a new tab's only entry): keep the entry, without the marker

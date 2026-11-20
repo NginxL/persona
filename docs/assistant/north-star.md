@@ -166,6 +166,67 @@ readout against the built-in manager's database without a running manager or a m
 
 Use it for a baseline from a build that never recorded anything.
 
+## Weekly view
+
+`personad assistant north-star --weekly [--date YYYY-MM-DD] [--tz Area/City]` reads four weeks of seven calendar days,
+ending at the start of the reading day. `--date` defaults to today and `--tz` follows the same setting as the day
+readout. For example, a reading on 2026-11-04 covers 2026-10-07 through 2026-11-03. Calendar-date arithmetic keeps a
+week correct when the clocks change. `--weekly` cannot be combined with `--split` or `--brief`; without `--weekly`,
+the command's output is unchanged.
+
+The command opens the same databases with read-only transactions and runs no migration. It is intended for a person
+to run on a fixed day each week. The JSON has `reading_day`, `time_zone`, four `weeks` (oldest first, with inclusive
+`start` and `end` dates), and an ordered `rows` list. Seven rows have four `cells`, one per week;
+`sessions_that_may_be_gone` has one `snapshot` at reading time instead. Cells contain only aggregates: no ids, titles,
+paths, names, session ids or to-do ids.
+
+A cell is a number or aggregate object, or a fixed result word. `unknown` means the records cannot answer it;
+`not enabled` means the current switch is off; `not probed` means no probe was made; `not recorded` means the input
+was not recorded; `too few` means the denominator is below the stated floor; `to-do deleted` means a required to-do
+no longer exists. None of these words is a zero. A missing table or column needed by a row is `unknown`, as is a week
+before `assistant.north_star_since` or outside the 30-day work-event retention for rows that read those records.
+An unreadable `manager.json` makes only the review and dispatch rows `unknown`.
+
+The weekly view does not detect stretches while the manager was stopped, whether a workspace folder still exists, or
+an Agent replaced on the same to-do. It adds no event, setting, table, migration, HTTP route or client change.
+
+### Registry
+
+This is the single definition of each weekly count. Other documents cite these ids instead of restating their rules.
+Thresholds are proposals for maintainers, not decisions made by the command; changing a threshold changes its registry
+row, not the reader. A later count gets a registry row before it gets a reader.
+
+| id | Definition, source and fields | Window and inconclusive cases | Proposed threshold |
+| --- | --- | --- | --- |
+| `interruptions_per_finished_todo` | `interruptions` uses the day readout's rules; `n` is current to-dos closed and not cancelled, excluding failed starts and counting concerns. `ratio` is interruptions / n; `from_tasks` and `share_from_tasks` use the day readout's task source; `reopened_within_24h` deduplicates `todo_reopened` by to-do and includes exactly 24 hours. It excludes reopened cancellations and retried failed starts. Older events record the close reason but cannot distinguish a failed start from a manual close. Sources: `interactions`, work events and `todos`. | Four weeks. Recording/retention/schema gaps: `unknown`. n < 10: `ratio: too few`; no interruptions: `share_from_tasks: too few`. This reopen count includes manual and automatic closes, unlike `wrong_done.reopened` (judge closes only), and counts the reopen event, unlike supervision-by-model's reopen assigned to a settled acceptance. | A4's number, read against a baseline week; no threshold of its own. |
+| `workspaces_of_closed_todos` | For the same closed to-dos, use the started task that holds the execution binding. A reserved or reused to-do id is a fallback when no execution binding survives. `created`, `reused` and `shared` come from `workspace_resolved`; `existing` and `none` from the workspace mode; missing plan, task or resolution is `not_recorded`. `n` is their sum. `still_there_and_clean` is always `not probed`. | Four weeks. Missing schema: `unknown`. Buckets always add up to n; no filesystem probe is made. | Evidence only; no threshold. |
+| `independent_review` | `by_result` counts the latest stored `todo_supervision.auto_review` per to-do by ended result. `runs_started` unions reviewer links and stored starts by run id, including a run that failed before its reviewer linked. Each run is assigned to one week; a non-zero stored start takes precedence over the reviewer link time. `lower_bound` is always true because older results are replaced. The launcher comes from `manager.json` `agents.review.launcher`. | Four weeks. No launcher: `not enabled`; unreadable config or missing schema: `unknown`. Results are a lower bound; runs that left no link or latest record cannot be recovered. | Evidence only, never a reason to change the reviewer. |
+| `dispatched_tasks` | Count successful records in `agents.dispatch.tasks`; the switch is `agents.dispatch.enabled` in `manager.json`. | Four weeks. Dispatch off: `not enabled`; unreadable config: `unknown`. A week pruned by the newest retained dispatch's seven-day horizon, including a week starting exactly at that cutoff, or a 200-entry list whose oldest record is after the week's start, is `unknown`. An empty history is a real 0. Four weekly readings are needed for four weeks. | With dispatch on, at least one permits proposing per-task state and the three dispatch events below; four readings of 0 do not. |
+| `conversation_not_found` | Sum the day readout's `conversation_not_found` failures for the main conversation (`main`) and leader conversations (`leaders`), including its read-only baseline sources. `lower_bound` is always true. | Four weeks. Recording or work-event retention gap: `unknown`. Each week equals the sum of its seven day readouts. | Evidence only; no threshold. |
+| `continuations` | Count historical `task_brief_todos.continues` links by `linked_at`. Current builds run a continuation on its existing to-do and write no new link of this kind. | Four weeks. Missing table/column: `unknown`. Zero is `not recorded`, because same-to-do replacement leaves no continuation link and is therefore inconclusive. | Historical evidence only. The counting-rules decision in #11399 is open. |
+| `sessions_that_may_be_gone` | One upper-bound snapshot: `claude` and `agent_empty` count non-review `todo_agents` links older than 30 days; `reviewers` counts reviewer links separately; `archived` counts `sessions.archived` records still archived whose session activity is older than 30 days. | Reading time only. Missing schema: `unknown`. These may be gone, not proven gone; `upper_bound` is always true. | 0 in three consecutive windows means a gone-marker is not built; any other number decides nothing. Transcript retention remains a maintainer decision. |
+| `workers_agent_difference` | For each `source=worker` link, compare its Agent with the latest `source=leader` link named by `via` (the leader's to-do, not its session). Output `same`, `different`, `not_recorded` and `n`. | Four weeks by worker link time. Missing schema: `unknown`; no worker rows: `not recorded`. A missing leader or an empty Agent on either side is `not_recorded`, never `same`. | A task-spawn model preset may be shelved only with recorded pairs, no differences and no reported task-leader limitation. Empty or missing Agent kinds decide nothing. |
+
+### Proposed, not recorded yet
+
+The following registry rows reserve definitions for later changes. **This change writes none of them.** Each future
+writer is the assistant manager, carries no message content and has a review date; an uncited kind is removed then.
+Their rows must not be read as evidence that the event or marker exists.
+
+| id | Future source and fields | Proposed reading and threshold |
+| --- | --- | --- |
+| `manager_start` | Once per manager start; no fields. | No threshold. It lets a stretch with the manager stopped read `unknown`. |
+| `queue_refused` | A queued message leaves delivery after a coded refusal: `code`, relay `kind`, and `to` (`background`, `main`, `sender` or `none`). Not written for an immediate `conversation_send` refusal. | Of refused supervision messages, count those not reaching the main conversation within 30 minutes. With events, 0 supports the route; a full window with none means older-to-do re-delivery is not built. |
+| `agent_dispatched` | A later dispatch stage starts a dispatch; no fields. | With dispatch on, no such event supports shelving automatic result return. |
+| `dispatch_settled` | A dispatched task's round ends; whether the dispatching Agent is still stopped on that round. | Read with `result_read`; no automatic return when settled dispatches are read as working less than once each on average in model rounds. |
+| `result_read` | `dispatch_read` or `agent_read` answers: `tool`, returned state, bytes, seconds waited, and whether a model round or `personad tool` made the read. Command-line reads are excluded from the model-round average. | Otherwise maintainers decide; dispatch off is inconclusive. |
+| `record_unavailable` | `{surface, state}`; state is `unreachable`, `gone`, `not_recorded` or `unknown`, at most once per to-do/session, surface and state per day. Surfaces are `work_details`, `result_file` and a client-observed `session` rechecked by the manager. | For work details/result files, 3+ `gone` or `not_recorded` in a window goes further; two windows of 0 stop at the first step, but 0 is inconclusive until a released client reads them. For sessions, any `gone` builds the marker; 0 is inconclusive. |
+| `review_run` | An independent review ends: blocking count (empty, not 0, on failure/cancellation), and launcher, requested model and reply-reported model for reviewer and working Agent. | Evidence only. Compare same/different launcher or reported model groups only with at least 30 runs in each; never group by provider. |
+| `todo_priority_sample` | Once a day with no session: `undated` To-do rows and `high` among them; Monday's sample is read. `high` is an upper bound because its author is unknown. | A priority menu needs rank-drawn rows and `high >= 1` in three of four weeks; four later weeks of 0 rule it out. A sort key needs two weeks with `high >= 3`. Missing samples, `undated < 3`, or a different sort is inconclusive. |
+| `session_file_gone` | A long-lived marker on a to-do link or archive record, set once and cleared by the next successful read; not a 30-day event. | Remove it if unused in its first year. A retention raise works when no newer session carries it; earlier readings are inconclusive. |
+| `device_connection_tally` | Device-only, never in this JSON: app opens with network but no connected address by four results, and successful connections by trust method and route. It records only while Developing Persona is on and leaves the device only by export. | Two baseline weeks first. Pinned success is fewer plaintext/system-trust addresses. No pinned address across four weeks means pinning is unnecessary; indistinguishable failure kinds need no split. Local-proxy/private-tunnel TLS needs fingerprinted pairings actually using those routes. Switch-off time is inconclusive. |
+| `weekly_view_reading` | Whether the fixed-day reading was posted to the issue it informs after this view ships on the maintainer's hub. | Four posted readings permit later event kinds under their registry rows; none means none are added; one to three means read another window. `not enabled`, `not probed` and `too few` are inconclusive, not rejections. |
+
 ## Daily briefing
 
 Two kinds of task open with the north star:

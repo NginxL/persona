@@ -242,8 +242,8 @@ func TestHerdrTUIDrivingShowsBlockedAsIdle(t *testing.T) {
 	}
 }
 
-// The effort is not changed while the agent works or waits on a dialog; Codex and compatible variants sessions are refused. No herdr
-// call in either case.
+// While the agent works or waits on a dialog the effort is queued, not typed: the node only refreshes herdr's snapshot
+// and never touches the pane. Codex and compatible variants sessions and unknown modes are refused without a herdr call.
 func TestHerdrModesRefusals(t *testing.T) {
 	n, f, home := herdrNode(t)
 	writeRollout(t, home, sidC, "/tmp/x", time.Now(), time.Now())
@@ -251,8 +251,15 @@ func TestHerdrModesRefusals(t *testing.T) {
 		claudeAgent(sidA, proto.StatusWorking, "w1:p1", "w1:t1", "w1", "/tmp/e", ""),
 		claudeAgent(sidB, proto.StatusBlocked, "w1:p2", "w1:t2", "w1", "/tmp/e", ""))
 	for _, id := range []string{sidA, sidB} {
-		if err := setModes(t, n, id, "", "high"); err == nil || !strings.Contains(err.Error(), "正在工作") {
-			t.Errorf("%s: %v", id, err)
+		if err := setModes(t, n, id, "", "high"); err == nil || !strings.Contains(err.Error(), "Agent 正在工作") {
+			t.Errorf("%s: legacy busy refusal = %v", id, err)
+		}
+		if got := n.switches().effortChange(id).target; got != "" {
+			t.Errorf("%s: legacy request queued %q", id, got)
+		}
+		reply, err := request(t, n, "session.modes", map[string]any{"session_id": id, "effort": "high", "queue_effort": true})
+		if err != nil || reply["pending_effort"] != "high" {
+			t.Errorf("%s: queued effort reply = %v, %v", id, reply, err)
 		}
 	}
 	if err := setModes(t, n, sidC, "plan", ""); err == nil || !strings.Contains(err.Error(), "Codex / TRAEX") {
@@ -261,7 +268,12 @@ func TestHerdrModesRefusals(t *testing.T) {
 	if err := setModes(t, n, sidA, "sideways", ""); err == nil {
 		t.Error("unknown mode")
 	}
-	assertTrace(t, f.trace(), nil)
+	assertTrace(t, f.trace(), []string{call("session.snapshot", nil), call("session.snapshot", nil)})
+	for _, id := range []string{sidA, sidB} {
+		if got := n.switches().effortChange(id).target; got != "high" {
+			t.Errorf("%s: pending effort %q", id, got)
+		}
+	}
 }
 
 // session.screen: source is visible unless "recent"; lines are clamped (visible ≤ 400, recent ≤ 20000, ≤ 0 → 60);

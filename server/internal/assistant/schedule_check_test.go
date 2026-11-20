@@ -14,9 +14,10 @@ import (
 
 type routineCheckHub struct {
 	*fakeHub
-	result proto.RoutineCheckResult
-	err    error
-	calls  int
+	result  proto.RoutineCheckResult
+	err     error
+	calls   int
+	machine string
 }
 
 func (h *routineCheckHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
@@ -24,6 +25,7 @@ func (h *routineCheckHub) DeviceCall(ctx context.Context, p DeviceCall) (json.Ra
 		return h.fakeHub.DeviceCall(ctx, p)
 	}
 	h.calls++
+	h.machine = p.Device
 	if h.err != nil {
 		return nil, h.err
 	}
@@ -82,6 +84,32 @@ func TestRoutineCheckRun(t *testing.T) {
 			}
 			if tc.name == "skip" && r.Error != "holiday" {
 				t.Fatalf("lost skip reason: %+v", r)
+			}
+		})
+	}
+}
+
+func TestRoutineCheckUsesTaskExecutionComputer(t *testing.T) {
+	for _, previous := range []string{"", "previous"} {
+		t.Run("previous="+previous, func(t *testing.T) {
+			f := readyHub()
+			f.devices = append(f.devices, Device{ID: "other", Name: "Other computer", Online: true})
+			h := &routineCheckHub{fakeHub: f, result: proto.RoutineCheckResult{ExitCode: 1, Reason: "nothing new"}}
+			st := &memStore{}
+			s := withSettings(t, f, New(Options{Hub: h, Store: func() Store { return st }, Logf: testLogf(t)}))
+			task := Task{ID: "scoped", Title: "Check files", Prompt: "Summarize", Repeat: repeatDaily, Time: "09:00",
+				ExecutionMachineID: "other", RunMachineID: previous,
+				RunIf: &routineCheck{RoutineCheckParams: proto.RoutineCheckParams{Command: "check", Timeout: 1}}}
+			setTasks(s, task)
+			now := time.Now()
+			if _, err := s.runTask(task, now, now, false, false); err != nil {
+				t.Fatal(err)
+			}
+			if h.calls != 1 || h.machine != "other" {
+				t.Fatalf("pre-run command used %q instead of the selected computer; calls=%d", h.machine, h.calls)
+			}
+			if r := lastRunOf(t, s, task.ID); !r.ConditionSkipped || f.sent() != 0 {
+				t.Fatalf("pre-run skip started a model turn: %+v sends=%d", r, f.sent())
 			}
 		})
 	}

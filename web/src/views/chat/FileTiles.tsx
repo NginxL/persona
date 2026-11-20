@@ -55,14 +55,16 @@ export function FileTiles({ draftKey, files }: { draftKey: string; files: Compos
                 <span className="block h-full rounded-full bg-accent" style={{ width: `${f.size ? Math.min(100, (f.sent / f.size) * 100) : 0}%` }} />
               </span>
             )}
-            {/* the tray's ✕ (AttachmentTray): in a box of its own, so its tap area reaches past the corner */}
+            {/* the tray's ✕ (AttachmentTray), in a box of its own. The tile clips its tap area (the row clips it at the
+                tile's top anyway, and past the tile's side it would lengthen the row's sideways scroll), so it takes the
+                ✕'s column instead: down to 44 px and left to where a failed file's retry ends */}
             <span className="absolute top-0.5 right-0.5 flex">
               <button
                 type="button"
                 aria-label={busy ? t("chat-composer.file_cancel", { name: f.name }) : t("ui-attachmenttray.remove", { name: f.name })}
                 onClick={() => removeFile(draftKey, f.id)}
                 data-remove
-                className="touch-hit flex size-4.5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover/att:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                className="touch-hit-corner flex size-4.5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 [--hit-in-x:8px] [--hit-in-y:24px] transition-opacity group-hover/att:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
               >
                 <Icon name="x" size={10} stroke={2.6} />
               </button>

@@ -677,10 +677,10 @@ func inboxPromptOwner(hello Hello) string {
 		return owner
 	}
 	switch answerLanguage(hello.Locale) {
-	case "日本語":
-		return "ユーザー"
+	case i18n.Ja.Name():
+		return "ユーザー" // i18n-ignore: the owner's name inside a Japanese model prompt, not interface text
 	case "":
-		return "用户"
+		return "用户" // i18n-ignore: the legacy prompt's owner word, kept byte for byte
 	default:
 		return "the user"
 	}

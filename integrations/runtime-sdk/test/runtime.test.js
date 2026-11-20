@@ -20,7 +20,22 @@ test('hello names the runtime and declares only the caps whose driver methods ex
   await until('list', () => n.last('runtime.sessions'))
   await n.peer.call('session.send', { session_id: 's1', text: 'x' })
   await assert.rejects(n.peer.call('session.interrupt', { session_id: 's1' }), /unsupported/)
+  await assert.rejects(n.peer.call('session.fork', { session_id: 's1' }), (error) => error.code === 'unsupported')
   assert.throws(() => createRuntime(minimal(), {}), /runtime id/)
+})
+
+test('fork advertises native support and returns the driver response', async (t) => {
+  const node = await startFakeNode(t)
+  const params = { session_id: 's1', at_item_id: '12#0' }
+  const rt = createRuntime(minimal({ fork: async (input) => {
+    assert.deepEqual(input, params)
+    return { session_id: 's2' }
+  } }), { runtime: 'toy', socketPath: node.path })
+  t.after(() => rt.stop())
+  rt.start()
+  await node.ready
+  assert.equal(node.hello.caps.fork, true)
+  assert.deepEqual(await node.peer.call('session.fork', params), { session_id: 's2' })
 })
 
 test('a list carries the transcripts the runtime names as its own though it does not list them', async (t) => {

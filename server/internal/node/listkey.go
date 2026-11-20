@@ -118,6 +118,11 @@ func listKeySized(list []proto.Session, size int) string {
 			w.quote(s.PermissionMode, '/')
 			w.quote(s.Effort, '\n')
 		}
+		if s.PendingEffort != nil {
+			w.b.WriteString("pending-effort:")
+			w.quote(*s.PendingEffort, '/')
+			w.str(strconv.FormatBool(s.EffortChangeFailed), '\n')
+		}
 		w.b.WriteString("source:")
 		w.str(s.SourceKind, '/')
 		w.str(s.SourceThreadID, '/')

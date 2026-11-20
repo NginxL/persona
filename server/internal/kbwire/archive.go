@@ -25,8 +25,9 @@ type SourceChat struct {
 	// State is where the conversation stands at the source, as the source records it: ChatOpen, ChatMerged (a pull
 	// request merged) or ChatClosed; "" when the source has no such state or does not report it. It is a fact, not
 	// the owner's Done flag, and the selection does not read it. StateAt is when it got there (zero: unknown).
-	State   string    `json:"state,omitempty"`
-	StateAt time.Time `json:"state_at,omitzero"`
+	State     string    `json:"state,omitempty"`
+	StateAt   time.Time `json:"state_at,omitzero"`
+	SourceURL string    `json:"source_url,omitempty"` // stable source pointer, when the connector supplies one
 }
 
 // A conversation's State at its source.

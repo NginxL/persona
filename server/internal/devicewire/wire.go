@@ -13,6 +13,10 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+// LegacyTaskExecution is an internal assistant.send hint for unconfigured scheduled turns.
+// The devices manager consumes it against the connected node's handshake before dispatch.
+const LegacyTaskExecution = "task_execution_legacy"
+
 // Manager → hub.
 const (
 	// EventState {machines: [State], absorbed: {entry id: machine id}, entries: [Entry]}: every machine as the manager

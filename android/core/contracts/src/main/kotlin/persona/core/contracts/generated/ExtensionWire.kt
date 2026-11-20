@@ -3904,6 +3904,10 @@ data class ExtensionMessagingAccount(
     val id: String = "",
     val name: String? = null,
     val avatar: String? = null,
+    /**
+     * Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+     */
+    @SerialName("avatar_url") val avatarUrl: String? = null,
     val tenant: String? = null,
     @SerialName("signed_in") val signedIn: Boolean = false,
     val unread: Int? = null,
@@ -3931,6 +3935,10 @@ data class ExtensionMessagingConversation(
     val id: String = "",
     val name: String = "",
     val avatar: String? = null,
+    /**
+     * Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+     */
+    @SerialName("avatar_url") val avatarUrl: String? = null,
     val kind: String = "",
     val unread: Int = 0,
     @SerialName("marked_unread") val markedUnread: Boolean? = null,
@@ -3957,6 +3965,10 @@ data class ExtensionMessagingPerson(
     val id: String? = null,
     val name: String = "",
     val avatar: String? = null,
+    /**
+     * Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+     */
+    @SerialName("avatar_url") val avatarUrl: String? = null,
     val kind: String? = null,
 )
 
@@ -4509,6 +4521,10 @@ data class ExtensionMessagingProfile(
     val id: String = "",
     val name: String = "",
     val avatar: String? = null,
+    /**
+     * Hub-supplied avatar path derived from avatar. Old sources supply only avatar.
+     */
+    @SerialName("avatar_url") val avatarUrl: String? = null,
     val cover: String? = null,
     val kind: String? = null,
     val subtitle: String? = null,

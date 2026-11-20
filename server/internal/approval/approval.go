@@ -48,4 +48,4 @@ const ClarifyingText = "The owner asked a question about this approval. It is no
 // WaitingText is the original tool call's non-final result when the owner has not answered within the card's decision
 // window: the card stays pending on the owner's apps (the Persona app and the web), where they can still approve it,
 // whether or not a notification reached them.
-const WaitingText = "The owner has not answered this approval yet. Nothing changed. The approval card stays pending in the Persona app and on the web, where the owner can still allow or deny it, even if no notification reached their devices; do not retry the tool or create another approval. A later message will report the original card's final outcome."
+const WaitingText = "The owner has not answered this approval yet. Nothing changed. End this turn now. The card stays pending in the Persona app and web, where the owner can still allow or deny it, even without a notification; do not retry the tool or create another approval. A later message will report its outcome."

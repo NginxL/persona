@@ -941,7 +941,11 @@ func (s *Service) routeToTaskAs(ctx context.Context, conversation, todoID, text,
 		if started.SessionID != "" { // the run it reached (#10465); a start that named no session leaves it unknown
 			body["machine_id"], body["session_id"] = started.MachineID, started.SessionID
 		}
-		return s.appendFeed(ctx, conversation, feedRouted, todoID, body)
+		it, err := s.appendFeed(ctx, conversation, feedRouted, todoID, body)
+		if err != nil { // the new agent has the text as its first message
+			return FeedItem{}, wordsSent{err}
+		}
+		return it, nil
 	}
 	return s.sendToTaskAgent(ctx, conversation, todoID, pickTaskAgent(live), text, relay, guard)
 }
@@ -1028,5 +1032,9 @@ func (s *Service) sendToTaskAgent(ctx context.Context, conversation, todoID stri
 	if relay != "" {
 		body["relay"] = relay
 	}
-	return s.appendFeed(sctx, conversation, feedRouted, todoID, body)
+	it, err := s.appendFeed(sctx, conversation, feedRouted, todoID, body)
+	if err != nil { // its agent has the text
+		return FeedItem{}, wordsSent{err}
+	}
+	return it, nil
 }

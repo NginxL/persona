@@ -26,6 +26,7 @@ type AssistantMachine struct {
 
 // AssistantClaudeMD is the assistant directory's CLAUDE.md (assistant/claude_md).
 type AssistantClaudeMD struct {
+	WorkGuide    bool
 	Owner        string // "" is "user"
 	Machines     []AssistantMachine
 	Notes        string // Settings › Assistant › About me, trimmed
@@ -433,10 +434,11 @@ func RenderSnapshotWorkflow(w SnapshotWorkflow) string {
 // AssistantContext is the hub's answer to assistant.context: the snapshot, for the main conversation with a line
 // saying so first (assistant/context). Node puts what changed of it at the start of each message (TurnContext).
 type AssistantContext struct {
-	Main     bool
-	Leader   bool // a leader conversation (#3133): it supervises the tasks it hands out
-	Owner    string
-	Snapshot string
+	ScheduledWorkPlan bool // Inline instructions for a granted scheduled round when the manager uses persona-work.
+	Main              bool
+	Leader            bool // a leader conversation (#3133): it supervises the tasks it hands out
+	Owner             string
+	Snapshot          string
 	// Directions: for the main conversation, the current leaders it hands work to (task_plan supervisor, #3609);
 	// LeaderName: for a leader, its direction's name.
 	Directions []ContextDirection
@@ -750,6 +752,16 @@ type TaskEnded struct {
 }
 
 func RenderTaskEnded(n TaskEnded) string { return render("assistant/task_ended", n) }
+
+// RelayRefused tells a conversation that the message it sent another with conversation_send or conversation_new (Tool)
+// was refused for good by that conversation (Title, ID) with a refusal Code, and is not tried again (#11393). Excerpt
+// is how the message began. Language is the owner's (answerLanguage: "" Chinese, "English", "日本語").
+type RelayRefused struct {
+	Language                       string
+	Tool, ID, Title, Code, Excerpt string
+}
+
+func RenderRelayRefused(d RelayRefused) string { return render("assistant/relay_refused", d) }
 
 // ChatReply tells a conversation that wrote into a Lark chat as the user that others wrote there since (#10777): the
 // chat's name (Group: a group, else a direct chat with that person), when the conversation last wrote there (local

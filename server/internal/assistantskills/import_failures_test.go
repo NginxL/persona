@@ -71,7 +71,7 @@ func TestImportYAMLDescriptionMatchesExistingList(t *testing.T) {
 		if _, err := i.Import(context.Background(), target, ImportRequest{Op: "install", Archive: archive, Reference: preview.Reference}); err != nil {
 			t.Fatal(err)
 		}
-		list := List(UserDir(), nil)
+		list := List(UserDir(), Selection{})
 		if len(list) == 0 || list[0].Description != "First second" {
 			t.Fatalf("YAML list description: %+v", list)
 		}

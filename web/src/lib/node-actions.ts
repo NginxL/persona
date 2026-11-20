@@ -9,7 +9,7 @@ import type { Launcher, Machine, Session } from "./types";
 import { copyText, toast } from "../ui/atoms";
 import { openNewAgent } from "./new-agent";
 import { navigate } from "./router";
-import { openNewWorktree } from "./worktree";
+import { openNewWorktree } from "./worktree-request";
 import type { MenuItem } from "../ui/menu-model";
 import { launcherBlock, usableFirst } from "./launcher-health";
 import { providerIdNote, providerTitle } from "./provider-names";

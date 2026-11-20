@@ -12,7 +12,7 @@ import persona.feature.chat.ChatLinkContext
 import persona.feature.chat.ComposerUploadLimiter
 import persona.feature.chat.ForwardMessage
 import persona.feature.chat.ForwardPlacements
-import persona.feature.chat.RestoredPhotos
+import persona.feature.chat.ForwardPlacement
 import persona.feature.chat.R as ChatR
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -41,7 +41,7 @@ internal data class AgentSpacePreset(val machineId: String, val workspaceId: Str
  * is (a forwarded message's block, #3901). [forwardedPhotos] is the matching in-memory handoff from that forward.
  */
 internal data class NewAgentPrefill(val machineId: String? = null, val cwd: String? = null, val prompt: String? = null,
-    val context: String? = null, val forwardedPhotos: RestoredPhotos = ForwardPlacements.takeNewAgent(context))
+    val context: String? = null, val forwardedPhotos: List<ForwardPlacement> = ForwardPlacements.takeNewAgent(context))
 
 /** The forward block a required first message may stand in for: one the card can read. Null for no context, or unreadable. */
 internal fun usableForward(context: String?): String? =
@@ -292,7 +292,10 @@ internal class NewAgentViewModel(
     private var workspacesJob: Job? = null
     private val uploadJobs = mutableMapOf<String, Job>()
     private val uploadLimiter = ComposerUploadLimiter()
-    private var prefillPhotos = prefill?.forwardedPhotos ?: RestoredPhotos()
+    private var prefillPhotos = prefill?.forwardedPhotos.orEmpty()
+    // Parsing the route gives its cards new UI IDs. The source URL and its message ID survive that round trip.
+    private val ChatLinkContext.photoSource get() = url to msg
+    private val photoSources = mutableMapOf<String, Pair<String, String>>()
     init {
         // Whether the folder is in a Git repository, a moment after it stops changing (iOS `loadRepo`): New Agent's
         // worktree switch shows only then, and never for a tab in an existing space.
@@ -312,8 +315,7 @@ internal class NewAgentViewModel(
                 val pending = store.pending(service.scope)
                 val recents = recentSetups()
                 if (pending != null) {
-                    prefillPhotos.attachments.forEach { uploads?.discard?.invoke(it) }
-                    prefillPhotos = RestoredPhotos()
+                    discardPrefillExcept(emptySet())
                     val r = pending.request
                     // Another agent's mode and effort are its launcher's own picks (#8261), never Claude Code's.
                     val claude = r.agentType == null
@@ -323,8 +325,8 @@ internal class NewAgentViewModel(
                     val restored = pending.firstMessage ?: r.prompt.orEmpty()
                     // Its forward's card again, and the rest of the first message as it was saved: any other block and
                     // what was typed. Without a forward, the saved message is the prompt as it is.
-                    val (block, rest) = ForwardMessage.split(restored)
-                    val forward = block?.xml()
+                    val (blocks, rest) = ForwardMessage.splitAll(restored)
+                    val forward = blocks.takeIf { it.isNotEmpty() }?.joinToString("\n") { it.xml() }
                     // A start of something else keeps its first message as it was sent, other blocks included.
                     val typed = if (forward != null) rest else restored
                     mutable.value = NewAgentState(initialized = true, machineId = r.machineId,
@@ -385,12 +387,13 @@ internal class NewAgentViewModel(
             browser = null, browsing = false, loading = true, error = null, models = NewAgentModels(), model = "", pickedSetup = null,
             workspaces = emptyList(), workspace = null, folderBeforeWorkspace = "", providerMode = "", providerEffort = "") }
         val forwarded = prefillPhotos
-        if (forwarded.attachments.isNotEmpty() || forwarded.lost > 0) {
-            prefillPhotos = RestoredPhotos()
-            val lost = forwarded.lost + attach(forwarded.attachments, showLimit = false)
-            if (lost > 0) notice(AgentText(if (lost == 1) ChatR.string.chat_forward_photos_lost_one
-                else ChatR.string.chat_forward_photos_lost_other, lost))
+        prefillPhotos = emptyList()
+        var lost = 0
+        for ((ref, photos) in forwarded) {
+            lost += photos.lost + attach(photos.attachments, showLimit = false, forward = ref)
         }
+        if (lost > 0) notice(AgentText(if (lost == 1) ChatR.string.chat_forward_photos_lost_one
+            else ChatR.string.chat_forward_photos_lost_other, lost))
         loadWorkspaces(id)
         machineJob = viewModelScope.launch {
             try {
@@ -575,6 +578,20 @@ internal class NewAgentViewModel(
             (if (next.modelLauncher != it.modelLauncher) next.copy(model = "") else next).settled() }
         loadModels()
     }
+    fun forwardContext(value: String?) {
+        if (state.value.locked) return
+        val remaining = ForwardMessage.readAll(value.orEmpty()).mapTo(mutableSetOf()) { it.photoSource }
+        discardPrefillExcept(remaining)
+        photoSources.filterValues { it !in remaining }.keys.forEach(::drop)
+        mutable.update { it.copy(context = value) }
+    }
+
+    private fun discardPrefillExcept(remaining: Set<Pair<String, String>>) {
+        val (keep, removed) = prefillPhotos.partition { it.ref.photoSource in remaining }
+        prefillPhotos = keep
+        removed.forEach { handoff -> handoff.photos.attachments.forEach { uploads?.discard?.invoke(it) } }
+    }
+
     fun prompt(value: String) { if (!state.value.locked) mutable.update { it.copy(prompt = value) } }
     fun ultracode(on: Boolean) { if (!state.value.locked && state.value.ultracode != on) mutable.update { it.copy(ultracode = on, error = null) } }
     /** The permission mode for a launcher that lists its own (#8261): "" its own approval, or one it lists. */
@@ -785,7 +802,7 @@ internal class NewAgentViewModel(
     val notices: Flow<AgentText> = noticeChannel.receiveAsFlow()
     fun notice(text: AgentText) { noticeChannel.trySend(text) }
     /** Picked photos and files join the form and go to the computer picked, three at a time. Returns how many did not fit. */
-    fun attach(picked: List<persona.feature.chat.ComposerAttachment>, showLimit: Boolean = true): Int {
+    fun attach(picked: List<persona.feature.chat.ComposerAttachment>, showLimit: Boolean = true, forward: ChatLinkContext? = null): Int {
         val uploads = uploads
         val current = state.value
         if (uploads == null || picked.isEmpty() || current.locked || !current.takesAttachments || current.machineId.isEmpty()) {
@@ -803,6 +820,7 @@ internal class NewAgentViewModel(
         if (showLimit && refused.isNotEmpty()) notice(AgentText(
             if (refused.any { it.media }) R.string.agents_attach_photo_limit else ChatR.string.chat_composer_file_limit))
         if (accepted.isEmpty()) return refused.size
+        forward?.photoSource?.let { source -> accepted.forEach { photoSources[it.id] = source } }
         mutable.update { it.copy(attachments = it.attachments + accepted, attachedOn = it.machineId, attachNote = null) }
         accepted.forEach { upload(it.id) }
         return refused.size
@@ -832,6 +850,8 @@ internal class NewAgentViewModel(
         clearAttachments()
     }
     private fun clearAttachments() {
+        discardPrefillExcept(emptySet())
+        photoSources.clear()
         uploadJobs.values.toList().forEach { it.cancel() }
         uploadJobs.clear()
         val gone = state.value.attachments
@@ -839,12 +859,11 @@ internal class NewAgentViewModel(
         gone.forEach { uploads?.discard?.invoke(it) }
     }
     override fun onCleared() {
-        prefillPhotos.attachments.forEach { uploads?.discard?.invoke(it) }
-        prefillPhotos = RestoredPhotos()
         clearAttachments()
         super.onCleared()
     }
     private fun drop(id: String) {
+        photoSources.remove(id)
         uploadJobs.remove(id)?.cancel()
         val gone = state.value.attachments.firstOrNull { it.id == id } ?: return
         mutable.update { it.copy(attachments = it.attachments.filterNot { a -> a.id == id }) }
@@ -899,7 +918,7 @@ internal class NewAgentViewModel(
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
-                if (state.value.attachedOn != machine) return@launch
+                if (state.value.attachedOn != machine || state.value.attachments.none { it.id == id }) return@launch
                 // A failed upload stays as a row with its reason and Retry; its local content is not discarded.
                 notice(uploadFailure(attachment.name, e))
                 if (attachment.image) {

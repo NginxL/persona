@@ -374,6 +374,13 @@ func (n *Node) worktreeCreate(ctx context.Context, kind, workspace, cwd, branch,
 			created, err = main.CreateWorktreeFromMain(ctx, workspace, repo.mainRoot, base, branch, dest)
 		} else if workspace != "" {
 			created, err = w.CreateWorktree(ctx, workspace, branch, dest)
+		} else if fromCwd, ok := h.(interface {
+			CreateWorktreeFromCwd(context.Context, string, string, string) (*host.Created, error)
+		}); ok {
+			// No workspace holds the repository (none open, or one whose tabs are in different folders): herdr still
+			// makes it from the repository's own folder, so the workspace carries its repository and sits under it in
+			// the sidebar. worktreeByGit's plain workspace carried neither, only the repository's name as its label.
+			created, err = fromCwd.CreateWorktreeFromCwd(ctx, repo.root, branch, dest)
 		} else {
 			created, err = n.worktreeByGit(ctx, h, repo, branch, dest)
 		}

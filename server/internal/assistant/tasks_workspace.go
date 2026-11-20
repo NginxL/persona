@@ -15,9 +15,11 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/workspacenaming"
 )
 
 const (
+	workspaceBackend  = "backend"
 	workspaceNew      = "new"
 	workspaceExisting = "existing"
 	workspaceNone     = "none"
@@ -31,6 +33,13 @@ type TaskWorkspace struct {
 	Mode     string
 	Existing string
 	Branch   string
+	Backend  *BackendWorkspaceSelection
+}
+
+// BackendWorkspaceSelection references a saved naming plan for the target to-do.
+type BackendWorkspaceSelection struct {
+	OperationID string `json:"operation_id"`
+	Host        string `json:"host,omitempty"`
 }
 
 func (w *TaskWorkspace) UnmarshalJSON(raw []byte) error {
@@ -44,7 +53,8 @@ func (w *TaskWorkspace) UnmarshalJSON(raw []byte) error {
 		return nil
 	}
 	var in struct {
-		Existing string `json:"existing"`
+		Backend  *BackendWorkspaceSelection `json:"backend"`
+		Existing string                     `json:"existing"`
 		New      *struct {
 			Branch string `json:"branch"`
 		} `json:"new"`
@@ -55,6 +65,13 @@ func (w *TaskWorkspace) UnmarshalJSON(raw []byte) error {
 		return fmt.Errorf("invalid workspace: %w", err)
 	}
 	in.Existing = strings.TrimSpace(in.Existing)
+	if in.Backend != nil {
+		if in.New != nil || in.Existing != "" || !workspacenaming.ValidOperationID(in.Backend.OperationID) {
+			return fmt.Errorf("workspace.backend requires a single saved operation_id")
+		}
+		w.Mode, w.Backend = workspaceBackend, in.Backend
+		return nil
+	}
 	if in.Existing != "" && in.New == nil {
 		w.Mode, w.Existing = workspaceExisting, in.Existing
 		return nil
@@ -68,6 +85,8 @@ func (w *TaskWorkspace) UnmarshalJSON(raw []byte) error {
 
 func (w TaskWorkspace) MarshalJSON() ([]byte, error) {
 	switch w.Mode {
+	case workspaceBackend:
+		return json.Marshal(map[string]any{"backend": w.Backend})
 	case workspaceExisting:
 		return json.Marshal(map[string]string{"existing": w.Existing})
 	case workspaceNew:
@@ -78,15 +97,23 @@ func (w TaskWorkspace) MarshalJSON() ([]byte, error) {
 	return json.Marshal(w.Mode)
 }
 
-// TaskWorkspaceResolved is hub-owned. Before start Path is an engine preview;
-// after creation it is the engine's answer. No client-supplied resolution is trusted.
+type BackendLaunchRepository struct {
+	workspacenaming.RepositoryPlan
+	ResolvedRef    string `json:"resolved_ref,omitempty"`
+	ResolvedCommit string `json:"resolved_commit,omitempty"`
+}
+
+// TaskWorkspaceResolved is the server-computed checkout or directory. WorkspaceID belongs to the engine.
 type TaskWorkspaceResolved struct {
-	Machine     string `json:"machine"`
-	Path        string `json:"path"`
-	Branch      string `json:"branch,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	Created     bool   `json:"created,omitempty"`
-	Reused      bool   `json:"reused,omitempty"`
+	BackendWorkspaceID string                    `json:"backend_workspace_id,omitempty"`
+	OperationID        string                    `json:"operation_id,omitempty"`
+	Repositories       []BackendLaunchRepository `json:"repositories,omitempty"`
+	Machine            string                    `json:"machine"`
+	Path               string                    `json:"path"`
+	Branch             string                    `json:"branch,omitempty"`
+	WorkspaceID        string                    `json:"workspace_id,omitempty"`
+	Created            bool                      `json:"created,omitempty"`
+	Reused             bool                      `json:"reused,omitempty"`
 	// Shared: the engine could not prepare a checkout for an inferred new workspace, so the task runs in a cwd
 	// another active task also writes in, as every task did before workspaces existed.
 	Shared bool `json:"shared,omitempty"`
@@ -110,6 +137,9 @@ func (s *Service) resolveTaskWorkspace(ctx context.Context, t *PlanTask) error {
 	defer cancel()
 	if t.ReservedTodoID == "" {
 		t.ReservedTodoID = firstNonEmpty(t.ReuseTodo, t.TodoID, "todo_"+randomHex(8))
+	}
+	if t.backendWorkspace() {
+		return s.resolveBackendTask(ctx, t)
 	}
 	var sourceCwd string // the inferred cwd's workspace, and the other task that writes there
 	var owner *Todo
@@ -333,6 +363,9 @@ func (s *Service) taskWorkspaceBusy(ctx context.Context, machine, cwd, except st
 func (s *Service) admitTaskWorkspace(ctx context.Context, t *PlanTask) error {
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return err
+	}
+	if t.backendWorkspace() {
+		return s.admitBackendTask(ctx, t)
 	}
 	s.tasks.workspaceMu.Lock()
 	defer s.tasks.workspaceMu.Unlock()

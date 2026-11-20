@@ -3,17 +3,8 @@ package persona.core.data
 import androidx.room.Room
 import java.io.File
 import java.security.MessageDigest
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -30,23 +21,12 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import persona.core.contracts.Endpoint
-import persona.core.contracts.HubScope
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.SessionKey
-import persona.core.contracts.api.InboxAssistantConnection
-import persona.core.contracts.api.InboxAssistantTransport
-import persona.core.contracts.api.MessageRequest
-import persona.core.contracts.api.MessageTransport
 import persona.core.contracts.api.MessageTransportResult
-import persona.core.hub.HttpInboxAssistantTransport
-import persona.core.hub.HttpMessageTransport
-import persona.core.hub.HubChatTransport
 import persona.core.hub.HubConnectionConfig
-import persona.core.hub.HubNetwork
-import persona.core.hub.OkHttpHubConnection
 import persona.feature.inbox.InboxHandOffRequest
 
 /** Opt-in against the two real managers started by the live handoff fixture. */
@@ -93,91 +73,45 @@ class NamedManagerInboxHandoffLiveTest {
 
     private suspend fun attempt(
         config: HubConnectionConfig, name: String, manager: String, itemId: String, target: SessionKey, clientId: String,
-    ): Attempt {
-        val pairing = HubScope(requireNotNull(config.hubId), name)
-        val job = SupervisorJob()
-        val scope = CoroutineScope(job + Dispatchers.IO)
-        val database = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), PersistentDatabase::class.java)
-            .allowMainThreadQueries().build()
-        val journal = InboxReplyJournal(temporary.newFolder(name), pairing.path)
-        val store = RoomOutboxStore(database, pairing, journal)
-        lateinit var messages: HttpMessageTransport
-        val connection = OkHttpHubConnection(config, HubNetwork("loopback"), onReady = { messages.onReady() },
-            connectOnCreation = false)
-        try {
-            messages = HttpMessageTransport(pairing, connection, scope)
-            val sent = CompletableDeferred<Pair<MessageRequest, MessageTransportResult>>()
-            val sender = OutboxMessageSender(pairing, store, object : MessageTransport by messages {
-                override suspend fun send(request: MessageRequest): MessageTransportResult =
-                    messages.send(request).also { sent.complete(request to it) }
-            }, scope)
-            val inbox = HttpInboxAssistantTransport(pairing.path, connection)
-            val recorded = CompletableDeferred<JsonObject>()
-            val transport = object : InboxAssistantTransport by inbox {
-                override suspend fun recordAgentHandOff(itemId: String, session: SessionKey, title: String, clientId: String): JsonObject {
-                    try {
-                        return inbox.recordAgentHandOff(itemId, session, title, clientId).also { recorded.complete(it) }
-                    } catch (error: Exception) {
-                        recorded.completeExceptionally(error)
-                        throw error
-                    }
-                }
-            }
-            val chat = HubChatTransport(connection)
-            val repository = RealInboxRepository(object : InboxAssistantConnection {
-                override val current = MutableStateFlow<InboxAssistantTransport?>(transport)
-            }, journal, HubSessionsRepository(chat, connection, scope), HubInteractionCenter(chat, connection, scope),
-                scope, hubConnection = connection, messageSender = sender) { _, _ -> error("Unexpected attachment") }
-
-            connection.reconnect()
-            messages.readyToSend.first { it }
-            repository.refresh()
-            val item = checkNotNull(repository.snapshot.value.records.singleOrNull { it.hubItemId == itemId && it.manager == manager }) {
-                "The merged Inbox must list exactly one $itemId owned by $manager"
-            }
-            val request = InboxHandOffRequest(item.item.id, "Route this fixture handoff.", target.machineId,
-                target.sessionId, clientId, targetTitle = "Fixture agent")
-            assertEquals(target, repository.handOff(request))
-            val (submitted, result) = sent.await()
-            assertEquals(clientId, submitted.clientMessageId)
-            assertEquals(clientId, submitted.opId)
-            assertEquals(request.text, submitted.text)
-            assertEquals(target, submitted.session)
-            assertEquals(MessageTransportResult.Accepted, result)
-            val record = recorded.await()
-            val returned = record.getValue("session").jsonObject
-            assertEquals(target.machineId, returned.string("machine_id"))
-            assertEquals(target.sessionId, returned.string("session_id"))
-            val updated = record.getValue("item").jsonObject
-            assertEquals(itemId, updated.string("id"))
-            val handoff = updated.getValue("handoffs").jsonArray.single().jsonObject
-            assertEquals(target.machineId, handoff.string("machine_id"))
-            assertEquals(target.sessionId, handoff.string("session_id"))
-            val chain = updated.getValue("chain").jsonArray.map { it.jsonObject }.single {
-                it.string("kind") == "agent" && it["link"]?.jsonObject?.get("session_id")?.jsonPrimitive?.content == target.sessionId
-            }
-            assertEquals(target.machineId, chain.getValue("link").jsonObject.string("machine_id"))
-            while (journal.read(pairing.path).agentHandOffs.none { it.request.operationId == clientId && it.recorded }) delay(20)
-
-            val proof = buildJsonObject {
-                put("message_result", "accepted")
-                put("record_result", buildJsonObject {
-                    put("item_id", updated.string("id"))
-                    put("machine_id", returned.string("machine_id"))
-                    put("session_id", returned.string("session_id"))
-                    put("chain_id", chain.string("id"))
-                    put("sha256", sha256(record.toString().toByteArray()))
-                })
-            }
-            return Attempt(record, proof)
-        } finally {
-            withContext(NonCancellable) {
-                job.cancelAndJoin()
-                connection.close()
-                journal.close()
-                database.close()
-            }
+    ): Attempt = withLiveInboxHandoff(config, name, temporary.newFolder(name)) {
+        val item = checkNotNull(repository.snapshot.value.records.singleOrNull { it.hubItemId == itemId && it.manager == manager }) {
+            "The merged Inbox must list exactly one $itemId owned by $manager"
         }
+        val request = InboxHandOffRequest(item.item.id, "Route this fixture handoff.", target.machineId,
+            target.sessionId, clientId, targetTitle = "Fixture agent")
+        assertEquals(target, repository.handOff(request))
+        val (submitted, result) = sent.await()
+        assertEquals(clientId, submitted.clientMessageId)
+        assertEquals(clientId, submitted.opId)
+        assertEquals(request.text, submitted.text)
+        assertEquals(target, submitted.session)
+        assertEquals(MessageTransportResult.Accepted, result)
+        val record = recorded.await()
+        val returned = record.getValue("session").jsonObject
+        assertEquals(target.machineId, returned.string("machine_id"))
+        assertEquals(target.sessionId, returned.string("session_id"))
+        val updated = record.getValue("item").jsonObject
+        assertEquals(itemId, updated.string("id"))
+        val handoff = updated.getValue("handoffs").jsonArray.single().jsonObject
+        assertEquals(target.machineId, handoff.string("machine_id"))
+        assertEquals(target.sessionId, handoff.string("session_id"))
+        val chain = updated.getValue("chain").jsonArray.map { it.jsonObject }.single {
+            it.string("kind") == "agent" && it["link"]?.jsonObject?.get("session_id")?.jsonPrimitive?.content == target.sessionId
+        }
+        assertEquals(target.machineId, chain.getValue("link").jsonObject.string("machine_id"))
+        while (journal.read(pairing.path).agentHandOffs.none { it.request.operationId == clientId && it.recorded }) delay(20)
+
+        val proof = buildJsonObject {
+            put("message_result", "accepted")
+            put("record_result", buildJsonObject {
+                put("item_id", updated.string("id"))
+                put("machine_id", returned.string("machine_id"))
+                put("session_id", returned.string("session_id"))
+                put("chain_id", chain.string("id"))
+                put("sha256", sha256(record.toString().toByteArray()))
+            })
+        }
+        Attempt(record, proof)
     }
 
     private companion object {

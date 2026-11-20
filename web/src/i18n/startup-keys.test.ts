@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { startupMatcher } from "./startup-keys";
 import startup from "./startup-namespaces.json";
+import modelIdMessages from "./locales/en/lib-model-id.json";
 
 describe("startupMatcher", () => {
   const inStartup = startupMatcher(["common", "settings.avatar", "todos.stage_"]);
@@ -17,6 +18,11 @@ describe("startupMatcher", () => {
 
   it("takes nothing from an empty list", () => {
     expect(startupMatcher([])("common.ok")).toBe(false);
+  });
+
+  it("loads model ID hints and validation messages with the model editors", () => {
+    const configured = startupMatcher(startup);
+    for (const key of Object.keys(modelIdMessages)) expect(configured(`lib-model-id.${key}`), key).toBe(false);
   });
 
   it("keeps reply translation feedback eager and menu-only words in the intent-loaded catalog", () => {

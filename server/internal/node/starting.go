@@ -302,7 +302,7 @@ func (n *Node) startAsyncIn(kind, id, cwd, launcher, prompt, workspaceID, mode, 
 		r.cancel()
 		return nil, err
 	}
-	// Known from now on: its chat loads empty (startingSession) and its watch waits for the transcript.
+	// Known from now on: its chat loads empty while it starts (startingSession) and its watch waits for the transcript.
 	initial := sessionState{Launcher: launcher, Cwd: cwd, StartedAt: now}
 	if execution.taskSpace != nil {
 		initial.TaskID = execution.taskSpace.task

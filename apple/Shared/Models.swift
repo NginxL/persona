@@ -1078,6 +1078,8 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
     /// Until then `permissionMode` stays the mode it runs in. False from older hubs.
     var bypassPending: Bool = false
     var effort: String? = nil
+    var pendingEffort: String? = nil
+    var effortChangeFailed: Bool? = nil
     /// The levels `effort` may be set to when they are not Claude Code's (`SessionModes.effortOptions`): a Codex thread
     /// the hub drives through its app-server, where only the effort changes (node/codex_effort.go). Nil elsewhere.
     var efforts: [String]? = nil
@@ -1495,6 +1497,7 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         case listWaiting = "waiting", listBackgroundCount = "background_count", listRunningSubagents = "running_subagents", listRunningWorkflows = "running_workflows"
         case listBackgroundTasksCount = "background_tasks_count", listWorkflowProgress = "workflow_progress"
         case title, cwd, status, launcher, model, agent, effort, efforts, capabilities, attached
+        case pendingEffort = "pending_effort", effortChangeFailed = "effort_change_failed"
         case hiddenByDirectory = "hidden_by_directory"
         case serviceTier = "service_tier", serviceTiers = "service_tiers"
         case modelPick = "model_pick"
@@ -1572,6 +1575,8 @@ nonisolated struct Session: Codable, Identifiable, Hashable, Sendable {
         bypassAvailable = (try? c.decodeIfPresent(Bool.self, forKey: .bypassAvailable)).flatMap { $0 } ?? false
         bypassPending = (try? c.decodeIfPresent(Bool.self, forKey: .bypassPending)).flatMap { $0 } ?? false
         effort = try c.decodeIfPresent(String.self, forKey: .effort)
+        pendingEffort = try c.decodeIfPresent(String.self, forKey: .pendingEffort)
+        effortChangeFailed = try c.decodeIfPresent(Bool.self, forKey: .effortChangeFailed)
         efforts = try c.decodeIfPresent([String].self, forKey: .efforts)
         serviceTier = try c.decodeIfPresent(String.self, forKey: .serviceTier)
         serviceTiers = try c.decodeIfPresent([SessionServiceTier].self, forKey: .serviceTiers)

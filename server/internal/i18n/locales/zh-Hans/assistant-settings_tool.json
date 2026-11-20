@@ -90,5 +90,10 @@
   "idle_auto_compact_unchanged": "空闲对话整理设置未变化。",
   "idle_auto_compact_saved": "空闲对话整理设置已保存。",
   "change_idle_auto_compact_minutes": "自动压缩前的静默时长：{before} → {after} 分钟",
-  "change_idle_auto_compact_tokens": "自动压缩的上下文大小：{before} → {after} token"
+  "change_idle_auto_compact_tokens": "自动压缩的上下文大小：{before} → {after} token",
+  "title_supervision_batch_minutes": "普通督办按接收方攒批",
+  "change_supervision_batch_minutes": "普通督办按接收方攒批：{before} → {after} 分钟（0 保持现有节奏）",
+  "bad_supervision_batch_minutes": "请输入 0 至 1440 的整数分钟。",
+  "supervision_batch_minutes_unchanged": "普通督办攒批间隔未变化。",
+  "supervision_batch_minutes_saved": "普通督办攒批间隔已保存为 {value} 分钟。"
 }

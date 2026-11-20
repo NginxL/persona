@@ -35,6 +35,11 @@ func (s *Service) todoProjectionOf(ctx context.Context, list []listedTodo, now t
 	return todoProjection{facts: facts, views: projection.Views(facts, now)}
 }
 
+// hasParkInteractionLink says whether this park's projection must retain its workers' pending cards, even after release.
+func hasParkInteractionLink(v *Supervision) bool {
+	return v != nil && v.State == reviewParked && v.Parked != nil && v.Parked.Evidence != nil && v.Parked.Evidence.Kind == parkExternalEvent && v.Parked.Evidence.InteractionID != ""
+}
+
 // todoFactsOf are the rows of list as the projection reads them, with their active runs' sessions and those runs'
 // pending cards (todoRunCards), which say what a run that asks is asking (todoProjectionOf; todo_view_push.go works
 // out the views of a part of the list from them).
@@ -42,11 +47,12 @@ func (s *Service) todoFactsOf(ctx context.Context, list []listedTodo) []projecti
 	want := map[string]map[string]bool{} // by computer, the session ids of the open to-dos' active runs
 	for i := range list {
 		t := &list[i]
+		linked := hasParkInteractionLink(t.Supervision)
 		if t.DoneAt != nil && t.StartError == "" {
 			continue
 		}
 		for _, a := range t.Agents {
-			if a.ReleasedAt != nil || a.DismissedAt != nil {
+			if a.ReleasedAt != nil && !linked || a.DismissedAt != nil {
 				continue
 			}
 			if want[a.MachineID] == nil {
@@ -72,12 +78,13 @@ func (s *Service) todoFactsOf(ctx context.Context, list []listedTodo) []projecti
 	facts := make([]projection.Facts, len(list))
 	for i := range list {
 		t := &list[i]
+		linked := hasParkInteractionLink(t.Supervision)
 		facts[i] = projectionFacts(*t, sessions, loc)
 		if t.DoneAt != nil && t.StartError == "" {
 			continue
 		}
 		for _, a := range t.Agents {
-			if a.ReleasedAt != nil || a.DismissedAt != nil {
+			if a.ReleasedAt != nil && !linked || a.DismissedAt != nil {
 				continue
 			}
 			// A computer that did not answer lists nothing: its runs read as offline, and the to-do gets no Inactive
@@ -201,6 +208,7 @@ func (s *Service) todoProjectTitles(ctx context.Context, facts []projection.Fact
 // projectionFacts is listed row t as the projection reads it: the fields a decoder of the row's JSON would fill (the
 // test TestProjectionFactsMatchTheList holds the two together), the sessions of its active runs, and the owner's zone.
 func projectionFacts(t listedTodo, sessions map[[2]string]proto.Session, loc *time.Location) projection.Facts {
+	linked := hasParkInteractionLink(t.Supervision)
 	f := projection.Facts{ID: t.ID, Title: t.Title, DoneAt: t.DoneAt, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 		Origin: t.Origin, PlanID: t.PlanID, StartError: t.StartError, DoneBy: t.DoneBy, ReopenedAt: t.ReopenedAt,
 		CancelledAt: t.CancelledAt, CancelledReason: t.CancelledReason, Quiet: t.Quiet, PRURL: t.PRURL,
@@ -213,14 +221,18 @@ func projectionFacts(t listedTodo, sessions map[[2]string]proto.Session, loc *ti
 	for i, a := range t.Agents {
 		f.Agents[i] = projection.Agent{MachineID: a.MachineID, SessionID: a.SessionID, ReleasedAt: a.ReleasedAt,
 			Title: a.Title, StartError: a.StartError, DismissedAt: a.DismissedAt}
-		if c, ok := sessions[[2]string{a.MachineID, a.SessionID}]; ok && a.ReleasedAt == nil && a.DismissedAt == nil {
+		if c, ok := sessions[[2]string{a.MachineID, a.SessionID}]; ok && (a.ReleasedAt == nil || linked) && a.DismissedAt == nil {
 			f.Sessions = append(f.Sessions, c)
 		}
 	}
 	if v := t.Supervision; v != nil {
 		f.Supervision = &projection.Supervision{State: v.State, PendingSince: v.PendingSince, UpdatedAt: v.UpdatedAt}
 		if p := v.Parked; p != nil {
-			f.Supervision.Parked = &projection.Parked{Reason: p.Reason, Until: p.Until, WaitingOn: p.WaitingOn}
+			parked := &projection.Parked{Reason: p.Reason, Until: p.Until, WaitingOn: p.WaitingOn}
+			if p.Evidence != nil && p.Evidence.InteractionID != "" {
+				parked.Evidence = &projection.ParkEvidence{Kind: p.Evidence.Kind, InteractionID: p.Evidence.InteractionID}
+			}
+			f.Supervision.Parked = parked
 		}
 		if v.Reviews != nil {
 			f.Supervision.Reviews = make([]projection.Review, len(v.Reviews))

@@ -7,5 +7,6 @@
     <string name="agents_todo_stage_merge">合入</string>
     <string name="agents_todo_stage_deploy">部署</string>
     <string name="agents_todo_stage_verify">已验证</string>
+    <string name="agents_todo_stage_done">完成</string>
     <string name="agents_todo_stage_a11y">阶段：%1$s（第 %2$d 步，共 %3$d 步）</string>
 </resources>

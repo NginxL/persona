@@ -68,6 +68,10 @@ func startOlderApprovalSnapshotPublisher(t *testing.T, ft *fleetTest) (<-chan st
 // is still parked on an ordinary mutex, so virtual time cannot advance yet.
 func startPreparedInteractionAtSnapshotGate(t *testing.T, ft *fleetTest, ix proto.Interaction, op approvalops.Operation) <-chan preparedTestResult {
 	t.Helper()
+	// The snapshot gate holds quiet.mu, which a cache-miss session lookup also
+	// needs. Register against the already-observed complete session list so the
+	// prepared caller can reach its card without passing through that gate.
+	ft.s.fleetKeepPrevious(ix.MachineID, []proto.Session{{SessionID: ix.SessionID, Status: proto.StatusIdle}})
 	done := make(chan preparedTestResult, 1)
 	go func() {
 		out, err := ft.s.waitPreparedCard(context.Background(), ix, op)

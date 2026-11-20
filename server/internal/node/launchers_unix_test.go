@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -72,5 +73,66 @@ func TestLaunchersDoNotWaitForWhatTheRcFileLeavesRunning(t *testing.T) {
 	}
 	if again, took := ask(); took > time.Second || len(again.list) != len(a.list) {
 		t.Errorf("second ask: %d launchers in %v, want the cached %d at once", len(again.list), took, len(a.list))
+	}
+}
+
+// A read of the login shell that ends before the script runs (a slow rc file cut off by the cap, an rc file that exits)
+// prints only what the rc files print on the way. That is no launcher list: the last one stays, every launcher in it
+// still known, instead of plain claude alone for a minute (#11580); with no list yet, the read is an error.
+func TestLaunchersKeepTheLastListWhenTheShellEndsBeforeListing(t *testing.T) {
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("no zsh")
+	}
+	home := t.TempDir()
+	rc := filepath.Join(home, ".zshrc")
+	write := func(defs string) {
+		t.Helper()
+		if err := os.WriteFile(rc, []byte(defs), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("ZDOTDIR", home)
+	t.Setenv("SHELL", "/bin/zsh")
+
+	launcherCache.Lock()
+	at, list := launcherCache.at, launcherCache.list
+	codex, settings, scripts := launcherCache.codex, launcherCache.settings, launcherCache.scripts
+	launcherCache.at, launcherCache.list = time.Time{}, nil
+	launcherCache.Unlock()
+	t.Cleanup(func() {
+		launcherCache.Lock()
+		launcherCache.at, launcherCache.list = at, list
+		launcherCache.codex, launcherCache.settings, launcherCache.scripts = codex, settings, scripts
+		launcherCache.Unlock()
+	})
+	expire := func() {
+		launcherCache.Lock()
+		launcherCache.at = time.Time{}
+		launcherCache.Unlock()
+	}
+	n := &Node{}
+	ctx := context.Background()
+	ending := "echo 'Welcome back'\nexit 1\n"
+
+	write(ending)
+	if ls, err := n.launchers(ctx); err == nil {
+		t.Fatalf("no list yet and the shell ended before listing: launchers %v, want an error", ls)
+	}
+
+	write("_claude_launchers() { printf '%-26s%-40s%s\\n' mycc - demo-model; }\n")
+	ls, err := n.launchers(ctx)
+	if err != nil || !slices.ContainsFunc(ls, func(l proto.Launcher) bool { return l.Name == "mycc" }) {
+		t.Fatalf("launchers %v, error %v; want mycc", ls, err)
+	}
+
+	expire()
+	write(ending)
+	ls, err = n.launchers(ctx)
+	if err != nil || !slices.ContainsFunc(ls, func(l proto.Launcher) bool { return l.Name == "mycc" }) {
+		t.Fatalf("after a read that ended before listing: launchers %v, error %v; want the last list with mycc", ls, err)
+	}
+	if !n.knownLauncher(ctx, "mycc") {
+		t.Error("mycc is unknown after a read that ended before listing; want it still known")
 	}
 }

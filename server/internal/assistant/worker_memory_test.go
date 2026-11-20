@@ -132,8 +132,9 @@ func assertOriginalWorkerMemory(t *testing.T, records []kb.ProjectMemoryRecord) 
 	if got.Conclusion != workerMemoryConclusion || !slices.Equal(got.Links, []string{workerMemoryPR, workerMemoryIssue}) {
 		t.Fatalf("original outcome was not preserved: %+v", got)
 	}
-	if got.Decision != "" || got.Reason != "" {
-		t.Fatalf("an unavailable model invented decision/reason: %+v", got)
+	if got.Decision != "" || got.Reason != "" || got.Type != kb.ProjectMemoryOutcome ||
+		got.Verification != kb.ProjectMemoryAgentReported || got.RecordedAt == "" {
+		t.Fatalf("an unavailable model invented decision/reason or lost provenance: %+v", got)
 	}
 }
 
@@ -222,24 +223,44 @@ func TestRecordWorkerOutcomeModelFailurePreservesOriginal(t *testing.T) {
 	assertDirectWorkerMemory(t, workerMemoryRecords(t, env.e, "explicit"))
 }
 
-// A successful extraction supplies the structured decision while retaining the report's existing evidence links.
+// A successful extraction supplies every structured decision and pitfall while retaining the report's evidence links.
 func TestRecordWorkerOutcomeModelDecision(t *testing.T) {
 	env := newWorkerMemoryEnv(t)
 	env.setProject(t, "explicit")
 	env.f.mu.Lock()
-	env.f.outcome = `{"outcome":"Bounded the retry loop.","links":["` + workerMemoryPR + `"],"decisions":[{"question":"How should retries work?","choice":"Keep a bound","reason":"It prevents duplicate work."}],"pitfalls":[]}`
+	env.f.outcome = `{"outcome":"Bounded the retry loop.","links":["` + workerMemoryPR + `"],
+		"decisions":[{"question":"How should retries work?","choice":"Keep a bound","reason":"It prevents duplicate work."},
+		{"question":"When should work stop?","choice":"After the check","reason":"The evidence is complete."}],
+		"pitfalls":["A retry used to duplicate work.","The old test missed the second decision."]}`
 	env.f.mu.Unlock()
 	env.record(t)
 	records := workerMemoryRecords(t, env.e, "explicit")
-	if len(records) != 1 {
-		t.Fatalf("worker memory records = %+v, want one", records)
+	if len(records) != 5 {
+		t.Fatalf("worker memory records = %+v, want outcome + two decisions + two pitfalls", records)
 	}
-	got := records[0]
-	if got.Conclusion != "Bounded the retry loop." || got.Decision != "Keep a bound" || got.Reason != "It prevents duplicate work." {
-		t.Fatalf("model outcome was not recorded: %+v", got)
+	outcome := records[0]
+	if outcome.Type != kb.ProjectMemoryOutcome || outcome.Conclusion != "Bounded the retry loop." ||
+		outcome.Verification != kb.ProjectMemoryAgentReported || outcome.RecordedAt == "" {
+		t.Fatalf("model outcome was not recorded with provenance: %+v", outcome)
 	}
-	if !slices.Equal(got.Links, []string{workerMemoryPR, workerMemoryIssue}) {
-		t.Fatalf("model outcome lost existing links: %+v", got.Links)
+	if !slices.Equal(outcome.Links, []string{workerMemoryPR, workerMemoryIssue}) {
+		t.Fatalf("model outcome lost existing links: %+v", outcome.Links)
+	}
+	decisions := []kb.ProjectMemoryRecord{records[3], records[4]}
+	if decisions[0].Type != kb.ProjectMemoryDecision || decisions[0].Question != "When should work stop?" ||
+		decisions[0].Decision != "After the check" || decisions[0].Reason != "The evidence is complete." ||
+		decisions[1].Question != "How should retries work?" || decisions[1].Decision != "Keep a bound" {
+		t.Fatalf("decisions were not retained newest first: %+v", decisions)
+	}
+	pitfalls := records[1:3]
+	if pitfalls[0].Type != kb.ProjectMemoryPitfall || pitfalls[0].Conclusion != "The old test missed the second decision." ||
+		pitfalls[1].Conclusion != "A retry used to duplicate work." {
+		t.Fatalf("pitfalls were not retained: %+v", pitfalls)
+	}
+	for _, record := range records[1:] {
+		if record.Verification != kb.ProjectMemoryAgentReported || record.RecordedAt != outcome.RecordedAt {
+			t.Fatalf("typed record provenance = %+v", record)
+		}
 	}
 }
 

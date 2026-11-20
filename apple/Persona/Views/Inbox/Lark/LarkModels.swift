@@ -419,7 +419,7 @@ extension APIClient {
                     guard var o = raw as? [String: Any] else { return raw }
                     o["members"] = (o["members"] as? [[String: Any]] ?? []).map { m in
                         var x: [String: Any] = ["user_id": m["id"] ?? "", "name": m["name"] ?? ""]
-                        if let a = m["avatar"] { x["avatar"] = MessagingShape.media(a, source: source, account: account) }
+                        x["avatar"] = MessagingShape.avatar(m, source: source, account: account)
                         return x
                     }
                     return o

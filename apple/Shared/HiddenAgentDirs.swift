@@ -1,13 +1,22 @@
 import Foundation
 import PersonaWire
 
-/// One computer's hidden Agent folders (docs/protocol/protocol.md "Agent directory visibility"): the parallel list to its
-/// Blocked Config Folders (ClaudeDirsSection), with the same pattern syntax. The manager matches them against each
-/// session's working folder; a rule switched off stays listed and hides nothing.
+/// What an Agent folder rule does with the sessions working there (#10053): block keeps them out of Persona (that
+/// computer stops collecting them), hide leaves them recorded but out of Agents and the assistant's view.
+nonisolated enum AgentDirAction: String, Codable, Sendable, CaseIterable {
+    case block, hide
+}
+
+/// One computer's Agent folder rules (docs/protocol/protocol.md "Agent directory visibility"): the parallel list to its
+/// Blocked Config Folders (ClaudeDirsSection), with the same pattern syntax. The node and the manager match them
+/// against each session's working folder; a rule switched off stays listed and does nothing.
 nonisolated struct HiddenAgentDirRule: Codable, Equatable, Identifiable, Sendable {
     var pattern: String
     var enabled: Bool
+    /// nil from a hub before blocking: such a rule hides.
+    var action: AgentDirAction?
     var id: String { pattern }
+    var effectiveAction: AgentDirAction { action ?? .hide }
 }
 
 nonisolated struct HiddenAgentDirs: Codable, Equatable, Sendable {

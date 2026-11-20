@@ -7,7 +7,7 @@
 // an answer (the agent waits there), and a needs_you pushed before the hub withdrew the card is the old one (#4877).
 import { foldedState } from "../../lib/child-sessions";
 import { homeKey } from "../../lib/folded-rows";
-import { makeSessionLookup, type SessionLookup } from "../../lib/todos";
+import { makeSessionLookup, withInteractionLookup, type SessionLookup } from "../../lib/todos";
 import type { AnsweredCard } from "../../lib/store";
 import type { Interaction, Session } from "../../lib/types";
 
@@ -66,12 +66,13 @@ export function answeredHere(s: Session, waiting: ReadonlySet<string>, answered:
 export function answeredLookup(sessions: Session[] | Record<string, Session[]> | SessionLookup, interactions: Interaction[], answered: Record<string, AnsweredCard>): SessionLookup {
   const base = typeof sessions === "function" ? sessions : makeSessionLookup(sessions);
   const done = answeredBy(answered);
-  if (!done.size) return base;
+  if (!done.size) return withInteractionLookup(base, interactions);
   const waiting = new Set(interactions.map(homeKey));
-  return (mid, sid) => {
+  const lookup = (mid: string, sid: string) => {
     const s = base(mid, sid);
     return s && answeredHere(s, waiting, done) ? answeredCopy(s) : s;
   };
+  return withInteractionLookup(lookup, interactions);
 }
 
 /** The sessions with that applied, for lists that take them whole (the dock's and "All"'s manual agents). Same array

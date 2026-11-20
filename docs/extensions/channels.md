@@ -315,7 +315,7 @@ if the assistant is disconnected, return `503 assistant_offline`; fields are unc
   - With `settings_url` (Lark bot), an extra "More Settings" row opens the old page.
 - **Connector page**: existing WeChat connector and Lark bot entries in Settings › Connectors remain; a top explanation says it's a chat channel and links to "Settings › Channels". Apple says "Set it up in Settings › Channels". Binding on the channel page and login on the connector page use the same API; either works identically.
 - **Chat page**: a small "From WeChat" line below channel-origin user messages (channel icon + name, secondary color); no marker for App-origin messages.
-- **Chat list**: if session `channels` is nonempty, show a small icon of the most recent channel beside the title. A chat an extension opened (`origin` `lark_agent` / `extension`) shows its source's mark there instead (on the web, iOS, iPadOS and Android the opening extension's own icon when it has one, #10358), and its first message gets "From Lark /agent" / "From an extension" (there "From <that extension>" while its icon is drawn) (iOS / iPadOS and the web; Android #4203; `docs/protocol/protocol.md` "Origin of assistant chats", #3758).
+- **Chat list**: if session `channels` is nonempty, show a small icon of the most recent channel beside the title. A chat an extension opened (`origin` `lark_agent` / `extension`) shows its source's mark there instead (on the web, iOS, iPadOS and Android the opening extension's own icon when it has one, #10358), and its first message gets "From Lark /agent" / "From an extension" (there "From <that extension>" while its icon is drawn) (iOS, iPadOS, the web and Android; #4203; `docs/protocol/protocol.md` "Origin of assistant chats", #3758).
 
 ## 8. Steps
 

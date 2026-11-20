@@ -32,8 +32,9 @@ func (b *BusHub) queueEvent(event string, params json.RawMessage) {
 		params = json.RawMessage(`"` + key + `"`) // the key: the text is taken when it comes up (takeDelta)
 	}
 	b.pending.Add(1)
+	ev := busEvent{event, params, b.conns.Load()}
 	select {
-	case b.events <- busEvent{event, params}:
+	case b.events <- ev:
 		return
 	default:
 	}
@@ -45,7 +46,7 @@ func (b *BusHub) queueEvent(event string, params json.RawMessage) {
 		b.pending.Add(-1)
 		b.opts.Logf("assistant: %s dropped: too many events waiting", event)
 	default:
-		go func() { b.events <- busEvent{event, params} }()
+		go func() { b.events <- ev }()
 	}
 }
 

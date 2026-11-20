@@ -81,6 +81,10 @@ const (
 	// (#6282, docs/protocol/protocol.md "Assistant chat search"). The hub lists the assistant_search feature only while
 	// the default manager names it; the apps keep filtering titles and last messages without it.
 	CapabilityAssistantSearch = "assistant_search"
+	// CapabilityDirectionSessions: the manager files sessions under a direction and reads one direction
+	// (PUT /api/v1/assistant/sessions/{mid}/{sid}/direction, GET /api/v1/assistant/directions/{id}, and the tree's
+	// additive sessions; #11391). The hub lists direction_sessions only while the default manager names it.
+	CapabilityDirectionSessions = "direction_sessions"
 	// CapabilityAssistantStartServiceTier: the manager forwards a new conversation's native service_tier to the node,
 	// which acknowledges it before the first turn (#6240). The hub lists the feature only for the default manager and
 	// refuses an explicit tier sent to a manager that does not name this capability.
@@ -267,6 +271,7 @@ var Routes = []string{
 	"GET /api/v1/assistant/availability",
 	"GET /api/v1/assistant/directions/tree",
 	"GET /api/v1/assistant/directions/offers",
+	"GET /api/v1/assistant/directions/{id}",
 	"DELETE /api/v1/assistant/directions/offers/{id}",
 	"POST /api/v1/assistant/directions/{id}/start",
 	"POST /api/v1/assistant/directions/{id}/make",
@@ -275,6 +280,7 @@ var Routes = []string{
 	"POST /api/v1/assistant/agents/{mid}/{sid}/supervisor",
 	"PUT /api/v1/assistant/directions/{id}/name",
 	"PUT /api/v1/assistant/directions/{id}/notes",
+	"PUT /api/v1/assistant/sessions/{mid}/{sid}/direction",
 	"GET /api/v1/assistant/conversations/{id}/feed",
 	"POST /api/v1/assistant/feed/{id}/dismiss",
 	"POST /api/v1/assistant/feed/{id}/undo-dismiss",
@@ -325,6 +331,12 @@ var Routes = []string{
 	"GET /api/v1/todos/{id}",                // one to-do as the list has it, with its view
 	"GET /api/v1/todos/{id}/images/{image}", // one attached picture's exact bytes (todo_images.go, #11084)
 	"GET /api/v1/todos/{id}/repositories",
+	"GET /api/v1/todos/{id}/backend-workspace",
+	"GET /api/v1/todos/{id}/backend-workspace/operations/{operation_id}",
+	"POST /api/v1/todos/{id}/backend-workspace/prepare",
+	"POST /api/v1/todos/{id}/backend-workspace/start",
+	"POST /api/v1/todos/{id}/backend-workspace/cancel",
+	"POST /api/v1/todos/{id}/backend-workspace/cleanup",
 	"GET /api/v1/todos/{id}/workspace-rules",
 	"PUT /api/v1/todos/{id}/workspace-rules",
 	"POST /api/v1/todos/{id}/workspace-naming/preview",

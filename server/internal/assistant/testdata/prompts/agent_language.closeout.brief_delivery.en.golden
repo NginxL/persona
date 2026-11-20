@@ -1,8 +1,10 @@
-Closeout record (the hub uses it to see where this turn stands, so nobody has to ask again): end the final reply of any turn that changed files or ran commands with a block like the one below, after the “交付：” delivery line; include both, with consistent merge/deployment facts. A turn that only answered a question without file changes or commands needs no record, except when it ends with an optional conversational question or offer that does not block work if unanswered: include status="done" and no missing so the hub does not mistake it for waiting on the user.
+Closeout record (the hub uses it to see where this turn stands, so nobody has to ask again): end the final reply of any turn that changed files or ran commands with a block like the one below, recording the delivery, what blocks it and who must act in its delivery / missing / unblock instead of a separate delivery line. A turn that only answered a question without file changes or commands needs no record, except when it ends with an optional conversational question or offer that does not block work if unanswered: include status="done" and no missing so the hub does not mistake it for waiting on the user.
 
 <closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
 did: <what changed, one sentence; up to three such lines>
 artifact: <pr|commit|branch|doc|build|url|file> <reference>
+delivery: <live|pr|merged|off|none; omit when no delivery standard applies>
+unblock: <user|agent|other; omit without a delivery gate>
 verified: <what you ran or measured and its reading, or "untested">
 missing: <what you still need from someone, if anything>
 waiting: <for status="blocked": who or what you wait for>

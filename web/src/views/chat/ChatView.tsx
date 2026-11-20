@@ -5,7 +5,8 @@ import { LinkManager, useShownManager } from "../../lib/manager-choice";
 import { alsoOpenText } from "../../lib/engines";
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, errorText, fullItem, pastHub, sessionPath } from "../../lib/api";
-import { attentionReason, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDeletable, sessionMenuActions, sourceSubtitle, sessionTitle, shortPath, stateOf, tabLabel, uuid } from "../../lib/format";
+import { attentionReason, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDisplayTab, sessionMenuActions, sourceSubtitle, sessionTitle, sessionTitleDetail, shortPath, stateOf, tabLabel, uuid } from "../../lib/format";
+import { useHerdrTabName } from "../../lib/agents-display";
 import { conversationPage } from "../../lib/conversation-page";
 import { navigate, type SessionView } from "../../lib/router";
 import { canShowTerminal, composerSlot, otherView, terminalJump, terminalWaits, useSessionView, viewOnlyRow } from "../../lib/session-view";
@@ -64,13 +65,13 @@ import { PendingCards } from "./Interactions";
 import { focusedCard, focusedFirst } from "../../lib/card-focus";
 import { COMPOSER_INPUT, lostWith } from "../../lib/dock-focus";
 import { FailureNote, showsFailureNote } from "./FailureNote";
-import { CloseoutCard } from "./CloseoutCard";
+import { LazyCloseoutCard } from "./closeout-chunks";
 import { shownCloseout } from "../../lib/closeout";
 import { AWAIT_MS, awaitingTurn, DOCK_MAX, turnStart } from "./dock";
 import { HEADER_SLOT, HEADER_SLOT_END, HEADER_SLOT_START } from "./header";
 import { AgentModelPill, AssistantModelPill, useAssistantTurnFix } from "./ModelPill";
 import { switchRefused } from "../../lib/session-models";
-import { mediaMatches, NARROW, NO_HOVER, SHORT, useFinePointer, useMedia } from "../../lib/viewport";
+import { mediaMatches, NARROW, NO_HOVER, PHONE, SHORT, useFinePointer, useMedia } from "../../lib/viewport";
 import { UserBubble } from "./SegmentView";
 import { LatestMessageTime } from "./latest-message-time";
 import { scrollsAFold } from "./fold-scroll";
@@ -105,7 +106,7 @@ import { PermissionPicker, usePlanMode } from "./PermissionPicker";
 import { permissionsCommand } from "../../lib/permissions-command";
 import { archiveCloseItems, closeItems } from "../AgentMenus";
 import { ChatSidebarButton } from "../ShellSwitch";
-import { appArchiveDeps, deleteInsteadOfArchive, restoreAgent, useArchived } from "../../lib/agent-archives";
+import { appArchiveDeps, offerSessionDelete, restoreAgent, useArchived } from "../../lib/agent-archives";
 import { UltracodeLostNote } from "./Ultracode";
 import { isUltracodeQueued, ultracodeQueueDone } from "../../lib/ultracode";
 import { ChatActionsContext, liveValue, type ChatActions } from "./chat-actions";
@@ -189,6 +190,11 @@ function asOwnCard(ix: Interaction): Interaction {
   }
   return c;
 }
+/** In this chat's own waiting cards (not the Assistant tray's): one of them, and its text fields (styles.css lets the
+ *  dock grow for those while the keyboard is up). */
+const OWN_CARD = "[data-chat-cards] [data-pending-card]";
+const inOwnCard = (el: EventTarget | null) => el instanceof Element && Boolean(el.closest(OWN_CARD));
+const isCardField = (el: EventTarget | null) => el instanceof Element && el.matches(`${OWN_CARD} :is(input, textarea)`);
 /** How many earlier pages a link to a child loads looking for the exchange its card is in. */
 const CHILD_LINK_PAGES = 10;
 // no child sessions: no cards, and the exchanges are not walked for where they would go
@@ -453,9 +459,17 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   const keptUndelivered = shownUndelivered(session, tr.items, pending.map((p) => p.id));
   // a queued message taken back or deleted (QueueStrip) is not on its way any more: its sending bubble goes with it,
   // rather than showing again until the turn ends (#4342)
-  // the photos a Persona chat's queued message went with, when it was sent from here (its queue holds only the words).
+  // the photos a Persona chat's queued message went with, when it was sent from here (its queue holds only the words),
+  // and local preview data URLs for any queued message sent from this page (#10871).
   // Both stay the same while `pending` does: the queue is drawn in the memoized composer.
   const queuedPhotos = useCallback((raw: string) => pending.find((p) => sameMessage(raw, p.msg.text))?.msg.images?.length ?? 0, [pending]);
+  const queuedPhotoPreviews = useCallback((raw: string): string[] => {
+    const paired = photoOnly.get(raw);
+    const match = paired !== undefined ? pending[paired] : pending.find((p) => sameMessage(raw, p.msg.text));
+    return (match?.msg.images ?? [])
+      .map((item) => (item.image?.data ? `data:${item.image.mime};base64,${item.image.data}` : ""))
+      .filter(Boolean);
+  }, [pending, photoOnly]);
   const withdrawn = useCallback((text: string) => {
     const paired = photoOnly.get(text);
     const gone = pending.find((p) => !p.posting && sameMessage(text, p.msg.text)) ?? (paired !== undefined && !pending[paired]?.posting ? pending[paired] : undefined);
@@ -1332,6 +1346,14 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
       stopDone();
     }
   }, [mid, sid, stopDone]);
+  // Ctrl/⌘+Enter in the box: the queue panel's Send now (QueuePanel.tsx), after the message is queued
+  const sendQueueNow = useCallback(async () => {
+    try {
+      await api(`${sessionPath(mid, sid)}/queue/send-now`, { method: "POST", json: {} });
+    } catch (e) {
+      toast(t("chat-chatview.send_now_failed", { error: errorText(e) }), "error");
+    }
+  }, [mid, sid]);
   // the turn ended, and not necessarily by this stop
   useEffect(() => {
     if (state !== "working") stopDone();
@@ -1927,13 +1949,22 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   // A card answered above the composer takes the focused button with it: the keyboard goes back to the composer (#5154).
   // Not on a touch screen alone (that would raise the keyboard), nor when something else took the focus.
   const dockFocus = useRef<Element | null>(null);
+  // A card's own field being typed into (#11442): a page made short by Android's keyboard must not fold that card away,
+  // until the focus leaves the card (its send arrow or options take it on the tap: folded then, the tap is lost)
+  const [cardField, setCardField] = useState(false);
   const onDockFocus = (e: React.FocusEvent) => {
     dockFocus.current = composerBox.current?.contains(e.target) ? null : e.target;
+    if (isCardField(e.target)) setCardField(true);
+    else if (!inOwnCard(e.target)) setCardField(false);
+  };
+  const onDockBlur = (e: React.FocusEvent) => {
+    if (!inOwnCard(e.relatedTarget)) setCardField(false);
   };
   // Checked after each render only while a control above the composer holds the focus (nothing to do otherwise)
   useEffect(() => {
     if (!dockFocus.current || !lostWith(dockFocus.current, document.activeElement, document.body)) return;
     dockFocus.current = null;
+    setCardField(false);
     if (fine) composerBox.current?.querySelector<HTMLTextAreaElement>(COMPOSER_INPUT)?.focus({ preventScroll: true });
   });
   // the run's time counts from the turn's start, as its "Working…" does (not from the session's last state change)
@@ -1942,6 +1973,8 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
     const live = lines.flatMap((l) => l.kind === "supervision" ? l.lines : [l]).findLast((l) => l.kind === "segment" && l.live);
     return live?.kind === "segment" ? live.seg : undefined;
   }, [lines]);
+  const processing = !sendFeedback && Boolean(assistant || session?.assistant) && state === "working" && !backgroundOnly &&
+    !liveSeg && (tr.loading || (opening && !tr.streaming));
   const runStart = (liveSeg ? turnStart(liveSeg) : undefined) ?? stateSince;
   // what the turn is doing, for the bar's words (cindy's status): kept as it was while it says the same
   const lastStep = useRef<RunStep | undefined>(undefined);
@@ -1976,8 +2009,8 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   // the run's status. The same element while nothing in it changes: the composer is memoized.
   const hasQueue = queued.length > 0;
   const queue = useMemo(
-    () => (session && hasQueue ? <QueueStrip session={session} draftKey={draftKey} canEdit={canCompose} compact={short} persona={assistant ? persona.name : undefined} onWithdrawn={withdrawn} photosOf={assistant ? queuedPhotos : undefined} /> : null),
-    [session, hasQueue, draftKey, canCompose, short, assistant, persona.name, withdrawn, queuedPhotos],
+    () => (session && hasQueue ? <QueueStrip session={session} draftKey={draftKey} canEdit={canCompose} compact={short} persona={assistant ? persona.name : undefined} onWithdrawn={withdrawn} photosOf={assistant ? queuedPhotos : undefined} photoPreviewsOf={queuedPhotoPreviews} /> : null),
+    [session, hasQueue, draftKey, canCompose, short, assistant, persona.name, withdrawn, queuedPhotos, queuedPhotoPreviews],
   );
   // with the plan's pill showing, "Jump to bottom" goes beside it (over the chat, they hid each other); the pill keeps
   // one wrapper either way, so a flyout pinned open on it stays when the reader scrolls
@@ -2019,11 +2052,9 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   // says a worker needs you while the panel is shut
   const showConversationTasks = Boolean((assistant || inPage) && !embedded && !chrome && session?.space !== "health");
   const conversationTasksOpen = panel?.kind === "conversation-tasks" && panel.mid === mid && panel.sid === sid;
-  const chatHeaderActions = useMemo(() => showConversationTasks ? <>
-    <IconButton icon="todo" label={t("sidepanel.conversation_tasks")} active={conversationTasksOpen}
-      onClick={() => togglePanel({ kind: "conversation-tasks", mid, sid, manager: skillManager })} />
-    {headerActions}
-  </> : headerActions, [showConversationTasks, conversationTasksOpen, mid, sid, skillManager, headerActions]);
+  const conversationTasks = useMemo(() => (showConversationTasks
+    ? { open: conversationTasksOpen, onToggle: () => togglePanel({ kind: "conversation-tasks", mid, sid, manager: skillManager }) }
+    : undefined), [showConversationTasks, conversationTasksOpen, mid, sid, skillManager]);
   const teamCount = leads ? workerCount(session) : 0;
   const teamNeeds = workers.some((w) => stateOf(w) === "needs_you");
   const toggleTeam = useCallback(() => {
@@ -2053,7 +2084,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
       delegated={teamShown || sideShown ? delegated.filter((d) => !elsewhere(d.ix)) : delegated}
       offerNext={inPage && !assistant ? { mid, sid } : undefined}
       narrow={compactDock}
-      short={short}
+      short={short && !cardField}
       keyboard={keyboard}
       onDismissKeyboard={() => composerBox.current?.querySelector<HTMLTextAreaElement>(COMPOSER_INPUT)?.blur()}
     />
@@ -2097,7 +2128,8 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
         onTerminal={openTerminal}
         viewDot={view === "term" && (interactions.length > 0 || state === "needs_you")}
         termDot={terminalWaits(session, interactions, outbox)}
-        actions={chatHeaderActions}
+        actions={headerActions}
+        tasks={conversationTasks}
         team={team}
         sides={sideControl}
         panel={chrome}
@@ -2112,7 +2144,11 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <ViewLayer bare={!switchable} on={view === "chat"} from="start">
       {/* what a stopped agent said of its own work, above the transcript and not part of it (#3612) */}
-      {closeoutShown && session && <CloseoutCard key={`${mid}/${sid}`} session={session} segment={closeoutSegment} expandFold={tr.expandFold} />}
+      {closeoutShown && session && (
+        <Suspense fallback={null}>
+          <LazyCloseoutCard key={`${mid}/${sid}`} session={session} segment={closeoutSegment} expandFold={tr.expandFold} />
+        </Suspense>
+      )}
       <div className="relative min-h-0 flex-1">
         {(tr.notLive || refreshFailed) && <NotLivePill error={refreshFailed} onReload={() => { tr.reload(); onRefresh?.(); }} lower={Boolean(picked && !search.open)} />}
         <div ref={scrollRef} onScroll={onScroll} data-chat-scroll className="relative h-full overflow-y-auto [overflow-anchor:none]">
@@ -2127,8 +2163,10 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
             ) : <div role="alert" className="rounded-control bg-inset px-3 py-2 text-[13px] text-red">{t("chat-chatview.start_failed", { error: session.start_error })}</div>)}
             {session?.start_error_code === "shell_waiting" && <Suspense fallback={null}><ShellQuestion session={session} /></Suspense>}
             {starting && !tr.loading && !outgoing && <Loading label={t("chat-chatview.starting_agent")} />}
+            {/* over the content's top padding, in the scroller: starting and ending an older page move nothing on screen,
+                and nothing writes scrollTop for it (that would stop a touch fling) */}
             {earlier.loadingEarlier && (
-              <div className="flex justify-center py-2">
+              <div data-loading-earlier className="pointer-events-none absolute inset-x-0 top-1 flex justify-center">
                 <Loading label={t("chat-chatview.loading_earlier")} />
               </div>
             )}
@@ -2228,9 +2266,9 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
               ) }))]
               .sort((a, b) => a.at - b.at)
               .map((x) => x.el)}
-            {(shownPending.some((p) => p.waits) || (sendFeedback !== undefined ? Boolean(sendFeedback) : shownPending.length > 0 || outbox.some((e) => e.state === "sending") || (starting && outgoing > 0) || (opening && !tr.streaming && state === "working"))) && (
-              <div className="flex items-center gap-2.5" data-message-feedback={sendFeedback || (opening && state === "working" ? "processing" : "sending")}>
-                {sendFeedback === "unknown" ? <span role="status" className="text-ink-3">{t("lib-outbox.delivery_unknown")}</span> : <Loading label={shownPending.some((p) => p.waits) ? t("ultracode.send_waits") : sendFeedback === "processing" || (opening && state === "working") ? t("chat-segmentview.processing") : starting ? t("chat-chatview.preparing") : online ? t("chat-segmentview.sending") : t("chat-chatview.waiting_for_hub")} />}
+            {(shownPending.some((p) => p.waits) || processing || (sendFeedback !== undefined ? Boolean(sendFeedback) : shownPending.length > 0 || outbox.some((e) => e.state === "sending") || (starting && outgoing > 0))) && (
+              <div className="flex items-center gap-2.5" data-message-feedback={sendFeedback || (processing ? "processing" : "sending")}>
+                {sendFeedback === "unknown" ? <span role="status" className="text-ink-3">{t("lib-outbox.delivery_unknown")}</span> : <Loading label={shownPending.some((p) => p.waits) ? t("ultracode.send_waits") : sendFeedback === "processing" || processing ? t("chat-segmentview.processing") : starting ? t("chat-chatview.preparing") : online ? t("chat-segmentview.sending") : t("chat-chatview.waiting_for_hub")} />}
               </div>
             )}
             {voiceState && <VoiceTail owner={voiceOwner} persona={persona.name} />}
@@ -2257,6 +2295,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
         style={{ "--dock-max": DOCK_MAX } as React.CSSProperties}
         onInput={pendingRecap ? dismissRecap : undefined}
         onFocus={onDockFocus}
+        onBlur={onDockBlur}
       >
         {/* everything over the composer: it shrinks and scrolls before the composer does (the composer grew, and its
             cards, task questions and notes stood taller than the dock, drawn up over the chat or pushing it to nothing);
@@ -2348,6 +2387,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
           working={state === "working" || awaiting}
           needsYou={state === "needs_you"}
           onSend={send}
+          onSendNow={session && (assistant || (session.agent === "claude" && session.source_kind !== "runtime")) ? sendQueueNow : undefined}
           disabled={Boolean(offlineLine) || (!noRow && !hydrating && !sessionCan(session, "send"))}
           onEditLastMessage={onEditLastMessage}
           editingLast={editProp}
@@ -2455,7 +2495,7 @@ function NotLivePill({ onReload, lower, error }: { onReload: () => void; /** The
     <div role="status" data-testid="chat-not-live" className={lower ? "absolute top-14 left-1/2 z-10 -translate-x-1/2" : "absolute top-3 left-1/2 z-10 -translate-x-1/2"} style={{ animation: "fade-up 150ms ease-out both" }}>
       <div className="flex h-8 items-center gap-2 rounded-full border border-line bg-surface px-3 text-[12px] leading-none whitespace-nowrap text-ink-2 shadow-raised">
         <span title={error}>{t(error ? "chat-chatview.refresh_failed" : "chat-chatview.not_live")}</span>
-        <button type="button" onClick={onReload} className="font-medium text-accent-ink hover:underline">
+        <button type="button" onClick={onReload} className="touch-hit font-medium text-accent-ink hover:underline">
           {t("chat-chatview.not_live_reload")}
         </button>
       </div>
@@ -2471,7 +2511,7 @@ function ReturnPill({ onClick }: { onClick: () => void }) {
         type="button"
         onClick={onClick}
         data-search-return
-        className="flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] leading-none font-medium whitespace-nowrap text-ink-2 shadow-raised transition-colors duration-150 hover:bg-hover active:scale-[0.98]"
+        className="touch-hit flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] leading-none font-medium whitespace-nowrap text-ink-2 shadow-raised transition-colors duration-150 hover:bg-hover active:scale-[0.98]"
       >
         <Icon name="arrowLeft" size={14} className="shrink-0" />
         <span className="translate-y-[0.5px]">{t("chat-chatview.search_return")}</span>
@@ -2489,7 +2529,7 @@ function JumpPill({ label, onClick, inline }: { label: string; onClick: () => vo
         onClick={onClick}
         aria-label={label}
         data-jump-pill
-        className="flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] leading-none font-medium whitespace-nowrap text-ink-2 shadow-raised transition-colors duration-150 hover:bg-hover active:scale-[0.98]"
+        className="touch-hit flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-[12px] leading-none font-medium whitespace-nowrap text-ink-2 shadow-raised transition-colors duration-150 hover:bg-hover active:scale-[0.98]"
       >
         <Icon name="arrowDown" size={14} className="shrink-0" />
         <span className="translate-y-[0.5px]">{label}</span>
@@ -2576,7 +2616,7 @@ export const Header = memo(function Header({
   starting = false,
   interactions = [],
   overview,
-  title,
+  title: baseTitle,
   machineName,
   assistant,
   main,
@@ -2592,6 +2632,7 @@ export const Header = memo(function Header({
   viewDot,
   termDot,
   actions,
+  tasks,
   team,
   sides,
   panel: chrome,
@@ -2628,15 +2669,22 @@ export const Header = memo(function Header({
   termDot?: boolean;
   /** The page's own buttons, at the end of the right side (ChatView `headerActions`). */
   actions?: React.ReactNode;
+  /** The conversation's tasks panel: a button from 640 px, a row of ⋯ on a phone (the title keeps its room there). */
+  tasks?: { open: boolean; onToggle: () => void };
   /** A lead with workers (#5180): its Team panel's button, whether the panel is open, and whether a worker needs you. */
   team?: { open: boolean; needs: boolean; onToggle: () => void };
   /** A session with side sessions (#7944): how many, whether its Side sessions panel is open, whether one needs you. */
   sides?: { count: number; open: boolean; needs: boolean; onToggle: () => void };
   panel?: PanelChrome;
 }) {
+  const preferTab = useHerdrTabName();
+  const primaryTab = session && !assistant && !direction ? sessionDisplayTab(session, preferTab) : "";
+  const title = primaryTab || baseTitle;
+  const titleDetail = primaryTab && session ? sessionTitleDetail(session, preferTab) : "";
   const identity = useAssistantIdentity();
   const layout = useLayout();
   const narrow = useMedia(NARROW);
+  const phone = useMedia(PHONE);
   // A rail and a phone drawer have no assistant head beside the page. Older hubs have a product head instead.
   const headBesidePage = !narrow && sidebarShown(layout) && !sidebarRail(layout) && identity !== null;
   const menu = useMenu();
@@ -2732,6 +2780,8 @@ export const Header = memo(function Header({
   const feishu = externalLink(session);
   const linkedTodo = session?.todo ?? session?.completed_todo;
 
+  // Conversation tasks' button gives way on a phone: ⋯ has it there, also before the session is in
+  const tasksItem: MenuItem[] = tasks && phone ? [{ key: "conversation-tasks", label: t("sidepanel.conversation_tasks"), icon: "todo", checked: tasks.open, onSelect: tasks.onToggle }] : [];
   const own: MenuItem[] = session
     ? [
         // the space's other agents (#5421: in ⋯ at every width, as cindy's header has no such button)
@@ -2789,6 +2839,7 @@ export const Header = memo(function Header({
           ? [{ key: "resume-terminal", label: t("chat-chatview.resume_in_terminal"), icon: "play" as const, disabled: resumeOffer === "no_engine", detail: resumeOffer === "no_engine" ? t("chat-chatview.resume_no_engine", { computer: machineName }) : undefined, onSelect: resumeHere }]
           : []),
         ...(showFiles ? [{ key: "files", label: t("chat-chatview.files"), icon: "folder" as const, checked: here(panel, "files"), onSelect: openFiles }, { key: "git", label: "Git", icon: "git" as const, checked: here(panel, "git"), onSelect: openGit }, ...(reviews ? [{ key: "review", label: t("chat-chatview.review_changes"), icon: "pullRequest" as const, checked: here(panel, "review"), onSelect: openReview }] : [])] : []),
+        ...tasksItem,
         ...sessionReviewItems,
         // a run of a comparison (#8916): back to its runs' page
         ...(compare ? [{ key: "compare", label: compare.label, icon: "branch" as const, onSelect: () => navigate({ name: "compare", id: compare.id }) }] : []),
@@ -2810,9 +2861,9 @@ export const Header = memo(function Header({
         ...(archived
           ? [{ key: "restore", label: t("chat-chatview.restore"), icon: "undo" as const, divider: true, onSelect: () => void restoreAgent(archived, appArchiveDeps) }, ...closeItems({ ...session, archived: true }, features)]
           : archiveCloseItems(session, features)),
-        ...(!archived && deleteInsteadOfArchive(features) && sessionDeletable(session) ? [{ key: "delete", label: t("chat-chatview.delete_chat"), icon: "trash" as const, danger: true, onSelect: () => setDialog("delete") }] : []),
+        ...(!archived && offerSessionDelete(session, features) ? [{ key: "delete", label: t("chat-chatview.delete_chat"), icon: "trash" as const, danger: true, onSelect: () => setDialog("delete") }] : []),
       ]
-    : [];
+    : tasksItem;
   // a side panel's own rows (Open in new window, Remove task…) at the top of ⋯
   const panelItems = chrome?.items ?? [];
   const items: MenuItem[] = panelItems.length > 0 && own.length > 0 ? [...panelItems, { ...own[0], divider: true }, ...own.slice(1)] : [...panelItems, ...own];
@@ -2842,7 +2893,7 @@ export const Header = memo(function Header({
         {session && !assistant && <AgentDeviceMark session={session} machineName={machineName} />}
         {assistant && !headBesidePage && <span data-chat-face className="mr-1.5 flex shrink-0"><AssistantFace session={session} last={last} /></span>}
         {editing && session ? (
-          <TitleEditor session={session} title={title} onDone={() => setEditing(false)} />
+          <TitleEditor session={session} title={primaryTab ? session.title || baseTitle : title} onDone={() => setEditing(false)} />
         ) : assistant && main && items.length > 0 ? (
           <h1 className={titleClass}>
             <button type="button" data-chat-title data-assistant-name-menu aria-haspopup="menu" aria-expanded={Boolean(menu.anchor)} onClick={menu.open} className="touch-hit relative flex max-w-full items-center gap-1 whitespace-nowrap rounded-full px-2 py-1 hover:bg-hover focus-visible:bg-hover">
@@ -2852,8 +2903,8 @@ export const Header = memo(function Header({
           </h1>
         ) : (
           <h1
-            onDoubleClick={canRename && !chrome?.title && !direction ? () => setEditing(true) : undefined}
-            title={chrome?.title ? [chrome.title, chrome.sub].filter(Boolean).join(" · ") : title}
+            onDoubleClick={canRename && !chrome?.title && !direction ? () => preferTab && primaryTab ? setDialog("rename") : setEditing(true) : undefined}
+            title={chrome?.title ? [chrome.title, chrome.sub].filter(Boolean).join(" · ") : [title, titleDetail].filter(Boolean).join("\n")}
             data-chat-title
             className={cx(titleClass, "cursor-default truncate select-none")}
           >
@@ -2932,6 +2983,7 @@ export const Header = memo(function Header({
       )}
       {/* wide screens have New chat at the top of the sidebar; a phone's sidebar is a drawer */}
       {assistant && !chrome && session?.space !== "health" && <IconButton icon="compose" label={t("chat-chatview.new_chat")} onClick={() => navigate({ name: "persona-new" })} className="lg:hidden" />}
+      {tasks && <IconButton icon="todo" label={t("sidepanel.conversation_tasks")} active={tasks.open} onClick={tasks.onToggle} className="hidden sm:flex" />}
       {!chrome && actions}
       {!assistant && session && (session.agent === "codex" || session.source_kind === "codex_history" || session.source_kind === "codex_app_server") &&
         <Suspense fallback={null}><TakeoverAction key={`${session.machine_id}:${session.session_id}`} session={session} /></Suspense>}

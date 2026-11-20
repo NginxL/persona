@@ -1,12 +1,10 @@
 // Worktree creation transport and legacy terminal-menu helpers. Advanced choices require the owner’s advertised capabilities.
 import { t as tr } from "../i18n";
 import { api, ApiError, credentialOwner, enc, errorText } from "./api";
-import type { MenuNode } from "./node-actions";
 import { navigate } from "./router";
 import { defaultManager, MANAGER_HEADER } from "./manager-choice";
 import { folderName } from "./mentions";
 import { getState } from "./store";
-import type { WorkspaceTarget } from "./workspace-target";
 
 export interface SparsePreset { id: string; name?: string; directories: string[] }
 export interface WorktreeSource { type: "pr" | "issue"; number: number; title: string; url: string; branchName?: string; baseRefName?: string; isCrossRepository?: boolean }
@@ -181,55 +179,15 @@ export function openCreated(mid: string, created: WorktreeCreated) {
 
 // ── opening the dialog from a menu or the palette ────────
 
-export interface WorktreeRequest {
-  target: WorktreeTarget;
-  /** The computer's tree changed (the new workspace is in it): read it again. */
-  changed: () => void;
-  source?: WorkspaceTarget;
-  /** Undefined follows the source; null requests a top-level workspace. */
-  parent?: WorkspaceTarget | null;
-  onCreated?: (created: WorktreeCreated, target: WorkspaceTarget) => void;
-}
-
-const openers = new Set<(r: WorktreeRequest) => void>();
-
-/** Opens "New worktree…" (the app shell listens) for a workspace node. */
-export function openNewWorktree(node: Pick<MenuNode, "mid" | "workspaceId" | "host" | "label">, changed: () => void = () => {}) {
-  if (!node.workspaceId) return;
-  const request = { target: { mid: node.mid, workspaceId: node.workspaceId, host: node.host, label: node.label }, changed };
-  openers.forEach((l) => l(request));
-}
-
-/** Delivers an already assembled creation request to the app shell. */
-export function emitWorktreeRequest(request: WorktreeRequest) {
-  openers.forEach((l) => l(request));
-}
-
-export function onOpenNewWorktree(l: (r: WorktreeRequest) => void) {
-  openers.add(l);
-  return () => {
-    openers.delete(l);
-  };
-}
+export { emitWorktreeRequest, onOpenNewWorktree, openNewWorktree } from "./worktree-request";
+export type { WorktreeRequest } from "./worktree-request";
 
 // ── a new agent's own worktree (#6115) ──
 // worktree/add makes one from the agent's folder on persona/<its name>; worktree/status says whether a folder is one of
 // Persona's and what removing it would lose; worktree/remove takes it away when the agent is closed and the user says so.
 
-/** What worktree/status says of a folder (server/internal/proto/panes.go WorktreeStatus). `path` is set for any folder
- *  in a repository (its top level), `worktree` only for a linked worktree, `ours` only for one Persona made. */
-export interface WorktreeStatus {
-  worktree: boolean;
-  ours: boolean;
-  path?: string;
-  branch?: string;
-  root?: string;
-  main_branch?: string;
-  /** Where a new agent's worktree of this repository goes (newer nodes). */
-  checkouts?: string;
-  dirty: number;
-  unmerged: number;
-}
+export { removeAgentWorktree, worktreeLoss, worktreeStatus } from "./worktree-cleanup";
+export type { WorktreeStatus } from "./worktree-cleanup";
 
 export interface WorktreeAdded {
   path: string;
@@ -255,17 +213,6 @@ export function agentNameHint(prompt: string, cwd: string): string {
   return branchSlug(p) ? p : folderName(cwd.trim());
 }
 
-/** Null when the computer cannot say (an older node, offline): the switch and the cleanup then stay out of the way.
- *  kind: the engine the agent opens in (New Agent) or ran in (closing it: its `host`, which made its worktree; Paseo
- *  makes its own); none, the computer's default. */
-export async function worktreeStatus(mid: string, cwd: string, signal?: AbortSignal, kind?: string): Promise<WorktreeStatus | null> {
-  try {
-    return await api<WorktreeStatus>(`/machines/${enc(mid)}/worktree/status`, { method: "POST", json: { cwd, ...(kind ? { kind } : {}) }, signal });
-  } catch {
-    return null;
-  }
-}
-
 /** kind: the engine the agent opens in, which makes the worktree (Paseo, as a workspace of its own); none, the
  *  computer's default. */
 export function addAgentWorktree(mid: string, cwd: string, nameHint: string, branch = "", owner: Pick<NonNullable<Parameters<typeof api>[1]>, "signal" | "token" | "tokenOwner"> = {}, kind?: string): Promise<WorktreeAdded> {
@@ -274,26 +221,4 @@ export function addAgentWorktree(mid: string, cwd: string, nameHint: string, bra
     json: { cwd, ...(nameHint ? { name_hint: nameHint } : {}), ...(branch.trim() ? { branch: branch.trim() } : {}), ...(kind ? { kind } : {}) },
     ...owner,
   });
-}
-
-/** What removing a worktree would lose: changed files, and with the branch, its commits the main branch lacks. */
-export function worktreeLoss(st: WorktreeStatus, deleteBranch: boolean): { dirty: number; unmerged: number } {
-  return { dirty: st.dirty, unmerged: deleteBranch ? st.unmerged : 0 };
-}
-
-/** Removes it once its agent is closed: the node may still list the agent for a moment (worktree_in_use), so a few
- *  tries a second apart. `force` only when the user confirmed what is lost; `kind` the engine the agent ran in (its
- *  `host`). */
-export async function removeAgentWorktree(mid: string, path: string, o: { deleteBranch: boolean; force: boolean; kind?: string }, tries = 6, wait = 1000): Promise<{ removed: boolean; branch_deleted: boolean }> {
-  for (let i = 1; ; i++) {
-    try {
-      return await api<{ removed: boolean; branch_deleted: boolean }>(`/machines/${enc(mid)}/worktree/remove`, {
-        method: "POST",
-        json: { path, ...(o.deleteBranch ? { delete_branch: true } : {}), ...(o.force ? { force: true } : {}), ...(o.kind ? { kind: o.kind } : {}) },
-      });
-    } catch (e) {
-      if (i >= tries || !(e instanceof ApiError) || e.code !== "worktree_in_use") throw e;
-      await new Promise((r) => setTimeout(r, wait));
-    }
-  }
 }

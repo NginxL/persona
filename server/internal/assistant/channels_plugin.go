@@ -256,8 +256,10 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 	if err != nil {
 		return err
 	}
-	in := prompts.ChannelMessage{Persona: true, Name: v.Name, Owner: s.owner(ctx), Plain: caps.Format == channel.FormatPlain,
-		Asks: caps.Asks != channel.AsksNone, Public: v.Kind == channel.KindMention, Language: answerLanguage(s.hello(ctx).Locale),
+	hello := s.hello(ctx)
+	lang := i18n.Lang(hello.Locale)
+	in := prompts.ChannelMessage{Persona: true, Name: v.Name, Owner: strings.TrimSpace(hello.Owner), Plain: caps.Format == channel.FormatPlain,
+		Asks: caps.Asks != channel.AsksNone, Public: v.Kind == channel.KindMention, Language: answerLanguage(hello.Locale),
 		Chat: m.Chat, Topic: m.Topic, Context: m.Context, Text: strings.TrimSpace(m.Text), Quote: m.Quote, Forward: m.Forward,
 		Unsupported: slices.Clone(m.Unsupported)}
 	var images []proto.Image
@@ -270,11 +272,12 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 			images = append(images, proto.Image{Mime: mime, Data: base64.StdEncoding.EncodeToString(img.Data)})
 			continue
 		}
-		in.Unsupported = append(in.Unsupported, "更多的图片")
+		in.Unsupported = append(in.Unsupported, i18n.T(lang, "assistant-channels_plugin.extra_images"))
 	}
 	for _, f := range m.Files {
 		if !caps.FilesIn || len(f.Data) > channel.FileMost || rt.machine == "" {
-			in.Unsupported = append(in.Unsupported, "文件「"+firstNonEmpty(f.Name, "未命名")+"」")
+			name := firstNonEmpty(f.Name, i18n.T(lang, "assistant-channels_plugin.unnamed"))
+			in.Unsupported = append(in.Unsupported, i18n.T(lang, "assistant-channels_plugin.unsupported_file", i18n.Args{"name": i18n.Verbatim(name)}))
 			continue
 		}
 		path, err := s.uploadBytes(ctx, rt.machine, firstNonEmpty(f.Name, "file"), f.Data)

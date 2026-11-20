@@ -1,11 +1,12 @@
 // Repositories and their Issue/PR links: the to-do detail shows them as rows (the Agent keeps this store), and editing
 // opens a dialog. The store is metadata only: nothing here creates folders or moves a task's stage.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRepositoryRequestContext as useRequestContext } from "../lib/use-repository-request-context";
 import { t } from "../i18n";
 import { ApiError, errorText } from "../lib/api";
 import {
   cleanRepositoryDraft, isExtensionProvider, loadRepositoryCatalog, loadTaskRepositories, repositoryDraft, repositoryLinkKindLabel,
-  repositoryLinkView, repositoryProviderName, repositoryRequestContext, saveTaskRepositories, validRepositoryAlias,
+  repositoryLinkView, repositoryProviderName, saveTaskRepositories, validRepositoryAlias,
   validRepositoryDraft, validRequestedRef, repositoryDuplicateLink,
   type CreateRepositoryBindings, type RepositoryCatalog, type RepositoryRequestContext, type RepositoryLinkInput, type RequestedRef,
   type RepositoryLinkLabel, type RepositoryLinkView, type TaskRepository, type TaskRepositoryInput, type TaskRepositoryLink, type TaskRepositorySet,
@@ -16,14 +17,6 @@ import { Button, Collapse, Dialog, IconButton, Loading, Menu, toast, useMenu } f
 import { Icon } from "./icons";
 import { RepositoryMark } from "./RepositoryMark";
 import { SearchField } from "./SearchField";
-
-function useRequestContext(manager: string, owner: string) {
-  const alive = useRef(true);
-  const identity = useRef("");
-  identity.current = `${manager}:${owner}`;
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  return useMemo(() => repositoryRequestContext(manager, owner, () => alive.current && identity.current === `${manager}:${owner}`), [manager, owner]);
-}
 
 const hostOf = (identity: RepositoryIdentity) => { try { return new URL(identity.instance_url).host; } catch { return identity.instance_url; } };
 const linkTag = (identity: RepositoryIdentity, view: RepositoryLinkView) => `${identity.provider === "gitlab" && view.kind === "pull_request" ? "!" : "#"}${view.number}`;

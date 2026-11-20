@@ -1,9 +1,13 @@
 package node
 
 import (
+	"bufio"
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -214,11 +218,11 @@ func TestCollectUsageWindowsReadsCodexAndTheClaudeDrop(t *testing.T) {
 	write("claude-old.json", drop, usageWindowsMaxAge+time.Hour)
 	write("other.json", drop, time.Minute) // not claude*.json
 
-	got := n.collectUsageWindows(now)
+	got := n.collectUsageWindows(now, n.usageWindowCodexHomes())
 	if len(got) != 2 {
 		t.Fatalf("sources: %+v", got)
 	}
-	c := got["codex:"+n.codexHome()]
+	c := got["codex:"+codexUsageKey(realPath(n.codexHome()))]
 	if c.Name != "Codex Plus" || len(c.Windows) != 1 || c.Windows[0].UsedPercent != 33 || now.Sub(c.SampledAt) < time.Hour {
 		t.Errorf("codex = %+v", c)
 	}
@@ -234,7 +238,7 @@ func TestUsageSnapshotKeepsTheLastSampleAndHonoursTheOffSwitch(t *testing.T) {
 	now := time.Now()
 	rolloutAt(t, n.codexHome(), now.Add(-time.Hour), "44444444-4444-4444-8444-444444444444", tokenCount(now.Add(-time.Hour), 7, 10080, now.Add(24*time.Hour)))
 
-	snap := n.usageSnapshot(true)
+	snap := n.usageSnapshot()
 	if !snap.Enabled || len(snap.Accounts) != 1 || snap.Accounts[0].Windows[0].UsedPercent != 7 {
 		t.Fatalf("first poll: %+v", snap)
 	}
@@ -246,28 +250,28 @@ func TestUsageSnapshotKeepsTheLastSampleAndHonoursTheOffSwitch(t *testing.T) {
 	rolloutCaches.Lock()
 	delete(rolloutCaches.byHome, n.codexHome())
 	rolloutCaches.Unlock()
-	if snap = n.usageSnapshot(true); len(snap.Accounts) != 1 {
+	if snap = n.usageSnapshot(); len(snap.Accounts) != 1 {
 		t.Fatalf("the kept sample is gone: %+v", snap)
 	}
 
 	// off: nothing is answered, and what was kept is forgotten
 	n.setUsageWindows(false)
-	if snap = n.usageSnapshot(true); snap.Enabled || len(snap.Accounts) != 0 {
+	if snap = n.usageSnapshot(); snap.Enabled || len(snap.Accounts) != 0 {
 		t.Fatalf("off: %+v", snap)
 	}
 	n.setUsageWindows(true)
-	if snap = n.usageSnapshot(true); !snap.Enabled || len(snap.Accounts) != 0 {
+	if snap = n.usageSnapshot(); !snap.Enabled || len(snap.Accounts) != 0 {
 		t.Fatalf("back on, nothing to read: %+v", snap)
 	}
 }
 
 func TestMergeUsageForgetsSamplesOlderThanThreeDays(t *testing.T) {
 	now := time.Now()
-	kept := map[string]proto.UsageAccount{
-		"fresh": {Name: "a", SampledAt: now.Add(-time.Hour)},
-		"old":   {Name: "b", SampledAt: now.Add(-usageWindowsMaxAge - time.Minute)},
+	kept := map[string]proto.UsageNodeAccount{
+		"fresh": {UsageAccount: proto.UsageAccount{Name: "a", SampledAt: now.Add(-time.Hour)}},
+		"old":   {UsageAccount: proto.UsageAccount{Name: "b", SampledAt: now.Add(-usageWindowsMaxAge - time.Minute)}},
 	}
-	found := map[string]proto.UsageAccount{"fresh": {Name: "a2", SampledAt: now}}
+	found := map[string]proto.UsageNodeAccount{"fresh": {UsageAccount: proto.UsageAccount{Name: "a2", SampledAt: now}}}
 	got := mergeUsage(kept, found, now)
 	if len(got) != 1 || got["fresh"].Name != "a2" {
 		t.Errorf("got %+v", got)
@@ -276,7 +280,224 @@ func TestMergeUsageForgetsSamplesOlderThanThreeDays(t *testing.T) {
 
 func TestUsageSnapshotWithNothingToReadAnswersAnEmptyList(t *testing.T) {
 	n := &Node{home: t.TempDir(), dir: t.TempDir()}
-	if snap := n.usageSnapshot(true); !snap.Enabled || snap.Accounts == nil || len(snap.Accounts) != 0 {
+	if snap := n.usageSnapshot(); !snap.Enabled || snap.Accounts == nil || len(snap.Accounts) != 0 {
 		t.Errorf("an empty answer must be [] not null: %+v", snap)
+	}
+}
+
+func TestCodexUsageRefreshPrefersAccountBoundWindowsAndFallsBackBySource(t *testing.T) {
+	useFakeCodexUsageApp(t)
+	n, _ := testNode(t)
+	n.dir = t.TempDir()
+	n.codices = newCodexRegistry()
+	legacyHome := t.TempDir()
+	now := time.Now()
+	resets := now.Add(time.Hour)
+	rolloutAt(t, n.codexHome(), now.Add(-time.Minute), "44444444-4444-4444-8444-444444444444",
+		tokenCount(now.Add(-time.Minute), 7, 10080, resets))
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(n.codexHome(), alias); err != nil {
+		t.Fatal(err)
+	}
+	n.codices.config.Homes = []string{legacyHome, alias}
+	source := codexUsageKey(realPath(n.codexHome()))
+	const id = "fixture-account"
+	writeCodexUsageReply(t, n.codexHome(), fmt.Sprintf(`{"accountId":%q,
+		"rateLimits":{"limitId":"premium","primary":{"usedPercent":99,"windowDurationMins":300}},
+		"rateLimitsByLimitId":{"codex":{"planType":"pro","primary":{"usedPercent":42,"windowDurationMins":10080,"resetsAt":%d}}}}`, id, resets.Unix()))
+	writeCodexUsageReply(t, legacyHome, `{"rateLimits":{"planType":"plus","primary":{"usedPercent":0,"windowDurationMins":300}}}`)
+
+	n.refreshUsageWindows(t.Context())
+	result, err := n.handle(t.Context(), "usage.windows", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := result.(proto.UsageSnapshot)
+	if len(snap.Accounts) != 2 {
+		t.Fatalf("expected two homes, got %+v", snap)
+	}
+	for _, account := range snap.Accounts {
+		switch account.SourceKey {
+		case source:
+			if account.AccountKey != codexUsageKey(id) || account.Name != "Codex Pro" ||
+				len(account.Windows) != 1 || account.Windows[0].UsedPercent != 42 ||
+				account.Windows[0].ResetsAt == nil || account.Windows[0].ResetsAt.Unix() != resets.Unix() {
+				t.Errorf("app-server sample: %+v", account)
+			}
+		case codexUsageKey(realPath(legacyHome)):
+			if account.AccountKey != "" || account.Name != "Codex Plus" ||
+				len(account.Windows) != 1 || account.Windows[0].UsedPercent != 0 {
+				t.Errorf("legacy app-server sample: %+v", account)
+			}
+		default:
+			t.Errorf("unexpected source: %+v", account)
+		}
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), id) || strings.Contains(string(data), n.codexHome()) || strings.Contains(string(data), legacyHome) {
+		t.Error("node RPC exposed a raw account ID or home")
+	}
+
+	// A model-specific answer has no plan windows. A failed read keeps a newer verified sample.
+	writeCodexUsageReply(t, n.codexHome(), `{"accountId":"different-account",
+		"rateLimits":{"limitId":"premium","primary":{"usedPercent":99,"windowDurationMins":300}}}`)
+	n.refreshUsageWindows(t.Context())
+	current := func() proto.UsageNodeAccount {
+		t.Helper()
+		for _, account := range n.usageSnapshot().Accounts {
+			if account.SourceKey == source {
+				return account
+			}
+		}
+		t.Fatal("missing Codex home")
+		return proto.UsageNodeAccount{}
+	}
+	if account := current(); account.AccountKey != codexUsageKey(id) || account.Windows[0].UsedPercent != 42 {
+		t.Fatalf("old rollout replaced a newer verified sample: %+v", account)
+	}
+
+	// A newer rollout can be used as a fallback. It never inherits an identity from the app-server.
+	newer := time.Now().Add(time.Second)
+	rolloutAt(t, n.codexHome(), newer, "55555555-5555-4555-8555-555555555555", tokenCount(newer, 11, 10080, resets))
+	rolloutCaches.Lock()
+	delete(rolloutCaches.byHome, n.codexHome())
+	rolloutCaches.Unlock()
+	n.refreshUsageWindows(t.Context())
+	if account := current(); account.AccountKey != "" || account.Windows[0].UsedPercent != 11 {
+		t.Fatalf("new rollout did not become an unidentified source: %+v", account)
+	}
+
+	expired := now.Add(-time.Minute)
+	writeCodexUsageReply(t, n.codexHome(), fmt.Sprintf(`{"accountId":%q,
+		"rateLimits":{"limitId":"codex","planType":"pro","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":%d}}}`, id, expired.Unix()))
+	n.refreshUsageWindows(t.Context())
+	if account := current(); account.AccountKey != codexUsageKey(id) ||
+		len(account.Windows) != 1 || account.Windows[0].ResetsAt == nil || account.Windows[0].ResetsAt.Unix() != expired.Unix() {
+		t.Fatalf("node did not forward expired authoritative window: %+v", account)
+	}
+
+	writeCodexUsageReply(t, n.codexHome(), fmt.Sprintf(`{"accountId":%q,
+		"rateLimits":{"limitId":"codex","planType":"team","primary":{"usedPercent":10,"windowDurationMins":300}}}`, id))
+	n.refreshUsageWindows(t.Context())
+	if account := current(); account.AccountKey != "" || account.Plan != "team" || account.Windows[0].UsedPercent != 10 {
+		t.Fatalf("workspace ID was used as a personal quota ID: %+v", account)
+	}
+}
+
+func TestCodexUsageRefreshDoesNotBlockSnapshotsAndDisableCancelsIt(t *testing.T) {
+	useFakeCodexUsageApp(t)
+	n := &Node{home: t.TempDir(), dir: t.TempDir()}
+	now := time.Now()
+	rolloutAt(t, n.codexHome(), now, "44444444-4444-4444-8444-444444444444", tokenCount(now, 7, 300, now.Add(time.Hour)))
+	writeCodexUsageReply(t, n.codexHome(), "block")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		n.refreshUsageWindows(ctx)
+	}()
+	defer func() { cancel(); <-done }()
+	waitFor(t, "app-server usage request", func() bool {
+		_, err := os.Stat(filepath.Join(n.codexHome(), "fixture-usage-started"))
+		return err == nil
+	})
+	// A cold usage RPC returns a local sample even though the app-server is still waiting.
+	response := make(chan proto.UsageSnapshot, 1)
+	go func() { response <- n.usageSnapshot() }()
+	select {
+	case snap := <-response:
+		if len(snap.Accounts) != 1 || snap.Accounts[0].AccountKey != "" || snap.Accounts[0].Windows[0].UsedPercent != 7 {
+			t.Fatalf("cold sample: %+v", snap)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("usage RPC blocked on app-server")
+	}
+	n.setUsageWindows(false)
+	n.setUsageWindows(true)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("disable did not cancel the usage request")
+	}
+	n.usageWin.mu.Lock()
+	defer n.usageWin.mu.Unlock()
+	if n.usageWin.accounts != nil {
+		t.Error("a canceled refresh repopulated the cache")
+	}
+}
+
+func useFakeCodexUsageApp(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake app-server launcher uses a POSIX shell")
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli := filepath.Join(t.TempDir(), "codex")
+	script := "#!/bin/sh\nexec " + shellQuote(binary) + " -test.run='^TestFakeCodexUsageApp$'\n"
+	if err := os.WriteFile(cli, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previous := codexUsageCLI
+	codexUsageCLI = func() (string, error) { return cli, nil }
+	t.Cleanup(func() { codexUsageCLI = previous })
+	t.Setenv("PERSONA_TEST_CODEX_USAGE_APP", "1")
+}
+
+func writeCodexUsageReply(t *testing.T, home, result string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(home, "fixture-usage-result"), []byte(result), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFakeCodexUsageApp supplies the official app-server JSON-RPC contract to the collector's real stdio client.
+func TestFakeCodexUsageApp(t *testing.T) {
+	if os.Getenv("PERSONA_TEST_CODEX_USAGE_APP") == "" {
+		return
+	}
+	home := os.Getenv("CODEX_HOME")
+	scanner := bufio.NewScanner(os.Stdin)
+	out := json.NewEncoder(os.Stdout)
+	var initialized bool
+	for scanner.Scan() {
+		var message struct {
+			ID     *int            `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
+			t.Fatal(err)
+		}
+		switch message.Method {
+		case "initialize":
+			_ = out.Encode(map[string]any{"id": message.ID, "result": map[string]any{}})
+		case "initialized":
+			initialized = true
+		case "account/rateLimits/read":
+			var params map[string]bool
+			if err := json.Unmarshal(message.Params, &params); err != nil || !initialized || !params["excludeResetCreditDetails"] {
+				t.Fatal("unexpected usage request")
+			}
+			body, err := os.ReadFile(filepath.Join(home, "fixture-usage-result"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(body) == "block" {
+				if err := os.WriteFile(filepath.Join(home, "fixture-usage-started"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				continue
+			}
+			_ = out.Encode(map[string]any{"id": message.ID, "result": json.RawMessage(body)})
+		default:
+			t.Fatalf("unexpected app-server method %q", message.Method)
+		}
 	}
 }

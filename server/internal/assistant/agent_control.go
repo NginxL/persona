@@ -277,7 +277,7 @@ func (s *Service) adoptAgentAs(ctx context.Context, self string, am Device, c pr
 			return Todo{}, false, err
 		}
 		t.Supervision = &v
-		s.setTaskStageKind(ctx, t.ID, "", "", taskStageKind(false, v.DoneWhen, t.PRURL), false)
+		s.restage(ctx, t.ID, nil) // by its new criteria; a read-only start still holds
 		return t, false, nil
 	}
 	title, retitle := s.adoptedTitle(ctx, c, title, prompt)
@@ -296,7 +296,7 @@ func (s *Service) adoptAgentAs(ctx context.Context, self string, am Device, c pr
 		s.dropAdoption(ctx, todo.ID, err)
 		return Todo{}, false, fmt.Errorf("supervise it: %w", err)
 	}
-	s.setTaskStageKind(ctx, todo.ID, "", "", taskStageKind(false, doneWhen, todo.PRURL), false)
+	s.restage(ctx, todo.ID, nil)
 	todo.Supervision = &v
 	s.briefFor(ctx, s.callerOrigin(ctx, self), todo, doneWhen, expect) // before its agent is linked (task_brief.go)
 	if err := s.linkTodoAgent(ctx, todo.ID, am.ID, c.SessionID, title, c.Cwd, c.Agent); err != nil {

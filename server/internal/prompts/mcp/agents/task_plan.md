@@ -8,6 +8,8 @@ File changes need readonly=false and explicitly authorized write permission. Rep
 
 When repository identity needs resolving, consult repositories_list, and repository_get only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight. Closing the terminal on acceptance is the owner's Start choice; this tool cannot set it.
 
+For an existing todo with a saved workspace naming plan, explicitly select {"backend":{"operation_id":"<saved operation ID>"}}. Its selected repositories must all be ready before the session starts at the saved root on its owning computer. An optional backend.host selects a supported engine on that computer.
+
 Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-change"}} names its branch; {"existing":"<cwd or workspace_id>"} selects one; "none" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation), and an occupied cwd uses new. Explicit existing never switches silently; refusal names its task owner. For an explicit new branch already checked out, reuse requires a clean checkout, no live Agent and no unfinished-task owner; otherwise refuse with its path and known owner. The machine's engine owns creation, location and registration; never run git worktree add. The card previews the path and is editable before Start. Default branch: task/<todo id>. Creation failure starts no Agent. Workspaces remain after acceptance. Organization read-only policy refusals include their reason: follow it, never retry unchanged.
 
 `wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.
@@ -38,15 +40,18 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
           "title",
           "prompt",
           "machine",
-          "cwd",
           "readonly",
           "user_requested",
           "why"
         ],
+        "anyOf": [
+          {"type": "object", "required": ["cwd"]},
+          {"type": "object", "required": ["workspace", "todo_id"], "properties": {"workspace": {"type": "object", "required": ["backend"]}}}
+        ],
         "properties": {
           "title": {
             "type": "string",
-            "description": "the task in a short line the user reads on the card (Chinese, under 20 characters)"
+            "description": "Card title in Chinese, under 20 characters."
           },
           "context": {"type": "string", "description": "facts the manager cannot resolve; omit project background"},
           "prompt": {
@@ -55,7 +60,7 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
           },
           "machine": {
             "type": "string",
-            "description": "machine id; fixed target by default"
+            "description": "Machine id; fixed by default."
           },
           "machine_policy": {
             "type": "string",
@@ -64,13 +69,14 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
           },
           "cwd": {
             "type": "string",
-            "description": "the project directory: absolute path or ~/…"
+            "description": "Absolute or ~/ project directory. Required unless workspace.backend supplies the saved root."
           },
           "workspace": {
             "type": ["string", "object"],
             "description": "workspace policy; omit for default; existing: absolute/~/path or workspace id on that machine; no custom root",
             "oneOf": [
               { "type": "string", "enum": ["new", "none"] },
+              { "type": "object", "required": ["backend"], "additionalProperties": false, "properties": { "backend": { "type": "object", "required": ["operation_id"], "additionalProperties": false, "properties": { "operation_id": { "type": "string", "minLength": 1 }, "host": { "type": "string" } } } } },
               { "type": "object", "required": ["existing"], "additionalProperties": false, "properties": { "existing": { "type": "string", "minLength": 1 } } },
               { "type": "object", "required": ["new"], "additionalProperties": false, "properties": { "new": { "type": "object", "additionalProperties": false, "properties": { "branch": { "type": "string" } } } } }
             ]
@@ -109,11 +115,11 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
           },
           "user_requested": {
             "type": "boolean",
-            "description": "true when the user asked for this very task in their latest message (told you to do it, to have an agent do it, to go ahead and start); false when it is your own idea or inferred from something they did not ask for"
+            "description": "True only for this task/start requested in the user's latest message; false for inferred work/your own idea."
           },
           "why": {
             "type": "string",
-            "description": "one line (Chinese) on why this machine, directory and model"
+            "description": "Chinese one-line reason for machine, directory and model."
           },
           "done_when": {
             "type": "array",
@@ -121,11 +127,11 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
             "items": {
               "type": "string"
             },
-            "description": "what done means: results you will check before you accept it (Chinese, one each), e.g. 「PR 合并到 master」「浅色 / 深色截图贴进 PR」「线上 hub 已部署并验证」; the agent is told them. Required for a writable task (at least one); with continues the effective criteria from the original to-do apply and this is ignored"
+            "description": "Chinese acceptance results told to Agent, one per entry. Nonempty for writable tasks; ignored with continues, which uses original todo's effective criteria."
           },
           "goal": {
             "type": "string",
-            "description": "the work in one sentence, as the owner would say what they get from it (Chinese); required for a read-only task, the title when left out of a writable one"
+            "description": "Owner's one-line Chinese outcome. Required read-only; writable defaults to title."
           },
           "out_of_bounds": {
             "type": "array",
@@ -133,23 +139,23 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
             "items": {
               "type": "string"
             },
-            "description": "optional: what the agent must not do or touch (Chinese, one each), e.g. 「不合并」「不动线上」"
+            "description": "Optional forbidden actions/areas, in Chinese, one per entry."
           },
           "continues": {
             "type": "string",
-            "description": "optional: the original todo id this task continues. Continuations always reuse this same todo and its original brief and effective criteria; never split work to a new todo. At Start, stop/release still-active prior Agents and reopen this todo if closed. Refuse unauthorized takeovers, an unreachable prior Agent that cannot be stopped, and legacy open successor duplicates. Failed starts keep this todo. Needs continues_why; if no permission change is wanted, agent_send can follow up the same live Agent"
+            "description": "Original todo id; needs continues_why. Reuse todo, original brief and effective criteria even on failed Start; never split. Start stops/releases active prior Agents and reopens if closed. Refuse unauthorized takeover, unreachable Agents that cannot be stopped, or open legacy successors. No permission change: agent_send may follow up its live Agent."
           },
           "scope_revision": {
             "type": "string",
-            "description": "with continues after a scope change: the exact scope_revision returned by task_scope; refuse planning if it is stale"
+            "description": "With continues after a scope change: exact task_scope scope_revision; refuse stale plans."
           },
           "continues_why": {
             "type": "string",
-            "description": "with continues: one line on why the earlier task stopped or needs a replacement; kept on this continuation's plan"
+            "description": "With continues: one-line stop/replacement reason saved on this plan."
           },
           "started_why": {
             "type": "string",
-            "description": "when the owner did not just ask for this (your own idea, something a 督办 message or a routine led to): one line on why you start it; kept on the brief"
+            "description": "If not just owner-requested (own idea, 督办 or routine): one-line start reason saved in brief."
           },
           "attachments": {
             "type": "array",
@@ -162,26 +168,26 @@ Workspace policy: "new" makes an isolated checkout; {"new":{"branch":"task/my-ch
           "expect_minutes": {
             "type": "integer",
             "minimum": 0,
-            "description": "about how long the task should take, in minutes; required (above 0) unless continues is given. A task with no progress for 1.5× that (at least 20 minutes) counts as stuck, and one with no end after 3× that (at least a day) is raised to you as overdue"
+            "description": "Estimated minutes; positive unless continues. Stuck after 1.5× without progress (minimum 20 minutes); overdue reported after 3× without end (minimum one day)."
           },
           "project": {
             "type": "string",
-            "description": "optional: its knowledge-base project, an existing one's slug or name (kb_list projects), set when the area of work is clear; never a near-duplicate"
+            "description": "Existing kb_list projects slug/name for a clear long-term area; no near-duplicates."
           },
           "part_of": {
             "type": "string",
-            "description": "optional: the request to-do this is a piece of"
+            "description": "Optional request todo this is a piece of."
           },
           "after": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "with part_of: the pieces it waits for"
+            "description": "With part_of: prerequisite pieces."
           },
           "todo_id": {
             "type": "string",
-            "description": "optional: an open or failed-start todo this conversation opened or supervises, with no live Agent (stopped ones are released at Start). To stop a live Agent or reopen a done one use continues; given both, they name the same todo"
+            "description": "Open or failed-start todo this chat opened/supervises; no live Agent. Release stopped Agents at Start. For stopping/reopening use continues/continues_why. Both IDs must match."
           },
           "inbox_item": {
             "type": "string",

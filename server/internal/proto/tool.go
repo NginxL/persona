@@ -15,6 +15,9 @@ type Tool struct {
 	// (assistant/tool_loading.go). personad mcp leaves Claude Code's alwaysLoad off such a tool, so it waits behind
 	// ToolSearch. Absent (an older manager, node or MCP server) is loaded up front, as before.
 	DeferLoading bool `json:"defer_loading,omitempty"`
+	// WorkGuideTool is discoverable on demand in an opted-in Assistant conversation.
+	// Older MCP servers ignore it and keep advertising the original tool.
+	WorkGuideTool bool `json:"work_guide_tool,omitempty"`
 }
 
 // Content is an MCP tool result content block.

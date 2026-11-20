@@ -2811,6 +2811,8 @@ export interface MessagingAccount {
   id: string;
   name?: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   tenant?: string;
   signed_in: boolean;
   unread?: number;
@@ -2828,6 +2830,8 @@ export interface MessagingConversation {
   id: string;
   name: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   kind: MessagingConversationKind;
   unread: number;
   marked_unread?: boolean;
@@ -2852,6 +2856,8 @@ export interface MessagingPerson {
   id?: string;
   name: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   kind?: string;
 }
 
@@ -3265,6 +3271,8 @@ export interface MessagingProfile {
   id: string;
   name: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   cover?: string;
   kind?: string;
   subtitle?: string;
@@ -4256,6 +4264,8 @@ export interface ConnectorArchiveChat {
   state?: string;
   /** When the conversation got to state; omitted when unknown. */
   state_at?: string;
+  /** Stable HTTP(S) link to the conversation at its source, when available. */
+  source_url?: string;
 }
 
 /**
@@ -5018,6 +5028,10 @@ export interface KBEntry {
    * absent on other kinds, before a match and from an older hub.
    */
   meeting_id?: string;
+  /** Reference-only for a project that stores pointers. Omitted means full. */
+  project_mode?: string;
+  freshness?: KBProjectFreshness;
+  sources?: KBProjectSource[];
 }
 
 /**
@@ -5088,6 +5102,57 @@ export interface KBDetail {
    * (docs/assistant/knowledge.md "Person profiles").
    */
   profiles?: Record<string, KBProfileRecord>;
+  /** Reference-only for a project that stores pointers. Omitted means full. */
+  project_mode?: string;
+  freshness?: KBProjectFreshness;
+  sources?: KBProjectSource[];
+}
+
+export interface KBProjectSource {
+  /** Canonical source identity shared across project views. */
+  id: string;
+  url?: string;
+  refs?: string[];
+  /** State observed at the source, such as merged. */
+  delivery_state?: string;
+  delivery_at?: string;
+  /** Unverified when only source delivery facts are available. */
+  environment_verification?: string;
+}
+
+export interface KBProjectFreshness {
+  needs_review: boolean;
+  timeline_end: number;
+  evidence?: KBProjectEvidenceRef[];
+  fields: Record<string, KBProjectFieldFreshness>;
+}
+
+export interface KBProjectFieldFreshness {
+  /** Omitted when historical authorship is unknown. */
+  writer?: string;
+  source?: string;
+  cutoff?: KBProjectCutoff;
+  lock_reason?: string;
+  review_by: string;
+  needs_review: boolean;
+  review_reason?: string;
+  /** Omitted when the gap cannot be counted. */
+  uncovered_evidence_count?: number;
+}
+
+export interface KBProjectCutoff {
+  timeline_from: number;
+  timeline_through: number;
+  /** True if earlier timeline entries were outside this refresh window. */
+  timeline_truncated?: boolean;
+  sources?: KBProjectEvidenceRef[];
+}
+
+export interface KBProjectEvidenceRef {
+  ref: string;
+  /** Opaque revision of this input. */
+  position: string;
+  source_id?: string;
 }
 
 export interface KBProfileRecord {

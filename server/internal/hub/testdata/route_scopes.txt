@@ -143,6 +143,7 @@ assistant.ask        GET /api/v1/assistant/capabilities
 assistant.ask        GET /api/v1/assistant/conversations/{id}/feed
 -                    GET /api/v1/assistant/directions/offers
 -                    GET /api/v1/assistant/directions/tree
+-                    GET /api/v1/assistant/directions/{id}
 assistant.dispatch_policy GET /api/v1/assistant/dispatch-policy
 -                    GET /api/v1/assistant/feishu/notices
 -                    GET /api/v1/assistant/followups
@@ -339,6 +340,8 @@ agents.read          GET /api/v1/sessions/{mid}/{sid}/screen
 todos.read           GET /api/v1/todos
 todos.read           GET /api/v1/todos/places
 todos.read           GET /api/v1/todos/{id}
+-                    GET /api/v1/todos/{id}/backend-workspace
+-                    GET /api/v1/todos/{id}/backend-workspace/operations/{operation_id}
 todos.read           GET /api/v1/todos/{id}/decisions
 -                    GET /api/v1/todos/{id}/images/{image}
 todos.read           GET /api/v1/todos/{id}/repositories
@@ -632,6 +635,10 @@ todos.write          POST /api/v1/todos
 -                    POST /api/v1/todos/retitle
 -                    POST /api/v1/todos/{id}/accept
 -                    POST /api/v1/todos/{id}/asks/{ask}/answer
+-                    POST /api/v1/todos/{id}/backend-workspace/cancel
+-                    POST /api/v1/todos/{id}/backend-workspace/cleanup
+-                    POST /api/v1/todos/{id}/backend-workspace/prepare
+-                    POST /api/v1/todos/{id}/backend-workspace/start
 -                    POST /api/v1/todos/{id}/decision-dismiss
 -                    POST /api/v1/todos/{id}/decision-undo-dismiss
 todos.write          POST /api/v1/todos/{id}/decisions
@@ -676,6 +683,7 @@ assistant.dispatch_policy PUT /api/v1/assistant/dispatch-policy
 -                    PUT /api/v1/assistant/routines
 -                    PUT /api/v1/assistant/saved-prompts/order
 -                    PUT /api/v1/assistant/saved-prompts/{id}
+-                    PUT /api/v1/assistant/sessions/{mid}/{sid}/direction
 assistant.start_defaults PUT /api/v1/assistant/start-defaults
 -                    PUT /api/v1/assistant/tasks/{id}
 -                    PUT /api/v1/assistant/urgent-call

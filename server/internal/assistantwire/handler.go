@@ -260,13 +260,16 @@ type StartEnded struct {
 
 // ConversationSent is session.assistant_sent's params: an app's message the hub sent to the assistant's conversation
 // SessionID, and what became of it. Outcome is ConversationDelivered, ConversationFailed or ConversationUnknown (it may
-// have been typed); Code and Error are the hub's answer when it was not delivered.
+// have been typed); Code and Error are the hub's answer when it was not delivered. ClientMsgID is the message's
+// client_msg_id when it has one, so the manager settles each message by its own notice (#11392); an older hub sends
+// none.
 type ConversationSent struct {
-	MachineID string `json:"machine_id"`
-	SessionID string `json:"session_id"`
-	Outcome   string `json:"outcome"`
-	Code      string `json:"code,omitempty"`
-	Error     string `json:"error,omitempty"`
+	MachineID   string `json:"machine_id"`
+	SessionID   string `json:"session_id"`
+	Outcome     string `json:"outcome"`
+	Code        string `json:"code,omitempty"`
+	Error       string `json:"error,omitempty"`
+	ClientMsgID string `json:"client_msg_id,omitempty"`
 }
 
 // ConversationSent's outcomes.

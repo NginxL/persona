@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/screen"
 )
 
@@ -32,6 +31,9 @@ var (
 // agyReadyHint is the hint under agy's input box: the box is up, so no trust dialog is coming.
 const agyReadyHint = "? for shortcuts"
 
+// agyNoticeDismiss is the line under a notice agy draws above its input box on start, which holds the keyboard.
+const agyNoticeDismiss = "esc to dismiss"
+
 // agyTrustKeys are the keys that answer agy's trust dialog by trusting the folder, nil when the screen does not show it.
 // The dialog is known by its question ("Do you trust the contents of this project?") and the option by what it says
 // ("Yes, I trust this folder"), not by its place.
@@ -51,28 +53,15 @@ func agyTrustKeys(text string) []string {
 	return nil
 }
 
-// agyPaneSettled: herdr reports the agy in pane as anything but blocked (it reads the trust dialog as blocked), so its
-// input box is up. False when the hosts cannot be read or no agy is reported there.
-func (n *Node) agyPaneSettled(ctx context.Context, pane string) bool {
-	if err := n.refreshHosts(ctx); err != nil {
-		return false
-	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	for _, a := range n.agents {
-		if a.PaneID == pane && a.Agent == agyAgent {
-			return a.AgentStatus != "" && a.AgentStatus != proto.StatusBlocked && a.AgentStatus != proto.StatusUnknown
-		}
-	}
-	return false
-}
-
 // agyTrustFolder answers agy's trust dialog in pane, if one shows, before the start types its first message. It returns
-// once agy's input box shows (its hint, or herdr no longer reads agy as blocked) with no dialog, or after agyTrustWait;
-// errors only when ctx ends or keys cannot be sent.
+// once agy's input box is drawn (its hint) with no dialog, or after agyTrustWait; errors only when ctx ends or keys cannot
+// be sent. herdr reports agy by its process before agy's screen takes the terminal, and calls it idle then: a message
+// typed in that window is echoed by the terminal and dropped by agy (#11437), so herdr's status alone never lets the
+// first message go. A start notice over the box is dismissed with one Esc first.
 func (n *Node) agyTrustFolder(ctx context.Context, pane string) error {
 	deadline := time.Now().Add(agyTrustWait)
 	answered := "" // the dialog screen last answered: the same screen is not answered twice
+	dismissed := false
 	for {
 		text, err := n.readPane(ctx, pane, "visible", 40)
 		if err == nil {
@@ -84,8 +73,17 @@ func (n *Node) agyTrustFolder(ctx context.Context, pane string) error {
 					log.Printf("agy start in pane %s: trusted the folder the start chose (#11424)", pane)
 					answered = text
 				}
-			} else if !screen.Choosing(text) && (strings.Contains(text, agyReadyHint) || n.agyPaneSettled(ctx, pane)) {
-				return nil
+			} else if !screen.Choosing(text) && strings.Contains(text, agyReadyHint) {
+				// A notice agy shows over its input box on start ("Auto is now the default agent mode … esc to
+				// dismiss", 1.5.13) swallows typed input until it is dismissed (#11437): Esc once, then the box.
+				if dismissed || !strings.Contains(strings.ToLower(text), agyNoticeDismiss) {
+					return nil
+				}
+				if err := n.sendKeys(ctx, pane, "escape"); err != nil {
+					return err
+				}
+				log.Printf("agy start in pane %s: dismissed agy's start notice before the first message (#11437)", pane)
+				dismissed = true
 			}
 		}
 		if time.Now().After(deadline) {

@@ -19,6 +19,18 @@ class ChatRepositoriesTest {
     @get:Rule val shadowParity = ShadowParityRule()
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun restoredHistoryRetainsItsOldestBoundaryBeforeTheLatestItemsAreVerified() = runTest {
+        for (more in listOf(null, true, false)) {
+            val cache = FakeItemsCache(CachedChat(listOf(item(3)), "h", 3, more))
+            val transport = FakeChatTransport().apply { fetch = { awaitCancellation() } }
+            val repo = HubChatRepository(transport, FakeConnection(), cache, FakeSessions(), backgroundScope)
+            val restored = repo.observe(key).first { it.items.isNotEmpty() }
+            assertFalse(restored.verified)
+            assertEquals(more != null, restored.olderBoundaryKnown)
+            assertEquals(more == true, restored.hasOlder)
+        }
+    }
+
     @Test fun unobservedSessionRevisionsNeverReadBodiesAndReopeningStillVerifiesTheLatestPage() = runTest {
         val sessions = FakeSessions()
         val connection = FakeConnection()

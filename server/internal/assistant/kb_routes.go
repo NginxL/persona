@@ -160,8 +160,14 @@ func (s *Service) kbRoutes() {
 			return
 		}
 		var u kb.UserUpdate
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&u); err != nil {
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&u); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
+			return
+		}
+		if (u.ProjectMode != nil || u.SourceURLs != nil) && !fullRole(r) {
+			apierr.Write(w, http.StatusForbidden, i18n.Err("assistant-kb_routes.source_settings_forbidden"))
 			return
 		}
 		ignored := kb.UserUnsupported(r.PathValue("kind"), u) // not applied: said, not dropped silently

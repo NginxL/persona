@@ -320,7 +320,7 @@ extension AppModel {
         let old = allSessions.filter { $0.group == group }
         let index = Dictionary(old.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
         let incoming = rows.map { $0.preservingDetails(from: index[$0.key]) }
-        if !heldRetryReceipts.isEmpty {
+        if heldRetryRestoration != nil || !heldRetryReceipts.isEmpty {
             reconcileHeldRetries(Dictionary(grouping: rows.filter { $0.undelivered != nil }, by: \.machineRef))
         }
         applySessions(Dictionary(grouping: Self.merging(incoming, into: old), by: \.machineRef), complete: false)
@@ -365,7 +365,8 @@ extension Session {
         row.ports = old.ports
         row.permissionMode = old.permissionMode
         row.bypassAvailable = old.bypassAvailable
-        row.effort = old.effort
+        // The pending choice and the confirmed effort come from the same session snapshot.
+        if row.pendingEffort == nil && old.pendingEffort == nil, row.effort == nil { row.effort = old.effort }
         row.efforts = old.efforts
         row.serviceTier = old.serviceTier
         row.serviceTiers = old.serviceTiers

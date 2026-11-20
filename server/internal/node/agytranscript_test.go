@@ -62,6 +62,7 @@ func TestAgyPaneTranscriptMapping(t *testing.T) {
 			{seq: 1, role: "assistant", kind: "tool_use", tool: "LS", input: `[1,2]`, pair: 3},
 			{seq: 1, role: "assistant", kind: "tool_use", tool: "Agent", input: `{"description":"subagent","prompt":""}`, pair: 4},
 			{seq: 2, role: "user", kind: "tool_result", text: "edited", pair: 1},
+			{seq: 2, role: "assistant", kind: "image", pair: 1},
 			{seq: 3, role: "user", kind: "tool_result", text: "multi-edited", pair: 2},
 			{seq: 4, role: "user", kind: "tool_result", text: "listed", pair: 3},
 			{seq: 5, role: "user", kind: "tool_result", text: "delegated", pair: 4},

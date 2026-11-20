@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"slices"
 	"testing"
+	"time"
 
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -422,5 +425,91 @@ func TestMachineCallGatesSessionSwitch(t *testing.T) {
 		if refused := errors.As(err, &re) && re.Code == proto.CodeNodeOutdated; refused != tc.want {
 			t.Fatalf("%s: refused=%v want=%v: %v", tc.info.Version, refused, tc.want, err)
 		}
+	}
+}
+
+func TestMachineCallGatesTaskExecution(t *testing.T) {
+	d := newTestDevices(t)
+	m := newMachine(d, MachineConfig{ID: "box", Name: "Box", Kind: "ssh", SSHHost: "box.invalid"})
+	without := current("old")
+	without.Capabilities = slices.DeleteFunc(slices.Clone(without.Capabilities), func(c string) bool { return c == nodeproto.TaskExecution })
+	for _, info := range []proto.NodeInfo{current("new"), without, {Version: "pre-handshake"}} {
+		m.mu.Lock()
+		m.info, m.online = info, true
+		m.mu.Unlock()
+		for _, method := range []string{"assistant.directory", "assistant.send"} {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			var re *rpc.Error
+			err := m.call(ctx, method, map[string]any{"task_execution": true}, nil)
+			refused := errors.As(err, &re) && re.Code == proto.CodeNodeOutdated
+			if refused != !nodeHas(info, nodeproto.TaskExecution) {
+				t.Fatalf("%s %s: %v", info.Version, method, err)
+			}
+		}
+	}
+}
+
+func TestMachineSelectsTaskExecutionBeforeSending(t *testing.T) {
+	without := current("older")
+	without.Capabilities = slices.DeleteFunc(slices.Clone(without.Capabilities), func(c string) bool { return c == nodeproto.TaskExecution })
+	for _, info := range []proto.NodeInfo{current("current"), without, {Version: "pre-handshake", ModelConfiguration: true}} {
+		t.Run(info.Version, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			d := newTestDevices(t)
+			m := newMachine(d, MachineConfig{ID: "box", Name: "Box", Kind: "ssh"})
+			managerSide, nodeSide := net.Pipe()
+			defer managerSide.Close()
+			defer nodeSide.Close()
+			manager, node := rpc.New("manager", managerSide), rpc.New("node", nodeSide)
+			sends := make(chan map[string]json.RawMessage, 4)
+			node.OnRequest = func(_ context.Context, method string, raw json.RawMessage) (any, error) {
+				if method != "assistant.send" {
+					t.Errorf("unexpected node method %s", method)
+				}
+				var fields map[string]json.RawMessage
+				err := json.Unmarshal(raw, &fields)
+				sends <- fields
+				return nil, err
+			}
+			go func() { _ = node.Serve(ctx, nodeSide) }()
+			go func() { _ = manager.Serve(ctx, managerSide) }()
+			m.mu.Lock()
+			m.peer, m.info, m.online = manager, info, true
+			m.mu.Unlock()
+			strict := nodeHas(info, nodeproto.TaskExecution)
+			p := map[string]any{"origin": "task", "origin_known": true, "task_execution": true, devicewire.LegacyTaskExecution: true, "cwd": "/home/me/assistant"}
+			for _, resume := range []bool{false, true} {
+				if resume {
+					p["session_id"], p["resume_only"] = "same-session", true
+				}
+				if err := m.call(ctx, "assistant.send", p, nil); err != nil {
+					t.Fatal(err)
+				}
+				wire := <-sends
+				if wire[devicewire.LegacyTaskExecution] != nil || (string(wire["task_execution"]) == "true") != strict ||
+					(wire["cwd"] != nil) != (strict || !resume) || resume && string(wire["resume_only"]) != "true" {
+					t.Fatalf("node parameters: %s", wire)
+				}
+			}
+			if strict {
+				return
+			}
+			// Even a hint on a protected destination cannot loosen the capability gate.
+			p["origin"] = "inbox"
+			var re *rpc.Error
+			if err := m.call(ctx, "assistant.send", p, nil); !errors.As(err, &re) || re.Code != proto.CodeNodeOutdated {
+				t.Fatalf("protected send was not refused: %v", err)
+			}
+			delete(p, "origin")
+			delete(p, "origin_known")
+			if err := m.call(ctx, "assistant.send", p, nil); !errors.As(err, &re) || re.Code != proto.CodeNodeOutdated {
+				t.Fatalf("unknown-origin send was not refused: %v", err)
+			}
+			if len(sends) != 0 {
+				t.Fatal("a protected send reached the older node")
+			}
+		})
 	}
 }

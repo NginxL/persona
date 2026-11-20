@@ -26,6 +26,7 @@ struct ModelLaunchersView: View {
     @Environment(AppModel.self) private var model
     private let requestScope = AssistantSettingsRequestScope(AppModel.shared)
     @State private var launchers: [LauncherView]?
+    @State private var listOwner: ProviderImportOwner?
     /// How each machine's list came in; nil from an older hub.
     @State private var sync: [LauncherSync]?
     @State private var error: String?
@@ -155,7 +156,9 @@ struct ModelLaunchersView: View {
         #endif
         .sheet(item: $adding, onDismiss: { importWizard = nil }) { step in
             // Saving moves `launchersRevision`, which reloads this list below.
-            if debugOldEditor { LauncherEditor(existing: nil) {} } else { ProviderWizard(start: step, wizard: importWizard) }
+            if debugOldEditor { LauncherEditor(existing: nil) {} } else {
+                ProviderWizard(start: step, wizard: importWizard, launchers: listOwner == importOwner ? launchers ?? [] : [])
+            }
         }
         #if os(macOS) && DEBUG
         .onAppear { if UserDefaults.standard.bool(forKey: "macLauncherEditor") { adding = .pick } } // `-macLauncherEditor YES`: Add Launcher
@@ -408,7 +411,11 @@ struct ModelLaunchersView: View {
     private func load() async {
         guard let api = requestScope.api(model) else { return }
         do {
-            (launchers, sync) = try await api.launcherList()
+            let owner = importOwner
+            let result = try await api.launcherList()
+            guard !Task.isCancelled else { return }
+            (launchers, sync) = result
+            listOwner = owner
             error = nil
         } catch {
             self.error = error.shown

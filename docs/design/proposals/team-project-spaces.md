@@ -2,6 +2,8 @@
 
 Design proposal for [#11178](https://github.com/nwverse/persona/issues/11178). It is for people who deliver a project together and want each person's agent to work from the same decisions. The proposed first release is a Web pilot for a small, invitation-only team.
 
+The first backend slice is a separately started [team project documents pilot](../../server/server.md#team-project-documents-pilot). Operators can use its HTTP API to try publishing and approving text with independently revocable member credentials.
+
 A product lead should be able to say “Publish the approved refund requirements to Checkout”. A developer can then ask “Design the API on my Mac”, and a tester can ask “Draft coverage for those requirements”. Each should be able to open the exact revision their agent used. A member should be able to do all three without giving anyone access to their private chats or a general-purpose login to their computer.
 
 ## A requirement from draft to delivery

@@ -3,6 +3,7 @@
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { onOverlayEntry } from "../../lib/back-close";
 import { loadPages } from "../../lib/lazy-page";
 import { Composer } from "./Composer";
 import { COMPOSER_LINES, lineCount, offersExpand } from "./composer-grow";
@@ -24,6 +25,8 @@ describe("composer line cap", () => {
 // jsdom lays nothing out: a line per "\n", 24px each (the computed line height falls back to 24 there too)
 const scroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
 let phone = true;
+// the narrow layout, where Back closes overlays first (off unless a test turns it on)
+let narrow = false;
 let host: HTMLDivElement;
 let root: Root;
 
@@ -33,6 +36,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   phone = true;
+  narrow = false;
   localStorage.clear();
   Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
     configurable: true,
@@ -40,7 +44,7 @@ beforeEach(() => {
   });
   vi.stubGlobal("matchMedia", (q: string) => ({
     media: q,
-    get matches() { return q.includes("max-width: 639px") ? phone : false; },
+    get matches() { return q.includes("max-width: 639px") ? phone : q === "(max-width: 1023px)" && narrow; },
     addEventListener() {},
     removeEventListener() {},
   }));
@@ -114,6 +118,35 @@ describe("the phone composer", () => {
     await act(async () => editor()!.querySelector<HTMLButtonElement>('[data-testid="composer-expanded-send"]')!.click());
     expect(sent).toEqual([lines(9)]);
     expect(editor()).toBeNull();
+  });
+
+  it("closes on Back as its collapse button does, staying on the page; collapsed, it takes its entry back off (#11442)", async () => {
+    narrow = true;
+    const at = location.href;
+    act(() => root.render(<Composer draftKey="k-back" placeholder="" onSend={async () => true} />));
+    type(lines(9));
+    act(() => expandButton()!.click());
+    expect(onOverlayEntry()).toBe(true);
+    editor()!.querySelector("textarea")!.setSelectionRange(12, 12);
+    await act(async () => {
+      const popped = new Promise((r) => addEventListener("popstate", r, { once: true }));
+      history.back();
+      await popped;
+    });
+    expect(editor()).toBeNull();
+    expect(location.href).toBe(at);
+    expect(onOverlayEntry()).toBe(false);
+    expect(box().value).toBe(lines(9));
+    expect([box().selectionStart, box().selectionEnd]).toEqual([12, 12]);
+
+    act(() => expandButton()!.click());
+    expect(onOverlayEntry()).toBe(true);
+    act(() => document.querySelector<HTMLButtonElement>('[data-testid="composer-collapse"]')!.click());
+    expect(editor()).toBeNull();
+    // back-close's 0 ms timer, then the Back it causes
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+    expect(onOverlayEntry()).toBe(false);
+    expect(location.href).toBe(at);
   });
 
   it("uses the same six-line cap on desktop without offering the phone editor", () => {

@@ -13,10 +13,12 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// Hidden Agent folders (proto/agentdirs.go): per computer, the folders whose sessions stay collected but are left out
-// of Agents and the assistant's view. The list sits beside the blocked Claude config folders (claudedirs.go): same
-// per-machine setting, same pattern syntax, same routes' shape. The node is not told; the assistant reads the rules
-// (HiddenAgentDirs) and decides what is shown, and is told after every change (Options.HiddenAgentDirsChanged).
+// Agent folder rules (proto/agentdirs.go): per computer, folders whose sessions are blocked (not collected) or hidden
+// (collected, left out of Agents and the assistant's view). The list sits beside the blocked Claude config folders
+// (claudedirs.go): same per-machine setting, same pattern syntax, same routes' shape. The node is told the blocking
+// patterns (node.configure agent_dirs_blocked) and keeps those sessions out itself; the assistant reads every rule
+// (HiddenAgentDirs), leaves blocked and hidden sessions out of what it shows (so an older node's blocked sessions are
+// only hidden), and is told after every change (Options.HiddenAgentDirsChanged).
 
 func hiddenAgentDirsKey(machine string) string { return "agent_dirs_hidden/" + machine }
 
@@ -77,7 +79,11 @@ func cleanHiddenAgentDirs(rules []proto.HiddenAgentDir) ([]proto.HiddenAgentDir,
 		if slices.ContainsFunc(out, func(o proto.HiddenAgentDir) bool { return o.Pattern == p }) {
 			return nil, fmt.Errorf("%w %q: listed twice", errBadPattern, p)
 		}
-		out = append(out, proto.HiddenAgentDir{Pattern: p, Enabled: r.Enabled})
+		action, ok := proto.CleanAgentDirAction(r.Action)
+		if !ok {
+			return nil, fmt.Errorf("%w %q: action %q is neither %q nor %q", errBadPattern, p, r.Action, proto.AgentDirBlock, proto.AgentDirHide)
+		}
+		out = append(out, proto.HiddenAgentDir{Pattern: p, Enabled: r.Enabled, Action: action})
 	}
 	return out, nil
 }
@@ -111,9 +117,14 @@ func (m *Machine) editHiddenAgentDirs(ctx context.Context, edit func([]proto.Hid
 		c.mu.Unlock()
 		return nil, err
 	}
+	blockedBefore := proto.BlockedAgentDirPatterns(c.rules)
 	c.rules = slices.Clone(next)
 	c.mu.Unlock()
-	m.d.logf("[%s] hidden agent folders: %v", m.cfg.ID, next)
+	m.d.logf("[%s] agent folder rules: %v", m.cfg.ID, next)
+	// The node keeps blocked folders out itself: it is told, and lists again without them (or with them, unblocked).
+	if !slices.Equal(blockedBefore, proto.BlockedAgentDirPatterns(next)) {
+		go m.reconfigureClaudeDirs(ctx)
+	}
 	if f := m.d.opts.HiddenAgentDirsChanged; f != nil {
 		f(m.cfg.ID)
 	}
@@ -137,6 +148,19 @@ func (d *Devices) EditHiddenAgentDirs(ctx context.Context, id string, edit func(
 		return nil, errUnknownMachine
 	}
 	return m.editHiddenAgentDirs(ctx, edit)
+}
+
+// blockedAgentDirsParam is node.configure's agent_dirs_blocked: the patterns of the rules that block ([] when none
+// do, which clears the node's list). nil (null on the wire) when the rules cannot be read: the node then keeps the
+// list it has, across restarts too, rather than unblocking every folder. Once read, the rules are cached and only
+// this manager changes them, so a read can only fail before the first one succeeded.
+func (m *Machine) blockedAgentDirsParam(ctx context.Context) []string {
+	rules, err := m.hiddenAgentDirs(ctx)
+	if err != nil {
+		m.d.logf("[%s] agent folder rules for the node: %v (the node keeps its blocked folders)", m.cfg.ID, err)
+		return nil
+	}
+	return proto.BlockedAgentDirPatterns(rules)
 }
 
 func (m *Machine) hiddenAgentDirsState(rules []proto.HiddenAgentDir) proto.HiddenAgentDirs {
@@ -164,7 +188,20 @@ func (d *Devices) putHiddenAgentDirs(w http.ResponseWriter, r *http.Request, m *
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("bad body: %w", err))
 		return
 	}
-	rules, err := m.editHiddenAgentDirs(r.Context(), func([]proto.HiddenAgentDir) ([]proto.HiddenAgentDir, error) { return in.Rules, nil })
+	rules, err := m.editHiddenAgentDirs(r.Context(), func(now []proto.HiddenAgentDir) ([]proto.HiddenAgentDir, error) {
+		// An app from before blocking sends no actions: a rule it lists that exists keeps its own, so switching
+		// another rule there does not turn blocks into hides. A new rule without one hides, as it did then.
+		for i, rule := range in.Rules {
+			if rule.Action != "" {
+				continue
+			}
+			p, _ := proto.CleanDirPattern(rule.Pattern)
+			if j := slices.IndexFunc(now, func(o proto.HiddenAgentDir) bool { return o.Pattern == p }); j >= 0 {
+				in.Rules[i].Action = now[j].Action
+			}
+		}
+		return in.Rules, nil
+	})
 	if err != nil {
 		code := http.StatusInternalServerError
 		if errors.Is(err, errBadPattern) {

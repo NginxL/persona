@@ -19,6 +19,7 @@ nonisolated struct ThreadChat: Codable, Hashable, Sendable {
     var kind: String
     var url: String?
     var avatar: String?
+    var avatarURL: String?
     var members: Int?
     /// The action that answers here; nil: read-only.
     var reply: String?
@@ -43,6 +44,7 @@ nonisolated struct ThreadChat: Codable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, name, kind, url, avatar, members, reply, state, author, labels, branch, body
         case bodyFormat = "body_format"
+        case avatarURL = "avatar_url"
     }
 
     /// A chat app's conversation, drawn as bubbles (others on the left, mine on the right).
@@ -56,6 +58,20 @@ nonisolated struct ThreadPerson: Codable, Hashable, Sendable {
     var id: String?
     var name: String
     var avatar: String?
+    var avatarURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, avatar
+        case avatarURL = "avatar_url"
+    }
+
+    func picture(in connector: String, manager: String?) -> String? {
+        if let avatarURL, avatarURL.hasPrefix("/api/v1/avatars/") {
+            return LarkMedia.url(avatarURL, manager: manager)
+        }
+        guard let avatar, !avatar.isEmpty else { return nil }
+        return LarkMedia.url(ConnectorMedia.url(connector, ref: avatar), manager: manager)
+    }
 }
 
 nonisolated struct ThreadMedia: Codable, Hashable, Sendable {
@@ -265,6 +281,7 @@ nonisolated enum ThreadLayout {
 @MainActor @Observable final class ConnectorThreadModel {
     let connector: String
     let thread: String
+    let manager: String?
     private(set) var chat: ThreadChat?
     private(set) var messages: [ThreadMessage] = []
     private(set) var before: String?
@@ -280,10 +297,11 @@ nonisolated enum ThreadLayout {
     /// Pages a jump to a quote's message reads back at most before giving up.
     static let jumpPages = 3
 
-    init(connector: String, thread: String, api: @escaping () -> APIClient? = { AppModel.shared.api }) {
+    init(connector: String, thread: String, manager: String? = nil, api: @escaping () -> APIClient? = { AppModel.shared.api }) {
         self.connector = connector
         self.thread = thread
-        self.api = api
+        self.manager = manager
+        self.api = { api()?.manager(manager) }
     }
 
     var hasOlder: Bool { before != nil }

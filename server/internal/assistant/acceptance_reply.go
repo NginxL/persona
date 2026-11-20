@@ -62,6 +62,8 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 		}
 		if result, err := s.acceptTry(ctx, id, ""); errors.Is(err, errAcceptStore) {
 			s.botNote(ctx, messageID, i18n.T(l, "http-status.unavailable"))
+		} else if note := inDoubtNote(l, err); note != "" { // it may be with the agent already: look before saying it again
+			s.botNote(ctx, messageID, note)
 		} else if err != nil { // the recommendation did not reach the agent: nothing recorded, "OK" can be said again
 			s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.accept_not_taken", i18n.Args{"error": clip(oneLine(i18n.Localize(err, l)), 120)}))
 		} else if result.undelivered != nil {
@@ -255,8 +257,12 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 			b.mu.Lock()
 			if a := b.asks[id]; a != nil && a.AskedAt.Equal(cp.AskedAt) {
 				// A default that did not go is not tried again (it may have reached the agent after all): its deadline stays
-				// handled (DueAt) and the sweep reminds the owner instead.
+				// handled (DueAt) and the sweep reminds the owner instead. So is the owner's own press whose recommendation
+				// may be with the agent: no default at its deadline sends it a second time.
 				a.AcceptedAt, a.ByDefault = time.Time{}, false
+				if !byDefault && !a.Deadline.IsZero() && a.DueAt.IsZero() && writeDelivered(err) != "none" {
+					a.DueAt = time.Now().UTC()
+				}
 				s.saveAcceptLocked(ctx)
 			}
 			b.mu.Unlock()

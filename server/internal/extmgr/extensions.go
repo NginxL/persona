@@ -585,6 +585,11 @@ func (ps *extensions) changed(c extension.Change) {
 	ps.kept.forgetProvider(c.ID) // and give other values, or none
 	// A removed provider's Always rules for hand-offs go with it (secret_handoff_rules.go).
 	if c.Kind == "removed" {
+		if c.Old != nil && c.Old.Full != nil && ps.h.avatars != nil {
+			for _, source := range c.Old.Full.Messaging() {
+				ps.h.avatars.Drop(messagingAvatarCache(source.ID))
+			}
+		}
 		ps.forgetAssistantData(ctx, c.ID) // what the assistant read of its data directory goes with it
 		if n, err := ps.h.removeHandoffRules(ctx, c.ID, ""); err != nil {
 			ps.logf("plugin %s removed: its hand-off rules were not: %v", c.ID, err)

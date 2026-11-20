@@ -12,31 +12,42 @@ struct ChatAvatar: View {
     /// Whose initial, and its disc's hue (`Theme.monogram`).
     var name: String
     var size: CGFloat = Theme.Size.avatar
+    /// The hub and manager owning this generic messaging row.
+    var origin: APIClient? = nil
     @Environment(\.displayScale) private var displayScale
-    @State private var image: UIImage?
+    private struct Request: Equatable {
+        let path: String?
+        let edge: Int
+        let hub: URL?
+        let group: String?
+    }
+    @State private var loaded: (request: Request, image: UIImage)?
 
     var body: some View {
         let disc = Theme.monogram(name)
+        let edge = Self.edge(pixels: size * displayScale)
+        let request = Request(path: url, edge: edge, hub: origin?.config.url, group: origin?.group)
         Monogram(name: name, size: size, fill: disc.fill, ink: disc.ink, font: LarkAvatar.font(size))
             .overlay {
-                if let image {
-                    Image(uiImage: image).resizable().scaledToFill()
+                if let loaded, loaded.request == request {
+                    Image(uiImage: loaded.image).resizable().scaledToFill()
                         .clipShape(.circle)
                         .overlay(Circle().strokeBorder(Color.primary.opacity(0.06)))
                 }
             }
-            .task(id: url) {
-                guard let url, !url.isEmpty else {
-                    image = nil
+            .task(id: request) {
+                guard let path = request.path, !path.isEmpty else {
+                    loaded = nil
                     return
                 }
-                let edge = Self.edge(pixels: size * displayScale)
-                if let kept = LarkMedia.shared.cached(url, size: edge) {
-                    image = kept
+                if let kept = LarkMedia.shared.cached(path, size: request.edge, using: origin) {
+                    loaded = (request, kept)
                     return
                 }
-                image = nil
-                image = await LarkMedia.shared.image(url, size: edge, maxPixel: CGFloat(edge))
+                loaded = nil
+                if let image = await LarkMedia.shared.image(path, size: request.edge, maxPixel: CGFloat(request.edge), using: origin), !Task.isCancelled {
+                    loaded = (request, image)
+                }
             }
             .accessibilityHidden(true)
     }

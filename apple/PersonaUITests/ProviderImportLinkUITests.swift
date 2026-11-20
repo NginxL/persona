@@ -36,8 +36,9 @@ final class ProviderImportLinkUITests: XCTestCase {
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 3), "a system alert would cover the provider flow")
     }
 
-    @MainActor private func open(_ url: URL, in app: XCUIApplication) {
-        app.open(url)
+    @MainActor private func open(_ url: URL) {
+        // Deliver an external link to the running app, preserving an in-memory import pending through pairing.
+        XCUIDevice.shared.system.open(url)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for label in ["打开", "Open"] { // i18n-ignore: the system's own dialog
             let b = springboard.buttons[label].firstMatch
@@ -58,7 +59,7 @@ final class ProviderImportLinkUITests: XCTestCase {
             let before = launcherNames()
             XCTAssertFalse(before.isEmpty, "the mock's providers are readable")
             let app = launch(scheme, largest: largest)
-            open(link(payload), in: app)
+            open(link(payload))
             // The wizard is pre-filled with the draft: its name and base URL sit in fields.
             let base = app.textFields.matching(NSPredicate(format: "value CONTAINS[c] %@", "example.invalid")).firstMatch
             XCTAssertTrue(base.waitForExistence(timeout: 10), "the wizard is pre-filled with the draft's base URL:\n\(app.debugDescription)")
@@ -76,15 +77,20 @@ final class ProviderImportLinkUITests: XCTestCase {
         let payload = #"{"kind":"custom","name":"Example Gateway","endpoints":[{"protocol":"openai-chat","baseUrl":"https://example.invalid/v1","models":["m1"]}]}"#
         let before = launcherNames()
         let app = XCUIApplication()
-        app.launchArguments = ["-openChatsFresh", "YES", "-ui.scheme", "light"]
+        app.launchArguments = ["-openWelcome", "YES", "-openChatsFresh", "YES", "-ui.scheme", "light"]
         app.launchPinned()
         dismissPermissionPrompt(in: app)
         // No paired API exists yet: the import must stay pending through the user's explicit Connect.
-        open(link(payload), in: app)
-        open(URL(string: pairLink)!, in: app)
-        let confirm = app.buttons["pair.confirm"].firstMatch
+        open(link(payload))
+        open(URL(string: pairLink)!)
+        // The native alert on iOS 27 can expose only the visible title of its buttons.
+        let confirm = app.alerts.buttons.matching(NSPredicate(format: "identifier == %@ OR label IN %@",
+                                                               "pair.confirm", ["Connect", "连接", "接続"])).firstMatch
         XCTAssertTrue(confirm.waitForExistence(timeout: 5), "the pairing link asks before connecting:\n\(app.debugDescription)")
         confirm.tap()
+        // A freshly paired hub can require confirmation of its suggested engine before showing the pending route.
+        let engine = app.buttons["engine.save"]
+        if engine.waitForExistence(timeout: 8) { engine.tap() }
         let base = app.textFields.matching(NSPredicate(format: "value CONTAINS[c] %@", "example.invalid")).firstMatch
         XCTAssertTrue(base.waitForExistence(timeout: 20), "the pending import opens after pairing:\n\(app.debugDescription)")
         XCTAssertEqual(launcherNames(), before, "the delayed review still saves nothing")
@@ -93,7 +99,7 @@ final class ProviderImportLinkUITests: XCTestCase {
 
     @MainActor func testRefusedImportLinkShowsPlainNote() throws {
         let app = launch("light")
-        open(link(#"{"kind":"custom","name":"Example Gateway","endpoints":[]}"#, version: 2), in: app)
+        open(link(#"{"kind":"custom","name":"Example Gateway","endpoints":[]}"#, version: 2))
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 10), "a refused link says why:\n\(app.debugDescription)")
         let words = alert.staticTexts.allElementsBoundByIndex.map(\.label)

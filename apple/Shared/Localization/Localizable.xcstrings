@@ -1,6 +1,1684 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "agentDirs.action" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Action"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "動作"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "操作"
+          }
+        }
+      }
+    },
+    "agentDirs.action.block" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Block"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブロック"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏蔽"
+          }
+        }
+      }
+    },
+    "agentDirs.action.hide" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hide"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "非表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏"
+          }
+        }
+      }
+    },
+    "agentDirs.add" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add Folder Rule"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フォルダのルールを追加"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加文件夹规则"
+          }
+        }
+      }
+    },
+    "agentDirs.footer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sessions working in these folders, with any Agent. Block: this computer stops collecting them, so nothing in Persona shows or counts them, and their permission requests are left to the agent's own interface. Hide: they stay recorded but leave Agents and the assistant's view; active supervised tasks stay visible, and the Agents menu can show them for a moment. A path covers that folder and everything in it; ~ is this computer's home; *name* matches a folder name anywhere. Turn a rule off to show its sessions again. To stop collecting a Claude Code config folder altogether, use Blocked Config Folders in Claude Code Settings."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これらのフォルダ内で作業するセッション（どの Agent でも）が対象です。ブロック：このコンピュータはセッションを収集しなくなり、Persona のどこにも表示・集計されません。許可の確認はエージェント自身の画面に任されます。非表示：記録は続きますが、Agents とアシスタントのビューには表示されません。監督中のタスクは表示されたままで、Agents メニューから一時的に表示できます。パスはそのフォルダと中身すべてを対象にします。~ はこのコンピュータのホーム、*name* は任意の場所のフォルダ名に一致します。ルールをオフにするとセッションが再び表示されます。Claude Code の設定フォルダ自体を収集しない場合は、Claude Code の設定の「ブロックした設定フォルダ」を使ってください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这些文件夹中工作的会话（任何 Agent）。屏蔽：这台电脑不再收集它们，Persona 中任何地方都不显示、不计数，它们的授权请求留在 Agent 自己的界面处理。隐藏：会话继续记录，但不出现在 Agents 和助手的视图中；正在督办的任务仍然可见，也可以在 Agents 菜单里临时显示。路径包含该文件夹及其所有子文件夹；~ 表示这台电脑的主目录；*name* 匹配任意位置的文件夹名。关闭规则即可重新显示其中的会话。若要完全不收集某个 Claude Code 配置文件夹，请使用 Claude Code 设置中的“屏蔽的配置文件夹”。"
+          }
+        }
+      }
+    },
+    "agentDirs.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent Folders"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent フォルダ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent 文件夹"
+          }
+        }
+      }
+    },
+    "This doesn't look like a provider's settings. Paste an alias, export lines, a settings.json, a curl command or a provider's JSON." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This doesn't look like a provider's settings. Paste an alias, export lines, a settings.json, a curl command or a provider's JSON."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロバイダーの設定ではないようです。alias、exportの行、settings.json、curlコマンド、プロバイダーのJSONを貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这看起来不像供应商的配置。可以粘贴 alias、export 行、settings.json、curl 命令或供应商的 JSON。"
+          }
+        }
+      }
+    },
+    "This looks like JSON but couldn't be read. Check that all of it was pasted." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This looks like JSON but couldn't be read. Check that all of it was pasted."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JSONのようですが、読み取れませんでした。すべて貼り付けたか確認してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这像是 JSON，但没能读出来。请检查是否粘贴完整。"
+          }
+        }
+      }
+    },
+    "The words after claude aren't carried over, since they may hold a key. Add them under Advanced if you need them." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The words after claude aren't carried over, since they may hold a key. Add them under Advanced if you need them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "claude の後ろの引数は、キーが含まれている可能性があるため引き継いでいません。必要なら「詳細設定」で追加してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "claude 后面的参数没有带过来，因为其中可能含有 key。需要的话请在「高级」里补上。"
+          }
+        }
+      }
+    },
+    "A header with an unusual name isn't carried over. Add it under Advanced if you need it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A header with an unusual name isn't carried over. Add it under Advanced if you need it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名前が一般的でないヘッダーは引き継いでいません。必要なら「詳細設定」で追加してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有一个名字不常规的请求头没有带过来。需要的话请在「高级」里补上。"
+          }
+        }
+      }
+    },
+    "The key comes from the shell, so it's left out. Paste the key itself on the next step." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The key comes from the shell, so it's left out. Paste the key itself on the next step."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーはシェルが決めるため、含めていません。次のステップでキーそのものを貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Key 要由 shell 算出来，没有带上。请在下一步粘贴 Key 本身。"
+          }
+        }
+      }
+    },
+    "No key was found. Type it on the next step." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No key was found. Type it on the next step."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーが見つかりませんでした。次のステップで入力してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有找到 Key，请在下一步填写。"
+          }
+        }
+      }
+    },
+    "This settings.json gets its key by running a command, which can't be read here. Paste the key itself on the next step." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This settings.json gets its key by running a command, which can't be read here. Paste the key itself on the next step."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このsettings.jsonはコマンドを実行してキーを取得するため、ここでは読み取れません。次のステップでキーそのものを貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 settings.json 通过运行命令获取 Key，这里读不到。请在下一步粘贴 Key 本身。"
+          }
+        }
+      }
+    },
+    "This is one of the built-in providers, not a custom one. Pick it from the list instead and paste its key." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This is one of the built-in providers, not a custom one. Pick it from the list instead and paste its key."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "これは組み込みのプロバイダーで、カスタムのものではありません。一覧から選んでキーを貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这是内置供应商之一，不是自定义的。请在列表里选它，再粘贴它的 Key。"
+          }
+        }
+      }
+    },
+    "Its endpoint uses a request path of its own, which Persona can't set, so it works only if the gateway also answers at the usual path." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Its endpoint uses a request path of its own, which Persona can't set, so it works only if the gateway also answers at the usual path."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このエンドポイントは独自のリクエストパスを使いますが、Personaでは設定できません。ゲートウェイが通常のパスでも応答する場合にだけ使えます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的接口用的是自己的请求路径，Persona 没法设置，所以只有网关在常用路径上也能响应时才能用。"
+          }
+        }
+      }
+    },
+    "This import link is longer than an import link can be." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This import link is longer than an import link can be."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このインポートリンクは、インポートリンクの長さの上限を超えています。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个导入链接超出了导入链接的长度上限。"
+          }
+        }
+      }
+    },
+    "The alias %@ doesn't start Claude Code, so it isn't used." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The alias %@ doesn't start Claude Code, so it isn't used."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "alias %@はClaude Codeを起動しないため、使いません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "alias %@ 不启动 Claude Code，没有用上。"
+          }
+        }
+      }
+    },
+    "Line %lld doesn't start Claude Code, so it isn't used." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Line %lld doesn't start Claude Code, so it isn't used."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld行目はClaude Codeを起動しないため、使いません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 行不启动 Claude Code，没有用上。"
+          }
+        }
+      }
+    },
+    "This command doesn't start Claude Code, so it isn't used." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This command doesn't start Claude Code, so it isn't used."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このコマンドはClaude Codeを起動しないため、使いません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这条命令不启动 Claude Code，没有用上。"
+          }
+        }
+      }
+    },
+    "%@ has no gateway address, so Claude Code signs in on its own there and there's nothing to add." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ has no gateway address, so Claude Code signs in on its own there and there's nothing to add."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@にはゲートウェイのアドレスがなく、Claude Codeが独自にサインインするため、追加するものはありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 没有网关地址，Claude Code 在那里用自己的登录，没有可添加的。"
+          }
+        }
+      }
+    },
+    "Line %lld has no gateway address, so Claude Code signs in on its own there and there's nothing to add." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Line %lld has no gateway address, so Claude Code signs in on its own there and there's nothing to add."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld行目にはゲートウェイのアドレスがなく、Claude Codeが独自にサインインするため、追加するものはありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 行没有网关地址，Claude Code 在那里用自己的登录，没有可添加的。"
+          }
+        }
+      }
+    },
+    "There's no gateway address in it, so Claude Code would sign in on its own and there's nothing to add." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "There's no gateway address in it, so Claude Code would sign in on its own and there's nothing to add."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲートウェイのアドレスが含まれていないため、Claude Codeは独自にサインインします。追加するものはありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "里面没有网关地址，Claude Code 会用自己的登录，没有可添加的。"
+          }
+        }
+      }
+    },
+    "%@'s address comes from the shell, so it can't be read here. Paste the address itself." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@'s address comes from the shell, so it can't be read here. Paste the address itself."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@のアドレスはシェルが決めるため、ここでは読み取れません。アドレスそのものを貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的地址要由 shell 算出来，这里读不到。请粘贴地址本身。"
+          }
+        }
+      }
+    },
+    "The address on line %lld comes from the shell, so it can't be read here. Paste the address itself." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address on line %lld comes from the shell, so it can't be read here. Paste the address itself."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld行目のアドレスはシェルが決めるため、ここでは読み取れません。アドレスそのものを貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 行的地址要由 shell 算出来，这里读不到。请粘贴地址本身。"
+          }
+        }
+      }
+    },
+    "The address comes from the shell, so it can't be read here. Paste the address itself." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address comes from the shell, so it can't be read here. Paste the address itself."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アドレスはシェルが決めるため、ここでは読み取れません。アドレスそのものを貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址要由 shell 算出来，这里读不到。请粘贴地址本身。"
+          }
+        }
+      }
+    },
+    "%@'s address includes a user name or password, so it isn't used. Paste it without them." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@'s address includes a user name or password, so it isn't used. Paste it without them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@のアドレスにユーザー名かパスワードが含まれているため、使いません。それらを除いて貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的地址里带有用户名或密码，没有用上。请去掉它们再粘贴。"
+          }
+        }
+      }
+    },
+    "The address on line %lld includes a user name or password, so it isn't used. Paste it without them." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address on line %lld includes a user name or password, so it isn't used. Paste it without them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld行目のアドレスにユーザー名かパスワードが含まれているため、使いません。それらを除いて貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 行的地址里带有用户名或密码，没有用上。请去掉它们再粘贴。"
+          }
+        }
+      }
+    },
+    "The address includes a user name or password, so it isn't used. Paste it without them." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address includes a user name or password, so it isn't used. Paste it without them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アドレスにユーザー名かパスワードが含まれているため、使いません。それらを除いて貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址里带有用户名或密码，没有用上。请去掉它们再粘贴。"
+          }
+        }
+      }
+    },
+    "%@'s address has a part after ? or #, which can hold a key, so it isn't used. Paste the address without it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@'s address has a part after ? or #, which can hold a key, so it isn't used. Paste the address without it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@のアドレスには ? や # 以降の部分があり、キーが含まれている可能性があるため使いません。その部分を除いて貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的地址带有 ? 或 # 之后的部分，其中可能含有 key，所以没有用上。请去掉这部分再粘贴地址。"
+          }
+        }
+      }
+    },
+    "The address on line %lld has a part after ? or #, which can hold a key, so it isn't used. Paste the address without it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address on line %lld has a part after ? or #, which can hold a key, so it isn't used. Paste the address without it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld行目のアドレスには ? や # 以降の部分があり、キーが含まれている可能性があるため使いません。その部分を除いて貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 行的地址带有 ? 或 # 之后的部分，其中可能含有 key，所以没有用上。请去掉这部分再粘贴地址。"
+          }
+        }
+      }
+    },
+    "The address has a part after ? or #, which can hold a key, so it isn't used. Paste the address without it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The address has a part after ? or #, which can hold a key, so it isn't used. Paste the address without it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アドレスには ? や # 以降の部分があり、キーが含まれている可能性があるため使いません。その部分を除いて貼り付けてください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地址带有 ? 或 # 之后的部分，其中可能含有 key，所以没有用上。请去掉这部分再粘贴地址。"
+          }
+        }
+      }
+    },
+    "The curl option %@ isn't used." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The curl option %@ isn't used."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "curlのオプション%@は使いません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有用上 curl 选项 %@。"
+          }
+        }
+      }
+    },
+    "%@ isn't a path Persona knows, so the whole URL is used as the address. Check it on the next step." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ isn't a path Persona knows, so the whole URL is used as the address. Check it on the next step."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@はPersonaが知らないパスのため、URL全体をアドレスとして使います。次のステップで確認してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 不是 Persona 认识的路径，整个 URL 都当作地址。请在下一步检查。"
+          }
+        }
+      }
+    },
+    "Line %lld isn't an alias, a variable or a claude command, so it isn't used." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Line %lld isn't an alias, a variable or a claude command, so it isn't used."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld行目はalias、変数、claudeコマンドのいずれでもないため、使いません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 行不是 alias、变量或 claude 命令，没有用上。"
+          }
+        }
+      }
+    },
+    "Its %@ address isn't added, since a provider here has one address." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Its %@ address isn't added, since a provider here has one address."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@のアドレスは追加しません。ここでは1つのプロバイダーにアドレスは1つです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有添加它的 %@ 地址：这里一个供应商只有一个地址。"
+          }
+        }
+      }
+    },
+    "One of its addresses isn't added, since Persona has no such kind of provider." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One of its addresses isn't added, since Persona has no such kind of provider."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona にない種類のため、アドレスの一つは追加していません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的一个地址没有添加，因为 Persona 没有这种类型的服务商。"
+          }
+        }
+      }
+    },
+    "This import link is damaged or incomplete (at %@). Ask whoever sent it for a new one." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This import link is damaged or incomplete (at %@). Ask whoever sent it for a new one."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このインポートリンクは壊れているか、不完全です（場所：%@）。送ってくれた人に新しいリンクを頼んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个导入链接已损坏或不完整（出错位置：%@）。请让发送者重新发一个。"
+          }
+        }
+      }
+    },
+    "This import link is damaged or incomplete. Ask whoever sent it for a new one." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This import link is damaged or incomplete. Ask whoever sent it for a new one."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このインポートリンクは壊れているか、不完全です。送ってくれた人に新しいリンクを頼んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个导入链接已损坏或不完整。请让发送者重新发一个。"
+          }
+        }
+      }
+    },
+    "This import link uses format version %@, which Persona can't read yet." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This import link uses format version %@, which Persona can't read yet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このインポートリンクの形式はバージョン%@で、Personaではまだ読み取れません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个导入链接的格式版本是 %@，Persona 暂时还读不了。"
+          }
+        }
+      }
+    },
+    "This import link uses a format version Persona can't read yet." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This import link uses a format version Persona can't read yet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このインポートリンクの形式のバージョンは、Personaではまだ読み取れません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个导入链接的格式版本 Persona 暂时还读不了。"
+          }
+        }
+      }
+    },
+    "This import link has a field Persona doesn't know (%@), so nothing from it was used." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This import link has a field Persona doesn't know (%@), so nothing from it was used."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このインポートリンクにはPersonaが知らない項目（%@）があるため、内容は何も使っていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个导入链接里有 Persona 不认识的字段（%@），所以里面的内容都没有使用。"
+          }
+        }
+      }
+    },
+    "This import link has a field Persona doesn't know, so nothing from it was used." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This import link has a field Persona doesn't know, so nothing from it was used."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このインポートリンクにはPersonaが知らない項目があるため、内容は何も使っていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个导入链接里有 Persona 不认识的字段，所以里面的内容都没有使用。"
+          }
+        }
+      }
+    },
+    "This provider signs in with an account, which can't be added by pasting." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This provider signs in with an account, which can't be added by pasting."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロバイダーはアカウントでサインインするため、貼り付けでは追加できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个供应商用账号登录，无法通过粘贴添加。"
+          }
+        }
+      }
+    },
+    "This provider doesn't use a key." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This provider doesn't use a key."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロバイダーはキーを使いません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个供应商不需要 Key。"
+          }
+        }
+      }
+    },
+    "This provider signs in with %@, which can't be added by pasting." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This provider signs in with %@, which can't be added by pasting."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロバイダーは%@でサインインするため、貼り付けでは追加できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个供应商用 %@ 登录，无法通过粘贴添加。"
+          }
+        }
+      }
+    },
+    "This provider signs in a way that can't be added by pasting." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This provider signs in a way that can't be added by pasting."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このプロバイダーのサインイン方法は、貼り付けでは追加できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个服务商的登录方式无法通过粘贴添加。"
+          }
+        }
+      }
+    },
+    "Only the first 50 were read. The rest were left out." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only the first 50 were read. The rest were left out."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最初の50件だけを読み取り、残りは含めていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只读了前 50 个，其余没有带上。"
+          }
+        }
+      }
+    },
+    "Something on line %lld couldn't be used." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Something on line %lld couldn't be used."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld行目に使えない部分がありました。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %lld 行有内容没能用上。"
+          }
+        }
+      }
+    },
+    "Part of it couldn't be used." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Part of it couldn't be used."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使えない部分がありました。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有一部分没能用上。"
+          }
+        }
+      }
+    },
+    "A shell alias or export lines, a .env file, Claude Code's settings.json, a curl command, a provider's JSON or an import link. It's read when you stop typing, and nothing is saved until you press Save." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A shell alias or export lines, a .env file, Claude Code's settings.json, a curl command, a provider's JSON or an import link. It's read when you stop typing, and nothing is saved until you press Save."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェルのaliasやexportの行、.envファイル、Claude Codeのsettings.json、curlコマンド、プロバイダーのJSON、インポートリンク。入力が止まると読み取ります。保存を押すまで何も保存されません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "shell 里的 alias 或 export 行、.env 文件、Claude Code 的 settings.json、curl 命令、供应商的 JSON 或导入链接。停止输入后自动识别，点「保存」之前不会保存任何内容。"
+          }
+        }
+      }
+    },
+    "Reading…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reading…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み取り中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在识别…"
+          }
+        }
+      }
+    },
+    "Nothing in it can be added as a provider." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing in it can be added as a provider."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロバイダーとして追加できるものはありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "里面没有可以添加为供应商的内容。"
+          }
+        }
+      }
+    },
+    "Notes about the text" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notes about the text"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "貼り付けた内容についての注意"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关于粘贴内容的说明"
+          }
+        }
+      }
+    },
+    "Providers in the text" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Providers in the text"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み取ったプロバイダー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "识别出的供应商"
+          }
+        }
+      }
+    },
+    "What to do with it" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What to do with it"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "処理方法"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "怎么处理"
+          }
+        }
+      }
+    },
+    "Add its models to %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add its models to %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@にモデルを追加"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把模型加到 %@"
+          }
+        }
+      }
+    },
+    "Replace %@'s key" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Replace %@'s key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@のキーを置き換え"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "替换 %@ 的 Key"
+          }
+        }
+      }
+    },
+    "Add as a new provider" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add as a new provider"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新しいプロバイダーとして追加"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加为新供应商"
+          }
+        }
+      }
+    },
+    "Paste a configuration" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste a configuration"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定を貼り付け"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "粘贴配置"
+          }
+        }
+      }
+    },
+    "Also carries over %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Also carries over %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@も引き継ぎます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一并带上 %@。"
+          }
+        }
+      }
+    },
+    "Leaves out %@, since keys and passwords aren't carried over." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out %@, since keys and passwords aren't carried over."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@は引き継ぎません。キーやパスワードのようです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上 %@：看起来是密钥或密码。"
+          }
+        }
+      }
+    },
+    "Leaves out %@, since only the shell can work out the value." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out %@, since only the shell can work out the value."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@は引き継ぎません。値はシェルが実行時に決めます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上 %@：值要在 shell 里才能算出来。"
+          }
+        }
+      }
+    },
+    "Leaves out %@, since the value only fits that computer." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out %@, since the value only fits that computer."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@は引き継ぎません。そのコンピューターでしか使えません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上 %@：只适用于那台电脑。"
+          }
+        }
+      }
+    },
+    "Leaves out %@, since a provider keeps at most 50." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out %@, since a provider keeps at most 50."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@は引き継ぎません。1つのプロバイダーに入れられるのは50個までです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上 %@：一个供应商最多带 50 个。"
+          }
+        }
+      }
+    },
+    "Leaves out %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@は引き継ぎません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上 %@。"
+          }
+        }
+      }
+    },
+    "Also sends the headers %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Also sends the headers %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ヘッダー%@も送ります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同时发送请求头 %@。"
+          }
+        }
+      }
+    },
+    "Leaves out the header %@, since keys and passwords aren't carried over." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out the header %@, since keys and passwords aren't carried over."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ヘッダー%@は引き継ぎません。キーやパスワードのようです。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上请求头 %@：看起来是密钥或密码。"
+          }
+        }
+      }
+    },
+    "Leaves out the header %@, since it's sent anyway." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out the header %@, since it's sent anyway."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ヘッダー%@は引き継ぎません。いずれにせよ送られます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上请求头 %@：本来就会发送。"
+          }
+        }
+      }
+    },
+    "Leaves out the header %@, since this kind of provider sends no extra headers." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out the header %@, since this kind of provider sends no extra headers."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ヘッダー%@は引き継ぎません。この種類のプロバイダーは追加のヘッダーを送りません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上请求头 %@：这类供应商不发送额外的请求头。"
+          }
+        }
+      }
+    },
+    "Leaves out the header %@, since its value can't be kept as written." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out the header %@, since its value can't be kept as written."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ヘッダー%@は引き継ぎません。値をそのまま保存できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上请求头 %@：它的值无法原样保存。"
+          }
+        }
+      }
+    },
+    "Leaves out the header %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leaves out the header %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ヘッダー%@は引き継ぎません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不带上请求头 %@。"
+          }
+        }
+      }
+    },
+    "Found on your computers" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Found on your computers"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "お使いのコンピューターで見つかったもの"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在你的电脑上发现"
+          }
+        }
+      }
+    },
+    "On %@ (offline)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On %@ (offline)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@上（オフライン）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 上（离线）"
+          }
+        }
+      }
+    },
+    "Provider configuration" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Provider configuration"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロバイダー設定"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供应商配置"
+          }
+        }
+      }
+    },
+    "Couldn't read the configuration. You can try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read the configuration. You can try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定を読み取れませんでした。もう一度試せます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能识别这段配置。可以再试一次。"
+          }
+        }
+      }
+    },
+    "Couldn't open that provider. Read the configuration again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't open that provider. Read the configuration again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロバイダーを開けませんでした。設定をもう一度読み込んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能打开这个供应商。请重新识别配置。"
+          }
+        }
+      }
+    },
     "Hidden Agent Folders" : {
       "localizations" : {
         "en" : {
@@ -1388,6 +3066,29 @@
       },
       "shouldTranslate" : true
     },
+    "%@ finished [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ finished"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@が完了しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 做完了"
+          }
+        }
+      }
+    },
     "%@ Has a Question" : {
       "localizations" : {
         "en" : {
@@ -1433,6 +3134,52 @@
         }
       }
     },
+    "%@ is waiting for another Agent [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is waiting for another Agent"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@がほかのエージェントを待っています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 在等另一个 Agent"
+          }
+        }
+      }
+    },
+    "%@ is waiting for something outside [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is waiting for something outside"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@が外部の出来事を待っています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 在等外部的事"
+          }
+        }
+      }
+    },
     "%@ Is Waiting for Your Approval" : {
       "localizations" : {
         "en" : {
@@ -1455,6 +3202,75 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "%@ is waiting for your reply [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is waiting for your reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@があなたの返信を待っています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 在等你回复"
+          }
+        }
+      }
+    },
+    "%@ is working [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is working"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@が作業中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 在做"
+          }
+        }
+      }
+    },
+    "%@ is working in the background [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ is working in the background"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@がバックグラウンドで作業中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 在后台做"
+          }
+        }
+      }
     },
     "%@ Models are the same as what /model shows in the terminal." : {
       "localizations" : {
@@ -1479,6 +3295,29 @@
       },
       "extractionState" : "manual"
     },
+    "%@ needs you [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ needs you"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@があなたを待っています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 需要你"
+          }
+        }
+      }
+    },
     "%@ Needs Your Permission" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1498,6 +3337,75 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ 需要你授权"
+          }
+        }
+      }
+    },
+    "%@ reached its usage limit [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ reached its usage limit"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@が利用上限に達しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用量到上限了"
+          }
+        }
+      }
+    },
+    "%@ recommended [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ recommended"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "おすすめは%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推荐 %@"
+          }
+        }
+      }
+    },
+    "%@ stopped before it finished [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ stopped before it finished"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@は途中で止まりました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 没做完就停了"
           }
         }
       }
@@ -5415,6 +7323,29 @@
       },
       "extractionState" : "manual"
     },
+    "%@: %@ [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：%2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：%2$@"
+          }
+        }
+      }
+    },
     "%@: %@ tokens" : {
       "comment" : "The token calendar's day read aloud: its date and tokens",
       "localizations" : {
@@ -6079,6 +8010,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$lld 个 Agent"
+          }
+        }
+      }
+    },
+    "%lld asks [To-dos Door]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld asks"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld件の確認"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个请求"
           }
         }
       }
@@ -8274,6 +10228,41 @@
         }
       }
     },
+    "%lld hours ago [To-dos Spoken]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld hour ago"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld hours ago"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld時間前"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 小时前"
+          }
+        }
+      }
+    },
     "%lld hours late" : {
       "localizations" : {
         "en" : {
@@ -9373,6 +11362,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$lld 分钟"
+          }
+        }
+      }
+    },
+    "%lld minutes ago [To-dos Spoken]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld minute ago"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld minutes ago"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld分前"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分钟前"
           }
         }
       }
@@ -11821,6 +13845,41 @@
         }
       }
     },
+    "%lld to-dos [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld to-do"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld to-dos"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld件のToDo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个待办"
+          }
+        }
+      }
+    },
     "%lld to-dos today [Home Widgets]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12844,6 +14903,29 @@
       },
       "extractionState" : "manual"
     },
+    "%lldh [To-dos Age]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lldh"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld時間"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 小时"
+          }
+        }
+      }
+    },
     "%lldh ago" : {
       "localizations" : {
         "en" : {
@@ -12912,6 +14994,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "%lldm [To-dos Age]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lldm"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld分"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分钟"
+          }
+        }
+      }
     },
     "%llds elapsed" : {
       "localizations" : {
@@ -14415,6 +16520,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "A decision for you [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A decision for you"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "決めてほしいことがあります"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有件事要你决定"
+          }
+        }
+      }
     },
     "A Docker hub updates with a new image: when one is out, run this in the compose file's directory" : {
       "localizations" : {
@@ -16036,6 +18164,52 @@
         }
       }
     },
+    "Accepted [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accepted"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "検収済み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已验收"
+          }
+        }
+      }
+    },
+    "After this week [To-dos Due]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "After this week"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来週以降"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本周以后"
+          }
+        }
+      }
+    },
     "AI Draft Reply" : {
       "localizations" : {
         "en" : {
@@ -16400,6 +18574,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "録音から AI が作成しました。重要な内容は確認してください。"
+          }
+        }
+      }
+    },
+    "All To-dos [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All To-dos"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてのToDo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部待办"
+          }
+        }
+      }
+    },
+    "An Agent [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An Agent"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "エージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一个 Agent"
           }
         }
       }
@@ -18210,6 +20430,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加计算"
+          }
+        }
+      }
+    },
+    "Add candidate" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add candidate"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "候補を追加"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加候选模型"
           }
         }
       }
@@ -28443,6 +30685,28 @@
         }
       }
     },
+    "Available model" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Available model"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "利用可能なモデル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型可用"
+          }
+        }
+      }
+    },
     "Available · Direct to APNs" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28690,6 +30954,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "后退"
+          }
+        }
+      }
+    },
+    "back %@ [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "back %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@に再開"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@恢复"
           }
         }
       }
@@ -31966,6 +34253,75 @@
       },
       "extractionState" : "manual"
     },
+    "Can wait [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can wait"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "後で答えてよいもの"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可以晚点答"
+          }
+        }
+      }
+    },
+    "Canceled [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Canceled"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キャンセル済み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已取消"
+          }
+        }
+      }
+    },
+    "check and tick [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "check and tick"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認してチェック"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "看一下再勾掉"
+          }
+        }
+      }
+    },
     "CI" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32173,6 +34529,29 @@
         }
       }
     },
+    "Closed to-dos show up here by the day they closed. [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Closed to-dos show up here by the day they closed."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了したToDoは完了した日ごとにここに表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成的待办按完成那天列在这里。"
+          }
+        }
+      }
+    },
     "Collapse [Question Card]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32214,6 +34593,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "连接到 %1$@？"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Couldn't change thinking effort. Choose it again to send waiting messages." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't change thinking effort. Choose it again to send waiting messages."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "思考の強さを変更できませんでした。待機中のメッセージを送るには、もう一度選んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法更改思考强度。请重新选择，以发送等待中的消息。"
           }
         }
       },
@@ -35288,6 +37690,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已取消"
+          }
+        }
+      }
+    },
+    "Candidate %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Candidate %1$lld"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "候補 %1$lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "候选模型 %1$lld"
+          }
+        }
+      }
+    },
+    "Candidate models" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Candidate models"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "候補モデル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "候选模型"
           }
         }
       }
@@ -55048,6 +57494,29 @@
         }
       }
     },
+    "Didn't start [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Didn't start"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "起動できませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没开起来"
+          }
+        }
+      }
+    },
     "DMs" : {
       "localizations" : {
         "en" : {
@@ -61039,6 +63508,75 @@
         }
       }
     },
+    "Done %@ [To-dos Spoken]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@に完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@完成"
+          }
+        }
+      }
+    },
+    "Done after review [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done after review"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認後に完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "验收后已完成"
+          }
+        }
+      }
+    },
+    "Done by Persona [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done by Persona"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personaが完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 已完成"
+          }
+        }
+      }
+    },
     "Done Chats" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -61080,6 +63618,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "刚刚处理"
+          }
+        }
+      }
+    },
+    "Done today [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done today"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天完成"
           }
         }
       }
@@ -62646,6 +65207,29 @@
       },
       "extractionState" : "manual"
     },
+    "Due %@ [To-dos Spoken]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Due %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "期限は%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@到期"
+          }
+        }
+      }
+    },
     "Due Date" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -62669,6 +65253,52 @@
         }
       }
     },
+    "Due Date [To-dos Grouping]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Due Date"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "期限"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "截止日期"
+          }
+        }
+      }
+    },
+    "Due Date [To-dos Sort]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Due Date"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "期限"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "截止日期"
+          }
+        }
+      }
+    },
     "Due Day" : {
       "localizations" : {
         "en" : {
@@ -62687,6 +65317,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "期限の日"
+          }
+        }
+      }
+    },
+    "Due today [To-dos Spoken]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Due today"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日が期限"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天到期"
           }
         }
       }
@@ -63034,6 +65687,28 @@
         }
       }
     },
+    "Each provider and model combination must be different." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Each provider and model combination must be different."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同じプロバイダとモデルの組み合わせは複数回指定できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提供商和模型的组合不能重复。"
+          }
+        }
+      }
+    },
     "Each run goes into the chat that scheduled it and continues with its context." : {
       "localizations" : {
         "en" : {
@@ -63125,6 +65800,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Earlier [To-dos Done]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Earlier"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "それ以前"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早"
+          }
+        }
+      }
     },
     "Earlier Messages" : {
       "localizations" : {
@@ -63605,6 +66303,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Edit candidate" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Edit candidate"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "候補を編集"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编辑候选模型"
+          }
+        }
+      }
     },
     "Edit history is hidden" : {
       "localizations" : {
@@ -67802,6 +70522,28 @@
         }
       }
     },
+    "Extension lists" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extension lists"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拡張機能のリスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "扩展提供的列表"
+          }
+        }
+      }
+    },
     "Extension · %@" : {
       "localizations" : {
         "en" : {
@@ -68054,6 +70796,98 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Finished %@ [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finished %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@に完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@做完"
+          }
+        }
+      }
+    },
+    "Finished [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finished"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已做完"
+          }
+        }
+      }
+    },
+    "Finished in a related to-do [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finished in a related to-do"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "関連するToDoで完了しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在相关待办里做完了"
+          }
+        }
+      }
+    },
+    "from %@ [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "from %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@から"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@起"
+          }
+        }
+      }
     },
     "FYI" : {
       "localizations" : {
@@ -70787,6 +73621,75 @@
         }
       }
     },
+    "Group By [To-dos Grouping]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Group By"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "グループ分け"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分组方式"
+          }
+        }
+      }
+    },
+    "Group By: %@ [To-dos Grouping]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Group By: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "グループ分け：%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分组方式：%@"
+          }
+        }
+      }
+    },
+    "Inactive [State Names]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inactive"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "動きなし"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无进展"
+          }
+        }
+      }
+    },
     "No tapes on this iPhone yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -70829,6 +73732,144 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不连 hub"
+          }
+        }
+      }
+    },
+    "Nothing done yet [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing done yet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了したものはまだありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有完成的待办"
+          }
+        }
+      }
+    },
+    "Nothing in progress [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing in progress"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "進行中のものはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有进行中的待办"
+          }
+        }
+      }
+    },
+    "Nothing needs you [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing needs you"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応が必要なものはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有需要你的事"
+          }
+        }
+      }
+    },
+    "Nothing to do [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing to do"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "やることはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有待做的事"
+          }
+        }
+      }
+    },
+    "Nothing to do yet. [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nothing to do yet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだToDoはありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有待办。"
+          }
+        }
+      }
+    },
+    "now [To-dos Age]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "たった今"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刚刚"
           }
         }
       }
@@ -70948,6 +73989,144 @@
         }
       }
     },
+    "Overdue [To-dos Due]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Overdue"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "期限切れ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已过期"
+          }
+        }
+      }
+    },
+    "Overdue [To-dos Spoken]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Overdue"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "期限切れ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已过期"
+          }
+        }
+      }
+    },
+    "Persona is working [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona is working"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personaが作業中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 在做"
+          }
+        }
+      }
+    },
+    "Persona picks %@ unless you answer [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona picks %@ unless you answer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回答がなければ、Personaが%@を選びます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你不回答的话，Persona 会选 %@"
+          }
+        }
+      }
+    },
+    "Persona says it can't be done as asked [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona says it can't be done as asked"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personaによると、このままではできません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 说按原样做不了"
+          }
+        }
+      }
+    },
+    "Phase [To-dos Grouping]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Phase"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フェーズ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "阶段"
+          }
+        }
+      }
+    },
     "Pause Timer [Persona Alarm]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -71013,6 +74192,98 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "播放声音"
+          }
+        }
+      }
+    },
+    "Priority [To-dos Sort]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Priority"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "優先度"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "优先级"
+          }
+        }
+      }
+    },
+    "Project [To-dos Grouping]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Project"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロジェクト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "项目"
+          }
+        }
+      }
+    },
+    "Put aside [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Put aside"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留中"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先放着"
+          }
+        }
+      }
+    },
+    "Recent Activity [To-dos Sort]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recent Activity"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近の動き"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近动态"
           }
         }
       }
@@ -71109,6 +74380,121 @@
         }
       }
     },
+    "Reported back [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reported back"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "報告済み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已汇报"
+          }
+        }
+      }
+    },
+    "Review [To-dos Door]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Review"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "確認"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看"
+          }
+        }
+      }
+    },
+    "Review Plan [To-dos Door]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Review Plan"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "計画を確認"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看计划"
+          }
+        }
+      }
+    },
+    "Show Done Today [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Done Today"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日完了したものを表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示今天完成的"
+          }
+        }
+      }
+    },
+    "Show Someday [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Someday"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「いつか」を表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示以后再做"
+          }
+        }
+      }
+    },
     "Silent at 4×." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -71128,6 +74514,144 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "4× 时不出声。"
+          }
+        }
+      }
+    },
+    "since %@ [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "since %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@から"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@起"
+          }
+        }
+      }
+    },
+    "Someday [State Names]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Someday"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "いつか"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以后再做"
+          }
+        }
+      }
+    },
+    "Sort By [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sort By"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "並べ替え"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "排序方式"
+          }
+        }
+      }
+    },
+    "Starting %@… [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting %@…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@を起動中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动 %@…"
+          }
+        }
+      }
+    },
+    "Starting… [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "起動中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动…"
+          }
+        }
+      }
+    },
+    "Steps %lld/%lld [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Steps %1$lld/%2$lld"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ステップ %1$lld/%2$lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "步骤 %1$lld/%2$lld"
           }
         }
       }
@@ -71177,6 +74701,52 @@
           }
         }
       }
+    },
+    "Suggested [To-dos Sort]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggested"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "おすすめ順"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "推荐顺序"
+          }
+        }
+      }
+    },
+    "Keep Current Effort" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep Current Effort"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在の思考の強さを維持"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留当前思考强度"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Terminals [Agent Follow-Up]" : {
       "extractionState" : "manual",
@@ -83901,16 +87471,108 @@
             "value" : "Just finished"
           }
         },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了したばかり"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "刚做完待看"
           }
+        }
+      }
+    },
+    "Live [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live"
+          }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "完了したばかり"
+            "value" : "公開済み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已上线"
+          }
+        }
+      }
+    },
+    "More [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "その他"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多"
+          }
+        }
+      }
+    },
+    "No date [To-dos Due]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No date"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日付なし"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有日期"
+          }
+        }
+      }
+    },
+    "No project [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No project"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロジェクトなし"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无项目"
           }
         }
       }
@@ -84029,6 +87691,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Just now [To-dos Spoken]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Just now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "たった今"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刚刚"
+          }
+        }
+      }
     },
     "Just speak; it goes to %@" : {
       "localizations" : {
@@ -96368,6 +100053,28 @@
         }
       }
     },
+    "Models are tried in order. Leave a model ID empty to use the provider’s default." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Models are tried in order. Leave a model ID empty to use the provider’s default."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデルは上から順に試行されます。プロバイダの既定モデルを使うには、モデル ID を空欄にします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统将按顺序尝试这些模型。将模型 ID 留空可使用提供商的默认模型。"
+          }
+        }
+      }
+    },
     "Models tried: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -98256,6 +101963,50 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "My list" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "My list"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自分のリスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义列表"
+          }
+        }
+      }
+    },
+    "My model list" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "My model list"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自分のモデルリスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的模型列表"
+          }
+        }
+      }
     },
     "Name" : {
       "localizations" : {
@@ -105669,6 +109420,28 @@
       },
       "extractionState" : "manual"
     },
+    "No providers can be called directly for this purpose." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No providers can be called directly for this purpose."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この用途で直接呼び出せるプロバイダはありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此用途没有可直接调用的提供商。"
+          }
+        }
+      }
+    },
     "No providers were imported." : {
       "localizations" : {
         "en" : {
@@ -111595,6 +115368,121 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Personaの通知がオフのため、録音が一時停止または停止しても通知されません。"
+          }
+        }
+      }
+    },
+    "Notifications can't reach this device. Allow them in Settings." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications can't reach this device. Allow them in Settings."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスは通知を受け取れません。設定で通知を許可してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台设备收不到通知。请在设置中允许通知。"
+          }
+        }
+      }
+    },
+    "Notifications can't reach this device. Ask the person who set up Persona to finish notification setup." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications can't reach this device. Ask the person who set up Persona to finish notification setup."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスは通知を受け取れません。Personaの設定をした人に、通知の設定を完了してもらってください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台设备收不到通知。请让负责设置 Persona 的人完成通知设置。"
+          }
+        }
+      }
+    },
+    "Notifications can't reach this device. Check your network. Persona will try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications can't reach this device. Check your network. Persona will try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスは通知を受け取れません。ネットワークを確認してください。Personaは再試行します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台设备收不到通知。请检查网络，Persona 会重试。"
+          }
+        }
+      }
+    },
+    "Notifications can't reach this device. Keep Persona open while it tries again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications can't reach this device. Keep Persona open while it tries again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスは通知を受け取れません。Personaを開いたままにすると、再試行します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台设备收不到通知。请保持 Persona 打开，它会自动重试。"
+          }
+        }
+      }
+    },
+    "Notifications can't reach this device. Update Persona to turn them back on." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notifications can't reach this device. Update Persona to turn them back on."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスは通知を受け取れません。Personaをアップデートして通知を復旧してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台设备收不到通知。请更新 Persona 以恢复通知。"
           }
         }
       }
@@ -122188,6 +126076,29 @@
         }
       }
     },
+    "Persona Notification Settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona Notification Settings"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personaの通知設定"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 通知设置"
+          }
+        }
+      }
+    },
     "Persona Settings" : {
       "localizations" : {
         "en" : {
@@ -122846,6 +126757,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Persona 自己决定，并记下它的假设。"
+          }
+        }
+      }
+    },
+    "Persona decides on %@ unless you answer [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona decides on %@ unless you answer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回答がなければ、Personaが%@に決めます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你不回答的话，Persona 会在%@自己决定"
+          }
+        }
+      }
+    },
+    "Persona decides at %@ unless you answer [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona decides at %@ unless you answer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回答がなければ、Personaが%@に決めます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你不回答的话，Persona 会在%@自己决定"
           }
         }
       }
@@ -123915,6 +127872,52 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Persona picks %@ on %@ unless you answer [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona picks %1$@ on %2$@ unless you answer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回答がなければ、Personaが%2$@に%1$@を選びます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你不回答的话，Persona 会在%2$@选 %1$@"
+          }
+        }
+      }
+    },
+    "Persona picks %@ at %@ unless you answer [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona picks %1$@ at %2$@ unless you answer"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回答がなければ、Personaが%2$@に%1$@を選びます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你不回答的话，Persona 会在%2$@选 %1$@"
+          }
+        }
+      }
     },
     "Persona reads it directly" : {
       "extractionState" : "manual",
@@ -127912,6 +131915,28 @@
       },
       "extractionState" : "manual"
     },
+    "Provider default" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Provider default"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロバイダの既定モデル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提供商默认模型"
+          }
+        }
+      }
+    },
     "Providers and Keys" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -128394,6 +132419,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Purpose model only" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Purpose model only"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この用途のモデルのみ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅使用此用途的模型"
+          }
+        }
+      }
     },
     "Push" : {
       "localizations" : {
@@ -131839,6 +135886,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Recently requested lists" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recently requested lists"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近リクエストされたリスト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近请求的列表"
+          }
+        }
+      }
     },
     "Recents" : {
       "localizations" : {
@@ -152237,6 +156306,29 @@
         }
       }
     },
+    "Since %@ [To-dos Spoken]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Since %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@から"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从%@起"
+          }
+        }
+      }
+    },
     "Since %@ · %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -167860,6 +171952,29 @@
       },
       "extractionState" : "manual"
     },
+    "The hub has no push registration for this device." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The hub has no push registration for this device."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハブにこのデバイスのプッシュ登録がありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "hub 没有这台设备的推送注册。"
+          }
+        }
+      }
+    },
     "The hub hasn't said which way it pushes to this device." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -174062,6 +178177,98 @@
       },
       "extractionState" : "manual"
     },
+    "Thinking effort after this turn: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking effort after this turn: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このターンの後の思考の強さ：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本轮结束后的思考强度：%1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Thinking effort change failed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking effort change failed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "思考の強さを変更できませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "思考强度更改失败"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Thinking effort could not be confirmed. Choose it again before resending." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking effort could not be confirmed. Choose it again before resending."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "思考の強さを確認できませんでした。再送信する前にもう一度選んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法确认思考强度。请重新选择后再发送。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Thinking effort will change after this turn." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking effort will change after this turn."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このターンが終わると、思考の強さが変わります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "思考强度将在本轮结束后更改。"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Thinking Effort" : {
       "localizations" : {
         "en" : {
@@ -175056,6 +179263,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "This Week"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今週"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本周"
+          }
+        }
+      }
+    },
+    "This week [To-dos Done]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This week"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今週"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本周"
+          }
+        }
+      }
+    },
+    "This week [To-dos Due]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This week"
           }
         },
         "ja" : {
@@ -177178,6 +181431,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "This extension hasn’t requested any model lists yet." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This extension hasn’t requested any model lists yet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この拡張機能はまだモデルリストをリクエストしていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此扩展尚未请求任何模型列表。"
+          }
+        }
+      }
     },
     "This extension is managed outside the extension market. Remove it at its source." : {
       "extractionState" : "manual",
@@ -181747,6 +186022,52 @@
       },
       "extractionState" : "manual"
     },
+    "To Do [State Names]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To Do"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "やること"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待做"
+          }
+        }
+      }
+    },
+    "To do [State Names]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To do"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "やること"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待做"
+          }
+        }
+      }
+    },
     "To Edit · %@" : {
       "localizations" : {
         "en" : {
@@ -182411,6 +186732,29 @@
       },
       "extractionState" : "manual"
     },
+    "To-dos Persona or an Agent works on show up here. [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To-dos Persona or an Agent works on show up here."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PersonaやエージェントがやっているToDoはここに表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 或 Agent 在做的待办会出现在这里。"
+          }
+        }
+      }
+    },
     "To-do…" : {
       "localizations" : {
         "en" : {
@@ -182546,6 +186890,52 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "今日"
+          }
+        }
+      }
+    },
+    "Today [To-dos Done]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天"
+          }
+        }
+      }
+    },
+    "Today [To-dos Due]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天"
           }
         }
       }
@@ -183166,6 +187556,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "明日"
+          }
+        }
+      }
+    },
+    "Tomorrow [To-dos Due]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tomorrow"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "明日"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "明天"
           }
         }
       }
@@ -187018,6 +191431,28 @@
         }
       }
     },
+    "Unavailable model" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unavailable model"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "利用できないモデル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型不可用"
+          }
+        }
+      }
+    },
     "Unavailable on This Computer" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -188877,6 +193312,29 @@
         }
       }
     },
+    "until %@ [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "until %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@まで"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "到%@为止"
+          }
+        }
+      }
+    },
     "Until [Notification Settings View 9a07c3]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -189037,6 +193495,28 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Up to %lld candidates." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up to %1$lld candidates."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "候補は最大 %1$lld 個です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最多可添加 %1$lld 个候选模型。"
+          }
+        }
+      }
     },
     "Up to %lld characters per message; longer ones are split" : {
       "localizations" : {
@@ -191089,6 +195569,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Usage limit reached [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usage limit reached"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "利用上限に達しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用量到上限了"
+          }
+        }
+      }
     },
     "Usage Limit · resets %@" : {
       "extractionState" : "manual",
@@ -194506,6 +199009,29 @@
       },
       "extractionState" : "manual"
     },
+    "Waiting for a merge [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for a merge"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マージ待ち"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等合并"
+          }
+        }
+      }
+    },
     "Waiting for Apple Watch" : {
       "localizations" : {
         "en" : {
@@ -197281,6 +201807,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "When a to-do needs your answer, it shows up here. [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When a to-do needs your answer, it shows up here."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ToDoがあなたの回答を必要とすると、ここに表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待办需要你回答时，会出现在这里。"
+          }
+        }
+      }
     },
     "When Done, Put It in the Inbox" : {
       "extractionState" : "manual",
@@ -200346,6 +204895,29 @@
         }
       }
     },
+    "Write down anything you want done. Persona can help with the rest. [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Write down anything you want done. Persona can help with the rest."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "やりたいことを書き留めてください。あとはPersonaが手伝います。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "想做的事都可以记下来，剩下的 Persona 可以帮忙。"
+          }
+        }
+      }
+    },
     "Write Only" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -200921,6 +205493,29 @@
       },
       "extractionState" : "manual"
     },
+    "Yesterday [To-dos Done]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yesterday"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "昨日"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "昨天"
+          }
+        }
+      }
+    },
     "Yesterday · %@" : {
       "localizations" : {
         "en" : {
@@ -200986,6 +205581,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你来定"
+          }
+        }
+      }
+    },
+    "You marked it done [To-dos Line]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You marked it done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了にしました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你已标为完成"
           }
         }
       }
@@ -202312,6 +206930,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Your own to-dos that nobody works on show up here. [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your own to-dos that nobody works on show up here."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "誰も取りかかっていない、あなた自身のToDoはここに表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没人在做的、你自己的待办会出现在这里。"
+          }
+        }
+      }
     },
     "Your password is used only for this unlock and isn't saved." : {
       "localizations" : {
@@ -212339,6 +216980,28 @@
         }
       }
     },
+    "Use models from" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use models from"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデルの選択元"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型来源"
+          }
+        }
+      }
+    },
     "Use one word: letters, digits, “-”, “_” or “.”." : {
       "comment" : "Saved prompt editor: characters a name may have",
       "extractionState" : "manual",
@@ -212477,6 +217140,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "列表在另一台设备上改过了，这里显示的是最新的。"
+          }
+        }
+      }
+    },
+    "Done [Todo Stage Bar]" : {
+      "comment" : "The step that ends a to-do's stage bar when its work closed with nothing left to deploy.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成"
           }
         }
       }

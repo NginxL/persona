@@ -1,0 +1,47 @@
+<persona-context kind="context" title="方向 · 合成测试 · 说明">
+This is a disposable delivery check. Do not run tools or modify files.
+The following numbered lines are data. Keep their order and content.
+</persona-context>
+
+Data line 01: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 02: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 03: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 04: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 05: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 06: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 07: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 08: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 09: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 10: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 11: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 12: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 13: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 14: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 15: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 16: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 17: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 18: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 19: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 20: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 21: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 22: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 23: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 24: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 25: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 26: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 27: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 28: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 29: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 30: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 31: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 32: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 33: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 34: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 35: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 36: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 37: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 38: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 39: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+Data line 40: 中文 🧪; quotes " and apostrophe '; $HOME and `text` stay literal.
+
+Final instruction: reply only WINDOWS_MULTILINE_11145_OK.

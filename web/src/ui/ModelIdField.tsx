@@ -4,7 +4,8 @@
 // session popover's Apply), `onValid` hands it each good ID as it is typed and `useButton={false}` drops "Use".
 import { useEffect, useId, useRef, useState } from "react";
 import { t } from "../i18n";
-import { cleanModelId, modelIdRule, typedModelProblem } from "../lib/model-id";
+import { cleanModelId } from "../lib/model-id";
+import { modelIdRule, typedModelProblem } from "../lib/model-id-input";
 import { composing } from "../lib/send-history";
 import { Button, cx } from "./atoms";
 

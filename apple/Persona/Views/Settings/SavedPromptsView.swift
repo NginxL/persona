@@ -34,8 +34,8 @@ struct SavedPromptsView: View {
         .sheet(item: $editing) { d in
             NavigationStack { SavedPromptEditor(draft: d, others: store.prompts.filter { $0.id != d.id }, save: store.save) }
         }
-        .confirmationDialog(Text("Delete “/\(deleting?.name ?? "")”?"), isPresented: deletingShown, titleVisibility: .visible,
-                            presenting: deleting) { p in
+        .accessibleConfirmationDialog(Text("Delete “/\(deleting?.name ?? "")”?"), isPresented: deletingShown, titleVisibility: .visible,
+                                      presenting: deleting) { p in
             Button("Delete", role: .destructive) { Task { await store.delete(p.id) } }
         } message: { _ in
             Text("It leaves the / list on all your devices.")
@@ -152,6 +152,8 @@ struct SavedPromptEditor: View {
     @State private var tried = false
     @State private var refusal: String?
     private let id: String?
+    /// What the editor opened with: the ✕ asks before throwing edits away where the platform does (a Mac).
+    private let opened: SavedPromptDraft
     private let others: [SavedPrompt]
     private let save: (String?, String, String) async throws -> SavedPrompt
 
@@ -159,6 +161,7 @@ struct SavedPromptEditor: View {
         _name = State(initialValue: draft.name)
         _text = State(initialValue: draft.text)
         id = draft.id
+        opened = draft
         self.others = others
         self.save = { try await save($0, $1, $2) }
     }
@@ -207,13 +210,10 @@ struct SavedPromptEditor: View {
         .themedGroupedPage()
         .pageTitle(id == nil ? String(localized: "New Prompt") : String(localized: "Edit Prompt"))
         .navigationBarTitleDisplayMode(.inline)
+        // ✕ at the leading corner and ✓ at the trailing one, as every edit sheet (docs/design/DESIGN_SYSTEM.md 3.6).
+        .sheetCancel(unsaved: name != opened.name || text != opened.text) { dismiss() }
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { Task { await submit() } }
-                    .disabled(saving)
-                    .accessibilityIdentifier("saved-prompt-save")
-            }
+            SheetConfirm(id: "saved-prompt-save", name: String(localized: "Save"), busy: saving) { Task { await submit() } }
         }
         .interactiveDismissDisabled(saving)
         .onChange(of: name) { refusal = nil }

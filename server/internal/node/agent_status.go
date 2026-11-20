@@ -32,6 +32,8 @@ func (n *Node) liveStatus(id string, a host.Agent, now time.Time) string {
 		return n.claudeStatus(id, a, now)
 	case "codex":
 		return n.codexStatus(id, a)
+	case cursorAgent, agyAgent:
+		return n.workAgentStatus(a, now)
 	}
 	return a.AgentStatus
 }

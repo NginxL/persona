@@ -20,8 +20,8 @@ import (
 const sessionID = "00000000-0000-4000-8000-000000008422"
 
 func main() {
-	if len(os.Args) == 4 && os.Args[1] == "observe" {
-		if err := observe(os.Args[2], os.Args[3]); err != nil {
+	if len(os.Args) == 4 && (os.Args[1] == "observe" || os.Args[1] == "observe-refusal") {
+		if err := observe(os.Args[2], os.Args[3], os.Args[1] == "observe-refusal"); err != nil {
 			panic(err)
 		}
 		return

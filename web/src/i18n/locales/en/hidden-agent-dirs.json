@@ -1,11 +1,15 @@
 {
-  "title": "Hidden Agent folders",
-  "footer": "Sessions working in these folders on the selected computer, with any Agent, stay recorded but leave Agents and Persona's view. A path covers that folder and everything in it; ~ is that computer's home; *name* matches a folder name anywhere. Active supervised Persona tasks stay visible. Switch a rule off to show its sessions again. To stop collecting a Claude Code config folder altogether, use Blocked config directories under Claude Code.",
+  "title": "Agent folders",
+  "footer": "Sessions working in these folders on the selected computer, with any Agent. Block: that computer stops collecting them, so nothing in Persona shows or counts them, and their permission requests are left to the agent's own interface. Hide: they stay recorded but leave Agents and Persona's view; active supervised Persona tasks stay visible. A path covers that folder and everything in it; ~ is that computer's home; *name* matches a folder name anywhere. Switch a rule off to show its sessions again. To stop collecting a Claude Code config folder altogether, use Blocked config directories under Claude Code.",
   "machine": "Computer",
   "pattern": "Folder or glob",
   "enabled": "Hidden from Agents and Assistant",
+  "enabled_block": "Blocked · not collected",
   "disabled": "Rule off · sessions visible",
-  "empty": "No hidden folders on this computer.",
+  "action": "Action",
+  "action_block": "Block",
+  "action_hide": "Hide",
+  "empty": "No Agent folder rules on this computer.",
   "add": "Add rule",
   "remove": "Remove",
   "failed": "Could not save or load rules: {error}",
@@ -18,6 +22,6 @@
   "normal": "Visible",
   "placeholder": "~/workspaces/*",
   "pattern_prefix": "Start with / or ~/ (~ is that computer's home), or * for a folder name",
-  "pattern_root": "Can't hide the whole home or root folder",
+  "pattern_root": "Can't use the whole home or root folder",
   "pattern_exists": "Already in the list"
 }

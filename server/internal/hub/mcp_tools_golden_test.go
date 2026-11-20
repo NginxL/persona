@@ -60,6 +60,18 @@ func TestGoldenMCPTools(t *testing.T) {
 	mcptoolgolden.CheckList(t, dir, "agent", checked(h.mcpTools(false)))
 }
 
+// The whole-list goldens the per-tool files replaced (#11252). A branch written before the split that merges main can
+// keep or recreate them while the per-tool files stay stale (#11475), so their return fails here with the fix.
+func TestNoWholeListMCPToolGoldens(t *testing.T) {
+	old, err := filepath.Glob(filepath.Join("testdata", "prompts", "mcp_tools.*.golden"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range old {
+		t.Errorf("%s is a whole-list golden replaced by %s/<list>/<tool>.golden (#11252): delete it, then rerun UPDATE_GOLDEN=1 go test ./internal/hub -run TestGoldenMCPTools so the tool your branch changed is in its own file", f, mcptoolgolden.Dir)
+	}
+}
+
 func assertNoEmptyToolEnums(t *testing.T, tools []proto.Tool) {
 	t.Helper()
 	var walk func(node any, path string)

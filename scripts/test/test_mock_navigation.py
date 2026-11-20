@@ -1,5 +1,5 @@
-"""The mock hub's navigation record (#9071, #9745) over its real HTTP routes: Overview's card arrangement is kept beside
-the start page and the sidebar's pages, checked like the manager checks it, and the made-up cards to arrange are listed
+"""The mock hub's navigation record (#9071, #9745, #10905) over its real HTTP routes: Overview's arrangement (its cards
+and its own sections) is kept beside the start page and the sidebar's pages, checked like the manager checks it, and the made-up cards to arrange are listed
 and drawn; MOCK_NAVIGATION=no-overview is a manager from before the field, MOCK_NAVIGATION=off a hub without the route.
 
     python3 scripts/test/test_mock_navigation.py
@@ -96,6 +96,19 @@ class MockNavigationTests(unittest.TestCase):
                     {"overview": [{"extension": "example-quota", "id": "left"}, {"extension": "example-quota", "id": "left"}]}):
             self.assertEqual(hub.call("PUT", "/api/v1/navigation", bad)[0], 400, bad)
         self.assertEqual(hub.call("GET", "/api/v1/navigation")[1].get("overview"), [])
+
+    def test_overview_sections(self):
+        """Overview's own sections (#10905) are entries of the same list, {"section", "hidden"?}, checked as the manager does."""
+        hub = Mock(MOCK_EXTENSIONS="1", MOCK_OVERVIEW_CARDS="1")
+        self.addCleanup(hub.close)
+        arranged = [{"section": "in_progress"}, *ARRANGEMENT, {"section": "needs_you"}, {"section": "working", "hidden": True}]
+        code, got = hub.call("PUT", "/api/v1/navigation", {"overview": arranged})
+        self.assertEqual((code, got.get("overview")), (200, arranged))
+        for bad in ({"overview": [{"section": "In-progress"}]}, {"overview": [{"section": "in_progress", "span": "full"}]},
+                    {"overview": [{"section": "in_progress", "extension": "example-quota", "id": "left"}]},
+                    {"overview": [{"section": "in_progress"}, {"section": "in_progress"}]}, {"overview": [{"section": 1}]}):
+            self.assertEqual(hub.call("PUT", "/api/v1/navigation", bad)[0], 400, bad)
+        self.assertEqual(hub.call("GET", "/api/v1/navigation")[1].get("overview"), arranged)
 
     def test_a_manager_from_before_the_field(self):
         hub = Mock(MOCK_NAVIGATION="no-overview")

@@ -1,9 +1,9 @@
 {
-  "title": "Arrange cards",
-  "hint": "Drag a card, or use its arrows, to move it. Choose a half or a full row, and switch a card off to hide it.",
+  "title": "Arrange Overview",
+  "hint": "Drag a card or a section, or use its arrows, to move it. Choose a half or a full row for a card, and switch one off to hide it.",
   "done": "Done",
   "reset": "Reset",
-  "reset_done": "The cards are back as they were.",
+  "reset_done": "Overview is back as it was.",
   "undo": "Undo",
   "drag": "Drag to move",
   "width": "Width of {name}",
@@ -14,5 +14,8 @@
   "show": "Show {name} on Overview",
   "hidden": "Hidden: not loaded",
   "line": "{hint} {where}",
-  "undo_stale": "Not undone: the cards were changed since."
+  "undo_stale": "Not undone: Overview was changed since.",
+  "always_shown": "Always shown: it holds what needs you",
+  "section_hidden": "Hidden",
+  "sections_local": "Cards follow on all your devices; the sections' order is saved in this browser only, as this hub can't keep it yet."
 }

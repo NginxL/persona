@@ -2,10 +2,15 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,6 +84,221 @@ func agyTestItems(t *testing.T, n *Node, id string, params map[string]any) ([]pr
 	t.Helper()
 	page := agyTestCall(t, n, "session.items", id, params).(map[string]any)
 	return page["items"].([]proto.Item), page
+}
+
+func TestAgyPaneSessionImage(t *testing.T) {
+	node, herdr, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	const otherRow = "agy-w1-p2"
+	seedAgents(t, node, herdr, agyTestAgent(agyTestPane, home, agyTestID), agyTestAgent("w1:p2", home, agyOtherTestID))
+	root := node.agyDataRoot()
+	brain := filepath.Join(root, "brain", agyTestID)
+	if err := os.MkdirAll(brain, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB9sAAAAASUVORK5CYII="
+	data, err := base64.StdEncoding.DecodeString(png)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(brain, "screen shot.png")
+	agyTestWrite(t, file, string(data))
+	uriPath := filepath.ToSlash(file)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	uri := (&url.URL{Scheme: "file", Path: uriPath}).String()
+	oversize := filepath.Join(brain, "large.png")
+	agyTestWrite(t, oversize, string(data)+strings.Repeat("0", agyMaxImageBytes))
+	unknown := filepath.Join(brain, "unknown.png")
+	agyTestWrite(t, unknown, "\x00\x01\x02\x03")
+	svg := filepath.Join(brain, "markup.png")
+	agyTestWrite(t, svg, `<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>`)
+	link := filepath.Join(brain, "link.png")
+	linkErr := os.Symlink(file, link)
+	outside := t.TempDir()
+	agyTestWrite(t, filepath.Join(outside, "outside.png"), string(data))
+	parentLinkErr := os.Symlink(outside, filepath.Join(brain, "external"))
+	fifo := filepath.Join(brain, "pipe.png")
+	fifoErr := exec.Command("mkfifo", fifo).Run()
+	internal := filepath.Join(brain, "subdir")
+	if err := os.Mkdir(internal, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entries := []struct {
+		name           string
+		media          agyMedia
+		valid, omitted bool
+		setupErr       error
+	}{
+		{name: "file URI", media: agyMedia{Mime: "image/png", URI: uri}, valid: true},
+		{name: "plain path", media: agyMedia{Mime: "image/png", URI: file}, valid: true},
+		{name: "relative path", media: agyMedia{Mime: "image/png", URI: filepath.Base(file)}, valid: true},
+		{name: "inline", media: agyMedia{Mime: "image/png", Data: png}, valid: true},
+		{name: "missing", media: agyMedia{Mime: "image/png", URI: "missing.png"}},
+		{name: "over size", media: agyMedia{Mime: "image/png", URI: oversize}},
+		{name: "over size inline", media: agyMedia{Mime: "image/png", Data: strings.Repeat("A", base64.StdEncoding.EncodedLen(agyMaxImageBytes)+4)}},
+		{name: "invalid inline", media: agyMedia{Mime: "image/png", Data: "!invalid"}},
+		{name: "bad WebP signature", media: agyMedia{Mime: "image/webp", Data: base64.StdEncoding.EncodeToString([]byte("RIFF\x00\x00\x00\x00WEBPVP"))}},
+		{name: "unsupported network URI", media: agyMedia{Mime: "image/png", URI: "https://example.com/screenshot.png"}},
+		{name: "remote file URI", media: agyMedia{Mime: "image/png", URI: "file://example.com" + uriPath}},
+		{name: "parent traversal", media: agyMedia{Mime: "image/png", URI: "../somewhere.png"}},
+		{name: "symlink", media: agyMedia{Mime: "image/png", URI: link}, setupErr: linkErr},
+		{name: "parent symlink escape", media: agyMedia{Mime: "image/png", URI: "external/outside.png"}, setupErr: parentLinkErr},
+		{name: "FIFO", media: agyMedia{Mime: "image/png", URI: fifo}, setupErr: fifoErr},
+		{name: "directory", media: agyMedia{Mime: "image/png", URI: internal}},
+		{name: "MIME mismatch", media: agyMedia{Mime: "image/jpeg", URI: file}},
+		{name: "SVG disguised as PNG", media: agyMedia{Mime: "image/png", URI: svg}},
+		{name: "unknown bytes", media: agyMedia{Mime: "image/png", URI: unknown}},
+		{name: "SVG", media: agyMedia{Mime: "image/svg+xml", URI: svg}, omitted: true},
+		{name: "no source", media: agyMedia{Mime: "image/png"}, omitted: true},
+	}
+	var media []agyMedia
+	for _, entry := range entries {
+		media = append(media, entry.media)
+	}
+	encoded, err := json.Marshal(media)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const fixture = `{"step_index":0,"type":"USER_INPUT","content":"<attached_images>\nuser.png\n</attached_images>","media":[{"mime_type":"image/png","uri":"user.png"}]}
+{"step_index":1,"type":"PLANNER_RESPONSE","tool_calls":[{"name":"view_file","args":{"AbsolutePath":"/example/view.png"}},{"name":"run_command","args":{"CommandLine":"capture"}}]}
+{"step_index":2,"type":"GENERIC","content":"Looked at a picture"}
+{"step_index":3,"type":"GENERIC","content":"Captured screenshots","media":%s}
+{"step_index":4,"type":"PLANNER_RESPONSE","content":"Done"}
+`
+	agyTestFile(t, root, agyTestID, fmt.Sprintf(fixture, encoded))
+	agyTestFile(t, root, agyOtherTestID, "{\"type\":\"USER_INPUT\",\"content\":\"Other session\"}\n")
+	items, page := agyTestItems(t, node, agyTestRow, map[string]any{"turns": 1})
+	if page["has_more"] != false || items[0].Text != "<attached_images>\nuser.png\n</attached_images>" || page["to_seq"] != 5 {
+		t.Fatalf("tool images changed the turn or attachment text: %+v", page)
+	}
+	result := items[4]
+	if result.Kind != proto.KindToolResult || result.Seq != 4 {
+		t.Fatalf("capture result: %+v", result)
+	}
+	baseID := strings.TrimSuffix(result.ID, "#0")
+	imageItems := make(map[string]proto.Item)
+	for _, item := range items {
+		if item.Kind == proto.KindImage {
+			imageItems[item.ID] = item
+		}
+	}
+	if len(imageItems) != len(entries)-2 {
+		t.Fatalf("got %d eligible image items", len(imageItems))
+	}
+	_, folded := agyTestItems(t, node, agyTestRow, map[string]any{"turns": 1, "fold_work": true})
+	foldedItems := folded["items"].([]proto.Item)
+	if len(foldedItems) != 3 || foldedItems[1].Fold == nil || !slices.ContainsFunc(foldedItems[1].Fold.Images, func(image proto.FoldImage) bool {
+		return image.Path == "/example/view.png" && image.Tool == "Read"
+	}) || !slices.ContainsFunc(foldedItems[1].Fold.Images, func(image proto.FoldImage) bool {
+		return image.ItemID == baseID+"#media0" && image.ToolUseID == result.ToolUseID
+	}) {
+		t.Fatalf("fold lost Read or lazy image metadata: %+v", foldedItems)
+	}
+	for index, entry := range entries {
+		t.Run(entry.name, func(t *testing.T) {
+			if entry.setupErr != nil {
+				t.Skipf("could not set up test file: %v", entry.setupErr)
+			}
+			id := fmt.Sprintf("%s#media%d", baseID, index)
+			item, found := imageItems[id]
+			if found == entry.omitted || found && (item.Role != "assistant" || item.Seq != result.Seq || item.ToolUseID != result.ToolUseID ||
+				item.Image == nil || *item.Image != (proto.Image{Mime: entry.media.Mime, Lazy: true})) {
+				t.Fatalf("unexpected lazy image item: %+v", item)
+			}
+			if entry.valid {
+				image := agyTestCall(t, node, "session.image", agyTestRow, map[string]any{"item_id": id, "path": unknown}).(*proto.Image)
+				if *image != (proto.Image{Mime: "image/png", Data: png}) {
+					t.Fatalf("unexpected image: %+v", image)
+				}
+				full := agyTestCall(t, node, "session.item", agyTestRow, map[string]any{"item_id": id}).(proto.Item)
+				if full.Image == nil || *full.Image != *item.Image {
+					t.Fatalf("session.item lost the lazy placeholder: %+v", full)
+				}
+				return
+			}
+			agyAssertNoImage(t, node, agyTestRow, id)
+		})
+	}
+	agyAssertNoImage(t, node, agyTestRow, file)
+	agyAssertNoImage(t, node, agyTestRow, result.ID)
+	agyAssertNoImage(t, node, otherRow, baseID+"#media0")
+}
+
+func agyAssertNoImage(t *testing.T, node *Node, session, item string) {
+	t.Helper()
+	raw, err := json.Marshal(map[string]string{"session_id": session, "item_id": item})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := node.handle(context.Background(), "session.image", raw); err == nil {
+		t.Fatal("session.image accepted an unavailable reference")
+	}
+}
+
+func TestAgyPaneSessionList(t *testing.T) {
+	n, herdr, home := herdrNode(t)
+	const (
+		acpRow     = "agy-" + agyTestID
+		otherRow   = "agy-" + agyOtherTestID
+		desktopRow = "desktop-agy-" + agyTestID
+		secondPane = "w1:p2"
+		secondRow  = "agy-w1-p2"
+		model      = "gemini-test"
+	)
+	n.runtimes = newRuntimeRegistry()
+	runtime := n.runtimes.add(nil)
+	runtime.ready, runtime.hello.Runtime = true, agyAgent
+	n.runtimes.setSessions(runtime, []proto.Session{
+		{SessionID: acpRow, Agent: agyAgent, Cwd: home, Status: proto.StatusIdle, Title: "ACP conversation", Model: model},
+		{SessionID: otherRow, Agent: agyAgent, Cwd: home, Status: proto.StatusIdle, Model: "other-model"},
+		{SessionID: desktopRow, Agent: agyAgent, Cwd: home, Status: proto.StatusOffline},
+	})
+	for _, tc := range []struct {
+		name, status, conversation string
+		ambiguous                  bool
+		wantACP                    bool
+	}{
+		{name: "live", status: proto.StatusIdle, conversation: agyTestID},
+		{name: "unresolved", status: proto.StatusIdle, wantACP: true},
+		{name: "ambiguous", status: proto.StatusIdle, conversation: agyTestID, ambiguous: true, wantACP: true},
+		{name: "offline", status: proto.StatusOffline, conversation: agyTestID, wantACP: true},
+		{name: "interrupted", status: proto.StatusInterrupted, conversation: agyTestID, wantACP: true},
+		{name: "closed", wantACP: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := map[string]string{otherRow: "other-model", desktopRow: ""}
+			var agents []any
+			if tc.status != "" {
+				pane := agyTestAgent(agyTestPane, home, tc.conversation)
+				pane["agent_status"] = tc.status
+				agents = append(agents, pane)
+				want[agyTestRow] = ""
+			}
+			if tc.ambiguous {
+				agents = append(agents, agyTestAgent(secondPane, home, tc.conversation))
+				want[secondRow] = ""
+			}
+			if tc.wantACP {
+				want[acpRow] = model
+			} else {
+				want[agyTestRow] = model
+			}
+			herdr.reply("session.snapshot", snapshot(nil, nil, agents, nil))
+			rows := listSessions(t, n)
+			got := make(map[string]string, len(rows))
+			for _, row := range rows {
+				got[row.SessionID] = row.Model
+				if row.SessionID == agyTestRow && (row.PaneID != agyTestPane || row.Host != host.Herdr || row.Status != tc.status || row.Title != "agy") {
+					t.Errorf("pane metadata changed: %+v", row)
+				}
+			}
+			if len(rows) != len(want) || !maps.Equal(got, want) {
+				t.Errorf("got %d rows with models %v, want %v", len(rows), got, want)
+			}
+		})
+	}
 }
 
 func TestAgyPanePagesAndFullItems(t *testing.T) {
@@ -357,7 +577,7 @@ func TestAgyPaneWatchConversationIsolation(t *testing.T) {
 		{"verified again", first, nil, "text", "first conversation", firstToken},
 		{"ID disappeared", agent(agyTestPane, ""), nil, "notice", noticeText, noticeToken},
 		{"ID returned", first, nil, "text", "first conversation", firstToken},
-		{"switched conversation", agent(agyTestPane, agyOtherTestID), nil, "text", "second conversation", "agy-pane:" + agyOtherTestID + ":steps"},
+		{"switched conversation", agent(agyTestPane, agyOtherTestID), nil, "text", "second conversation", agyStepsHistory(agyOtherTestID).token},
 	} {
 		setSnapshot(tc.pane, tc.others...)
 		waitFor(t, tc.name, func() bool { return len(hub.spans()) >= i+1 })

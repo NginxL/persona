@@ -124,6 +124,20 @@ func (h *herdrHost) CreateWorktreeFromMain(ctx context.Context, space, mainRoot,
 	return h.createWorktree(ctx, space, mainRoot, base, branch, path)
 }
 
+// CreateWorktreeFromCwd has herdr make the worktree from the repository root itself, on the own server: no workspace
+// holds that repository (worktreeCreate), so none is looked for; herdr's workspace still carries the repository.
+func (h *herdrHost) CreateWorktreeFromCwd(ctx context.Context, root, branch, path string) (*host.Created, error) {
+	c, err := h.c.WorktreeCreateFromCwd(ctx, root, branch, path)
+	if err != nil {
+		return nil, err
+	}
+	out := fromHerdrCreated("", &c.Created)
+	if out.SpaceID == "" {
+		return nil, errors.New("herdr did not return the new workspace")
+	}
+	return out, nil
+}
+
 func (h *herdrHost) createWorktree(ctx context.Context, space, mainRoot, base, branch, path string) (*host.Created, error) {
 	t, err := h.target(ctx, space)
 	if err != nil {

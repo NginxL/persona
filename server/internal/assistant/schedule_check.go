@@ -60,7 +60,10 @@ func (s *Service) approveRoutineCheck(ctx context.Context, machine, self string,
 
 // checkRoutine returns the log entry and whether the scheduled run should be skipped.
 func (s *Service) checkRoutine(ctx context.Context, t Task) (string, bool) {
-	machine := t.RunMachineID
+	machine := t.ExecutionMachineID
+	if machine == "" {
+		machine = t.RunMachineID
+	}
 	if machine == "" {
 		machine = s.settings(ctx).MachineID
 		if t.SessionID != "" {

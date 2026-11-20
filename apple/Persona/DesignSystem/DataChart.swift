@@ -55,9 +55,22 @@ struct DataChart: View {
     /// not a lone vertical column; two or more categories keep the columns. The same rule on every app
     /// (docs/extensions/extensions.md「New items」chart; issue #5386).
     static func isSingleCategoryShare(kind: Kind, stacked: Bool, series: [Series]) -> Bool {
-        guard kind == .bar, stacked, !series.isEmpty, series.allSatisfy({ $0.values.count == 1 }) else { return false }
+        singleCategoryShares(kind: kind, stacked: stacked, series: series) != nil
+    }
+
+    /// Each series' share of one category. If adding finite values overflows, scale them before summing so large
+    /// positive parts do not all become zero-width segments; ordinary values keep the original arithmetic.
+    static func singleCategoryShares(kind: Kind, stacked: Bool, series: [Series]) -> [Double]? {
+        guard kind == .bar, stacked, !series.isEmpty, series.allSatisfy({ $0.values.count == 1 }) else { return nil }
         let values = series.map(\.values[0])
-        return values.allSatisfy { $0.isFinite && $0 >= 0 } && values.reduce(0, +) > 0
+        guard values.allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
+        let total = values.reduce(0, +)
+        guard total > 0 else { return nil }
+        if total.isFinite { return values.map { $0 / total } }
+        let largest = values.max() ?? 1
+        let scaled = values.map { $0 / largest }
+        let scaledTotal = scaled.reduce(0, +)
+        return scaled.map { $0 / scaledTotal }
     }
 
     private var points: [Point] {

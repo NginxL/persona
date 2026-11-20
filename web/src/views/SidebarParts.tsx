@@ -89,8 +89,9 @@ export function useNavPages() {
   // The open to-dos that need the owner, not those Agents are on (#11085, lib/todo-triage ownerBadge); quiet tasks
   // (#1731) are told about in the main conversation, not counted here. The To-dos page's "Not done" counts every open one.
   const agentSessions = useAgentSessions();
+  const interactions = useStore((s) => s.interactions);
   const [restored] = useRestoredTodos();
-  const todosBadge = useMemo(() => ownerBadge(todos, makeSessionLookup(agentSessions), Date.now(), restored).size, [todos, agentSessions, restored]);
+  const todosBadge = useMemo(() => ownerBadge(todos, makeSessionLookup(agentSessions, interactions), Date.now(), restored).size, [todos, agentSessions, interactions, restored]);
   const todosBadgeLabel = todosBadge ? t("sidebar.todos_badge_title", { count: todosBadge }) : undefined;
   const counts = useScopedCounts();
   const inbox = useInboxBadge();

@@ -137,6 +137,7 @@ func TestAgyStartRoutesHerdrAndCompanion(t *testing.T) {
 					f.reply("session.snapshot", snapshot(nil, nil, []any{
 						agentOf(agyAgent, "", proto.StatusIdle, "w1:p2", "w1:t2", "w1", home, agyAgent),
 					}, nil))
+					f.setScreen("w1:p2", agyIdleScreen) // agy's input box is up: its first message may go in (agytrust.go)
 				}
 			})
 			var companion *fakeRuntime

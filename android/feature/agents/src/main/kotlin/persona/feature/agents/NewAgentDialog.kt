@@ -32,7 +32,7 @@ import persona.feature.chat.rememberUltracodeQuota
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.models.AgentModelPanel
-import persona.feature.chat.ForwardComposerCard
+import persona.feature.chat.ForwardComposerCards
 import persona.feature.chat.ForwardMessage
 import java.net.URI
 
@@ -412,7 +412,14 @@ private fun LazyListScope.newAgentItems(
         }
     }
     // A forwarded message (#3901) goes before the first message: its card over it.
-    usableForward(state.context)?.let(ForwardMessage::read)?.let { forward -> item("forward") { ForwardComposerCard(forward) } }
+    usableForward(state.context)?.let { context ->
+        item("forward") {
+            val refs = remember(context) { ForwardMessage.readAll(context) }
+            ForwardComposerCards(refs, singleLines = 4, onRemove = if (state.locked) null else ({ removed ->
+                model.forwardContext((refs - removed.toSet()).takeIf { it.isNotEmpty() }?.joinToString("\n") { it.xml() })
+            }))
+        }
+    }
     item("prompt") {
         JTextField(state.prompt, model::prompt, enabled = !state.locked,
             label = stringResource(when {

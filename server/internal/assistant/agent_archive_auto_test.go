@@ -18,8 +18,8 @@ func TestAutoArchivable(t *testing.T) {
 	old := now.Add(-4 * 24 * time.Hour)
 	wake := now.Add(time.Hour)
 	type link struct {
-		open, onTodo, reviewer bool
-		lastDone               time.Time
+		open, filed, onTodo, reviewer bool
+		lastDone                      time.Time
 	}
 	none := link{}
 	doneLong := link{onTodo: true, lastDone: old}
@@ -50,6 +50,8 @@ func TestAutoArchivable(t *testing.T) {
 		{"archived already", func(s *proto.Session) { s.Archived = true }, none, idle, false},
 		{"linked to an open to-do", func(*proto.Session) {}, link{open: true, onTodo: true}, idle, false},
 		{"linked to an open to-do and a done one", func(*proto.Session) {}, link{open: true, onTodo: true, lastDone: old}, idle, false},
+		{"filed under a current direction", func(*proto.Session) {}, link{filed: true}, idle, false},
+		{"filed under a current direction, its to-dos done", func(*proto.Session) {}, link{filed: true, onTodo: true, lastDone: old}, idle, false},
 		{"assistant conversation", func(s *proto.Session) { s.Assistant = true }, none, idle, false},
 		{"a review's reviewer", func(*proto.Session) {}, link{reviewer: true, onTodo: true, lastDone: old}, idle, false},
 		{"a subagent's row", func(s *proto.Session) { s.IsSubagent = true }, none, idle, false},
@@ -93,7 +95,7 @@ func TestAutoArchivable(t *testing.T) {
 		s := closedAgent(old)
 		s.LastText = "done"
 		c.edit(&s)
-		if got := autoArchivable(s, now, c.idle, c.link.open, c.link.onTodo, c.link.reviewer, c.link.lastDone); got != c.want {
+		if got := autoArchivable(s, now, c.idle, c.link.open, c.link.filed, c.link.onTodo, c.link.reviewer, c.link.lastDone); got != c.want {
 			t.Errorf("%s: autoArchivable = %v, want %v", c.name, got, c.want)
 		}
 	}

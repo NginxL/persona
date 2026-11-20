@@ -8,6 +8,16 @@ import (
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
+func feishuSessionNames(sess proto.Session, preferTab bool) (label, secondary string) {
+	if tab := sess.DisplayTabName(preferTab); tab != "" {
+		if title := transcript.Title(sess.Title); preferTab && title != tab {
+			secondary = clip(oneLine(title), 70)
+		}
+		return tab, secondary
+	}
+	return agentLabel(sess), ""
+}
+
 // feishuDirections takes one snapshot for a card or a whole report. Use the same
 // display names as the direction tree, including a name the owner just changed.
 func (s *Service) feishuDirections(ctx context.Context) map[string]string {
@@ -39,10 +49,22 @@ func (s *Service) feishuDirection(ctx context.Context, t Todo, names map[string]
 }
 
 // feishuAgentPlace identifies the session even when the node supplied no title.
-func (s *Service) feishuAgentPlace(ctx context.Context, ix proto.Interaction) string {
+func (s *Service) feishuAgentPlace(ctx context.Context, ix proto.Interaction) (place, secondary string) {
 	agent := transcript.Title(ix.SessionTitle)
+	sess, listed := s.nodeSession(ix.MachineID, ix.SessionID)
+	if listed {
+		if m, found := s.fleetMachine(ix.MachineID); found {
+			sess.Assistant = m.isAssistant(sess)
+		}
+		if sess.HerdrTabName() != "" {
+			preferTab := s.useHerdrTabName(ctx)
+			if sess.DisplayTabName(preferTab) != "" {
+				agent, secondary = feishuSessionNames(sess, preferTab)
+			}
+		}
+	}
 	if agent == "" && ix.Kind == proto.IxScreen {
-		if sess, ok := s.nodeSession(ix.MachineID, ix.SessionID); ok {
+		if listed {
 			agent = agentTitle(&sess, 60)
 		}
 		if agent == "" || agent == "." {
@@ -55,14 +77,14 @@ func (s *Service) feishuAgentPlace(ctx context.Context, ix proto.Interaction) st
 	agent = clip(oneLine(agent), 70)
 	if ix.Kind == proto.IxScreen {
 		if machine, ok := s.fleetMachine(ix.MachineID); ok && machine.Name != "" {
-			return agent + " · " + clip(oneLine(machine.Name), 40)
+			return agent + " · " + clip(oneLine(machine.Name), 40), secondary
 		}
 	}
 	if d, ok := s.device(ctx, ix.MachineID); ok && d.Name != "" && agent != "Persona" {
-		return agent + " · " + clip(oneLine(d.Name), 40)
+		return agent + " · " + clip(oneLine(d.Name), 40), secondary
 	}
 	if ix.Kind == proto.IxScreen && ix.MachineID != "" {
-		return agent + " · " + clip(oneLine(ix.MachineID), 40)
+		return agent + " · " + clip(oneLine(ix.MachineID), 40), secondary
 	}
-	return agent
+	return agent, secondary
 }

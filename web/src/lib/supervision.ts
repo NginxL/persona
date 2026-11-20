@@ -1,5 +1,6 @@
 import { formatDate, t } from "../i18n";
 import type { Todo } from "./todos";
+import type { Interaction } from "./types";
 
 // A task the main conversation supervises (#3124, docs/assistant/unified-entry.md "Supervision"): what done means, where its review
 // stands, and the reviews so far. Only such tasks carry `supervision`; an older hub sends none.
@@ -33,8 +34,38 @@ export interface ParkEvidence {
   wake: string;
   contact?: ParkContact;
   ready?: boolean;
+  /** external_event only: the exact pending worker interaction the hub verified for this park. */
+  interaction_id?: string;
   /** Recording conversation, not the person who sent the request. */
   recorded_by?: string;
+}
+
+export function parkInteractionID(todo: Todo): string | undefined {
+  const evidence = todo.supervision?.parked?.evidence;
+  if (todo.done_at || todo.supervision?.state !== "parked" || evidence?.kind !== "external_event") return undefined;
+  return evidence.interaction_id?.trim() || undefined;
+}
+
+/** The current pending interaction an external-event park names, only when its exact worker belongs to this task. */
+export function linkedParkInteraction(todo: Todo, interactions: readonly Interaction[]): Interaction | undefined {
+  const id = parkInteractionID(todo);
+  const ix = id ? interactions.find((candidate) => candidate.id === id) : undefined;
+  if (!id || !ix) return undefined;
+  return (todo.agents ?? []).some((a) => !a.dismissed_at && !a.start_error && a.machine_id === ix.machine_id && a.session_id === ix.session_id) ? ix : undefined;
+}
+
+/** The manager's current owner-ask projection of the same linked interaction, for surfaces without the pending list. */
+export function linkedParkOwnerAsk(todo: Todo): boolean {
+  const id = parkInteractionID(todo);
+  return !!id && !!todo.view?.asks?.some((ask) => ask.interaction === id);
+}
+
+/** A local copy of a to-do whose linked request is homed elsewhere; its recorded evidence is not mutated. */
+export function withoutParkInteraction(todo: Todo): Todo {
+  if (!parkInteractionID(todo)) return todo;
+  const supervision = todo.supervision!;
+  const parked = supervision.parked!;
+  return { ...todo, supervision: { ...supervision, parked: { ...parked, evidence: { ...parked.evidence!, interaction_id: undefined } } } };
 }
 
 export interface ReviewCheck {

@@ -42,4 +42,21 @@ class ReviewTest {
         assertEquals(CheckMark.Open, todo("""{"id":"t","supervision":{"supervisor":"m","done_when":["a"]}}""").supervision!!.checklist().single().mark)
         assertNull(todo("""{"id":"t","supervision":{"supervisor":"m"}}""").supervision!!.checkCount())
     }
+
+    /**
+     * A continuation's new round (#11553): task_plan continues reopened an accepted task with a new Agent, and the hub kept
+     * the acceptance in the reviews but put the ledger back to going on. The history alone never makes the to-do accepted;
+     * more work sent to the accepted task's Agent (#3156) keeps the ledger, and the stage, accepted.
+     */
+    @Test
+    fun aContinuationShowsItsNewRoundNotTheEarlierAcceptance() {
+        val earlier = """{"at":"2026-11-20T02:23:57Z","verdict":"accepted","checks":[{"criterion":"a","met":true}]}"""
+        val continued = todo("""{"id":"t","reopened_at":"2026-11-20T02:35:24Z","supervision":{"supervisor":"m","done_when":["a"],"state":"","round":0,"reviews":[$earlier]}}""")
+        assertEquals(false, continued.acceptanceStands)
+        assertEquals("", continued.reviewState)
+        assertEquals(ReviewStage.Ongoing, continued.reviewStage)
+        val standing = todo("""{"id":"t","supervision":{"supervisor":"m","done_when":["a"],"state":"accepted","reviews":[$earlier]}}""")
+        assertEquals(true, standing.acceptanceStands)
+        assertEquals(ReviewStage.Accepted, standing.reviewStage)
+    }
 }

@@ -230,7 +230,7 @@ func TestHiddenDirectorySettingCountsOnlyHiddenSessions(t *testing.T) {
 		t.Fatalf("get: %+v", got)
 	}
 	text := got.Content[0].Text
-	for _, want := range []string{"/code/app (on; matches 1 sessions)", "/code (on; matches 2 sessions)"} {
+	for _, want := range []string{"/code/app (hide, on; matches 1 sessions)", "/code (hide, on; matches 2 sessions)"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("want %q in:\n%s", want, text)
 		}

@@ -163,6 +163,9 @@ type AgentModel struct {
 	Description string `json:"description,omitempty"`
 	// Resolved: the model an alias stands for with this launcher's settings (opus → its model id).
 	Resolved string `json:"resolved,omitempty"`
+	// ResolvedOffered: the gateway's own catalog also lists Resolved verbatim as a selectable ID.
+	// Absent when unknown. The node preserves this evidence on the alias row without adding a picker row.
+	ResolvedOffered bool `json:"resolved_offered,omitempty"`
 	// Default: what the agent runs when no model is given; picking it is the same as picking none.
 	Default bool `json:"default,omitempty"`
 	// Efforts: the thinking efforts it takes, weakest first; none: no effort setting.

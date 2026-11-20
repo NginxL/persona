@@ -115,7 +115,7 @@ func (s *Service) recordWorkerOutcome(ctx context.Context, t Todo, machine, sess
 		s.logf("WARN worker memory todo %s: knowledge base unavailable: %v", t.ID, err)
 		return
 	}
-	projects := outcomeProjects(e, t, []outcomeAgent{{MachineID: machine, Cwd: cwd}})
+	projects := s.projectsForTask(ctx, e, t, machine, cwd)
 	if len(projects) == 0 {
 		return
 	}
@@ -155,13 +155,33 @@ func (s *Service) recordWorkerOutcome(ctx context.Context, t Todo, machine, sess
 	if out.Outcome == "" {
 		out.Outcome = tidyOutcome(taskOutcome{Outcome: conclusion}).Outcome
 	}
-	record := kb.ProjectMemoryRecord{ID: id, TodoID: t.ID, Agent: session, Turn: turn, ItemIndex: itemIndex,
-		Conclusion: out.Outcome, Links: out.Links}
-	if modelErr == nil && len(out.Decisions) > 0 {
-		record.Decision, record.Reason = out.Decisions[0].Choice, out.Decisions[0].Reason
+	recordedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	base := kb.ProjectMemoryRecord{TodoID: t.ID, Agent: session, Turn: turn, ItemIndex: itemIndex,
+		Verification: kb.ProjectMemoryAgentReported, RecordedAt: recordedAt}
+	var records []kb.ProjectMemoryRecord
+	if modelErr == nil {
+		for i, d := range out.Decisions {
+			record := base
+			record.ID = fmt.Sprintf("%s/decision/%d", id, i+1)
+			record.Type = kb.ProjectMemoryDecision
+			record.Question, record.Decision, record.Reason = d.Question, d.Choice, d.Reason
+			records = append(records, record)
+		}
+		for i, pitfall := range out.Pitfalls {
+			record := base
+			record.ID = fmt.Sprintf("%s/pitfall/%d", id, i+1)
+			record.Type = kb.ProjectMemoryPitfall
+			record.Conclusion = pitfall
+			records = append(records, record)
+		}
 	}
+	// The base outcome goes last: its presence means the whole batch was attempted, while a partial retry dedupes the
+	// typed records already appended. The durable identity itself remains the M1 worker/turn/item identity.
+	outcome := base
+	outcome.ID, outcome.Type, outcome.Conclusion, outcome.Links = id, kb.ProjectMemoryOutcome, out.Outcome, out.Links
+	records = append(records, outcome)
 	for _, p := range pending {
-		if err := e.AppendProjectMemory(p.Slug, record); err != nil {
+		if err := e.AppendProjectMemoryBatch(p.Slug, records); err != nil {
 			s.logf("WARN worker memory todo %s: append project %s: %v", t.ID, p.Slug, err)
 		}
 	}

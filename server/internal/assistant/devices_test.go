@@ -66,6 +66,7 @@ func (f *fakeDevices) Sessions(string) ([]proto.Session, bool) { return nil, fal
 func (f *fakeDevices) AppendSessions(dst []proto.Session, _ string) ([]proto.Session, bool) {
 	return dst, false
 }
+func (f *fakeDevices) Shown(string) (devices.Shown, bool) { return devices.Shown{}, false }
 func (f *fakeDevices) SessionsWhere(string, func(*proto.Session) bool) ([]proto.Session, bool) {
 	return nil, false
 }

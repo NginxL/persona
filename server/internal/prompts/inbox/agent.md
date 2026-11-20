@@ -46,7 +46,7 @@
 
 ## ナレッジベースの背景（{{or $.KnowledgeDir "~/.persona/data"}}）
 
-{{template "inbox/kb_blocks" $}}
+{{template "shared/kb_blocks" $}}
 会話 id：{{.ChatID}}。詳細は kb_get / kb_search。対応で新しい結論（進捗、担当、締切）が得られたら kb_update で該当プロジェクトの log に記録します（この書込は許可されています）。
 {{end}}{{else if .Language}}This is an Inbox matter (event {{.EventID}}). You are {{.Owner}}'s assistant conversation handling it. New messages, {{.Owner}}'s confirmations and directions for this matter will come here; continue rather than starting over.
 {{- if .Resumed}}
@@ -96,7 +96,7 @@ Before you started, these also arrived:
 
 ## Knowledge-base background ({{or $.KnowledgeDir "~/.persona/data"}})
 
-{{template "inbox/kb_blocks" $}}
+{{template "shared/kb_blocks" $}}
 Conversation id: {{.ChatID}}. Use kb_get / kb_search for more. If handling yields new conclusions (project progress, responsibilities, deadlines), write them to the corresponding project's log with kb_update (this write is allowed).
 {{end}}{{else}}这是收件箱里的一件事（事件 {{.EventID}}），你是{{.Owner}}的助手处理它的那段对话：这件事以后的新消息、{{.Owner}}的确认和指示都会发到这段对话里，你接着做，不用从头再来。
 {{- if .Resumed}}
@@ -146,6 +146,6 @@ Conversation id: {{.ChatID}}. Use kb_get / kb_search for more. If handling yield
 
 ## 知识库里的背景（{{or $.KnowledgeDir "~/.persona/data"}}）
 
-{{template "shared/kb_blocks" .}}
+{{template "shared/kb_blocks" $}}
 会话 id：{{.ChatID}}。更多用 kb_get / kb_search 查。处理完如果得出了新结论（项目进展、谁负责什么、截止时间），用 kb_update 写回对应项目的 log（这是允许的写操作）。
 {{end}}{{end}}

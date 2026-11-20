@@ -57,6 +57,7 @@ internal data class MessageTarget(
 /** Which message the long-press menu is open for (iOS `MessageMenu`); the page shows the menu, rows open it. */
 @Stable
 internal class MessageMenuState {
+    val forwardPick = ForwardPick()
     var target by mutableStateOf<MessageTarget?>(null)
         private set
 

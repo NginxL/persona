@@ -1,9 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { ago, attentionReason, baseName, bytes, externalLink, failureReason, failureText, sessionPreview } from "./format";
+import { ago, attentionReason, baseName, bytes, externalLink, failureReason, failureText, sessionPreview, sessionTitle } from "./format";
 import { formatRelative } from "../i18n";
 import type { Session } from "./types";
 
 const session = (o: Partial<Session>): Session => ({ machine_id: "m", session_id: "s", cwd: "/x", status: "idle", ...o }) as Session;
+
+describe("sessionTitle", () => {
+  const tab = { slot_id: "w1:t1", slot_name: "Export work", space_kind: "herdr" };
+  it("prefers a named herdr tab when enabled", () => {
+    const s = session({ ...tab, title: "CLI session name" });
+    expect(sessionTitle(s)).toBe(s.title);
+    expect(sessionTitle(s, true)).toBe(tab.slot_name);
+  });
+  it("uses a tab in place of an empty or shell prompt title with the setting off", () => {
+    for (const title of ["", "  ", "user@host: /workspace", "user@host:~/workspace", "user@host: path"]) {
+      expect(sessionTitle(session({ ...tab, title }))).toBe(tab.slot_name);
+    }
+    expect(sessionTitle(session({ ...tab, title: "Contact user@host: about exports" }))).toBe("Contact user@host: about exports");
+  });
+  it("keeps the CLI name in other engines and for sessions without a tab", () => {
+    for (const s of [session({ ...tab, assistant: true }), session({ ...tab, space_kind: "orca" }), session({ slot_name: "Workspace" }), session({})]) {
+      expect(sessionTitle({ ...s, title: "CLI session name" }, true)).toBe("CLI session name");
+    }
+  });
+});
 
 // A botmux session's reason for waiting and its Feishu topic (attention_reason, external_url; docs/integrations/engines.md "botmux").
 describe("sessionPreview", () => {

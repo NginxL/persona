@@ -44,15 +44,18 @@ func (s *Service) fitEngineLauncher(ctx context.Context, m Device, host string, 
 	if !known || !hostRuntime {
 		return "", startAgent{}, nil, false
 	}
-	configured := make([]ConfiguredLauncher, 0, len(list))
+	discovered := make([]ConfiguredLauncher, 0, len(list))
 	for _, l := range list {
-		configured = append(configured, ConfiguredLauncher{Launcher: l})
+		discovered = append(discovered, ConfiguredLauncher{Launcher: l})
 	}
-	configured = sessionLaunchers(configured, s.hello(ctx).Models.Launchers[m.ID])
+	overrides := s.hello(ctx).Models.Launchers[m.ID]
+	configured := sessionLaunchers(discovered, overrides)
 	agentOf := func(name string) startAgent {
 		for _, l := range configured {
 			if l.Name == name {
-				return launcherStartAgent(l)
+				a := launcherStartAgent(l)
+				a.snapshot = launcherKindSnapshot(discovered, overrides, name)
+				return a
 			}
 		}
 		return startAgent{}
@@ -131,7 +134,7 @@ func ranLauncher(asked string, in *proto.StartInstead, ran proto.Session) string
 func (s *Service) launchersHereOn(ctx context.Context, machine, host string) (list []proto.Launcher, hostRuntime, known bool) {
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	list, hostRuntime, err := s.machineLaunchersOn(cctx, machine, host)
+	list, hostRuntime, _, err := s.machineLaunchersOn(cctx, machine, host)
 	if err != nil || !slices.ContainsFunc(list, func(l proto.Launcher) bool {
 		source := compat.Source(l.Source)
 		return source != "persona" && source != "builtin"

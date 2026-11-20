@@ -17,5 +17,6 @@
   "node_no_model_http": "这台电脑的 node 还不能代发模型请求，请更新 node",
   "node_no_engine_switch": "这台电脑的 node 还不支持把运行中的 Agent 在 Claude Code 和 Codex 之间切换，请更新 node",
   "node_no_model_run": "这台电脑的 node 还不能用启动器回答模型请求，请更新 node",
+  "node_no_task_execution": "这台电脑尚不支持任务执行选项，请更新该电脑上的 Persona 后重试。",
   "node_no_start_goal": "这台电脑的 node 还不能在 Agent 开始时设目标，请更新 node"
 }

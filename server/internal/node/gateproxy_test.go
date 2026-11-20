@@ -425,18 +425,26 @@ func TestGatedToolSendsThroughTheProxy(t *testing.T) {
 	assistantHub(hub)
 	skills := filepath.Join(n.home, ".persona", "skills")
 	t.Setenv("PERSONA_SKILLS_DIR", skills)
+	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
 	n.dir = filepath.Join(n.home, ".persona")
 	script := filepath.Join(skills, "example", "scripts", "ex.sh")
-	_ = os.MkdirAll(filepath.Dir(script), 0o755)
-	_ = os.WriteFile(filepath.Join(skills, "example", "SKILL.md"), []byte("---\nname: example\n---\n"), 0o644)
-	_ = os.WriteFile(script, []byte(`#!/bin/bash
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skills, "example", "SKILL.md"), []byte("---\nname: example\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte(`#!/bin/bash
 echo "token:${EXAMPLE_TOKEN:-none}"
 if [ -n "${3:-}" ]; then
   curl -sS -X "$1" -H 'content-type: application/json' --data-raw "$3" "$EXAMPLE_BASE/api/v1$2"
 else
   curl -sS -X "$1" "$EXAMPLE_BASE/api/v1$2"
 fi
-`), 0o755)
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prepareAssistantForTest(t, n, ".persona/assistant", nil, nil)
 	g := proxiedGate(api.URL)
 	g.Tool = &proto.GateTool{Name: "example_api", Description: "Run ex."}
 	n.mu.Lock()

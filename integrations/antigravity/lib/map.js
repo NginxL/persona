@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, join } from 'node:path'
 import { appToolName, clipInput, light, snippet } from '../../runtime-sdk/index.js'
+import { isImageReference } from './media.js'
 
 export const RUNTIME = 'agy'
 export const LABEL = 'Antigravity'
@@ -151,7 +152,7 @@ export function cleanGenericOutput(content) {
 /**
  * Parse a transcript.jsonl file (or array of parsed step objects) into Persona items.
  * @param {object[]} steps
- * @param {{ brainDir?: string, full?: boolean }} [opts]
+ * @param {{ brainDir?: string, full?: boolean, includeMedia?: boolean, mediaItemId?: string }} [opts]
  */
 export function stepsToItems(steps, opts = {}) {
   const items = []
@@ -160,6 +161,7 @@ export function stepsToItems(steps, opts = {}) {
   let lastText = ''
   let turnError
   let afterWork = false
+  let media
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
@@ -255,8 +257,15 @@ export function stepsToItems(steps, opts = {}) {
           ts,
         }
         items.push(opts.full ? resItem : light(resItem))
-        // Omit tool-result step.media: Antigravity runtimes have no session.image handler (matching agytranscript.go),
-        // and Read/view_file image thumbnails are already resolved from tool_input.file_path via ViewedImages.
+        if (opts.includeMedia === true && Array.isArray(step.media)) {
+          for (const [index, entry] of step.media.entries()) {
+            if (!isImageReference(entry)) continue
+            const id = `${line}#media${index}`
+            items.push({ id, seq, role: 'assistant', kind: 'image', tool_use_id: callId, ts,
+              image: { mime: entry.mime_type, data: '', lazy: true } })
+            if (opts.mediaItemId === id) media = entry
+          }
+        }
         break
       }
       case 'PERSONA_MODE_NOTICE': {
@@ -277,7 +286,7 @@ export function stepsToItems(steps, opts = {}) {
     }
   }
 
-  return { items, toSeq: maxSeq, lastText, turnError }
+  return { items, toSeq: maxSeq, lastText, turnError, ...(media ? { media } : {}) }
 }
 
 const transcriptCache = new Map()
@@ -286,6 +295,20 @@ const MAX_CACHED_TRANSCRIPTS = 128
 const MAX_TRANSCRIPT_REVISIONS = 256
 const MAX_TRANSCRIPT_CACHE_BYTES = 64 * 1024 * 1024
 let transcriptCacheBytes = 0
+
+export function forkReplyPosition(itemId, steps) {
+  const legacy = !itemId.includes('@')
+  const item = stepsToItems(steps).items.find((entry) => entry.role === 'assistant' && entry.kind === 'text' &&
+    (entry.id === itemId || (legacy && entry.id.replace(/@[^#]+/, '') === itemId)))
+  return item ? steps.findIndex((entry, index) => entry?.type === 'PLANNER_RESPONSE' && (entry.step_index ?? index) + 1 === item.seq) : -1
+}
+
+export function forkStepIndex(index, trajectory) {
+  if (trajectory[index]?.type !== 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') return undefined
+  const nextInput = trajectory.findIndex((entry, position) => position > index && entry?.type === 'CORTEX_STEP_TYPE_USER_INPUT' &&
+    (!entry.metadata?.source || entry.metadata.source === 'CORTEX_STEP_SOURCE_USER_EXPLICIT'))
+  return (nextInput < 0 ? trajectory.length : nextInput) - 1
+}
 
 export function readTranscriptSteps(brainDir, full = false) {
   return readTranscript(brainDir, full).steps

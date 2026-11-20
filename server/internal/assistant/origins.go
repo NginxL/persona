@@ -175,6 +175,19 @@ func (s *Service) originNoted(ctx context.Context, machine, id string) bool {
 	return o != nil && (o.MachineID == "" || o.MachineID == machine)
 }
 
+// taskOwnOrigin verifies that the saved destination belongs to an ordinary task conversation.
+func (s *Service) taskOwnOrigin(ctx context.Context, t Task) bool {
+	b := &s.origins
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !s.originsLocked(ctx) {
+		return false
+	}
+	o := b.m[t.RunSessionID]
+	return o != nil && o.Origin == OriginTask && (o.Ref == "" || o.Ref == t.ID) &&
+		(o.MachineID == "" || o.MachineID == t.RunMachineID)
+}
+
 type shownOrigin struct{ origin, ref, machine, ext string }
 
 // conversationOrigins are the origins to show, by session id; false while they could not be read.

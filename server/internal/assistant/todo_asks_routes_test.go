@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -606,27 +607,42 @@ func TestTodoAskClosedWhileSendingIsStale(t *testing.T) {
 
 // What the route answers for what its callees refuse: the retry route's 409s only for a failed start it did not start
 // again (a decision's words that found the computer offline are the accept route's 502), a node's own refusal 423 with
-// its code, the store 503, any other failure 502 accept_not_taken.
+// its code, the store 503, any other failure that typed nothing 502 accept_not_taken, each saying delivered "none";
+// words that may be with the Agent, or are, 502 send_in_doubt, whatever the failure underneath (a node's coded answer
+// that says it is not sure, a to-do gone once they were typed). A failed start's retry starts nothing before it answers.
 func TestTodoAskAnswerErrorCodes(t *testing.T) {
 	e := newTodoEnv(t, nil)
 	for _, c := range []struct {
-		err  error
-		code int
-		want string
+		err       error
+		code      int
+		want      string
+		delivered string
 	}{
-		{machineOffline("box"), http.StatusBadGateway, "accept_not_taken"},
-		{startNotRetried{machineOffline("box")}, http.StatusConflict, ""},
-		{startNotRetried{errTaskNotRetryable}, http.StatusConflict, ""},
-		{startNotRetried{errors.New("the plan is gone")}, http.StatusBadGateway, "accept_not_taken"},
-		{&rpc.Error{Code: "dialog_open", Message: "a dialog is open"}, http.StatusLocked, "dialog_open"},
-		{errAcceptStore, http.StatusServiceUnavailable, ""},
-		{errors.New("the link dropped"), http.StatusBadGateway, "accept_not_taken"},
+		{machineOffline("box"), http.StatusBadGateway, "accept_not_taken", "none"},
+		{startNotRetried{machineOffline("box")}, http.StatusConflict, "", "none"},
+		{startNotRetried{errTaskNotRetryable}, http.StatusConflict, "", "none"},
+		{startNotRetried{errors.New("the plan is gone")}, http.StatusBadGateway, "accept_not_taken", "none"},
+		{startNotRetried{context.DeadlineExceeded}, http.StatusBadGateway, "accept_not_taken", "none"},
+		{&rpc.Error{Code: "dialog_open", Message: "a dialog is open"}, http.StatusLocked, "dialog_open", "none"},
+		{&rpc.Error{Code: "held_full", Message: "too many held"}, http.StatusLocked, "held_full", "none"},
+		{errAcceptStore, http.StatusServiceUnavailable, "", "none"},
+		{fmt.Errorf("%w: %w", errAcceptStore, context.DeadlineExceeded), http.StatusServiceUnavailable, "", "none"},
+		{errAskStale, http.StatusConflict, "ask_stale", "none"},
+		{errNotDeclinable, http.StatusConflict, "not_declinable", "none"},
+		{errAnswerNeeded, http.StatusBadRequest, "", "none"},
+		{db.ErrTodoNotFound, http.StatusNotFound, "todo_not_found", "none"},
+		{errors.New("the link dropped"), http.StatusBadGateway, "accept_not_taken", "none"},
+		{context.DeadlineExceeded, http.StatusBadGateway, codeSendInDoubt, "unknown"},
+		{rpc.ErrClosed, http.StatusBadGateway, codeSendInDoubt, "unknown"},
+		{&rpc.Error{Code: "peer_unconfirmed", Message: "the inbox read it", Data: json.RawMessage(`{"delivered":"unknown"}`)},
+			http.StatusBadGateway, codeSendInDoubt, "unknown"},
+		{wordsSent{db.ErrTodoNotFound}, http.StatusBadGateway, codeSendInDoubt, "yes"},
 	} {
 		rec := httptest.NewRecorder()
 		e.s.writeAnswerError(rec, httptest.NewRequest("POST", "/", nil), "todo_x", c.err)
-		var body struct{ Code string }
-		if rec.Code != c.code || json.Unmarshal(rec.Body.Bytes(), &body) != nil || c.want != "" && body.Code != c.want {
-			t.Errorf("%v: %d %s, want %d %q", c.err, rec.Code, rec.Body, c.code, c.want)
+		var body struct{ Code, Delivered string }
+		if rec.Code != c.code || json.Unmarshal(rec.Body.Bytes(), &body) != nil || c.want != "" && body.Code != c.want || body.Delivered != c.delivered {
+			t.Errorf("%v: %d %s, want %d %q delivered %q", c.err, rec.Code, rec.Body, c.code, c.want, c.delivered)
 		}
 	}
 }

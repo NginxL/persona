@@ -8,7 +8,7 @@ The implementation is `scripts/operations/pr_watch.py`. It replaces a local focu
 
 ## Review and merge contract
 
-Every new, open, non-draft PR head goes through independent gates:
+Every new, open, non-draft PR head goes through independent gates. A PR whose title starts `release:` is never merged by this ordinary watcher, even when those gates pass: only `release-pr.yml` can merge it after every signed-platform check and its exact-source verification artifact pass. The main ruleset separately requires `All available release-PR checks passed`, so an unrelated merger cannot bypass that release workflow (#11520).
 
 1. Resolve the PR's current base and head. Fetch both into an isolated worktree and refuse a moved ref.
 2. Invoke `claude -p` with a fixed review prompt, a structured JSON schema, `--safe-mode`, and only `Read`. Safe mode disables project instructions, hooks, plugins and MCP; the reviewer reads the supplied diff and can inspect surrounding source without Bash, editing, delegation or GitHub credentials in its instructions. PR text and repository content are untrusted input.

@@ -425,10 +425,9 @@ struct ExtensionChartItem: View {
     /// A stacked bar of one category (a single day's parts): it is a horizontal segmented bar, not a lone column.
     private var singleShare: [SegmentedShareBar.Share]? {
         let mapped = mapped
-        guard DataChart.isSingleCategoryShare(kind: chartKind, stacked: item.stacked == true, series: mapped) else { return nil }
-        let total = mapped.reduce(0) { $0 + $1.values[0] }
+        guard let ratios = DataChart.singleCategoryShares(kind: chartKind, stacked: item.stacked == true, series: mapped) else { return nil }
         return mapped.enumerated().map { i, s in
-            SegmentedShareBar.Share(id: i, color: s.color ?? DataChart.hues[i % DataChart.hues.count], ratio: s.values[0] / total)
+            SegmentedShareBar.Share(id: i, color: s.color ?? DataChart.hues[i % DataChart.hues.count], ratio: ratios[i])
         }
     }
 

@@ -133,12 +133,15 @@ function BranchEnd({ n, state, label }: { n: number; state?: TreeState; label?: 
  * list's sticky group headings (a grouping's top level, DESIGN_SYSTEM 3.4, which Collapse all reads), else a row inside a
  * section. Its body is `children`, or `empty` said in their place when there are none. The row selects no text: a
  * press-and-drag over the rows that fold groups painted the theme's grey selection behind each of their lines (#6458).
+ * On a touch screen the row is 44 px tall and a tap anywhere on it folds it: the chevron's touch-hit square, its button
+ * unpositioned there, takes the row as its box, under the positioned controls that keep their own taps (the to-do's link,
+ * the ⓘ) and over the words, the count and the state.
  */
 export function TreeBranch({ branch, top, folded, onToggle, toggleLabel, icon, title, info, end, empty, children }: { branch: string; top?: boolean; folded: boolean; /** None: nothing to unfold, the title stays in the column. */ onToggle?: () => void; toggleLabel: string; icon?: IconName; title: React.ReactNode; info?: React.ReactNode; end: React.ReactNode; empty?: string; children?: React.ReactNode }) {
   const row = (
-    <div data-tree-branch-row className="relative z-10 flex w-full min-w-0 select-none items-center gap-1.5 rounded-control py-1 pl-2 pr-2 text-label text-ink-2 hover:bg-hover">
+    <div data-tree-branch-row className="relative z-10 flex w-full min-w-0 select-none items-center gap-1.5 rounded-control py-1 pl-2 pr-2 text-label text-ink-2 hover:bg-hover [@media(pointer:coarse)]:min-h-11">
       {onToggle ? (
-        <button type="button" aria-expanded={!folded} aria-label={toggleLabel} onClick={onToggle} className="touch-hit flex shrink-0 items-center">
+        <button type="button" aria-expanded={!folded} aria-label={toggleLabel} onClick={onToggle} className="touch-hit flex shrink-0 items-center [@media(pointer:coarse)]:static">
           <BranchChevron folded={folded} />
         </button>
       ) : (
@@ -218,8 +221,10 @@ export const TreeTodoRows = memo(function TreeTodoRows({ td, top, ...p }: { td: 
   const [folded, toggle] = useFolded(td.key, td.folded, { follow: true, holds: holdsRow(td.sessions, p.activeKey) });
   // a direction's task no agent is on yet (#4352): nothing to unfold, and no bare 0 beside its state
   const unfolds = td.agents.length > 0 || !td.taskState;
+  // the link takes the touch row's height (touch-hit; the words truncate inside it, which would clip its square), so a
+  // finger just off the words opens the to-do rather than folding it
   const title = td.todoId ? (
-    <a href={href({ name: "todos", id: td.todoId })} onClick={(e) => { e.preventDefault(); openTodoFromTag(td.todoId!, navigate, p.onNavigate); }} className="min-w-0 flex-1 truncate font-medium text-ink hover:underline">{td.name}</a>
+    <a href={href({ name: "todos", id: td.todoId })} onClick={(e) => { e.preventDefault(); openTodoFromTag(td.todoId!, navigate, p.onNavigate); }} className="touch-hit min-w-0 flex-1 font-medium text-ink hover:underline"><span className="block truncate">{td.name}</span></a>
   ) : (
     <button type="button" onClick={toggle} className="min-w-0 flex-1 truncate text-left">{td.name}</button>
   );

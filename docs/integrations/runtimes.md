@@ -55,11 +55,13 @@ Optional (for each one present, the SDK declares the capability in `runtime.hell
 | `unlistedTranscripts()` | The Claude session ids of sessions of its own that `listSessions()` no longer lists (archived in the runtime), or nothing while it cannot say yet; no capability is declared. See "Runtimes that run Claude Code" below |
 | `modes({session_id, permission_mode, effort, model})` | Switching permission mode / reasoning effort from the phone (`caps.modes`; optional model changes require `createRuntime` option `modelSwitch: true`, advertised as `caps.model`; values are Persona's: `default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`, `low` … `max`). The apps show the mode chips on its rows whose agent is `claude` or the runtime's own, never Paseo's catch-all `paseo` (`capabilities.modes`, `docs/protocol/protocol.md` "Codex sources and capabilities"). A row may take modes and model away from its own session in its `capabilities` (`modes: false`, `model: false`: Paseo's archived agents, #8133), and a row whose agent is not `claude` may list the levels `effort` takes for it (`efforts`, weakest first), which the apps offer alone on it, and the permission modes it takes (`capabilities.permission_modes`, #8261: `default`, its own approval, and `bypassPermissions` where it has an Allow all), between which the apps offer a two-state switch, "Launcher default" and Allow all; node drops both where the runtime declared no `caps.modes` or the row took modes away, and `permission_modes` where the Claude Code chips stand |
 | `rewind({session_id, prompt, occurrence, prompts_after, restore})` | Rewinding a conversation to before one of the user's messages (`caps.rewind`): find the message by its text, its occurrence counting from the end and how many of the user's came after it, and refuse (`rewind_mismatch`) rather than cut elsewhere. Its rows may narrow it per session in their own `capabilities` (`rewind: false`), and only a row's `rewind_code: true` lets `restore: "code_and_conversation"` through (`docs/protocol/protocol.md` "Codex sources and capabilities") |
+| `fork({session_id, at_item_id})` | Branch an Agent or Assistant conversation (`caps.fork`) through the selected reply's turn, or copy all history when `at_item_id` is empty. Return `{session_id}` and publish the branch; an optional `session` row lists it before the next push. Refuse active turns (`fork_turn_running`) or stale replies (`fork_mismatch`). |
 | `models({launcher, refresh})` / `check({launcher, cwd, prompt})` | The launcher's models as the runtime has them now (`caps.models`, the pickers' refresh) / Settings › Models "Test" run through the runtime with its own login (`caps.check`): one real prompt in the node's empty check directory, answered as `{ok, model, answer, error}` |
 | `seen({session_id})` | The user saw the session in Persona (`caps.seen`, #6299): a runtime that keeps an unread mark of its own clears it, so the session is not unread in its own app too. The manager tells the node only while the runtime lists the session as `done` (unread), best effort |
 | `archive({session_id})` / `unarchive({session_id})` | The runtime's own reversible archive (`caps.archive`, declared only when both exist): when the user archives a session in Persona, it is archived in the runtime too, and restored with it. Archive an idle session without stopping or closing anything (Persona refuses busy sessions first) and keep it restorable; both must be idempotent (already archived / restored is success). A runtime whose archive also stops the session, or that has no way back, leaves them out: the archive is then Persona's alone (`docs/protocol/protocol.md`, "Agent session archives") |
 | `createWorkspace({cwd, workspace_id, branch, create_branch, base, name, key})` / `prepareWorkspace({cwd, repo_root})` | Workspaces of its own (`caps.workspaces`, declared only when both exist: the node asks where the worktrees go before each one it has made): a worktree it makes as a workspace of its own / the folder it puts a repository's worktrees in. With them it lists its workspaces through `rt.workspacesChanged(list)`. Only an engine's are used; see "Workspaces" below |
 | `renameWorkspace({workspace_id, title})` / `renameWorkspace({space_id, title})`, `archiveWorkspace({workspace_id})` | With `caps.workspaces`: a workspace's title (resolves to `{workspace}`, its row now) or a space's name (resolves to `{space_name}`, the name it shows now) / the workspace archived, a worktree it made removed from the disk (its branch kept). Without them those requests are `unsupported`; see "Workspaces" below |
+| `listHistory({since, until, cursor, limit})` | Sessions active in a time window, archived, finished and offline ones too (`caps.history`); returns `{rows, next_cursor, complete}`. See "History" below |
 | `watchChanged(id, watching, {transcript})` | The phone starts / stops watching a session (when a new node connects or the runtime stops, all stop): for runtimes that only follow a session while someone is watching (Paseo subscribes to the timeline per session). A watch is the one sign that someone has the chat open: every App watches a chat it opens, the manager watches only the turn of a message a channel delivered there, and background reads never watch. A runtime whose engine would start a stopped agent just to read it (Paseo loads an agent it let go, relaunching its provider, #8132) reads such a session only while it is watched, and answers other reads from what it already has or refuses them with `RpcError(…, 'not_loaded')` (`items`, `item`) |
 
 In `createRuntime`'s options, a runtime that runs several Agents can also pass `launchers: [{name, model, agent, models, auto_accept}]`: besides `launcher`, the new-session form then has these entries, one per provider,
@@ -116,12 +118,25 @@ Things shared across runtimes but not part of the protocol are in the SDK too, f
 | What | Does what |
 | --- | --- |
 | `rt.recent(rows, {days, max, pinned})`, `rt.touched(id)` | Picks the sessions to list: running / waiting for an answer (`pinned`) and ones the phone touched (last 50) are always listed; the rest within `days` days fill up to `max`, newest first. A session open on the phone must stay listed |
+| `rt.history(rows, {since, until, cursor, limit}, {complete})` (also `historyPage`) | Answers `listHistory` from all the runtime's session rows (or what it read from storage): window, order, paging and cursor. See "History" below |
 | `page(items, params, {history, toSeq})` | Paging for `session.items` (from the end by turns / count, backwards, catch-up, by range) |
 | `appToolName(name, own)` | Maps tool names to the set the App draws (`bash`→`Bash`, `read`→`Read`…); the runtime adds its own (DSH's `ask_user_question`, pi's `find`); parameter names are converted by each runtime |
 | `scriptedModel()` in `testing/model.mjs` | A scriptable fake model for end-to-end tests (DSH's llm-mock-server, switching scripts by phase) |
 | `conformance()` in `testing/conformance.mjs` | Generic end-to-end acceptance: text turns (thinking, reply, turn end, paging), approval, denial with a reason, questions, streaming, interrupt, push continuity; a runtime only passes its own tool parameters and then checks what's specific to it |
 
 Not in the SDK (used by only one runtime, or the two read different things): each one's way of reading its session storage, and keeping companion processes alive.
+
+## History
+
+The list carries only recent sessions (`rt.recent`). A caller reading an older period (an extension looking back 90 days) asks for sessions by a time window instead (`docs/protocol/protocol.md`, "Session history"). A runtime that keeps older sessions implements `listHistory({since, until, cursor, limit})` → `{rows, next_cursor, complete}`:
+
+- `since` / `until`: RFC 3339 (the SDK passes `until` as now when the caller left it out). A session is in the window when its time is in `[since, until)`; its time is `active_at`, else `updated_at`, else `started_at`.
+- Archived, finished and offline sessions are listed too; archived ones with `archived: true`. Deleted ones never are (the SDK drops rows with `status: "deleted"` or `deleted: true`).
+- Rows are `listSessions` rows, plus these optional fields when the runtime knows them: `active_at` (when it was last active, e.g. its last message; give it when archiving moves `updated_at`), `started_at`, `origin` (`user`, or `automation` for a session a scheduled job started) and `user_messages` (how many messages the user wrote in it).
+- Newest first, ties by `session_id`; `limit` defaults to 200, at most 500; `next_cursor` is an opaque string, empty on the last page.
+- `complete`: whether it can vouch that the window is fully listed (false when its storage was pruned).
+
+`rt.history(rows, params)` does all of that from the rows it is given, so most runtimes write `listHistory: (p) => rt.history(allRows(), p)`. A session listed only here is still read with `items` (node asks the runtimes about a session it does not know); `send` and `watch` may refuse it with `not_found`.
 
 ## Content
 
@@ -462,6 +477,10 @@ input clears the previous reply preview, including input with no visible text. T
 until the assistant writes response text. This keeps user-authored questions out of awaiting-reply detection while
 preserving genuine assistant questions. User messages and tool records remain available in the conversation items.
 
+CLI companion sessions and herdr panes show images from exported tool results. Conversation pages carry only image
+references; Persona loads the bytes when an image is shown. It accepts PNG, JPEG, GIF and WebP up to 1,152 KiB from
+the result's inline data or local file. The Desktop companion still omits these images.
+
 Native model errors can be omitted from the JSONL export even when ACP reports a completed prompt. When an idle
 summary has unexported steps, the companion reads at most the final eight native steps with `GetCascadeTrajectorySteps`.
 The result is cached against the summary and exported branch. Discovery opens the native service through read-only
@@ -553,6 +572,11 @@ identifies its loopback native service. `RevertToCascadeStep` receives `conversa
 index, including `-1` for an empty conversation. Native refusal propagates to the caller. The bridge uses the current
 native summary and replacement step indices to discard the abandoned export tail, then publishes a changed history
 token. This survives companion restarts without modifying native transcript files.
+
+Antigravity declares `caps.fork` for Agent and Assistant chats. `ForkConversation` keeps the existing workspace and
+copies through an inclusive native step index. The bridge resolves a reply from the exported transcript and stops
+before the next user turn so tool calls keep their results. A whole-chat fork sends `-1`; omitting the native index
+would select step zero. A fork of the main Assistant chat opens as a separate chat.
 
 The compact `transcript.jsonl` export can contain native `<truncated N bytes>` placeholders and can be ahead of
 the complete export. Use one source for sequences and content so a watch cannot advance past unread complete items.

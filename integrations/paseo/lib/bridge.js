@@ -186,6 +186,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
     resume: true,
     // start() runs permission_mode plan in Paseo's plan mode or refuses it (holdsPlan).
     readonly: true,
+    backend_workspace_root: true,
     // start() runs only Paseo's own providers: a launcher it lacks gets one of the same kind, said on the answer, or a
     // refusal (sameKindProvider); as the machine's engine its providers are all that a start there can run.
     sameKind: true,
@@ -2301,7 +2302,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
         labels: { [SESSION_LABEL]: sessionId } }
       const policy = mcpServers && withPolicy && root === 'claude' ? preapproved(mcpServers) : undefined
       if (policy) req.config.toolPolicy = policy
-      if (prompt.trim()) req.initialPrompt = prompt
+      if (prompt.trim() && !params.backend_workspace_root) req.initialPrompt = prompt
       if (workspaceId) req.workspaceId = workspaceId
       // Paseo answers once the agent's provider is up, which has no bound of its own: the start gives up at until.
       const ask = () => paseo.request('agent.create.request', req, { timeoutMs: Math.max(until - Date.now(), 1000) })
@@ -2321,6 +2322,9 @@ export function createPaseoBridge(deps = {}, options = {}) {
           const made = await repeat(`creating workspace for ${sessionId}`,
             () => paseo.request('workspace.create.request', req, { timeoutMs: Math.max(until - Date.now(), 1000) }), until, () => undefined)
           const d = made?.workspace
+          if (params.backend_workspace_root && (!d?.id || d.projectId !== projectId || !samePath(d.workspaceDirectory, cwd))) {
+            throw new RpcError('Paseo could not open the prepared task directory', 'backend_workspace_start_refused')
+          }
           if (!d?.id || d.projectId !== projectId) {
             throw new RpcError(`Paseo did not create the workspace in the selected project: ${made?.error || 'no matching workspace returned'}`, 'create_failed')
           }
@@ -2360,7 +2364,7 @@ export function createPaseoBridge(deps = {}, options = {}) {
       ...(EFFORTS.includes(config.thinkingOptionId) ? { effort: config.thinkingOptionId } : {}),
     })
     const said = Object.keys(instead).length ? { instead } : {}
-    const res = await within(created, callWait)
+    const res = params.backend_workspace_root ? await created : await within(created, callWait)
     if (res === TIMEOUT) {
       // Still being created (its provider starting, Paseo restarting): listed as starting until Paseo is done (track).
       // Then the agent's row takes over, or this one says why it did not start.
@@ -2378,6 +2382,14 @@ export function createPaseoBridge(deps = {}, options = {}) {
     }
     upsert(res.agent)
     const row = rowOf(res.agent)
+    if (params.backend_workspace_root) {
+      if (!row || !samePath(res.agent.cwd, cwd) || !samePath(row.cwd, cwd)) {
+        throw new RpcError('Paseo returned an agent outside the prepared task directory', 'backend_workspace_cwd_mismatch')
+      }
+      if (prompt.trim()) {
+        await deliverMessage({ session_id: row.session_id, text: prompt, client_msg_id: `workspace-start:${sessionId}` }, startGiveUp)
+      }
+    }
     // The effort it runs at, while Paseo's record does not say it yet.
     if (row && !row.effort && config.thinkingOptionId && EFFORTS.includes(config.thinkingOptionId)) row.effort = config.thinkingOptionId
     return { session: row ?? placeholder(), ...said }

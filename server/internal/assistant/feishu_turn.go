@@ -78,8 +78,15 @@ func (f feishuSink) progress(ctx context.Context, r *channel.Run, took time.Dura
 	sum := sha256.Sum256([]byte(c.JSON()))
 	if card := s.runExt(r, "card"); card != "" {
 		now := s.chansNow()
-		if sum == prog.sentCard || now.Before(prog.quietUntil) {
-			return // nothing new, or Feishu asked us to slow down: a later tick sends the latest
+		if sum == prog.sentCard {
+			return // nothing new
+		}
+		if f.kitProgress(ctx, r, prog, c) { // a card entity: written into, its words streamed (feishu_stream.go)
+			prog.sentCard = sum
+			return
+		}
+		if now.Before(prog.quietUntil) {
+			return // Feishu asked us to slow down: a later tick sends the latest
 		}
 		err := s.botUpdateCard(ctx, card, c)
 		switch {
@@ -100,7 +107,10 @@ func (f feishuSink) progress(ctx context.Context, r *channel.Run, took time.Dura
 		return
 	}
 	to := runTo(s.runExts(r, "chat", "thread"))
-	mid, err := s.botPostTo(ctx, to, r.ReplyTo, c, "", "")
+	mid, err, kit := f.kitPost(ctx, r, prog, c, to)
+	if !kit {
+		mid, err = s.botPostTo(ctx, to, r.ReplyTo, c, "", "")
+	}
 	if err != nil {
 		s.logf("bots: progress card: %v", err)
 		return
@@ -134,8 +144,8 @@ func (s *Service) runLiveView(id string) liveView {
 	return v
 }
 
-// runWaiting is the note for a run whose message is not found in its conversation yet: queued behind a turn that
-// works ("queued_note"), or not in yet ("preparing_note"); "" once it is.
+// runWaiting says why a run's message is not found in its conversation yet: queued behind a turn that works
+// ("queued"), or not in yet ("preparing"); "" once it is.
 func (s *Service) runWaiting(r *channel.Run) string {
 	c := &s.chans
 	c.mu.Lock()
@@ -144,13 +154,14 @@ func (s *Service) runWaiting(r *channel.Run) string {
 	case p == nil || p.from != 0:
 		return ""
 	case r.Seen:
-		return "assistant-feishu.queued_note"
+		return "queued"
 	}
-	return "assistant-feishu.preparing_note"
+	return "preparing"
 }
 
 func (f feishuSink) folded(ctx context.Context, o *channel.Run) {
 	if o.Ext["card"] != "" {
+		f.s.kitEnd(ctx, nil, o.Ext)
 		_ = f.s.botUpdateCard(ctx, o.Ext["card"], feishubot.NewCard("", "", "").Note(i18n.T(f.s.botLang(ctx), "assistant-feishu.folded")))
 	}
 	if cot := o.Ext["cot"]; cot != "" {
@@ -166,6 +177,7 @@ func (f feishuSink) recalled(ctx context.Context, m channel.Folded) {
 		s.botUnreact(ctx, m.ReplyTo, rx)
 	}
 	if card := m.Ext["card"]; card != "" {
+		s.kitEnd(ctx, nil, m.Ext)
 		l := s.botLang(ctx)
 		c := feishubot.NewCard("", "", "").Note(i18n.T(l, "assistant-feishu.recalled_folded"))
 		endHeader(l, c, channel.EndRecalled)
@@ -196,6 +208,14 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 		steps = append([]string{}, all...)
 	}
 	card := r.Ext["card"]
+	if card != "" {
+		// Its last write is as a message: the card stops streaming first (the run's lock is held, feishu_stream.go).
+		var k *cardKit
+		if _, prog := s.channelRunByID(r.ID); prog != nil {
+			k = prog.kit
+		}
+		s.kitEnd(ctx, k, r.Ext)
+	}
 	// With answer_new_card the answer is a card of its own at the bottom of the chat (Lark notifies on a new message,
 	// not on an edit) and the progress card folds into the process (#5396); a quiet ending stays in the progress card.
 	newCard := false
@@ -413,16 +433,17 @@ func unreachable(err error) bool {
 // conversation yet (runWaiting), "" once it is. A zero t means no live run: the card carries no Stop button.
 func progressCard(l i18n.Lang, label string, took time.Duration, steps []string, live, waiting string, v liveView, t botTarget) *feishubot.Card {
 	summary := i18n.T(l, "assistant-feishu.working_summary_took", i18n.Args{"took": channel.Duration(l, took)})
-	note := "assistant-feishu.working_note"
+	state, color := i18n.T(l, "assistant-feishu.state_working"), feishubot.Blue
 	switch waiting {
 	case "":
-	case "assistant-feishu.queued_note":
-		summary, note = i18n.T(l, "assistant-feishu.queued_summary"), waiting
+	case "queued":
+		summary, state, color = i18n.T(l, "assistant-feishu.queued_summary"), i18n.T(l, "assistant-feishu.state_queued"), feishubot.Neutral
 	default:
-		summary, note = i18n.T(l, "assistant-feishu.preparing_summary"), waiting
+		summary, state, color = i18n.T(l, "assistant-feishu.preparing_summary"), i18n.T(l, "assistant-feishu.state_preparing"), feishubot.Neutral
 	}
 	c := feishubot.NewCard("", "", summary)
-	c.Note("⏳ " + i18n.T(l, note, i18n.Args{"label": label, "took": channel.Duration(l, took)}))
+	// Its state as a coloured tag first, then who works and for how long.
+	c.Markdown(feishubot.InlineTag(state, color) + " <font color='grey'>" + feishubot.EscapeMarkdown(label+" · "+channel.Duration(l, took)) + "</font>")
 	for _, md := range progressLines(l, steps, v) {
 		c.Markdown(md)
 	}
@@ -443,13 +464,8 @@ func progressCard(l i18n.Lang, label string, took time.Duration, steps []string,
 		}
 		c.Note(strings.Join(parts, " · "))
 	}
-	if live = strings.TrimSpace(live); live != "" {
-		r := []rune(live)
-		if len(r) > 400 {
-			live = "…" + string(r[len(r)-400:])
-		}
-		c.Markdown(feishubot.EscapeMarkdown(live))
-	}
+	// What the conversation is writing now, in an element of its own: a card entity streams it (feishu_stream.go).
+	c.MarkdownID(progressLiveID, progressLive(live))
 	// The button is the /stop command on this run's conversation; it is only on the card of a run still in flight.
 	if t.Kind != "" {
 		c.Buttons(feishubot.Btn(i18n.T(l, "assistant-feishu_cards.stop"), feishubot.Danger,

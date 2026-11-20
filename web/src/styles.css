@@ -87,6 +87,13 @@
   .task-count-meter { border: 1px solid CanvasText; }
   .task-count-meter > span { background: Highlight; }
 }
+/* A waiting card's own field typed into with a phone's keyboard up (#11442): the dock may take what is visible, so the
+   field stays in sight over the composer instead of being cut under the card's answer row. Not once the keyboard is
+   down (`data-kb`, lib/viewport.ts) or the focus is elsewhere: DOCK_MAX again. Taller than the room, it shrinks to it
+   (min-height) and the card scrolls in its box, the composer kept on screen. */
+@media (max-width: 1023px) and (pointer: coarse) {
+  :root[data-kb] [data-chat-dock]:has([data-chat-dock-above] [data-pending-card] :is(input, textarea):focus) { max-height: var(--kb-h); min-height: 0; }
+}
 
 /* Design tokens, keyframes and component grammar from Beautiful UI (https://www.beautifului.dev/, MIT,
  * Copyright (c) 2026 Shane Levine; see THIRD_PARTY_NOTICES.md). Every view reads colors through these.
@@ -576,6 +583,16 @@ section[data-segment] { contain-intrinsic-block-size: auto var(--seg-est, 0px); 
   position: relative;
   @media (pointer: coarse) {
     &::before { content: ""; position: absolute; top: min(0px, calc(50% - 22px)); bottom: min(0px, calc(50% - 22px)); left: min(0px, calc(50% - 22px)); right: min(0px, calc(50% - 22px)); }
+  }
+}
+/* The same for a ✕ in a tile's top-right corner (an attachment's remove): the area grows out of the corner instead, up
+   through the 6 px gap above a row of tiles (no further) and right as far as touch-hit reaches, and only --hit-in-x /
+   --hit-in-y (6 px) into the tile, so a tap on a picture's middle still opens the picture. A tile with nothing to tap
+   under its ✕ (a file's) lets it reach further in. */
+@utility touch-hit-corner {
+  position: relative;
+  @media (pointer: coarse) {
+    &::before { content: ""; position: absolute; top: -8px; right: -13px; bottom: calc(-1 * var(--hit-in-y, 6px)); left: calc(-1 * var(--hit-in-x, 6px)); }
   }
 }
 /* An extension's graph on a page (UI version 10, #9727): the canvas is 70% of the page's visible height, at least 320

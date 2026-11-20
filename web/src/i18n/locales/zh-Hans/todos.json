@@ -17,6 +17,7 @@
   "stage_merge": "合入",
   "stage_deploy": "部署",
   "stage_verify": "已验证",
+  "stage_done": "完成",
   "stage_pr": "PR",
   "stage_pr_n": "PR #{n}",
   "stage_mr_n": "MR !{n}",

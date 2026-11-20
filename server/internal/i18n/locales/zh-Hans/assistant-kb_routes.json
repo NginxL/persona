@@ -2,5 +2,6 @@
   "not_open": "知识库还没准备好，稍后再试",
   "disabled": "此助手已关闭知识库。",
   "read_only": "知识库为只读模式，暂不支持修改。",
+  "source_settings_forbidden": "只有所有者可以修改项目的来源设置。",
   "unknown_kind": "未知的类别：只能搜 projects、chats、people、docs、meetings、events、recordings 或 topics。"
 }

@@ -31,6 +31,8 @@ func TestRetryCancelledWhenTheOwnerActedAfterTheFailure(t *testing.T) {
 			ran(ScheduleRun{RefID: "fu", At: failedAt.Add(time.Minute), Manual: true, Status: runFailed, SessionID: "s1"}), true},
 		{"Run now that could not start: retried", oneOff, true,
 			ran(ScheduleRun{RefID: "fu", At: failedAt.Add(time.Minute), Manual: true, Status: runFailed}), false},
+		{"Run now with lost receipt: not retried", oneOff, true,
+			ran(ScheduleRun{RefID: "fu", At: failedAt.Add(time.Minute), Manual: true, Status: runFailed, DeliveryUnknown: true}), true},
 		{"Run now skipped (busy): retried", oneOff, true,
 			ran(ScheduleRun{RefID: "fu", At: failedAt.Add(time.Minute), Manual: true, Status: runSkipped, SessionID: "s1"}), false},
 		{"another task's run since: retried", oneOff, true,

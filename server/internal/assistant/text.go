@@ -99,3 +99,10 @@ func itemLink(link, id string) string {
 	}
 	return deeplink.At(link, id)
 }
+
+func clipRunesTo(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}

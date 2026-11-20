@@ -231,10 +231,14 @@ func freeLauncherName(base string, taken func(string) bool) (name string, n int)
 // whose address is the launcher's gateway (a provider added by hand, or a ~/.zshrc launcher, on a plugin's gateway;
 // built-in presets match only by id).
 func presetFor(presets []LauncherPreset, preset, baseURL string) (LauncherPreset, bool) {
+	return gatewayPreset(presets, "launcher", preset, baseURL)
+}
+
+func gatewayPreset(presets []LauncherPreset, kind, preset, baseURL string) (LauncherPreset, bool) {
 	var byURL *LauncherPreset
 	want := normalGateway(baseURL)
 	for i, pr := range presets {
-		if pr.Kind != "launcher" {
+		if pr.Kind != kind || kind == "api" && !messagesAPI(pr.API) {
 			continue
 		}
 		if preset != "" && pr.ID == preset {
@@ -331,23 +335,71 @@ func (s *Service) presetModels(ctx context.Context, machine, name string, res pr
 	return res
 }
 
+// A legacy session's reply may also be a usable ID in its own right. Consult these declarations only
+// after the node returned one possible reverse mapping. The picker's merged rows hide this distinction.
+func (s *Service) declaredSpawnModel(ctx context.Context, machine string, parent proto.Session) bool {
+	name, model := parent.Launcher, parent.Model
+	if proto.IsExternalLauncher(name) || parent.SourceKind == proto.SourceRuntime || proto.RuntimeEngine(parent.Host) {
+		return false // a runtime's rows belong to its provider, even when a shell launcher shares its name
+	}
+	if parent.Host == "" {
+		if d, ok := s.device(ctx, machine); ok && proto.RuntimeEngine(d.Engine) {
+			return false // the node used its default host for this catalog
+		}
+	}
+	if s.isCustomModel(ctx, machine, name, model) {
+		return true // this exact pick already ran on this machine and launcher
+	}
+	kind, preset, gateway := "launcher", "", ""
+	ctx = withSettingsMemo(ctx)
+	if l, ok := s.managedNamed(ctx, name); ok && (l.Kind != "api" || messagesAPI(l.API)) && s.launcherScopeErr(ctx, machine, name) == nil {
+		if providerOffers(l, model) {
+			return true
+		}
+		if l.Kind == "api" {
+			kind = "api"
+		} else if l.AgentType() != "claude" {
+			return false
+		}
+		preset, gateway = l.Preset, l.BaseURL
+	} else {
+		// A shell's gateway address is part of its last launcher listing. Never refresh the fleet to infer a model.
+		seen, _ := s.zshrcLaunchersLastSeen(ctx)
+		l, ok := launcherInSnapshot(seen, machine, name)
+		if !ok || l.Source != "" && !machineSource(l.Source) {
+			return false
+		}
+		if l.Model == model {
+			return true
+		}
+		if l.Agent != "" && l.Agent != "claude" {
+			return false
+		}
+		gateway = l.BaseURL
+	}
+	if preset == "" && gateway == "" {
+		return false
+	}
+	pr, ok := gatewayPreset(s.launcherPresets(ctx), kind, preset, gateway)
+	if !ok {
+		return false
+	}
+	if pr.Model == model || pr.SmallModel == model {
+		return true
+	}
+	for _, m := range pr.Models {
+		if m.ID == model {
+			return true
+		}
+	}
+	return false
+}
+
 // knownZshrcLauncher is machine's ~/.zshrc launcher name as the hub last saw it, so the picker does not wait on a
 // second node call; only a launcher never seen is asked for now.
 func (s *Service) knownZshrcLauncher(ctx context.Context, machine, name string) (proto.Launcher, bool) {
-	find := func(list []proto.Launcher) (proto.Launcher, bool) {
-		for _, l := range list {
-			if l.Name == name {
-				return l, true
-			}
-		}
-		return proto.Launcher{}, false
-	}
-	for _, m := range s.zshrcLaunchers(ctx, false) {
-		if m.MachineID == machine {
-			if l, ok := find(m.Launchers); ok {
-				return l, true
-			}
-		}
+	if l, ok := launcherInSnapshot(s.zshrcLaunchers(ctx, false), machine, name); ok {
+		return l, true
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -355,5 +407,23 @@ func (s *Service) knownZshrcLauncher(ctx context.Context, machine, name string) 
 	if err != nil {
 		return proto.Launcher{}, false
 	}
-	return find(list)
+	return launcherNamed(list, name)
+}
+
+func launcherInSnapshot(seen []zshrcLaunchers, machine, name string) (proto.Launcher, bool) {
+	for _, m := range seen {
+		if m.MachineID == machine {
+			return launcherNamed(m.Launchers, name)
+		}
+	}
+	return proto.Launcher{}, false
+}
+
+func launcherNamed(list []proto.Launcher, name string) (proto.Launcher, bool) {
+	for _, l := range list {
+		if l.Name == name {
+			return l, true
+		}
+	}
+	return proto.Launcher{}, false
 }

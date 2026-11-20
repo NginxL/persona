@@ -21,7 +21,9 @@ jump land on their row and stay there.
 Prints one line per check and a verdict; exits 1 on the first failure. --shots saves light / dark / narrow screenshots.
 --hub lets the fake hub push a new exchange while the reader is up inside the last one (the exchange being read stays
 in place), then turns on its paging and a slow network: the earlier pages come in two exchanges at a time while the
-reader scrolls up, and the rows on screen move by no more than the loading row, as before (then it resets the fake hub).
+reader scrolls up, and the rows on screen hold still, the loading row drawn over the chat's top padding, with nothing
+moving the view while a page is on its way. The same on a touch phone, left from the end with a finger (then it
+resets the fake hub).
 """
 import argparse
 import json
@@ -299,9 +301,9 @@ def new_exchange_holds(page, hub, what):
 
 
 # Scrolls up by script (as DRIFT does) while the earlier pages come in; per page, how far the row at the view's middle
-# moved from the frame before the page landed to 20 frames after it. A page goes where the loading row stood, which
-# moves what is under it up by that row, as it did before #2485: the row's share (from its top to the next one's) is
-# taken out on both sides.
+# moved from the frame before the page landed to 20 frames after it, and how often the page itself wrote scrollTop
+# while the loading row showed. That row is drawn over the chat's top padding, out of the flow: its showing and going
+# move nothing, so nothing has to move the view for it (a script moving the view stops a touch fling).
 PAGED = """async () => {
   const sc = document.querySelector('[data-chat-scroll]');
   const r = sc.getBoundingClientRect();
@@ -311,40 +313,65 @@ PAGED = """async () => {
     while (el && el !== sc && el.getBoundingClientRect().height < 4) el = el.parentElement;
     return el;
   };
-  const loading = () => {
-    const row = [...sc.firstElementChild.children].find((c) => c.firstElementChild?.getAttribute('role') === 'status');
-    let next = row?.nextElementSibling;
-    while (next && getComputedStyle(next).display === 'contents') next = next.firstElementChild; // a line's wrapper
-    return next ? next.getBoundingClientRect().top - row.getBoundingClientRect().top : 0;
-  };
+  // the page's own scrollTop writes, told apart from this script's
+  const own = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+  let writes = 0, mine = false;
+  Object.defineProperty(sc, 'scrollTop', { configurable: true, get() { return own.get.call(this); }, set(v) { if (!mine) writes++; own.set.call(this, v); } });
+  const up = (dy) => { mine = true; sc.scrollTop -= dy; mine = false; };
+  const loading = () => Boolean(sc.querySelector('[data-loading-earlier]'));
   const count = () => sc.querySelectorAll('section[data-segment]').length;
   const moves = [];
-  for (let k = 0; k < 20; k++) {
-    for (let n = 0; n < 400 && sc.scrollTop >= 300; n++) { sc.scrollTop -= 120; await frame(); await frame(); }
-    const el = probe(), n0 = count(), t0 = performance.now();
-    let at = el.getBoundingClientRect().top - loading(), landed = -1;
-    for (let i = 0; performance.now() - t0 < 5000 && (landed < 0 || i - landed < 20); i++) {
-      await frame();
-      if (landed < 0 && count() > n0) landed = i;
-      else if (landed < 0) at = el.getBoundingClientRect().top - loading();
+  let shown = 0, written = 0;
+  try {
+    for (let k = 0; k < 20; k++) {
+      for (let n = 0; n < 400 && sc.scrollTop >= 300; n++) { up(120); await frame(); await frame(); }
+      const el = probe(), n0 = count(), t0 = performance.now();
+      let at = el.getBoundingClientRect().top, landed = -1;
+      for (let i = 0; performance.now() - t0 < 5000 && (landed < 0 || i - landed < 20); i++) {
+        const was = writes, showing = loading();
+        await frame();
+        if (landed < 0 && count() > n0) landed = i;
+        else if (landed < 0) {
+          at = el.getBoundingClientRect().top;
+          if (showing) { shown++; written += writes - was; }
+        }
+      }
+      if (landed < 0) break;
+      moves.push(Math.round((el.getBoundingClientRect().top - at) * 10) / 10);
     }
-    if (landed < 0) break;
-    moves.push(Math.round((el.getBoundingClientRect().top - loading() - at) * 10) / 10);
+  } finally {
+    delete sc.scrollTop;
   }
-  return { pages: moves.length, worst: Math.max(0, ...moves.map(Math.abs)), moves, segs: count() };
+  return { pages: moves.length, worst: Math.max(0, ...moves.map(Math.abs)), moves, segs: count(), shown, written };
 }"""
 
 
-def paged_up_holds(page, what):
-    page.locator(SCROLL).hover()
-    page.mouse.wheel(0, -200)  # leave the end as a reader does
+def paged_up_holds(page, what, touch=False):
+    if touch:
+        # leave the end with a finger (CDP touches, a drag down the chat)
+        b = page.locator(SCROLL).bounding_box()
+        x, y = b["x"] + b["width"] / 2, b["y"] + b["height"] / 3
+        cdp = page.context.new_cdp_session(page)
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+        for i in range(1, 11):
+            page.wait_for_timeout(16)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x, "y": y + 24 * i}]})
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    else:
+        page.locator(SCROLL).hover()
+        page.mouse.wheel(0, -200)  # leave the end as a reader does
     page.wait_for_timeout(800)
     d = page.evaluate(PAGED)
     if d["pages"] < 3:
         fail(f"{what}: scrolling up brought in {d['pages']} earlier pages, 3 or more wanted ({d})")
+    if d["shown"] < d["pages"]:
+        fail(f"{what}: the loading row did not show while the pages were on their way ({d})")
     if d["worst"] > 1:
-        fail(f"{what}: an earlier page landing moved what is on screen {d['worst']:.1f} px beyond the loading row ({d})")
-    ok(f"{what}: {d['pages']} earlier pages landed, what is on screen moved at most {d['worst']:.1f} px beyond the loading row")
+        fail(f"{what}: an earlier page landing moved what is on screen {d['worst']:.1f} px ({d})")
+    if d["written"]:
+        fail(f"{what}: the page moved the view {d['written']} times while an earlier page was on its way ({d})")
+    ok(f"{what}: {d['pages']} earlier pages landed, what is on screen moved at most {d['worst']:.1f} px and the view was "
+       "not moved while they loaded")
 
 
 def shot(page, shots, name):
@@ -411,7 +438,8 @@ def wide(browser, base, a, other):
     set_theme(page, "light")
 
     # From the sidebar: another Persona conversation, then back to the main one.
-    page.locator(f'aside a[href="/persona/{other["session_id"]}"]').click()
+    # the sidebar's link carries the machine as a query since the conversation route took one (?machine=…)
+    page.locator(f'aside a[href^="/persona/{other["session_id"]}"]').first.click()
     page.wait_for_function(f"location.pathname === '/persona/{other['session_id']}'")
     settled(page, "wide another Persona conversation")
     ok("wide: another Persona conversation opens")
@@ -478,6 +506,34 @@ def narrow(browser, base, a):
             at_end(page, "narrow / again")
         shot(page, a.shots, f"narrow-main-{theme}.png")
         ctx.close()
+    if a.hub:
+        narrow_paged(browser, base, a)
+
+
+def narrow_paged(browser, base, a):
+    """A touch phone (every exchange drawn, #2485) over a slow network, paged: what is on screen holds as the earlier
+    pages land, and nothing moves the view while one is on its way (that would stop a fling)."""
+    ctx = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
+    page = ctx.new_page()
+    page.set_default_timeout(10000)
+    page.goto(base + "/overview?token=" + a.token)
+    expect(page.locator("aside")).to_be_attached()
+    set_theme(page, "light")
+    try:
+        page.goto(base + f"/s/{AGENT[0]}/{AGENT[1]}")
+        at_end(page, "narrow agent chat, before paging")
+        # a long reply in it, so its newest page fills the view and scrolling up asks for the earlier ones
+        long = "\n\n".join(["Each earlier page comes in two exchanges at a time while the reader scrolls up. " * 6] * 30)
+        hub_get(a.hub, "/mock/say?" + urllib.parse.urlencode({"user": "How do the earlier pages come in?", "text": long}))
+        page.wait_for_function("() => [...document.querySelectorAll('[data-chat-scroll] section[data-segment]')].pop()?.textContent.includes('Each earlier page')")
+        hub_get(a.hub, "/mock/paging?on=1")
+        hub_get(a.hub, "/mock/delay?s=0.4")
+        page.reload()
+        at_end(page, "narrow agent chat over a slow network, paged")
+        paged_up_holds(page, "narrow agent chat over a slow network, paged, by touch", touch=True)
+    finally:
+        hub_get(a.hub, "/mock/reset")
+    ctx.close()
 
 
 if __name__ == "__main__":

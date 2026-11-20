@@ -1139,5 +1139,7 @@ export function stackedShare(item: Pick<UIItem, "kind" | "stacked" | "series">):
   if (values.some((v) => !Number.isFinite(v) || v < 0)) return null;
   const total = values.reduce((a, b) => a + b, 0);
   if (total <= 0) return null;
-  return values.map((value, i) => ({ series: i, value, ratio: value / total }));
+  const scale = Number.isFinite(total) ? 1 : Math.max(...values);
+  const scaledTotal = values.reduce((a, b) => a + b / scale, 0);
+  return values.map((value, i) => ({ series: i, value, ratio: value / scale / scaledTotal }));
 }

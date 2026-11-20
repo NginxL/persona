@@ -101,7 +101,7 @@ final class TodosV1 {
     /// may still be restoring itself when this is first made. `hubGroup`: the hub-level group now (nil: no hub paired).
     /// `features`: what a group's hub can do, by its hello or before it by the last. `changed`: told when `isOn` changes.
     /// `followsHub`: the app's own gate, which follows the hub-level group as the owner picks another.
-    init(allowed: Bool = TodosV1.released && TodosV1.platform, defaults: UserDefaults = .standard, launchGroup: String? = nil,
+    init(allowed: Bool = TodosV1.allowedHere, defaults: UserDefaults = .standard, launchGroup: String? = nil,
          hubGroup: @escaping @MainActor () -> String? = { AppModel.shared.hub?.group },
          features: @escaping @MainActor (String) -> TodoFeatures = { AppModel.shared.link($0)?.todoFeatures ?? .remembered($0) },
          changed: @escaping @MainActor () -> Void = {}, followsHub: Bool = false) {

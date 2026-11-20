@@ -432,6 +432,9 @@ func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string,
 	for {
 		if err := n.refreshHosts(wait); err == nil {
 			if a, ok := n.agent(id); ok && a.PaneID == pane {
+				// Codex may come up behind its own update offer, whose default is Update now: the next Enter (a
+				// message, a /compact) would install it and quit Codex (#11316). Skipped as a new start skips it.
+				n.settleCodexStartup(wait, pane)
 				return nil
 			}
 		}
@@ -482,8 +485,11 @@ func (n *Node) newTab(ctx context.Context, launch host.Launcher, cwd, ws, tabNam
 		}
 	} else {
 		created, err = createStartSlot(ctx, launch, ws, cwd, tabLabel(tabName, n.tabLabels(ctx, launch, ws)))
-		if ts != nil && created != nil && created.SpaceID == "" {
-			created.SpaceID = ws
+		if err == nil {
+			if ts != nil && created != nil && created.SpaceID == "" {
+				created.SpaceID = ws
+			}
+			n.closeWorktreeShells(ctx, launch, ws, created.Pane.String()) // the Agent's tab is the worktree's tab now
 		}
 	}
 	if err != nil {

@@ -166,14 +166,14 @@ func (s *Service) askAgain(ctx context.Context, r *channel.Run, prog *chanLive, 
 	if r.TargetKind == channel.TargetAgent {
 		return false
 	}
-	l := s.botLang(ctx)
+	locale := s.hello(ctx).Locale
 	name := r.Channel
 	if r.Channel == channel.Feishu {
-		name = i18n.T(l, "assistant-channels_runs.feishu")
+		name = i18n.T(i18n.Lang(locale), "assistant-channels_runs.feishu")
 	} else if v, ok := s.pluginChannel(ctx, r.Channel); ok && v.Name != "" {
 		name = v.Name
 	}
-	text := prompts.RenderChannelAnswerAgain(prompts.ChannelAnswerAgain{Name: name})
+	text := prompts.RenderChannelAnswerAgain(prompts.ChannelAnswerAgain{Name: name, Language: answerLanguage(locale)})
 	_, body, _ := strings.Cut(text, "\n") // the first line is the context tag
 	id := channel.ClientMsgID(r.Channel, r.ID+"-again")
 	// The manager's own words, not the owner's: they preempt no background round (owner_preempt.go).

@@ -7,8 +7,9 @@ import (
 
 // Agent folder rules: per computer, two parallel lists of folder patterns with one syntax and one matcher
 // (DirPatternMatchedBy). Blocked Claude config folders (claudedirs.go) keep a CLAUDE_CONFIG_DIR out of collection:
-// the node never scans it. Hidden Agent folders (HiddenAgentDir) leave collection alone and only take the sessions
-// whose working folder matches out of Agents and the assistant's view, for every runtime
+// the node never scans it. Agent folder rules (HiddenAgentDir) act on the sessions whose working folder matches, for
+// every runtime: a Block rule keeps them out of collection (the node lists nothing and sends nothing of them), a Hide
+// rule leaves collection alone and only takes them out of Agents and the assistant's view
 // (docs/protocol/protocol.md "Agent directory visibility").
 
 // ValidDirPattern: a pattern filepath.Match understands, rooted at /, ~/ (that computer's home), or starting with *
@@ -72,10 +73,35 @@ func DirPatternMatchedOn(dir, home, real string, patterns []string) string {
 	return ""
 }
 
-// HiddenAgentDir is one hidden Agent folder rule of a computer. A rule switched off stays listed and hides nothing.
+// HiddenAgentDir is one Agent folder rule of a computer: its sessions are blocked (Action AgentDirBlock: not collected,
+// nothing about them reaches the hub) or hidden (AgentDirHide: collected, left out of the views). A rule switched off
+// stays listed and does nothing. The list keeps the name it had when hiding was its only action (#8578, #10053).
 type HiddenAgentDir struct {
 	Pattern string `json:"pattern"`
 	Enabled bool   `json:"enabled"`
+	// Action is AgentDirBlock or AgentDirHide. A rule saved without one (before blocking, or by an older client) is
+	// AgentDirHide: what it did then. A new rule is AgentDirBlock unless Hide is chosen (the apps, persona_settings).
+	Action string `json:"action,omitempty"`
+}
+
+// The actions of an Agent folder rule.
+const (
+	AgentDirBlock = "block"
+	AgentDirHide  = "hide"
+)
+
+// Blocks: the rule blocks its sessions (switched on, action block).
+func (r HiddenAgentDir) Blocks() bool { return r.Enabled && r.Action == AgentDirBlock }
+
+// CleanAgentDirAction is action as stored: "" is AgentDirHide; false when it is neither.
+func CleanAgentDirAction(action string) (string, bool) {
+	switch action {
+	case "", AgentDirHide:
+		return AgentDirHide, true
+	case AgentDirBlock:
+		return AgentDirBlock, true
+	}
+	return "", false
 }
 
 // HiddenAgentDirs is what GET / PUT /api/v1/machines/{mid}/agent-dirs/hidden answer: the computer's rules, in the
@@ -88,7 +114,20 @@ type HiddenAgentDirs struct {
 // MaxHiddenAgentDirs bounds one computer's rules.
 const MaxHiddenAgentDirs = 100
 
-// HiddenAgentDirPatterns are the patterns of the rules switched on.
+// BlockedAgentDirPatterns are the patterns of the rules that block (Blocks): what the node is told to keep out
+// (node.configure agent_dirs_blocked).
+func BlockedAgentDirPatterns(rules []HiddenAgentDir) []string {
+	out := []string{}
+	for _, r := range rules {
+		if r.Blocks() {
+			out = append(out, r.Pattern)
+		}
+	}
+	return out
+}
+
+// HiddenAgentDirPatterns are the patterns of the rules switched on, blocking ones included: the manager leaves all of
+// their sessions out of the views, so a node that does not take agent_dirs_blocked yet only hides what it should block.
 func HiddenAgentDirPatterns(rules []HiddenAgentDir) []string {
 	var out []string
 	for _, r := range rules {

@@ -1,5 +1,7 @@
 Write to the knowledge base: create or change a project (name, project_kind short|long, status, goal, my_role, aliases, link chats / people, code dirs as "<machine>:<path>" so Agents there belong to it, append a timeline `log` line, replace its summary), or tag / annotate a chat, person, doc, meeting, event, recording (a recording's content is the phone's: only its tags, pinned and projects; importance P0–P3, relevance 0–100, tags, note, link projects), or a topic (its points are curated: only its name, note, aliases and tags). Tags set here are kept over the automatic ones. `remove_*` (ids) unlink for good: Persona won't relink it by itself; the rest still updates. Use it whenever a conversation settles something about a project or person. Two projects that are the same work under two names: `merge_into`; two that were merged but are not: `unmerge` on the one merged away.
 
+Change `project_mode` or `source_urls` only at the user's direction. Use `reference-only` when the authoritative knowledge lives elsewhere. Save pointers and aliases there, and keep project details at the source. Use `full` in a separate call before writing details again.
+
 ```json
 {
   "type": "object",
@@ -27,6 +29,16 @@ Write to the knowledge base: create or change a project (name, project_kind shor
     "project_kind": {
       "type": "string",
       "enum": ["short", "long"]
+    },
+    "project_mode": {
+      "type": "string",
+      "enum": ["full", "reference-only"],
+      "description": "projects only, at the user's direction: reference-only keeps pointers and retains existing history"
+    },
+    "source_urls": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "projects only, at the user's direction: replace external source URLs, or clear them with an empty list"
     },
     "status": {
       "type": "string",

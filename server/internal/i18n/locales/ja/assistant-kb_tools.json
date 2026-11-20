@@ -1,5 +1,6 @@
 {
   "search_empty": "ナレッジベースに「{query}」に関連する内容はありません。",
   "search_empty_no_query": "ナレッジベースに該当する内容はありません。",
-  "list_empty": "ナレッジベースにはまだ内容がありません。"
+  "list_empty": "ナレッジベースにはまだ内容がありません。",
+  "needs_review": "確認が必要"
 }

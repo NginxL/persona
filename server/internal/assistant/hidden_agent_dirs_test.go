@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -37,6 +38,11 @@ func (f *memAgentDirs) EditHiddenAgentDirs(_ context.Context, id string, edit fu
 	if err != nil {
 		f.mu.Unlock()
 		return nil, err
+	}
+	for i := range next { // as the devices store them: a rule without an action hides
+		if next[i].Action == "" {
+			next[i].Action = proto.AgentDirHide
+		}
 	}
 	f.rules[id] = slices.Clone(next)
 	f.mu.Unlock()
@@ -153,7 +159,7 @@ func TestHiddenDirectorySettingConfirmation(t *testing.T) {
 				t.Fatalf("tool: %+v", result)
 			}
 			rules, _, _ := f.HiddenAgentDirs(context.Background(), "mac")
-			if want := []proto.HiddenAgentDir{{Pattern: "/work", Enabled: true}}; slices.Equal(rules, want) != allow {
+			if want := []proto.HiddenAgentDir{{Pattern: "/work", Enabled: true, Action: proto.AgentDirBlock}}; slices.Equal(rules, want) != allow {
 				t.Fatalf("approval=%v rules=%+v", allow, rules)
 			}
 		})
@@ -168,7 +174,7 @@ func TestHiddenDirectorySettingActions(t *testing.T) {
 	f.set(t, "mac", proto.HiddenAgentDir{Pattern: "/work", Enabled: true})
 	ft.d.setSessions("mac", []proto.Session{{SessionID: "a", Cwd: "/work/a"}, {SessionID: "b", Cwd: "/code"}})
 	got := settingsTool(ft.s, `{"action":"get","key":"agents.hidden_dirs"}`)
-	if got.IsError || !strings.Contains(got.Content[0].Text, "/work (on; matches 1 sessions)") {
+	if got.IsError || !strings.Contains(got.Content[0].Text, "/work (hide, on; matches 1 sessions)") {
 		t.Fatalf("get: %+v", got)
 	}
 	if got := settingsTool(ft.s, `{"action":"add","key":"agents.hidden_dirs","value":{"machine":"mac","pattern":"/work"}}`); got.IsError || !strings.Contains(got.Content[0].Text, "already") {
@@ -190,7 +196,7 @@ func TestHiddenDirectorySettingActions(t *testing.T) {
 	if got := settingsTool(ft.s, `{"action":"add","key":"agents.hidden_dirs","value":{"machine":"mac","pattern":"/work","enabled":false}}`); got.IsError {
 		t.Fatalf("switch off: %+v", got)
 	}
-	if rules, _, _ := f.HiddenAgentDirs(context.Background(), "mac"); !slices.Equal(rules, []proto.HiddenAgentDir{{Pattern: "/work", Enabled: false}}) {
+	if rules, _, _ := f.HiddenAgentDirs(context.Background(), "mac"); !slices.Equal(rules, []proto.HiddenAgentDir{{Pattern: "/work", Enabled: false, Action: proto.AgentDirHide}}) {
 		t.Fatalf("switched off: %+v", rules)
 	}
 	approve()
@@ -227,7 +233,7 @@ func TestHiddenDirectoryApprovalDoesNotOverwriteNewerRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules, _, _ := f.HiddenAgentDirs(context.Background(), "mac")
-	if want := []proto.HiddenAgentDir{{Pattern: "/other", Enabled: true}, {Pattern: "/work", Enabled: true}}; !slices.Equal(rules, want) {
+	if want := []proto.HiddenAgentDir{{Pattern: "/other", Enabled: true, Action: proto.AgentDirHide}, {Pattern: "/work", Enabled: true, Action: proto.AgentDirBlock}}; !slices.Equal(rules, want) {
 		t.Fatalf("got %+v", rules)
 	}
 }
@@ -258,13 +264,89 @@ func TestHiddenDirectoryHomeThroughLink(t *testing.T) {
 		t.Fatalf("agents_list: %s", got)
 	}
 	got := settingsTool(ft.s, `{"action":"get","key":"agents.hidden_dirs"}`)
-	if got.IsError || !strings.Contains(got.Content[0].Text, "~/.bots/botfarm/* (on; matches 2 sessions)") ||
-		!strings.Contains(got.Content[0].Text, "~/.bots/botfarm (on; matches 2 sessions)") {
+	if got.IsError || !strings.Contains(got.Content[0].Text, "~/.bots/botfarm/* (hide, on; matches 2 sessions)") ||
+		!strings.Contains(got.Content[0].Text, "~/.bots/botfarm (hide, on; matches 2 sessions)") {
 		t.Fatalf("get: %+v", got)
 	}
 	// A rule written with the followed path hides the folder named through the link too.
 	f.set(t, "mac", proto.HiddenAgentDir{Pattern: "/data/home/u/.bots", Enabled: true})
 	if !ft.s.directoryHiddenSession("mac", "bot-link") || ft.s.directoryHiddenSession("mac", "mine") {
 		t.Fatal("a rule on the followed path")
+	}
+}
+
+// A rule's action through persona_settings (#10053): a new rule blocks unless hide is asked for, an existing rule keeps
+// its action unless one is given, switching it says so on the card, and an unknown action is refused.
+func TestAgentDirSettingAction(t *testing.T) {
+	ft := newFleetTest(t)
+	f := useAgentDirs(ft.s)
+	ctx := context.Background()
+	apply := func(value string) (string, []proto.HiddenAgentDir) {
+		t.Helper()
+		change, err := ft.s.changeHiddenAgentDirs(ctx, "add", json.RawMessage(value))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if change.apply == nil {
+			rules, _, _ := f.HiddenAgentDirs(ctx, "mac")
+			return change.summary, rules
+		}
+		if _, err := change.apply(ctx); err != nil {
+			t.Fatal(err)
+		}
+		rules, _, _ := f.HiddenAgentDirs(ctx, "mac")
+		return change.cardText(i18n.En), rules
+	}
+	card, rules := apply(`{"machine":"mac","pattern":"~/.bots/runs"}`)
+	if !slices.Equal(rules, []proto.HiddenAgentDir{{Pattern: "~/.bots/runs", Enabled: true, Action: proto.AgentDirBlock}}) || !strings.HasPrefix(card, "Block") {
+		t.Fatalf("a new rule: %q %+v", card, rules)
+	}
+	if card, _ = apply(`{"machine":"mac","pattern":"~/.bots/runs","enabled":false}`); !strings.Contains(card, "Switch off") {
+		t.Fatalf("switch off keeps the action: %q", card)
+	}
+	card, rules = apply(`{"machine":"mac","pattern":"~/.bots/runs","action":"hide"}`)
+	if !slices.Equal(rules, []proto.HiddenAgentDir{{Pattern: "~/.bots/runs", Enabled: true, Action: proto.AgentDirHide}}) || !strings.Contains(card, "to Hide") {
+		t.Fatalf("to hide: %q %+v", card, rules)
+	}
+	if card, _ = apply(`{"machine":"mac","pattern":"~/.bots/runs"}`); !strings.Contains(card, "already") || !strings.Contains(card, "hide, on") {
+		t.Fatalf("no action given keeps hide: %q", card)
+	}
+	if card, rules = apply(`{"machine":"mac","pattern":"/scratch","action":"hide"}`); !strings.HasPrefix(card, "Hide") || rules[1].Action != proto.AgentDirHide {
+		t.Fatalf("a new hide rule: %q %+v", card, rules)
+	}
+	if _, err := ft.s.changeHiddenAgentDirs(ctx, "add", json.RawMessage(`{"machine":"mac","pattern":"/x","action":"delete"}`)); err == nil {
+		t.Fatal("an unknown action")
+	}
+}
+
+// A node that does not block yet still lists a blocked folder's sessions: the manager leaves them out of every view
+// it has, as it does a hidden folder's, so nothing leaks while that node updates (#10053).
+func TestBlockedDirectoryOlderNodeFallsBackToHide(t *testing.T) {
+	ft := newFleetTest(t)
+	ft.f.mu.Lock()
+	ft.f.sessions["mac"] = nil
+	ft.f.mu.Unlock()
+	f := useAgentDirs(ft.s)
+	f.set(t, "mac", proto.HiddenAgentDir{Pattern: "~/automation", Enabled: true, Action: proto.AgentDirBlock})
+	ft.d.setSessions("mac", []proto.Session{
+		{SessionID: "bot-needs", Agent: "codex", Cwd: "/home/u/automation/a", Title: "Blocked question", Status: proto.StatusBlocked, UpdatedAt: time.Now()},
+		{SessionID: "bot-done", Agent: "claude", Cwd: "/home/u/automation/b", Title: "Blocked completion", Status: proto.StatusDone, LastText: "Complete", UpdatedAt: time.Now()},
+		{SessionID: "mine", Agent: "codex", Cwd: "/code/app", Title: "Visible work", Status: proto.StatusWorking, UpdatedAt: time.Now()},
+	})
+	for _, state := range []string{"all", "active", "needs_you", "unread", "done"} {
+		if got := ft.s.describeAgents(context.Background(), state, "", ""); strings.Contains(got, "Blocked") {
+			t.Fatalf("agents_list state=%s: %s", state, got)
+		}
+	}
+	fleet := ft.s.fleetSnapshot()
+	if fleet.NeedsYou != 0 || fleet.Unread != 0 || fleet.Working != 1 {
+		t.Fatalf("counts: %+v", fleet)
+	}
+	agents, ixs, told := ft.s.fleetInputs()
+	if got := linkAttention(i18n.Default, agents, ixs, told); got.NeedsYou != 0 {
+		t.Fatalf("needs-you: %+v", got)
+	}
+	if !ft.s.muted("mac", "bot-done") {
+		t.Fatal("a blocked folder's completion can notify")
 	}
 }

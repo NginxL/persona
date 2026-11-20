@@ -1819,7 +1819,7 @@ struct InboxDetailView: View {
         if current.doc != nil {
             InboxDocDetailView(item: current)
         } else if current.connector != nil {
-            InboxConnectorDetailView(item: current)
+            InboxConnectorDetailView(item: current, manager: model.itemManager(current.manager))
         } else if let m = current.moment {
             LarkMomentsPostView(postID: m.postID, pushed: true, manager: model.linkManager(current.manager)) // the post and its comments, as a shared Moments card opens
         } else if item.larkConversation != nil || item.mailSummary != nil {

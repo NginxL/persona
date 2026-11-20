@@ -91,7 +91,7 @@ func TestBackgroundSupervisorFollowsUpTheMainConversationsTasks(t *testing.T) {
 	if slices.Contains(cfg.Leaders, bg) || s.isLeader(ctx, bg) || s.supervises(ctx, bg) {
 		t.Fatal("the background supervisor is a leader")
 	}
-	if !slices.Contains(keptSessions(cfg, nil, nil, nil), SessionRef{MachineID: "server", SessionID: bg}) {
+	if !slices.Contains(keptSessions(cfg, nil, nil, nil, nil), SessionRef{MachineID: "server", SessionID: bg}) {
 		t.Fatal("the background supervisor is not kept listed")
 	}
 	if !s.supervising(bg) {
@@ -456,6 +456,7 @@ func TestDigestToWithBackgroundSupervisor(t *testing.T) {
 	}{
 		{"an ended direction's review", superviseSignal{Todo: ended.ID, Kind: sigReview}, "bg1"},
 		{"a task leader's decision for an ended direction", superviseSignal{Todo: ended.ID, Kind: sigDecide, To: "lead2"}, "bg1"},
+		{"the owner's answer to a check for an ended direction", superviseSignal{Todo: ended.ID, Kind: sigCheck, Report: checkDecidedReport, To: "lead2"}, "bg1"},
 		{"a review", superviseSignal{Todo: todo.ID, Kind: sigReview}, "bg1"},
 		{"a report", superviseSignal{Todo: todo.ID, Kind: sigReport}, "bg1"},
 		{"a stall", superviseSignal{Todo: todo.ID, Kind: sigStalled}, "bg1"},

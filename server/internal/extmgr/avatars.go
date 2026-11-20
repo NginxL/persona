@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/remoteimage"
@@ -62,16 +65,46 @@ func (h *Manager) getAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := h.connectors.Get(source)
-	if c == nil {
+	q := r.URL.Query()
+	var messaging *hubExtension
+	var item wire.MessagingItem
+	fromMessaging := q.Get("messaging") == "1"
+	if c == nil || fromMessaging {
+		messaging, item = h.extensions.messagingOwner(source)
+	}
+	if (c == nil || fromMessaging) && messaging == nil {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("no source %q", source))
 		return
 	}
-	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
+	size, _ := strconv.Atoi(q.Get("size"))
 	caller := cmp.Or(p.ID, p.Name, "hub")
 	var img *remoteimage.Image
 	var err error
+	cache := source
+	if messaging != nil {
+		cache = messagingAvatarCache(source)
+	}
 	if extwire.AvatarAddress(value) {
-		img, err = h.avatars.GetIn(r.Context(), caller, source, value, size)
+		img, err = h.avatars.GetIn(r.Context(), caller, cache, value, size)
+	} else if messaging != nil {
+		media, valid := messagingAvatarMedia(value)
+		if !valid {
+			writeErrCode(w, http.StatusNotFound, remoteimage.CodeBadURL, errors.New("not a messaging avatar"))
+			return
+		}
+		// Foundation's URLComponents sends a literal plus as "+". The manager
+		// emits spaces as "%20", so both opaque account IDs round-trip.
+		avatarQuery, _ := url.ParseQuery(strings.ReplaceAll(r.URL.RawQuery, "+", "%2B"))
+		account := avatarQuery.Get("account")
+		if account == "" && slices.Contains(item.Capabilities, "accounts") {
+			writeErrCode(w, http.StatusNotFound, remoteimage.CodeBadURL, errors.New("no account for this messaging avatar"))
+			return
+		}
+		// A media key names bytes within one source account.
+		name := messaging.id + "\x00" + url.QueryEscape(account) + "\x00" + value
+		img, err = h.avatars.Make(r.Context(), caller, cache, name, size, func(ctx context.Context) ([]byte, error) {
+			return messagingAvatar(ctx, messaging, source, media, account)
+		})
 	} else {
 		th, ok := connector.As[connector.Threads](c)
 		if !ok {

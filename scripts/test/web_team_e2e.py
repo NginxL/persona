@@ -6,8 +6,8 @@ worker). On a wide screen the lead's page opens its Team panel by itself: a stri
 order, the waiting one shown, its conversation and its permission card in the panel, not also in the lead's dock.
 Picking another worker moves the card to the lead's dock, "From worker · …". Closing the panel is kept: the next visit
 leaves it shut, the header's Team button carries the attention dot and opens it again. Old links to a worker open the
-lead with the panel on it. On a phone the panel never opens by itself; the Team button and old links open it. Light /
-dark × 1280 / 390.
+lead with the panel on it. On a phone the panel never opens by itself; the Team button and old links open it, and
+switching workers in it writes no history (one Back closes it, the next leaves the lead). Light / dark × 1280 / 390.
 
     MOCK_TEAM=1 PORT=18931 python3 scripts/mock/mock_hub.py &
     (cd web && PERSONA_HUB_URL=http://127.0.0.1:18931 npx vite --port 5201 --strictPort &)
@@ -129,6 +129,24 @@ def run(browser, base, token, size, theme, shots):
         expect(panel).to_have_count(0)
         # on a phone the panel has a history entry of its own (Back closes it): let closing step back before going on
         page.wait_for_timeout(400)
+        # switching workers writes no history (as switching the chat's pane tabs did before #5263): one Back closes the
+        # panel on the lead, the next goes to the page the chat was opened from
+        lead_url = page.url
+        page.locator("main header").get_by_role("button", name="协同：有子 Agent 在等你").click()
+        expect(panel).to_be_visible()
+        length = page.evaluate("history.length")
+        for i in (1, 2):
+            pills.nth(i).tap()
+            expect(pills.nth(i)).to_have_attribute("aria-selected", "true")
+        if page.evaluate("history.length") != length:
+            fail(f"{tag}: switching workers wrote history ({length} → {page.evaluate('history.length')})")
+        page.go_back()
+        expect(panel).to_have_count(0)
+        if page.url != lead_url:
+            fail(f"{tag}: Back with the panel open left the lead ({page.url})")
+        page.go_back()
+        page.wait_for_url("**/agents")
+        ok(f"{tag}: switching workers writes no history; Back closes the panel, the next Back goes to the page before")
 
     # an old link to a worker: the lead's page, the panel on that worker (at any width)
     page.goto(base + f"/s/{MID}/{TESTS}")

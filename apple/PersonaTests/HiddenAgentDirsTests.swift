@@ -18,6 +18,16 @@ import Testing
         #expect(state.replacing(first, with: nil).rules == [state.rules[1]])
     }
 
+    /// #10053: a rule's action. One from a hub before blocking has none and hides; a new one says what it does.
+    @Test func actionDefaultsToHideAndSurvivesCoding() throws {
+        let json = #"{"rules":[{"pattern":"~/work","enabled":true},{"pattern":"~/.bots/runs","enabled":true,"action":"block"}]}"#
+        let state = try JSON.decoder.decode(HiddenAgentDirs.self, from: Data(json.utf8))
+        #expect(state.rules.map(\.effectiveAction) == [.hide, .block])
+        let encoded = String(decoding: try JSONEncoder().encode(state.rules[1]), as: UTF8.self)
+        #expect(encoded.contains(#""action":"block""#))
+        #expect(!String(decoding: try JSONEncoder().encode(state.rules[0]), as: UTF8.self).contains("action"))
+    }
+
     @Test func typedFoldersAreCheckedLikeTheManagerDoes() throws {
         let state = HiddenAgentDirs(rules: [HiddenAgentDirRule(pattern: "~/work", enabled: true)])
         #expect(HiddenAgentDirs.cleaned(" ~/workspaces/ ") == "~/workspaces")

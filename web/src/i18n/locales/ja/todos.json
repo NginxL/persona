@@ -17,6 +17,7 @@
   "stage_merge": "マージ",
   "stage_deploy": "デプロイ",
   "stage_verify": "確認済み",
+  "stage_done": "完了",
   "stage_pr": "PR",
   "stage_pr_n": "PR #{n}",
   "stage_mr_n": "MR !{n}",

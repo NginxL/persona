@@ -370,11 +370,17 @@ class OutboxMessageSender(
     ) = lifecycle.withLock {
         check(job.isActive) { "Pairing scope is closed" }
         val entry = store.entries.first().firstOrNull { it.clientMessageId == id } ?: error("Message state changed")
+        val starting = delivery.state == DeliveryState.Sending && result == null
+        if (!starting && opId != null && opId != entry.operationId) return@withLock
+        if (!starting && entry.state !in awaitingReceipt) {
+            // A transcript or receipt can settle the same operation before the HTTP call returns.
+            if (entry.state in settled && result == MessageTransportResult.Accepted) publishAuthoritative(entry)
+            return@withLock
+        }
         val attempt = request(entry).copy(opId = opId ?: entry.operationId)
         val state = if (result == MessageTransportResult.Kept) OutboxState.Kept
             else OutboxState.entries.first { it.delivery == delivery.state }
-        val from = if (delivery.state == DeliveryState.Sending && result == null)
-            setOf(OutboxState.Refused) else setOf(OutboxState.Sending)
+        val from = if (starting) setOf(OutboxState.Refused) else awaitingReceipt
         // Refused again: nothing was delivered under that id either, so a later retry takes another.
         val next = when (state) {
             OutboxState.Refused -> newOperationId()
@@ -497,8 +503,10 @@ class OutboxMessageSender(
         // Bound the whole catch-up so unresolved entries cannot hold the sending gate forever.
         withTimeoutOrNull(reconciliationTimeoutMillis) {
             val entries = store.entries.first()
-            for (entry in entries.filter { it.state in catchUpStates }) {
-                if (entry.state in uncertain) store.transition(entry.clientMessageId, uncertain, OutboxState.Verifying)
+            // Startup and group adoption already turn interrupted sends into Unknown. A row still Sending
+            // belongs to a live POST; another message or a reconnect can wake this drain while a composer retry runs.
+            for (entry in entries.filter { it.state in catchUpStates && it.state != OutboxState.Sending }) {
+                if (entry.state in reviewable) store.transition(entry.clientMessageId, reviewable, OutboxState.Verifying)
                 val evidence = try {
                     transport.reconcile(request(entry), entry.createdAt,
                         entry.state != OutboxState.Held && entries.count { it.session == entry.session && it.text == entry.text } == 1)
@@ -513,7 +521,7 @@ class OutboxMessageSender(
                     is MessageEvidence.Receipt -> {
                         // A late success can settle manual review; an unknown receipt must keep that choice visible.
                         val from = if (evidence.result == MessageTransportResult.Accepted || evidence.result == MessageTransportResult.Held)
-                            uncertain + OutboxState.NeedsConfirmation else uncertain
+                            reviewable + OutboxState.NeedsConfirmation else reviewable
                         settle(entry, from, evidence.result)
                     }
                     null -> store.transition(entry.clientMessageId, setOf(OutboxState.Verifying), OutboxState.Unknown)
@@ -748,12 +756,12 @@ class OutboxMessageSender(
     companion object {
         /** Refusals of the start that come back by themselves (docs/assistant/onboarding.md 4.6): nothing was created. */
         private val RetryLaterCodes = setOf("node_unreachable", "assistant_offline")
-        private val uncertain = setOf(OutboxState.Sending, OutboxState.Unknown, OutboxState.Verifying)
         private val reviewable = setOf(OutboxState.Unknown, OutboxState.Verifying)
         /** Delivery unknown, with or without the review deadline passed: the user decides (confirm or discard). */
         private val undecided = reviewable + OutboxState.NeedsConfirmation
+        private val awaitingReceipt = undecided + OutboxState.Sending
         private val settled = setOf(OutboxState.Sent, OutboxState.Shown)
-        private val reconcilable = uncertain + OutboxState.Sent + OutboxState.NeedsConfirmation + OutboxState.Held
+        private val reconcilable = awaitingReceipt + OutboxState.Sent + OutboxState.Held
         /** Read-only catch-up may also find late evidence for an already shown message; transcript matching may not. */
         private val catchUpStates = reconcilable + OutboxState.Shown
         private val dispatchable = setOf(OutboxState.Queued, OutboxState.WaitingForNetwork)

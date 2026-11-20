@@ -599,6 +599,11 @@ class Watcher:
 
     def merge(self, config, pr):
         repo, number, root = config["name"], pr["number"], config["checkout"]
+        if pr.get("title", "").startswith("release:"):
+            # Release PRs belong only to release-pr.yml: ordinary semantic/portable evidence cannot replace its
+            # signed-platform verification, TestFlight receipt or protected administrator merge.
+            self.log("%s#%s is a release PR; ordinary watcher merging is disabled" % (repo, number))
+            return False
         if self.dry_run or not config["merge"]:
             self.log("%s#%s passed; merge disabled" % (repo, number))
             return False

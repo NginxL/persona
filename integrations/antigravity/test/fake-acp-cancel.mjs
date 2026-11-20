@@ -65,9 +65,26 @@ function onRequest(msg) {
     case 'session/prompt': {
       const sessionId = params.sessionId
       const mode = params.prompt?.find((b) => b.type === 'text')?.text?.trim() || ''
+      if (mode === 'reply') {
+        send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId,
+          update: { sessionUpdate: 'agent_message_chunk', content: { text: 'Finished.' } } } })
+        return answer({ stopReason: 'end_turn' })
+      }
       const turn = { id, mode, cancelled: false, open: new Set() }
       turns.set(sessionId, turn)
       if (mode === 'ask') turn.open.add(askPermission(sessionId, 'call-1'))
+      if (mode === 'updates' || mode === 'unrelated-updates') {
+        let count = 0
+        const timer = setInterval(() => {
+          send({ jsonrpc: '2.0', method: 'session/update', params: {
+            sessionId: mode === 'updates' ? sessionId : 'another-session', update: { sessionUpdate: 'heartbeat' },
+          } })
+          if (++count === 16 || !turns.has(sessionId)) {
+            clearInterval(timer)
+            if (turns.delete(sessionId)) answer({ stopReason: 'end_turn' })
+          }
+        }, 40)
+      }
       if (mode === 'ask-then-end') {
         askPermission(sessionId, 'call-1')
         turns.delete(sessionId)

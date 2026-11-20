@@ -17,6 +17,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -57,10 +58,14 @@ var errWorkAssistant = i18n.Err("assistant-start.work_machine")
 // work only for an assistant on the hub's own machine, and a link (or tailcat) machine has no ssh at all; from anywhere
 // else there is no command to give, only the Agents tools.
 func (s *Service) claudeMD(ctx context.Context, here string, larkCLI bool) string {
+	return prompts.RenderAssistantClaudeMD(s.assistantPrompt(ctx, here, larkCLI, s.settings(ctx)))
+}
+
+func (s *Service) assistantPrompt(ctx context.Context, here string, larkCLI bool, settings Settings) prompts.AssistantClaudeMD {
 	hello := s.hello(ctx)
 	d := prompts.AssistantClaudeMD{Owner: strings.TrimSpace(hello.Owner), Notes: s.notes(ctx), ExtraDirs: s.kbExtraDirs(ctx),
 		KnowledgeDir: s.kb.dir, LarkCLI: larkCLI, Language: answerLanguage(hello.Locale),
-		BackgroundSupervisor: s.backgroundOn(s.settings(ctx)), UrgentCall: s.urgentPrompt(ctx)}
+		BackgroundSupervisor: s.backgroundOn(settings), UrgentCall: s.urgentPrompt(ctx)}
 	devices := s.devices(ctx)
 	if i := slices.IndexFunc(devices, func(d Device) bool { return d.ID == here }); i >= 0 {
 		d.OnHub = devices[i].Kind == "local"
@@ -73,7 +78,7 @@ func (s *Service) claudeMD(ctx context.Context, here string, larkCLI bool) strin
 		d.Machines = append(d.Machines, prompts.AssistantMachine{Name: m.Name, ID: m.ID, Local: local, SSHHost: m.SSHHost,
 			AgentsOnly: !local && !(d.OnHub && m.Kind == "ssh")})
 	}
-	return prompts.RenderAssistantClaudeMD(d)
+	return d
 }
 
 // prepare tells machine's node what it needs before a message to the assistant (node assistant.prepare) and answers
@@ -97,6 +102,14 @@ func (s *Service) prepareSpace(ctx context.Context, machine, space string) (stri
 // a skill's files always goes: plugins.assistant hands them out once, so skipping would leave the old files on the
 // machine until the CLAUDE.md changed.
 func (s *Service) prepareSpaceIf(ctx context.Context, machine, space string, onlyChanged bool) (string, bool, error) {
+	// Read settings and publish both instruction files in the same per-directory order.
+	dir := s.assistantRel()
+	if space == SpaceHealth {
+		dir = s.healthRel()
+	}
+	key := machine + "\x00" + dir
+	s.prepareLocks.acquire(key)
+	defer s.prepareLocks.release(key)
 	if s.isWorkMachine(machine) {
 		return "", false, errWorkAssistant
 	}
@@ -115,9 +128,15 @@ func (s *Service) prepareSpaceIf(ctx context.Context, machine, space string, onl
 	// The digest of the hub's own part lets the extensions' data instructions ride along when it changes (the
 	// conversation restarts for it anyway) instead of restarting it on their own (extmgr extension_assistant_data.go).
 	pluginParams := map[string]any{"machine_id": machine}
-	var own string
+	var own, onDemand string
 	if space != SpaceHealth {
-		own = s.claudeMD(ctx, machine, conns.LarkCLI)
+		settings := s.settings(ctx)
+		d := s.assistantPrompt(ctx, machine, conns.LarkCLI, settings)
+		own = prompts.RenderAssistantClaudeMD(d)
+		if settings.workGuideOn() {
+			d.WorkGuide = true
+			onDemand = prompts.RenderAssistantClaudeMD(d)
+		}
 		sum := sha256.Sum256([]byte(own))
 		pluginParams["base_digest"] = hex.EncodeToString(sum[:16])
 	}
@@ -127,13 +146,12 @@ func (s *Service) prepareSpaceIf(ctx context.Context, machine, space string, onl
 	if len(plugins.Skills) == 0 {
 		plugins.Skills = json.RawMessage("null")
 	}
-	dir, md := s.assistantRel(), own+plugins.Instructions
+	md := own + plugins.Instructions
 	if space == SpaceHealth {
-		dir, md = s.healthRel(), s.healthClaudeMD(ctx, machine)
+		md = s.healthClaudeMD(ctx, machine)
 	}
-	key := machine + "\x00" + dir
 	digests, files := skillDigests(plugins.Skills)
-	given := preparedState{md: md, skills: digests}
+	given := preparedState{md: md, skills: digests, workGuide: onDemand != ""}
 	if onlyChanged && !files {
 		s.preparedMu.Lock()
 		same := s.prepared[key] == given
@@ -144,6 +162,10 @@ func (s *Service) prepareSpaceIf(ctx context.Context, machine, space string, onl
 	}
 	params := map[string]any{"dir": dir, "claude_md": md,
 		"connectors": conns.Connectors, "clis": conns.CLIs, "plugin_skills": plugins.Skills}
+	// Older nodes read only claude_md, so they retain the complete instructions.
+	if onDemand != "" {
+		params["work_guide_md"] = onDemand + plugins.Instructions
+	}
 	var prep struct {
 		Cwd  string   `json:"cwd"`
 		Need []string `json:"plugin_skills_need"`
@@ -172,7 +194,10 @@ func (s *Service) prepareSpaceIf(ctx context.Context, machine, space string, onl
 }
 
 // preparedState is what prepareSpaceIf gave a node for a directory: the CLAUDE.md and the plugin skills (skillDigests).
-type preparedState struct{ md, skills string }
+type preparedState struct {
+	md, skills string
+	workGuide  bool
+}
 
 // skillDigests are the plugin skills of a plugins.assistant answer as prepareSpaceIf compares them, each one's plugin,
 // name and digest; files says whether any comes with its files.
@@ -268,7 +293,13 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	}
 	var cwd string
 	var err error
-	if p.GuestTools != nil {
+	if p.Space == SpaceHealth {
+		// The space owns its directory, instructions and the node's outbound gate classification.
+		// Even a task's already-resolved cwd cannot replace health preparation.
+		cwd, err = s.prepareSpace(ctx, machine, p.Space)
+	} else if p.Cwd != "" {
+		cwd = p.Cwd
+	} else if p.GuestTools != nil {
 		cwd, err = s.guestPrepare(ctx, machine) // its own directory: none of the assistant's instructions, memory or skills
 	} else {
 		cwd, err = s.prepareSpace(ctx, machine, p.Space)
@@ -278,6 +309,12 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 	}
 	params := map[string]any{"cwd": cwd, "launcher": p.Launcher, "text": p.Text, "images": p.Images, "permission_mode": p.PermissionMode,
 		"effort": p.Effort, "is_main": main}
+	if p.TaskExecution {
+		params["task_execution"] = true
+		if p.LegacyTaskExecution {
+			params[devicewire.LegacyTaskExecution] = true
+		}
+	}
 	if p.Public {
 		params["public"] = true
 	}
@@ -318,14 +355,21 @@ func (s *Service) startOn(ctx context.Context, machine string, p StartParams, ma
 			delete(params, "model") // picked for the launcher that is gone, not for the one it falls back to
 		}
 	}
-	if err := s.applyModel(ctx, purpose, params); err != nil {
+	if p.TaskModel != nil && p.TaskExecution {
+		params["launch"] = "headless"
+		if err := s.finishModel(ctx, purpose, params, *p.TaskModel); err != nil {
+			return proto.Session{}, err
+		}
+	} else if err := s.applyModel(ctx, purpose, params); err != nil {
 		return proto.Session{}, err
 	}
 	if params["launch"] != "headless" {
 		return proto.Session{}, badRequest(fmt.Errorf("purpose %q requires headless launch for assistant.send", purpose))
 	}
-	if _, err := s.finishMainChatModel(ctx, machine, purpose, params, false); err != nil {
-		return proto.Session{}, err
+	if !p.TaskExecution {
+		if _, err := s.finishMainChatModel(ctx, machine, purpose, params, false); err != nil {
+			return proto.Session{}, err
+		}
 	}
 	// A guest's profile is its own: the main chat's setting is for the user's conversations only. So is the Inbox AI
 	// twin's: it acts on what strangers sent, and the user's own setup (allow rules, hooks, MCP servers) stays out of it
@@ -455,7 +499,8 @@ func (s *Service) startConversationOn(ctx context.Context, p StartParams, main b
 // in the profile the assistant's conversations had, not a new private one with no login in it (#6015).
 func (s *Service) startConversation(ctx context.Context, p startParams) (proto.Session, error) {
 	return s.startSignedIn(ctx, StartParams{Text: prompts.MessageSourceText(p.Text, p.Source), PermissionMode: p.PermissionMode, Purpose: p.Purpose, Space: p.Space,
-		Origin: p.Origin, OriginRef: p.OriginRef, NewSessionID: p.NewSessionID})
+		Origin: p.Origin, OriginRef: p.OriginRef, MachineID: p.MachineID, Cwd: p.Cwd, TaskExecution: p.TaskExecution,
+		LegacyTaskExecution: p.LegacyTaskExecution, TaskModel: p.TaskModel, NewSessionID: p.NewSessionID})
 }
 
 // Start is assistant.start: a conversation one of the hub's features starts (the inbox's AI twin), or the channels'

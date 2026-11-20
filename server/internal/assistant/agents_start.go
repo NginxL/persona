@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -162,6 +163,21 @@ func (s *Service) tabName(ctx context.Context, prompt string) string {
 		s.logf("tab name: nothing usable in %q", clip(oneLine(text), 80))
 	}
 	return name
+}
+
+// nameStartedAgent records the dispatched Agent's initial Persona title. Use the actual tab label when the host
+// made the requested name unique. A later CLI or Persona rename can replace it.
+func (s *Service) nameStartedAgent(ctx context.Context, machine string, c proto.Session, requested string) string {
+	if requested == "" || c.SessionID == "" {
+		return requested
+	}
+	title := cmp.Or(c.HerdrTabName(), requested)
+	if err := s.putInitialAgentTitle(ctx, machine, c.SessionID, title); err != nil {
+		s.logf("dispatch: save session title for %q/%q: %v", machine, c.SessionID, err)
+	} else {
+		s.publishSessions(machine)
+	}
+	return title
 }
 
 // tabSlug keeps what a tab name may be: lowercase ASCII letters and digits, single hyphens, at most 24 characters.

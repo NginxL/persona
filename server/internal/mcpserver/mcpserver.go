@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantskills"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/nodeclient"
 
@@ -71,6 +73,9 @@ func Serve(ctx context.Context, version string, in io.Reader, out io.Writer) err
 			werr = err
 		}
 	}
+	ctx = context.WithValue(ctx, workCatalogKey{}, &workCatalog{notify: func() {
+		writeNotification(notification{JSONRPC: "2.0", Method: "notifications/tools/list_changed", Params: map[string]any{}})
+	}})
 	for sc.Scan() {
 		var req request
 		if err := json.Unmarshal(sc.Bytes(), &req); err != nil || req.Method == "" {
@@ -310,7 +315,11 @@ func handle(ctx context.Context, version string, req request) (any, *rpcError) {
 		if listed, ok := ctx.Value(toolsListedKey{}).(func(toolSnapshot)); ok {
 			listed(snapshot)
 		}
-		return map[string]any{"tools": snapshot.Tools}, nil
+		tools := snapshot.Tools
+		if catalog, ok := ctx.Value(workCatalogKey{}).(*workCatalog); ok {
+			tools = catalog.list(snapshot)
+		}
+		return map[string]any{"tools": tools}, nil
 	case "tools/call":
 		var p struct {
 			Name      string          `json:"name"`
@@ -321,6 +330,11 @@ func handle(ctx context.Context, version string, req request) (any, *rpcError) {
 		}
 		if rerr := checkCallParams(&p.Name, &p.Arguments); rerr != nil {
 			return nil, rerr
+		}
+		if p.Name == workSearchName {
+			if catalog, ok := ctx.Value(workCatalogKey{}).(*workCatalog); ok && catalog.active() {
+				return catalog.search(ctx, p.Arguments), nil
+			}
 		}
 		var copied *clipboardCopy // phone_clipboard_set with file: read here, on the agent's machine (clipboard_file.go)
 		if p.Name == clipboardSetTool {
@@ -458,7 +472,14 @@ func listToolsOnce(ctx context.Context, previous toolSnapshot) (toolSnapshot, er
 		return previous, nil
 	}
 	tools := []map[string]any{}
+	var work map[string]bool
 	for _, t := range res.Tools {
+		if t.WorkGuideTool && isAssistant() && !isGuest() && toolSet() == "" {
+			if work == nil {
+				work = make(map[string]bool)
+			}
+			work[t.Name] = true
+		}
 		schema, description := t.InputSchema, t.Description
 		if len(schema) == 0 {
 			schema = json.RawMessage(`{"type":"object","properties":{}}`)
@@ -474,7 +495,14 @@ func listToolsOnce(ctx context.Context, previous toolSnapshot) (toolSnapshot, er
 		}
 		tools = append(tools, tool)
 	}
-	return toolSnapshot{Tools: tools, Revision: res.Revision, Session: res.Session}, nil
+	if len(work) > 0 {
+		cwd, err := os.Getwd()
+		if err != nil || !assistantskills.WorkGuideReady(cwd) || slices.ContainsFunc(res.Tools, func(t proto.Tool) bool { return t.Name == workSearchName }) {
+			// Keep the full catalog if prepare fell back to full instructions, or an extension owns the search name.
+			work = nil
+		}
+	}
+	return toolSnapshot{Tools: tools, WorkGuide: work, Revision: res.Revision, Session: res.Session}, nil
 }
 
 // The assistant's processes start this server with PERSONA_ASSISTANT / PERSONA_SESSION_ID (node/assistant.go): it

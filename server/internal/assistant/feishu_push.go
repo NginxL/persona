@@ -334,6 +334,11 @@ func (s *Service) feishuAgentDone(machine string, sess proto.Session, head, text
 	if strings.HasPrefix(head, "⚠️") || strings.HasPrefix(head, "⏳") { // a failed/cut-off turn or blocked work left
 		color = feishubot.Orange
 	}
+	preferTab := s.useHerdrTabName(ctx)
+	label, secondary := feishuSessionNames(sess, preferTab)
+	if tab := sess.DisplayTabName(preferTab); tab != "" {
+		head = strings.Replace(head, pushTitle(sess), clip(oneLine(tab), 70), 1)
+	}
 	if t, ok := s.taskOf(ctx, s.canonical(machine), session); ok {
 		label := s.feishuDirection(ctx, t, s.feishuDirections(ctx)) + clip(oneLine(t.Title), 70)
 		if head != t.Title {
@@ -343,6 +348,9 @@ func (s *Service) feishuAgentDone(machine string, sess proto.Session, head, text
 	}
 	note := func(clipped bool) string {
 		n := i18n.T(l, "assistant-feishu_cards.agent_done_note", i18n.Args{"place": place})
+		if secondary != "" {
+			n = secondary + "\n" + n
+		}
 		if clipped {
 			n = i18n.T(l, "assistant-feishu_cards.only_beginning") + "\n" + n
 		}
@@ -374,5 +382,5 @@ func (s *Service) feishuAgentDone(machine string, sess proto.Session, head, text
 	}
 	// A reply to the card talks to that agent, as with one picked with /agents.
 	s.rememberBotThread(mid, botTarget{Kind: targetAgent, MachineID: machine, SessionID: session},
-		agentLabel(sess)+" · "+s.machineName(machine))
+		label+" · "+s.machineName(machine))
 }

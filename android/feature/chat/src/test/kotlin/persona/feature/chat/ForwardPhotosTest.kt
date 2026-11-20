@@ -38,6 +38,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import persona.core.contracts.ImagePayload
 import persona.core.contracts.Interaction
 import persona.core.contracts.Item
 import persona.core.contracts.Machine
@@ -225,6 +226,24 @@ class ForwardPhotosTest {
             assertEquals(expectedPaths.sorted(), messageModel(text, user = true).images)
             assertEquals(expectedPhotos, expectedPaths.size)
         }
+    }
+
+    @Test fun cancellationWhileRestoringAForwardRemovesItsPartiallyStagedPhotos() {
+        val folder = File(context.cacheDir, "chat-captures")
+        val before = folder.list().orEmpty().toSet()
+        val result = runCatching {
+            kotlinx.coroutines.runBlocking {
+                forwardedPhotos(context, listOf("ok.png", "cancel.png"), read = { path ->
+                    if (path == "cancel.png") {
+                        assertTrue(folder.list().orEmpty().toSet().size > before.size)
+                        throw kotlinx.coroutines.CancellationException("left the picker")
+                    }
+                    ImagePayload(data = "aGVsbG8=", mime = "image/png")
+                })
+            }
+        }
+        assertTrue(result.exceptionOrNull() is kotlinx.coroutines.CancellationException)
+        assertEquals(before, folder.list().orEmpty().toSet())
     }
 
     private fun existingChat(target: ForwardTarget) {

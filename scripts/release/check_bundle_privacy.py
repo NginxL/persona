@@ -595,12 +595,22 @@ def verified_public_file(path):
 
 
 def public_download_url(cfg):
-    """The update URL every published personad carries and the one path it may have: publish.update_url as configured
-    (a GitHub repository's releases/latest/download, say), else publish.site_url's /dl (persona_config.update_url)."""
-    url = persona_config.update_url(cfg)
-    if url and persona_config.get(cfg, "publish.update_url", "") not in ("", None):
+    """The update URL every published personad carries and the one path it may have: an inherited environment override,
+    then publish.update_url (a GitHub repository's releases/latest/download, say), else publish.site_url's /dl."""
+    override = os.environ.get("PERSONA_UPDATE_URL")
+    url = persona_config.update_url(cfg, override)
+    if url and (override or persona_config.get(cfg, "publish.update_url", "") not in ("", None)):
         return url, urlsplit(url).path
     return url, "/dl"
+
+
+def public_download_urls(cfg):
+    """Both legitimate public feeds: the update base and the site's own /dl publication feed."""
+    urls = [public_download_url(cfg)]
+    site = persona_config.get(cfg, "publish.site_url", "")
+    if isinstance(site, str) and site.strip():
+        urls.append((site.rstrip("/") + "/dl", "/dl"))
+    return urls
 
 
 def public_archive_dependencies(path, whole_short):
@@ -713,7 +723,8 @@ def main():
                         if not whole_short:
                             t = remove_public_relay_url(t, persona_config.get(cfg, "app.push_relay", ""))
                         else:
-                            t = remove_public_relay_url(t, *public_download_url(cfg))
+                            for public_url, public_path in public_download_urls(cfg):
+                                t = remove_public_relay_url(t, public_url, public_path)
                         for v in inherent:
                             t = t.replace(v, "")
                         if modules:

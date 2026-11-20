@@ -270,6 +270,21 @@ enum LauncherName {
         env = p.env ?? ""
     }
 
+    /// Only the user's chosen part of a paste is applied to an existing provider's edit form.
+    func applyPaste(_ draft: ProviderImportDraft, action: ProviderPasteAction) {
+        switch action {
+        case .add:
+            applyImport(draft.provider)
+            if defaultModel.isEmpty { defaultModel = models.first?.id ?? "" }
+        case .merge:
+            var ids = Set(models.map(\.id))
+            models += draft.modelsToAdd.filter { ids.insert($0.id).inserted }
+        case .replaceKey:
+            apiKeyByReference = false
+            apiKey = draft.provider.apiKey ?? ""
+        }
+    }
+
     /// A new provider's startup id from an import draft (#5428): the draft's own id when it has one, else one made
     /// from its display name (a cindy link names only a display name), satisfying the wizard's name rule.
     private static func importID(_ p: ProviderImportProvider) -> String {

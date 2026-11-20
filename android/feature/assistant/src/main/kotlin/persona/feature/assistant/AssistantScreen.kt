@@ -981,10 +981,8 @@ fun AssistantScreen(
                             // A new conversation's launcher, for it alone (iOS StarterComposer, web StarterLauncherChip); Glass's is the pill.
                             accessory = if (homeForwards.isNotEmpty() || starterQuotes.isNotEmpty() ||
                                 (active == null && !healthPage && pageManagement != null && startConversationWith != null && !demo)) ({
-                                homeForwards.forEach { ref ->
-                                    persona.feature.chat.ForwardComposerCard(ref, lines = if (homeForwards.size == 1) 2 else 1) {
-                                        persona.feature.chat.ForwardPlacements.home = persona.feature.chat.ForwardPlacements.home.filterNot { it.id == ref.id }
-                                    }
+                                persona.feature.chat.ForwardComposerCards(homeForwards) { removed ->
+                                    persona.feature.chat.ForwardPlacements.home = persona.feature.chat.ForwardPlacements.home - removed.toSet()
                                 }
                                 if (active == null && !healthPage && pageManagement != null && startConversationWith != null && !demo) {
                                     if (mentionsHere) StarterQuoteCards(starterMentions)
@@ -1789,9 +1787,23 @@ private fun ConversationRow(
  * (#10358, ConversationOpener.kt); until then, and for every fallback, the origin's mark and words stay.
  */
 @Composable
-private fun ConversationOriginMark(source: AssistantConversationOrigin, opener: ConversationOpener? = null) {
+private fun ConversationOriginMark(source: AssistantConversationOrigin, opener: ConversationOpener? = null, withText: Boolean = false) {
     val drawn = rememberDrawnOpener(opener, source)
     val label = originMarkLabel(source, drawn?.name, androidx.compose.ui.platform.LocalResources.current)
+    if (withText) JSourceLine(label) { OriginIcon(source, drawn, label) }
+    else OriginIcon(source, drawn, label)
+}
+
+/** The first user message uses the drawer's exact mark, label, manager and icon fallbacks. */
+fun conversationOpeningSource(session: Session): (@Composable () -> Unit)? {
+    val source = automaticConversationOrigin(session.origin)
+    if (source != AssistantConversationOrigin.LarkAgent && source != AssistantConversationOrigin.Extension) return null
+    val opener = ConversationOpener.of(session)
+    return { ConversationOriginMark(source, opener, withText = true) }
+}
+
+@Composable
+private fun OriginIcon(source: AssistantConversationOrigin, drawn: DrawnOpener?, label: String) {
     if (drawn != null) {
         JSourceMark(label, size = MarkSize.Inline, picture = drawn.picture)
     } else if (source == AssistantConversationOrigin.LarkAgent) {

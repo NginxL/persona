@@ -17,8 +17,8 @@ import (
 // claimMethods are the calls that ask the connected runtimes about a session nobody claimed yet: what the apps do
 // with a session they show (open it, page it, send to it, stop it).
 var claimMethods = map[string]bool{"session.send": true, "session.items": true, "session.item": true, "session.image": true,
-	"session.visualization": true,
-	"session.watch":         true, "session.info": true, "session.interrupt": true}
+	"session.visualization": true, "session.fork": true,
+	"session.watch": true, "session.info": true, "session.interrupt": true}
 
 // awayReads are the calls the node answers itself for a session of a runtime that is away whose conversation is a
 // Claude transcript here (runtimeaway.go): its content, its info and the watch of its transcript.

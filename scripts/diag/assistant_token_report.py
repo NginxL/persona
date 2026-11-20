@@ -19,6 +19,7 @@ docs/assistant/assistant.md, "Local request source diagnostics" for boundaries a
 """
 import argparse
 import collections
+import datetime as dt
 import glob
 import importlib.util
 import json
@@ -28,6 +29,7 @@ import re
 import sys
 
 USAGE_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+TIME_FRACTION = re.compile(r"^(.{10}[T ][0-9]{2}:[0-9]{2}:[0-9]{2})[.,]([0-9]+)")
 
 # The leading <persona-context> blocks a message can start with (snapshot, message source, forwarded text).
 LEAD_CONTEXT = re.compile(r"(?s)^\s*<persona-context\b([^>]*)>(.*?)</persona-context>\s*")
@@ -148,9 +150,30 @@ def classify(text):
     return "owner", rest
 
 
+def timestamp_key(value):
+    if not isinstance(value, str):
+        return None
+    # Parse whole seconds with their offset. Keep the decimal fraction separately so Python 3.9 can
+    # parse arbitrary widths and a cutoff can still distinguish timestamps within a microsecond.
+    match = TIME_FRACTION.match(value)
+    fraction = ""
+    if match:
+        fraction = match[2].rstrip("0")
+        value = match[1] + value[match.end():]
+    try:
+        instant = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=dt.timezone.utc)
+    return instant, fraction
+
+
 class Report:
     def __init__(self, since=None, request_breakdown=False):
-        self.since = since
+        self.since = timestamp_key(since)
+        if since is not None and self.since is None:
+            raise ValueError("--since must be an ISO date or timestamp")
         self.kinds = collections.defaultdict(lambda: collections.Counter())
         self.conversations = collections.defaultdict(lambda: collections.Counter())
         self.events = []  # (total bytes, manual bytes) per supervision event
@@ -163,7 +186,13 @@ class Report:
             spec = importlib.util.spec_from_file_location("request_breakdown", Path(__file__).with_name("request_breakdown.py"))
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            self.breakdown = module.Breakdown(since)
+            self.breakdown = module.Breakdown()
+
+    def includes_timestamp(self, value):
+        if self.since is None:
+            return True
+        timestamp = timestamp_key(value)
+        return timestamp is not None and timestamp >= self.since
 
     def add_round(self, kind, text, rest, counted):
         if not counted:
@@ -178,7 +207,7 @@ class Report:
 
     def add_file(self, path):
         if self.breakdown is not None:
-            self.breakdown.add_file(path)
+            self.breakdown.add_file(path, self.includes_timestamp)
         with open(path, errors="replace") as f:
             try:
                 first = json.loads(f.readline())
@@ -200,7 +229,7 @@ class Report:
                     continue
                 if not isinstance(e, dict):
                     continue
-                counted = not self.since or str(e.get("timestamp", "")) >= self.since
+                counted = self.includes_timestamp(e.get("timestamp"))
                 if e.get("type") == "user" and e.get("isCompactSummary"):
                     kind = "after_compaction"
                 text = message_text(e)
@@ -276,7 +305,7 @@ class Report:
                 if not isinstance(e, dict) or not isinstance(e.get("payload"), dict):
                     continue
                 p = e["payload"]
-                counted = not self.since or str(e.get("timestamp", "")) >= self.since
+                counted = self.includes_timestamp(e.get("timestamp"))
                 if e.get("type") == "response_item" and p.get("type") == "message" and p.get("role") == "user":
                     last_event = None
                     parts = p.get("content") or []
@@ -417,16 +446,19 @@ def print_text(s):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("paths", nargs="*", help="transcript files or directories (default: the assistant directory's projects)")
-    ap.add_argument("--since", help="only lines at or after this ISO time, e.g. 2026-11-01")
+    ap.add_argument("--since", help="only lines at or after this ISO date or timestamp (UTC if no offset is given)")
     ap.add_argument("--json", action="store_true", help="print JSON")
     ap.add_argument("--request-breakdown", action="store_true",
                     help="include local source byte inventories and explicit request exports; unknowns are not zero")
     args = ap.parse_args(argv)
+    try:
+        r = Report(args.since, request_breakdown=args.request_breakdown)
+    except ValueError as error:
+        ap.error(str(error))
     paths = args.paths or [*default_paths(), *default_codex_files()]
     if not paths:
         print("no assistant transcripts found; pass a directory", file=sys.stderr)
         return 1
-    r = Report(args.since, request_breakdown=args.request_breakdown)
     for path in transcript_files(paths):
         r.add_file(path)
     s = r.summary()

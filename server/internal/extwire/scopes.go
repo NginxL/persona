@@ -105,7 +105,8 @@ var RouteScopes = map[string]string{
 	"GET /api/v1/assistant/reporters":                            ScopeAssistantAsk,
 	// The todos (the assistant's, relayed): reading them, adding, editing and attaching agents and spaces, and writing
 	// outcome decisions (an extension writes no other source). Deleting a todo, superseding decisions, the done check, a
-	// retry and the owner's own marks (seen, restored, Someday) stay with full credentials.
+	// retry and the owner's own marks (seen, restored, Someday) stay with full credentials. Backend worktree
+	// inspection and changes also require full credentials, as do the machine worktree routes.
 	"GET /api/v1/todos/{id}/workspace-rules":                       ScopeTodosRead,
 	"PUT /api/v1/todos/{id}/workspace-rules":                       ScopeTodosWrite,
 	"POST /api/v1/todos/{id}/workspace-naming/preview":             ScopeTodosWrite,

@@ -1,13 +1,14 @@
 // Six code-task steps with aria-current="step"; general tasks hide them, and PR/MR links remain independent.
-// Missing or unknown stage kinds preserve the existing stage behavior.
+// Missing or unknown stage kinds preserve the existing stage behavior. Finished work with nothing left to deploy
+// (stage_done, #11590) ends with Done after the steps it went through.
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { t } from "../i18n";
 import { TODO_STAGES } from "../lib/todo-stage";
 import { TodoStageBar } from "./TodoStageBar";
 
-const html = (stage?: string, prURL?: string, stageKind?: string) =>
-  renderToStaticMarkup(<TodoStageBar stage={stage} stageKind={stageKind} prURL={prURL} />);
+const html = (stage?: string, prURL?: string, stageKind?: string, done?: boolean) =>
+  renderToStaticMarkup(<TodoStageBar stage={stage} stageKind={stageKind} prURL={prURL} done={done} />);
 
 /** Each step's state, in the order the bar draws them. */
 function states(markup: string): Record<string, string> {
@@ -130,5 +131,29 @@ describe("TodoStageBar", () => {
     const markup = html("shipped", "https://example.com/pull/7");
     expect(markup).not.toContain("<ol");
     expect(markup).toContain('href="https://example.com/pull/7"');
+  });
+
+  it("ends finished work with Done after the steps it went through, none of them current", () => {
+    const markup = html("develop", undefined, "code", true);
+    expect(states(markup)).toEqual({ plan: "done", develop: "done", done: "done" });
+    expect(currentSteps(markup)).toEqual([]);
+    expect(markup).toContain(t("todos.stage_done"));
+    // Review, Merge, Deploy and Verified never happened: they are not drawn, let alone ticked.
+    [t("todos.stage_review"), t("todos.stage_deploy"), t("todos.stage_verify")].forEach((label) => expect(markup).not.toContain(label));
+    expect(markup.indexOf(t("todos.stage_develop"))).toBeLessThan(markup.indexOf(t("todos.stage_done")));
+  });
+
+  it("ends a merged change with nothing to deploy with Done after Merge", () => {
+    const markup = html("merge", "https://github.com/example/project/pull/7", "code", true);
+    expect(Object.keys(states(markup))).toEqual(["plan", "develop", "review", "merge", "done"]);
+    expect(Object.values(states(markup)).every((state) => state === "done")).toBe(true);
+    expect(markup).toContain('href="https://github.com/example/project/pull/7"');
+  });
+
+  it("draws no finished bar for general work, nor without a stage, and the open bar when not done", () => {
+    expect(html("develop", undefined, "general", true)).toBe("");
+    expect(html(undefined, undefined, "code", true)).toBe("");
+    expect(html("develop", undefined, "code", false)).toBe(html("develop", undefined, "code"));
+    expect(currentSteps(html("develop", undefined, "code", false))).toEqual(["develop"]);
   });
 });

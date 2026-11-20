@@ -3,8 +3,8 @@
 tools) are there to tap, a turn's pictures open in the image viewer where two fingers zoom the picture (not the page)
 and Back closes it on the chat, a wide table's last column is not a character a line, your bubble keeps a margin on its
 left (also while it is being sent, folded when long), the answer is 16 px, a work group's header is 40 tall, a long
-press on an answer leaves its menu open after the finger lifts, an edit's diff takes the whole screen and folds past 40
-lines, and formulas are drawn once KaTeX has loaded for them. On a desktop (1280, a mouse) the sizes stay 15 / 14.
+press on an answer leaves its menu open after the finger lifts, an edit's diff takes the whole screen (the changes
+panel, #9362), and formulas are drawn once KaTeX has loaded for them. On a desktop (1280, a mouse) the sizes stay 15 / 14.
 
 Needs a running web page against the fake hub with these conversations, and Playwright for Python (it drives the
 installed Chrome):
@@ -93,9 +93,10 @@ def check_sizes(page, tag, body, secondary, group_min=None):
     fs = page.evaluate("() => getComputedStyle(document.querySelector('main [data-answer] .prose-j')).fontSize")
     if fs != body:
         fail(f"{tag}: the answer is {fs}, not {body}")
-    # the row's words ("run tests"), in the open once the group is open
+    # the row's words (since #10684 a command row leads with the command, "swift test"; its description "跑测试" is the
+    # hover title), in the open once the group is open
     open_group(page)
-    row = page.locator('main [data-action-row="Bash"] button span', has_text="跑测试").first.evaluate("e => getComputedStyle(e).fontSize")
+    row = page.locator('main [data-action-row="Bash"] button[title="跑测试"] span', has_text="swift test").first.evaluate("e => getComputedStyle(e).fontSize")
     if row != secondary:
         fail(f"{tag}: a tool row is {row}, not {secondary}")
     # a table and a code block keep their size
@@ -140,8 +141,10 @@ def check_pending(page, tag):
     box = page.locator("main textarea").first
     box.fill(long)
     page.locator('main button[aria-label="发送"], main button[aria-label="排队发送"]').first.click()
-    pend = page.locator("main [data-user-bubble]").filter(has_text="发送中").last
+    # the bubble being sent; its 发送中… is the chat's one send line under it since #7490
+    pend = page.locator("main [data-user-bubble][data-send-state=sending]").last
     expect(pend).to_be_visible()
+    expect(page.locator("main [data-message-feedback=sending]")).to_contain_text("发送中")
     folded = pend.locator("[data-folded]")
     expect(folded).to_have_count(1)
     expect(pend.get_by_role("button", name="展开")).to_be_visible()
@@ -156,7 +159,7 @@ def check_pending(page, tag):
 
 def check_copy(page, tag):
     go(page, READ)
-    btn = page.locator('main [data-answer] button[aria-label="拷贝代码"]').first
+    btn = page.locator('main [data-answer] button[aria-label="复制代码"]').first
     expect(btn).to_be_visible()
     if float(btn.evaluate("e => getComputedStyle(e).opacity")) < 0.99:
         fail(f"{tag}: copy code is invisible on a touch screen")
@@ -177,12 +180,34 @@ def check_math(page, tag):
     ok(f"{tag}: KaTeX loads for the formulas and draws them")
 
 
+def leave_end(page):
+    """A finger pulls the chat down a little, slowly (no fling): the reader leaves the end, so the chat stops following
+    it. A scroll from a script is not the reader leaving: content that grows still pulls the view back to the end."""
+    sc = page.locator("main [data-chat-scroll]").bounding_box()
+    x, y0 = sc["x"] + sc["width"] / 2, sc["y"] + 40
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y0}]})
+    for i in range(1, 9):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x, "y": y0 + 10 * i}]})
+        page.wait_for_timeout(16)
+    page.wait_for_timeout(100)  # held still before lifting: no speed left for a fling
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    cdp.detach()
+    expect(page.locator("[data-jump-pill]")).to_be_visible()  # away from the end
+
+
 def check_mermaid(page, tag):
     go(page, WIDGET)
+    # each block is drawn on its own a moment after it mounts, each one making the chat taller; at the end the chat
+    # follows, which moved the first diagram away under the tap about one run in three. Wait for all of them, leave the
+    # end with a finger as a reader would, and only then bring the diagram into view.
+    page.wait_for_function("""() => [...document.querySelectorAll('main [data-mermaid]')].every((m) =>
+        m.querySelector('[data-mermaid-diagram] svg, details'))""", timeout=10000)
+    leave_end(page)
     m = page.locator("main [data-mermaid]").first
     m.scroll_into_view_if_needed()
     diagram = m.locator("[data-mermaid-diagram]")
-    expect(diagram.locator("svg").first).to_be_visible(timeout=10000)
+    expect(diagram.locator("svg").first).to_be_visible()
     tools = m.locator('button[aria-label="放大"]')
     if float(tools.evaluate("e => getComputedStyle(e.parentElement).opacity")) < 0.99:
         fail(f"{tag}: Mermaid's tools are invisible on a touch screen")
@@ -196,6 +221,8 @@ def check_mermaid(page, tag):
 
 
 def check_viewer(page, tag):
+    """Each context opens the viewer cold, the first picture after a page load. That open is what broke when #8762 made
+    the viewer load on demand: the picture never fitted, so a pinch did nothing, until #11511 fixed the viewer."""
     go(page, REVIEW)
     strip = page.locator("main [data-turn-images] button").first
     strip.scroll_into_view_if_needed()
@@ -221,7 +248,7 @@ def check_viewer(page, tag):
     scale = float(img.evaluate("e => parseFloat(e.style.scale || '1')"))
     vv = page.evaluate("() => visualViewport.scale")
     if scale < 1.5:
-        fail(f"{tag}: a pinch zoomed the picture only to {scale:.2f}")
+        fail(f"{tag}: a pinch zoomed the picture only to {scale:.2f} (a cold first open, see check_viewer)")
     if abs(vv - 1) > 0.01:
         fail(f"{tag}: a pinch zoomed the page ({vv})")
     ok(f"{tag}: two fingers zoom the picture ({scale:.1f}×), the page stays at 1×")
@@ -232,6 +259,120 @@ def check_viewer(page, tag):
     if not same_chat(REVIEW, page.url) or not page.locator("main [data-turn-images]").count():
         fail(f"{tag}: Back left the chat ({page.url})")
     ok(f"{tag}: Back closes the viewer and stays on the chat")
+
+
+# Every frame from here on: the viewer's picture, once the browser has it and it shows, drawn at its fit in the room;
+# and the frames its loading spinner shows in.
+VIEWER_FRAMES = """() => {
+  const px = (v) => parseFloat(v) || 0;
+  const s = window.__viewerFrames = { seen: 0, wrong: [], spinning: 0 };
+  const tick = () => {
+    if (document.querySelector('[role=dialog][aria-modal="true"] [role=status]')) s.spinning++;
+    const img = document.querySelector('[role=dialog][aria-modal="true"] img');
+    if (img && img.complete && img.naturalWidth && getComputedStyle(img).visibility !== 'hidden') {
+      const area = img.parentElement, cs = getComputedStyle(area);
+      const rw = area.clientWidth - px(cs.paddingLeft) - px(cs.paddingRight), rh = area.clientHeight - px(cs.paddingTop) - px(cs.paddingBottom);
+      const k = Math.min(rw / img.naturalWidth, rh / img.naturalHeight);
+      s.seen++;
+      if (Math.abs(px(img.style.width) - img.naturalWidth * k) > 1 || Math.abs(px(img.style.height) - img.naturalHeight * k) > 1)
+        s.wrong.push(`${img.naturalWidth}x${img.naturalHeight} drawn ${img.style.width || 'at its own size'} in ${Math.round(rw)}x${Math.round(rh)}`);
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}"""
+
+# Each control of the viewer's top row and bottom bar: its drawn size, its touch square (the button grown by
+# touch-hit's ::before), its row, and the points 21.5 px out from its middle (and the middle) a tap there misses.
+VIEWER_HITS = """d => {
+  const px = (v) => parseFloat(v) || 0;
+  const rows = [d.querySelector(':scope > div:first-of-type'), d.querySelector(':scope > div:last-of-type')];
+  return rows.map((row) => { const box = row.getBoundingClientRect();
+    return [...row.querySelectorAll('button')].filter((b) => b.getClientRects().length).map((b) => {
+      const r = b.getBoundingClientRect(), pb = getComputedStyle(b, '::before');
+      const grown = pb.content !== 'none' && pb.position === 'absolute';
+      const sq = grown ? { l: r.left + px(pb.left), t: r.top + px(pb.top), r: r.right - px(pb.right), b: r.bottom - px(pb.bottom) } : { l: r.left, t: r.top, r: r.right, b: r.bottom };
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const miss = [[0, 0], [0, -21.5], [0, 21.5], [-21.5, 0], [21.5, 0]]
+        .filter(([dx, dy]) => { const e = document.elementFromPoint(cx + dx, cy + dy); return !(e && b.contains(e)); }).map(([dx, dy]) => `${dx},${dy}`);
+      return { name: b.getAttribute('aria-label') || b.textContent.trim(), w: r.width, h: r.height, sq, box: { l: box.left, t: box.top, r: box.right, b: box.bottom }, miss };
+    }); });
+}"""
+
+
+def check_viewer_controls(page, tag):
+    """The first picture opened after a page load (the viewer's chunk not fetched yet) is fitted to the screen from its
+    first drawn frame, and so is the next one a swipe brings, neither with a loading spinner (#11511). With either (a file's four icon buttons below it,
+    then a long name and two worded buttons), every control in the viewer's top row and bottom bar answers a 44 px
+    square around its middle, inside its row and clear of its neighbours, and the top row's buttons stay round."""
+    page.goto(S["base"] + "/overview?token=mock")
+    page.wait_for_selector("aside", state="attached", timeout=15000)
+    go(page, REVIEW)
+    page.evaluate(VIEWER_FRAMES)
+    strip = page.locator("main [data-turn-images] button").first
+    strip.scroll_into_view_if_needed()
+    strip.tap()
+    dlg = page.locator('[role=dialog][aria-modal="true"]')
+    img = dlg.locator("img").first
+    expect(img).to_be_visible()
+    page.wait_for_timeout(500)
+    w, h = page.viewport_size["width"], page.viewport_size["height"]
+
+    def fitted(what):
+        frames = page.evaluate("() => window.__viewerFrames")
+        if not frames["seen"]:
+            fail(f"{tag}: {what} never showed")
+        if frames["wrong"]:
+            fail(f"{tag}: {what} was drawn at the wrong size in {len(frames['wrong'])} of {frames['seen']} frames ({frames['wrong'][0]})")
+        if not img.evaluate("e => !!e.style.scale"):
+            fail(f"{tag}: {what} is not fitted, so it cannot zoom")
+        # the chat's pictures are in the page already: no spinner for them, not even for a frame
+        if frames["spinning"]:
+            fail(f"{tag}: the loading spinner showed for {what}, already loaded, in {frames['spinning']} frames")
+        page.evaluate("() => { window.__viewerFrames.seen = 0; }")
+        return frames["seen"]
+
+    def controls(what):
+        for row, buttons in zip(("top row", "bottom bar"), dlg.evaluate(VIEWER_HITS)):
+            if not buttons:
+                fail(f"{tag}: the viewer's {row} has no buttons with {what}")
+            for i, c in enumerate(buttons):
+                sq, box = c["sq"], c["box"]
+                if row == "top row" and abs(c["w"] - c["h"]) > 0.5:
+                    fail(f"{tag}: {c['name']} in the top row is squeezed to {c['w']:.0f}x{c['h']:.0f} with {what}")
+                if sq["r"] - sq["l"] < 43.5 or sq["b"] - sq["t"] < 43.5:
+                    fail(f"{tag}: {c['name']} in the {row} answers only {sq['r'] - sq['l']:.0f}x{sq['b'] - sq['t']:.0f} with {what}")
+                if c["miss"]:
+                    fail(f"{tag}: a tap at {c['miss']} from {c['name']}'s middle does not reach it with {what}")
+                if sq["l"] < max(box["l"], 0) - 0.5 or sq["r"] > min(box["r"], w) + 0.5 or sq["t"] < box["t"] - 0.5 or sq["b"] > min(box["b"], h) + 0.5:
+                    fail(f"{tag}: {c['name']}'s square leaves the {row} with {what} ({sq} in {box})")
+                for o in buttons[i + 1:]:
+                    if min(sq["r"], o["sq"]["r"]) - max(sq["l"], o["sq"]["l"]) > 0.5 and min(sq["b"], o["sq"]["b"]) - max(sq["t"], o["sq"]["t"]) > 0.5:
+                        fail(f"{tag}: {c['name']}'s square overlaps {o['name']}'s in the {row} with {what}")
+            ok(f"{tag}: with {what}, the viewer's {row} ({', '.join(c['name'] for c in buttons)}) answers 44 px squares, apart and inside it")
+
+    ok(f"{tag}: the first picture after a load is fitted in each of its {fitted('the first picture')} frames")
+    controls("the first picture")
+    first = img.get_attribute("src")
+    x, y = center(img)
+    send = touches(page)
+    send("touchStart", [(x + 90, y)])
+    for k in range(1, 10):
+        send("touchMove", [(x + 90 - k * 20, y)])
+        page.wait_for_timeout(16)
+    send("touchEnd", [])
+    expect(dlg.locator('[aria-live="polite"]')).to_contain_text("2 / ")
+    page.wait_for_timeout(500)
+    if img.get_attribute("src") == first:
+        fail(f"{tag}: a swipe did not bring the next picture")
+    ok(f"{tag}: a swipe brings the next picture, fitted in each of its {fitted('the next picture')} frames")
+    controls("the next picture")
+    if S["shots"]:
+        page.add_style_tag(content="[role=dialog] .touch-hit::before { outline: 1px solid rgb(255 64 64) }")
+        shot(page, f"{tag}-viewer-hits")
+    page.go_back()
+    expect(dlg).to_have_count(0)
+    page.wait_for_timeout(500)
 
 
 def check_table(page, tag):
@@ -271,6 +412,7 @@ def check_long_press(page, tag):
     shot(page, f"{tag}-menu")
     page.keyboard.press("Escape")
     expect(menu).to_have_count(0)
+    page.wait_for_function("!history.state?.personaOverlay")  # its entry goes a tick later; the next go() would be the one popped
 
 
 def check_revisit(page, tag):
@@ -284,36 +426,116 @@ def check_revisit(page, tag):
 
 
 def check_diff(page, tag):
+    """An edit's diff, in the Changes side panel since #9362 (the full-screen diff went with it): on a phone the panel
+    covers the screen, the page never scrolls sideways (a long line scrolls inside the diff), and Back closes it on the
+    chat."""
     go(page, READ)
     open_group(page)
     page.locator('main [data-action-row="Edit"] button').first.tap()
-    scr = page.locator("[data-diff-screen]")
-    expect(scr).to_be_visible()
-    page.wait_for_timeout(350)  # its slide-up
-    b = scr.bounding_box()
+    panel = page.locator("aside[aria-label=变更]")
+    expect(panel.locator("[data-changes-panel] [data-change-diff] [data-change-id]").first).to_be_visible()  # the edit drawn
+    page.wait_for_timeout(350)  # its slide-in
+    b = panel.bounding_box()
     cw = page.evaluate("document.documentElement.clientWidth")
     if abs(b["width"] - cw) > 1 or b["x"] > 1:
-        fail(f"{tag}: the diff is {b['width']:.0f} wide at {b['x']:.0f}, not the screen ({cw})")
-    more = scr.locator("[data-diff-more]")
-    expect(more).to_contain_text("展开其余")
-    n = scr.locator("[data-diff-line]").count()
-    if n != 40:
-        fail(f"{tag}: the folded diff shows {n} lines, not 40")
-    # a fade at the right edge while the lines go on past it, none when they fit
-    over, fade = scr.locator("[data-diff]").evaluate("e => [e.scrollWidth > e.clientWidth + 2, getComputedStyle(e).maskImage]")
-    if over != ("gradient" in fade):
-        fail(f"{tag}: lines {'overflow' if over else 'fit'} but the fade is {fade!r}")
+        fail(f"{tag}: the changes panel is {b['width']:.0f} wide at {b['x']:.0f}, not the screen ({cw})")
+    if page.evaluate("document.documentElement.scrollWidth") > cw:
+        fail(f"{tag}: the page scrolls sideways under the diff")
     shot(page, f"{tag}-diff")
-    more.tap()
-    expect(more).to_have_count(0)
-    if scr.locator("[data-diff-line]").count() <= 40:
-        fail(f"{tag}: 展开 did not show the rest")
-    ok(f"{tag}: the diff takes the screen, fades at the right, folds at 40 lines and opens to all")
+    ok(f"{tag}: an edit's diff opens in the changes panel over the whole screen")
     page.go_back()
-    expect(scr).to_have_count(0)
+    expect(panel).to_have_count(0)
     if not same_chat(READ, page.url):
         fail(f"{tag}: Back left the chat")
     ok(f"{tag}: Back closes the diff on the chat")
+
+
+# The chat's pills on a touch screen (#11511): "Reload" in the failed-refresh pill, "Jump to bottom" and "Back to where
+# you were" answer a finger 20 px from their middle (touch-hit's 44 px), and their squares do not overlap.
+PILLS = "/s/studio/a1f3c2d4-0000-4000-8000-000000000003"  # an Agent no other check opens: its items come from the route below
+PILL_HITS = """(sels) => sels.map((sel) => {
+  const b = document.querySelector(sel);
+  if (!b) return { sel, missing: true };
+  const r = b.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const on = (px, py) => document.elementFromPoint(px, py)?.closest('button') === b;
+  const half = (n) => Math.max(n / 2, 22);
+  return { sel, h: Math.round(r.height), above: on(x, y - 20), below: on(x, y + 20),
+           sq: [x - half(r.width), y - half(r.height), x + half(r.width), y + half(r.height)] };
+})"""
+
+
+def check_chat_pills(page, tag):
+    # twelve exchanges with more before them; the older page fails (a hub that lost its computer), so the pill shows
+    n, last = 12, 900000
+    items = []
+    for k in range(n):
+        seq = last - 2 * (n - k) + 1
+        items += [{"id": f"pill-u{k}", "seq": seq, "ts": "2026-11-19T08:00:00Z", "role": "user", "kind": "text", "text": f"第 {k + 1} 个问题：这一块的写法有没有问题？"},
+                  {"id": f"pill-a{k}", "seq": seq + 1, "ts": "2026-11-19T08:01:00Z", "role": "assistant", "kind": "text",
+                   "text": "\n\n".join([f"第 {k + 1} 块看过了，命名可以再统一一点，测试也覆盖到了主要的分支。"] * 4)}]
+    pattern = "**/api/v1/sessions/studio/a1f3c2d4-0000-4000-8000-000000000003/items?*"
+
+    def serve(route):
+        url = route.request.url
+        if "before_seq=" in url:
+            route.fulfill(status=502, json={"error": "node unreachable"})
+        elif "turns=" in url:
+            route.fulfill(json={"items": items, "has_more": True, "to_seq": last})
+        else:
+            route.fallback()
+    page.route(pattern, serve)
+    try:
+        go(page, PILLS)
+        page.wait_for_timeout(600)
+        # leave the end with a finger, then up to the top: the older page is asked for, and fails
+        send = touches(page)
+        x, y = center(page.locator("[data-chat-scroll]"))
+        send("touchStart", [(x, y - 100)])
+        for i in range(1, 9):
+            page.wait_for_timeout(16)
+            send("touchMove", [(x, y - 100 + 30 * i)])
+        send("touchEnd", [])
+        page.wait_for_timeout(400)
+        page.evaluate("document.querySelector('[data-chat-scroll]').scrollTop = 0")
+        expect(page.locator("[data-testid=chat-not-live] button")).to_be_visible(timeout=10000)
+        expect(page.locator("[data-jump-pill]")).to_be_visible()
+        page.wait_for_timeout(300)  # the pills' fade-up
+        shot(page, f"{tag}-pills")
+        reload, jump = "[data-testid=chat-not-live] button", "[data-jump-pill]"
+        for d in page.evaluate(PILL_HITS, [reload, jump]):
+            if d.get("missing") or not (d["above"] and d["below"]):
+                fail(f"{tag}: {d['sel']} ({d.get('h')} tall) does not answer 20 px from its middle ({d})")
+        # a search hit gone to: "Back to where you were" over the chat's top edge, the failed-refresh pill under it
+        page.locator("header").get_by_role("button", name="更多操作", exact=True).tap()
+        page.get_by_role("menuitem", name="会话内搜索").tap()
+        page.locator("[data-chat-search] input").fill("第 1 个问题")
+        page.locator("[data-search-result]").first.tap()
+        expect(page.locator("[data-search-return]")).to_be_visible()
+        # The hit is the first exchange, at the top. Opening the search re-read the newest page, which took the error
+        # away and dropped the older page's waiting retry (#11522); the failed page is asked for again only on a scroll
+        # once its wait (3 s) is over: the reader moves a pixel at a time until it has failed again and the pill is back.
+        for i in range(30):
+            if page.locator(reload).is_visible():
+                break
+            page.evaluate(f"document.querySelector('[data-chat-scroll]').scrollTop += {1 if i % 2 else -1}")
+            page.wait_for_timeout(500)
+        expect(page.locator(reload)).to_be_visible()
+        page.wait_for_timeout(300)
+        hits = page.evaluate(PILL_HITS, [reload, "[data-search-return]", jump])
+        for d in hits:
+            if d.get("missing") or not (d["above"] and d["below"]):
+                fail(f"{tag}: with the return pill up, {d['sel']} does not answer 20 px from its middle ({d})")
+        for i, a in enumerate(hits):
+            for b in hits[i + 1:]:
+                ox = min(a["sq"][2], b["sq"][2]) - max(a["sq"][0], b["sq"][0])
+                oy = min(a["sq"][3], b["sq"][3]) - max(a["sq"][1], b["sq"][1])
+                if ox > 0.5 and oy > 0.5:
+                    fail(f"{tag}: the touch squares of {a['sel']} and {b['sel']} overlap ({a['sq']}, {b['sq']})")
+        shot(page, f"{tag}-pills-return")
+        ok(f"{tag}: Reload ({hits[0]['h']} tall), Back to where you were and Jump to bottom answer a finger 20 px from "
+           "their middle, their squares apart")
+    finally:
+        page.unroute(pattern)
 
 
 def phone(browser, name, theme, full):
@@ -336,6 +558,8 @@ def phone(browser, name, theme, full):
         check_revisit(page, tag)
         check_diff(page, tag)
         check_pending(page, tag)
+    check_viewer_controls(page, tag)
+    if name != "land": check_chat_pills(page, tag)
     ctx.close()
 
 
@@ -347,10 +571,11 @@ def desktop(browser, theme):
     h = main_box(page, "[data-work-group] > button")
     if h and h["height"] >= 32:
         fail(f"{tag}: the work group header grew on a desktop ({h['height']:.0f})")
-    btn = page.locator('main [data-answer] button[aria-label="拷贝代码"]').first
-    if float(btn.evaluate("e => getComputedStyle(e).opacity")) > 0.01:
-        fail(f"{tag}: copy code shows without hover on a desktop")
-    ok(f"{tag}: header {h['height']:.0f} tall, copy code waits for hover")
+    # a code block's Copy sits in its language bar, always shown (#3210: the corner button that waited for hover is gone)
+    btn = page.locator('main [data-answer] [data-code-bar] button[aria-label="复制代码"]').first
+    if float(btn.evaluate("e => getComputedStyle(e).opacity")) < 0.99:
+        fail(f"{tag}: copy code is not shown in the code bar on a desktop")
+    ok(f"{tag}: header {h['height']:.0f} tall, copy code in the code bar")
     shot(page, f"{tag}-read")
     ctx.close()
 

@@ -1,8 +1,11 @@
 {
-  "title": "隐藏的 Agent 文件夹",
+  "title": "Agent 文件夹",
+  "block": "在 {machine} 上屏蔽 {path} 中的 Agent 会话：这台电脑不再收集它们，Persona 中任何地方都不显示、不计数，它们的授权请求留在 Agent 自己的界面处理",
   "hide": "在 {machine} 上隐藏 {path} 中的 Agent 会话，不在 Agents 和 Persona 的视图中显示（会话照常运行并继续记录；正在督办的任务仍然可见）",
-  "add_off": "在 {machine} 上添加隐藏文件夹 {path}，先保持关闭（打开前不会隐藏任何会话）",
-  "switch_on": "打开 {machine} 上的隐藏文件夹 {path}（其中的会话不再出现在 Agents 和 Persona 的视图中）",
-  "switch_off": "关闭 {machine} 上的隐藏文件夹 {path}（其中的会话重新显示，规则保留）",
-  "remove": "删除 {machine} 上的隐藏文件夹 {path}（其中的会话重新显示）"
+  "add_off": "在 {machine} 上添加 Agent 文件夹规则 {path}，先保持关闭（打开前不起作用）",
+  "switch_on": "打开 {machine} 上的 Agent 文件夹规则 {path}",
+  "switch_off": "关闭 {machine} 上的 Agent 文件夹规则 {path}（其中的会话重新显示，规则保留）",
+  "to_block": "把 {machine} 上的 Agent 文件夹规则 {path} 改为屏蔽（这台电脑不再收集其中的会话）",
+  "to_hide": "把 {machine} 上的 Agent 文件夹规则 {path} 改为隐藏（其中的会话重新收集，但不在 Agents 和 Persona 的视图中显示）",
+  "remove": "删除 {machine} 上的 Agent 文件夹规则 {path}（其中的会话重新显示）"
 }

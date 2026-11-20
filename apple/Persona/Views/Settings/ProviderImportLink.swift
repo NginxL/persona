@@ -80,6 +80,16 @@ nonisolated struct ProviderImportProvider: Decodable, Sendable {
 nonisolated struct ProviderImportDraft: Decodable, Sendable {
     var label: String?
     var provider: ProviderImportProvider
+    var matches: [ProviderImportMatch]?
+    var notes: [ProviderImportNote]?
+    var envNames: [String]?
+    var skippedEnv: [ProviderImportSkip]?
+    var skippedHeaders: [ProviderImportSkip]?
+
+    enum CodingKeys: String, CodingKey {
+        case label, provider, matches, notes
+        case envNames = "env_names", skippedEnv = "skipped_env", skippedHeaders = "skipped_headers"
+    }
 }
 
 nonisolated struct ProviderImportNote: Decodable, Sendable {

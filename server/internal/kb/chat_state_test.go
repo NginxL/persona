@@ -100,6 +100,41 @@ func TestIngestRecordsStateWithLines(t *testing.T) {
 	}
 }
 
+func TestIngestSourceURLDoesNotDirtyProjects(t *testing.T) {
+	for _, withMessages := range []bool{false, true} {
+		t.Run(map[bool]string{false: "metadata only", true: "with messages"}[withMessages], func(t *testing.T) {
+			e := testEngine(t, nil)
+			sc := SourceChat{ID: "sample-garden-4", Kind: "pr", State: "open", StateAt: projectEvidenceTime}
+			c := &Chat{ID: ChatID("github", sc.ID), Source: "github", SourceID: sc.ID, Kind: sc.Kind,
+				State: sc.State, StateAt: sc.StateAt, Projects: []string{"garden"}}
+			if err := e.Store.PutChat(c); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.Store.PutProject(&Project{Slug: "garden", Status: "active", Chats: []string{c.ID}}); err != nil {
+				t.Fatal(err)
+			}
+			for i, url := range []string{"https://github.com/sample/garden/pull/4", "https://github.com/sample/garden-next/pull/4"} {
+				sc.SourceURL = url
+				var messages []SourceMessage
+				if withMessages {
+					messages = []SourceMessage{{ID: url, Text: "A review comment", At: e.textCutoff().AddDate(0, 0, i+1)}}
+				}
+				if n, err := e.Ingest(context.Background(), named("github"), sc, messages); err != nil || n != len(messages) {
+					t.Fatalf("ingesting source URL %q: %d, %v", url, n, err)
+				}
+				got, _ := e.Store.Chat(c.ID)
+				if got == nil || got.SourceURL != url || got.State != sc.State || !got.StateAt.Equal(sc.StateAt) {
+					t.Fatalf("expected persisted URL and unchanged state: %+v", got)
+				}
+				p, _ := e.Store.Project("garden")
+				if p == nil || p.Dirty {
+					t.Fatalf("recording source URL %q dirtied the project: %+v", url, p)
+				}
+			}
+		})
+	}
+}
+
 // FinishProjects finishes a project only on the sources' facts and only when every condition holds.
 func TestFinishProjects(t *testing.T) {
 	now := time.Now().UTC()

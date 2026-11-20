@@ -81,9 +81,38 @@ func startedAssistant(t *testing.T, n *Node, host *fakeRuntime) string {
 	return res.SessionID
 }
 
+func TestRuntimeAssistantModeForwardsAssistant(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	host := dialRuntime(t, n, assistantRuntimeHello())
+	id := startedAssistant(t, n, host)
+	if _, err := nodeCall(t, n, "session.modes", map[string]any{"session_id": id, "permission_mode": "plan"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := host.got("session.modes")
+	if len(calls) != 1 {
+		t.Fatalf("session.modes calls: %s", calls)
+	}
+	var got struct {
+		SessionID string `json:"session_id"`
+		Mode      string `json:"permission_mode"`
+		Assistant bool   `json:"assistant"`
+	}
+	if err := json.Unmarshal(calls[0], &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SessionID != id || got.Mode != "plan" || !got.Assistant {
+		t.Fatalf("session.modes payload: %s", calls[0])
+	}
+}
+
 func TestAssistantOnARuntimeStartsAndSendsWithTheSnapshot(t *testing.T) {
 	n, hub := runtimeNode(t)
 	assistantHub(hub)
+	n.dir = filepath.Join(n.home, ".persona")
+	cwd := filepath.Join(n.dir, "assistant")
+	privateMemory := filepath.Join(n.dir, "profiles", "claude", "projects", memoryKey(cwd), "memory")
+	writeNote(t, privateMemory, "runtime-copy.md", "A note from another profile.\n", time.Time{})
 	host := dialRuntime(t, n, assistantRuntimeHello())
 	if a, err := n.assistantAgent(context.Background(), "dsh"); err != nil || a != assistantOnRuntime {
 		t.Fatalf("assistantAgent: %q %v", a, err)
@@ -111,6 +140,12 @@ func TestAssistantOnARuntimeStartsAndSendsWithTheSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(p.Context, "测试时间") || !strings.Contains(p.Context, "MEMORY.md") {
 		t.Fatalf("the first message's context: %q", p.Context)
+	}
+	if p.MemoryDir != n.memoryDir(cwd) || !strings.Contains(p.Context, "(runtime-copy.md)") {
+		t.Fatalf("the runtime's first turn missed the merged memory: %s", sends[0])
+	}
+	if got := readNote(t, p.MemoryDir, "runtime-copy.md"); got != "A note from another profile.\n" {
+		t.Fatalf("the runtime's memory note: %q", got)
 	}
 	if st, ok := n.state.get(sid); !ok || st.Launcher != "dsh" || !strings.HasSuffix(st.Cwd, "/.persona/assistant") {
 		t.Fatalf("state %+v", st)
@@ -442,12 +477,21 @@ func TestGatedToolGoesThroughTheGate(t *testing.T) {
 	assistantHub(hub)
 	skills := filepath.Join(n.home, ".persona", "skills")
 	t.Setenv("PERSONA_SKILLS_DIR", skills)
+	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
 	n.dir = filepath.Join(n.home, ".persona")
 	script := filepath.Join(skills, "example", "scripts", "ex.sh")
-	_ = os.MkdirAll(filepath.Dir(script), 0o755)
-	_ = os.WriteFile(filepath.Join(skills, "example", "SKILL.md"), []byte("---\nname: example\n---\n"), 0o644)
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skills, "example", "SKILL.md"), []byte("---\nname: example\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ran := filepath.Join(n.home, "ran")
-	_ = os.WriteFile(script, []byte("#!/bin/bash\necho \"$*\" >> "+shellQuote(ran)+"\necho done \"$*\"\n"), 0o755)
+	if err := os.WriteFile(script, []byte("#!/bin/bash\necho \"$*\" >> "+shellQuote(ran)+"\necho done \"$*\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The hub prepares its assistant directory before sending. User-selected task directories keep their own skills.
+	prepareAssistantForTest(t, n, ".persona/assistant", nil, nil)
 	g := exampleGate("")
 	g.Tool = &proto.GateTool{Name: "example_api", Description: "Run ex."}
 	n.mu.Lock()

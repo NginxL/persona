@@ -2740,7 +2740,7 @@ def assistant_state(space="", archived=False):
            "conversations": [s for s in ASSISTANT if s["machine_id"] == cfg["machine_id"] and s.get("space", "") == space
                              and (archived or not s.get("archived"))]}
     if not os.environ.get("MOCK_LEGACY_HUB"):
-        out.update(agent_tasks=cfg["agent_tasks"], close_ended_terminals=cfg["close_ended_terminals"], inbox_signals=cfg["inbox_signals"], archive_closed_days=cfg["archive_closed_days"],
+        out.update(work_guide=MANAGER_WORK_GUIDES.get(MANAGERS["default"], False), agent_tasks=cfg["agent_tasks"], close_ended_terminals=cfg["close_ended_terminals"], inbox_signals=cfg["inbox_signals"], archive_closed_days=cfg["archive_closed_days"],
                    idle_close_hours=cfg["idle_close_hours"], kb_topics=cfg["kb_topics"],
                    main_supervises_own_tasks=cfg["main_supervises_own_tasks"], next_suggestions=cfg["next_suggestions"],
                    claude_interactive=cfg["claude_interactive"],
@@ -3305,6 +3305,18 @@ if os.environ.get("MOCK_TODO_PROJECTS") == "1":
         _p = {"todo_weather": "weather-app", "todo_review": "weather-app", "todo_photos": "photo-sync", "todo_nas": "photo-sync",
               "todo_blog": "blog"}.get(_t["id"])
         if _p: _t["project"] = _p
+# MOCK_STAGE_DONE=1: the stage strip's endings (#11590, docs/assistant/todos.md "Data model"): a code task accepted with
+# nothing left to deploy, whose strip ends with Done after Develop (stage_done), and a check of real data still running,
+# general work that draws no strip at all.
+if os.environ.get("MOCK_STAGE_DONE") == "1":
+    TODOS_INIT.extend([
+        {"id": "todo_stage_done", "title": "Upgrade the command-line tool", "notes": "Upgraded and checked on the laptop.",
+         "done_at": ago(minutes=40), "done_by": "review", "created_at": ago(hours=3), "updated_at": ago(minutes=40),
+         "stage": "develop", "stage_kind": "code", "stage_done": True, "spaces": [], "agents": []},
+        {"id": "todo_stage_general", "title": "Check the new rule against real data", "notes": "", "done_at": None,
+         "created_at": ago(hours=1), "updated_at": ago(minutes=5), "stage": "develop", "stage_kind": "general",
+         "spaces": [], "agents": []},
+    ])
 TODOS = copy.deepcopy(TODOS_INIT)
 
 _DIRECTION_STATE_ORDER = {"needs_you": 0, "review": 1, "stuck": 2, "working": 3, "planned": 4}
@@ -4733,6 +4745,8 @@ def assistant_for_manager(h):
     # Another manager is one from before meeting attendance and the retention settings: none of their fields.
     st = {k: v for k, v in st.items() if k not in ("main", "notes", "meeting_attendance_default", "recording_days", "minutes_days",
                                                            "meeting_transcription_default", "meeting_glossary", "meeting_transcription_extension", "meeting_transcription_ready")}
+    if "work_guide" in st:
+        st["work_guide"] = MANAGER_WORK_GUIDES.get(mid, False)
     return (dict(st, manager=mid, conversations=[], tasks=[], notes=notes, notes_effective=notes), 200)
 
 
@@ -4749,6 +4763,7 @@ def other_manager(h):
 
 
 # Each other manager's own 说明 (设置 › 助手 with its X-Persona-Manager): a whole assistant has its own.
+MANAGER_WORK_GUIDES = {}
 MANAGER_NOTES = {"m-3fa21c": "这是「工作」管理者：只管工作电脑上的事和工作邮箱。"}
 
 
@@ -10758,6 +10773,10 @@ def mock_interactions():
         # MOCK_TASKS_NO_ASKS=1: the tasks' agents ask nothing, so the conversation shows above the composer whole.
         if os.environ.get("MOCK_TASKS_NO_ASKS") == "1":
             out = [x for x in out if x.get("session_id") not in (TESTS, WIDGET, RELEASE)]
+        # A blocked Agent folder's sessions send no cards: the node keeps them on the computer (#10053).
+        if AGENT_DIRS_HIDDEN:
+            cwds = {(r["machine_id"], r["session_id"]): r.get("cwd") for r in SESSIONS}
+            out = [x for x in out if not _hidden_by_directory(x.get("machine_id"), cwds.get((x.get("machine_id"), x.get("session_id"))) or x.get("cwd"), "block")]
         if MOCK_TASKS:  # a task's agent asking: the hub names the task (task_title)
             titles = {a["session_id"]: t["title"] for t in TODOS if t.get("origin") and not t.get("done_at") for a in t.get("agents", [])}
             out = [dict(x, task_title=titles[x["session_id"]]) if x.get("session_id") in titles else x for x in out]
@@ -11837,8 +11856,9 @@ _CLAUDE_DIRS = [("~/.claude", "default", 0, 86), ("~/.config/claude/work", "conf
 
 
 # Settings › Agent › Hidden Agent Folders (#8578, docs/protocol/protocol.md "Agent directory visibility"): machine id →
-# [{pattern, enabled}]. Rows whose cwd an enabled rule matches carry hidden_by_directory; bounded lists leave them out
-# unless include_hidden=1, the legacy list and the sockets keep them. A change pushes that computer's rows and replays
+# [{pattern, enabled, action}]. Rows whose cwd an enabled hide rule matches carry hidden_by_directory; bounded lists leave
+# them out unless include_hidden=1, the legacy list and the sockets keep them. Rows an enabled block rule matches are
+# not there at all, as a node that blocks them lists none (#10053). A change pushes that computer's rows and replays
 # its pending cards, as the manager does; the cards never leave the inventory.
 AGENT_DIRS_HIDDEN = {}
 AGENT_DIRS_FAIL = {"n": 0}  # GET /mock/agent_dirs_fail?n=<count>: the next n reads of the list answer 503
@@ -11848,14 +11868,15 @@ def _machine_home(mid):
     return next((m.get("home") for m in MACHINES if m["id"] == mid), "") or "/home/me"
 
 
-def _hidden_by_directory(mid, cwd):
+def _hidden_by_directory(mid, cwd, action="hide"):
+    """An enabled rule of that action matches cwd."""
     import fnmatch
     if not cwd:
         return False
     home, parts = _machine_home(mid), [x for x in cwd.split("/") if x]
     for r in AGENT_DIRS_HIDDEN.get(mid, []):
         pat = r["pattern"]
-        if not r.get("enabled", True):
+        if not r.get("enabled", True) or r.get("action", "hide") != action:
             continue
         if pat.startswith("*"):
             if any(fnmatch.fnmatchcase(x, pat) for x in parts):
@@ -11882,7 +11903,10 @@ def _set_agent_dirs_hidden(mid, body):
             return None, "bad pattern %r: a path or glob starting with / or ~/, or * for a folder name" % pat
         if any(x["pattern"] == pat for x in rules):
             return None, "duplicate pattern %r" % pat
-        rules.append({"pattern": pat, "enabled": r.get("enabled", True) is not False})
+        action = r.get("action") or "hide"
+        if action not in ("block", "hide"):
+            return None, "action %r is neither block nor hide" % action
+        rules.append({"pattern": pat, "enabled": r.get("enabled", True) is not False, "action": action})
     AGENT_DIRS_HIDDEN[mid] = rules
     push_machine(mid)
     for ix in out_by_machine([x for x in mock_interactions() if x.get("machine_id") == mid]):
@@ -12584,192 +12608,17 @@ if os.environ.get("MOCK_MAIL_INBOX") == "off":
 # of inbox items. As a hub from before #669 (the harder case for the app): its program has not run while off since the
 # hub started, so it lists no capabilities (and has no sign-in, 409) until switched on and started (TELEGRAM_START
 # seconds; meanwhile "Process not started yet"). A hub from #669 on lists Telegram's declared capabilities from the start.
-# MOCK_GITHUB=device: GitHub signed in neither way, its device-flow sign-in from the app (connector/github/login.go):
-# straight to the code ABCD-1234 (the hub uses the GitHub CLI's client ID); it is entered after two asks (one second
-# apart).
-GITHUB_DEVICE = {"polls": 0}
+# GitHub's own routes are scripts/mock/github_mock.py's, a domain (#11543): its sign-ins (MOCK_GITHUB=device, the gh
+# logins of /api/v1/connectors/github/auth) and MOCK_GITHUB_INBOX=1's thread page. The connector stays here.
 if os.environ.get("MOCK_GITHUB_LOGIN") or os.environ.get("MOCK_GITHUB") == "scopes":
     # a hub from V6 on: GitHub signed in through a computer's gh, and it can sign in here
     GITHUB_CONNECTOR["capabilities"] = GITHUB_CONNECTOR["capabilities"] + ["login"]
     GITHUB_CONNECTOR["enabled"] = True
-# GET/PUT /api/v1/connectors/github/auth: where GitHub's token comes from (a computer's gh, or the device flow) and
-# each computer's gh login. MOCK_GITHUB=scopes: MacBook's gh lacks repo and notifications.
-GH_FULL = ["gist", "read:org", "repo", "workflow"]
-GH_MISSING = [{"scope": "repo", "affects": ["私有仓库的 PR、issue、评论、代码搜索读不到", "私有仓库的 CI 失败和日志读不到", "评论和 review 发不了"]},
-              {"scope": "notifications", "affects": ["收件箱收不到 GitHub 的通知"]}]
-GH_NARROW = os.environ.get("MOCK_GITHUB") == "scopes"
-GH_MACHINES = [
-    {"id": "mbp", "name": "MacBook", "state": "signed_in", "account": "alice", "scopes": ["read:org"] if GH_NARROW else GH_FULL,
-     **({"missing": GH_MISSING} if GH_NARROW else {})},
-    {"id": "studio", "name": "Mac Studio", "state": "not_signed_in"},
-    {"id": "server", "name": "服务器", "state": "offline"},
-]
-GITHUB_AUTH = {"source": "device" if os.environ.get("MOCK_GITHUB") == "device" else "machine",
-               "machine": None if os.environ.get("MOCK_GITHUB") == "device" else "mbp"}
-
-
-def github_auth_view():
-    v = {"source": GITHUB_AUTH["source"], "machines": GH_MACHINES, "scopes_known": False}
-    if GITHUB_AUTH["source"] == "machine":
-        v["machine"] = GITHUB_AUTH["machine"]
-        m = next((x for x in GH_MACHINES if x["id"] == GITHUB_AUTH["machine"]), {})
-        if m.get("state") == "signed_in":
-            v.update(scopes=m["scopes"], scopes_known=True)
-            if m.get("missing"): v["missing"] = m["missing"]
-    elif GITHUB_CONNECTOR.get("status") == "ok":
-        v.update(scopes=["repo"], scopes_known=True)
-    return v
-
-
-def set_github_auth(body):
-    global GITHUB_CONNECTOR
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    for k in ("account", "via", "error", "last_sync"): GITHUB_CONNECTOR.pop(k, None)
-    if body.get("source") == "device":
-        GITHUB_AUTH.update(source="device", machine=None)
-        GITHUB_DEVICE["polls"] = 0
-        GITHUB_CONNECTOR.update(status="not_signed_in", error="还没登录 GitHub：在下面选一台电脑上的 gh 登录，或者用设备码登录")
-        return True
-    m = next((x for x in GH_MACHINES if x["id"] == body.get("machine")), None)
-    if not m: return False
-    GITHUB_AUTH.update(source="machine", machine=m["id"])
-    if m["state"] == "signed_in":
-        GITHUB_CONNECTOR.update(status="ok", account=m["account"], via="来自 %s 的 gh 登录" % m["name"], last_sync=now)
-    else:
-        GITHUB_CONNECTOR.update(status="not_signed_in", via="来自 %s 的 gh 登录" % m["name"],
-                                error={"not_signed_in": "%s 上的 gh 没有登录 github.com" % m["name"], "offline": "GitHub 未授权（%s 离线）：它连上后会自动再读" % m["name"]}.get(m["state"], m["state"]))
-    return True
 if os.environ.get("MOCK_GITHUB") == "device":
     GITHUB_CONNECTOR = {"id": "github", "name": "GitHub", "status": "not_signed_in", "enabled": True,
                         "error": "还没登录 GitHub：在下面选一台电脑上的 gh 登录，或者用设备码登录",
                         "capabilities": ["status", "tools", "actions", "events", "hosts", "inbox", "archive", "login", "options"],
                         "hosts": ["github.com"], "options": {"ci": "mine", "muted_repos": [], "ignore_branches": ["train/*"]}}
-
-
-# GitHub's thread page (connector/github/thread.go, MOCK_GITHUB_INBOX=1): the made-up pull request
-# example-org/example-repo#12 as the hub reads it — header, description, comments, reviews, comments on a line, checks
-# and events; a reply is added as a comment of mine. Other threads (a CI run) cannot be opened, as on the hub.
-GH_AVATAR_COLORS = {"alice": (214, 120, 160), "bob": (90, 150, 220), "sam": (110, 180, 120), "ci-bot[bot]": (140, 140, 150)}
-GH_SENT = []
-
-
-def gh_thread_page():
-    now = datetime.now(timezone.utc)
-    def at(**kw):
-        return (now - timedelta(**kw)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    def who(login):
-        return {"id": login, "name": login, "avatar": "avatar:%s:4" % login}
-    hunk = ("@@ -36,9 +36,12 @@ func upload(ctx context.Context, f File) error {\n"
-            " \tfor attempt := 0; attempt < 3; attempt++ {\n"
-            " \t\tif err = send(ctx, f); err == nil {\n"
-            " \t\t\treturn nil\n"
-            " \t\t}\n"
-            "-\t\ttime.Sleep(time.Second)\n"
-            "+\t\ttime.Sleep(backoff(attempt))")
-    log = "\n".join(["=== RUN   TestUploadRetries", "    retry_test.go:58: attempt 1 failed: connection reset",
-                      "    retry_test.go:58: attempt 2 failed: connection reset", "    retry_test.go:71: waited 7s, want at most 6s",
-                      "--- FAIL: TestUploadRetries (7.01s)", "FAIL", "FAIL\texample.com/uploader\t7.214s", "Error: Process completed with exit code 1."])
-    msgs = [
-        {"id": "e1", "at": at(days=2, hours=3), "sender": who("alice"), "event": True, "text": "alice 加了标签 enhancement"},
-        {"id": "e2", "at": at(days=2, hours=3, minutes=-1), "sender": who("alice"), "event": True, "text": "alice 请 sam review"},
-        {"id": "c1", "at": at(days=2, hours=2), "sender": who("ci-bot[bot]"), "format": "markdown",
-         "text": "预览已部署：https://example.com/preview/12", "url": "https://github.com/example-org/example-repo/pull/12#issuecomment-1"},
-        {"id": "r1", "at": at(days=1, hours=6), "sender": who("bob"), "kind": "review", "review": "changes_requested", "format": "markdown",
-         "text": "退避要有**上限**，不然网络一直不好时会越等越久。", "url": "https://github.com/example-org/example-repo/pull/12#pullrequestreview-1"},
-        {"id": "rc1", "at": at(days=1, hours=6, minutes=-1), "sender": who("bob"), "kind": "code", "format": "markdown",
-         "code": {"path": "uploader/retry.go", "line": 42, "hunk": hunk},
-         "text": "这里最好加一点抖动（jitter），免得一批上传同时重试。", "url": "https://github.com/example-org/example-repo/pull/12#discussion_r1"},
-        {"id": "rc2", "at": at(days=1, hours=2), "sender": who("alice"), "kind": "code", "format": "markdown",
-         "code": {"path": "uploader/retry.go", "line": 42}, "reply_to": {"id": "rc1", "from": "bob", "text": "这里最好加一点抖动（jitter），免得一批上传同时重试。"},
-         "text": "好，加上了 `rand.Int63n`，上限 8 秒。", "url": "https://github.com/example-org/example-repo/pull/12#discussion_r2"},
-        {"id": "e3", "at": at(days=1, hours=1), "sender": who("alice"), "event": True, "text": "alice 强制推送了分支"},
-        {"id": "ck1", "at": at(hours=20), "sender": {"name": "github-actions"}, "kind": "check",
-         "check": {"name": "lint", "state": "success", "url": "https://github.com/example-org/example-repo/actions/runs/1/job/1"}},
-        {"id": "ck2", "at": at(hours=19, minutes=50), "sender": {"name": "github-actions"}, "kind": "check",
-         "check": {"name": "test", "state": "failure", "url": "https://github.com/example-org/example-repo/actions/runs/1/job/2", "log": log}},
-        {"id": "ck3", "at": at(hours=19, minutes=45), "sender": {"name": "github-actions"}, "kind": "check",
-         "check": {"name": "build", "state": "success", "url": "https://github.com/example-org/example-repo/actions/runs/1/job/3"}},
-        {"id": "r2", "at": at(hours=3), "sender": who("bob"), "kind": "review", "review": "approved", "format": "markdown",
-         "text": "上限和抖动都好了，LGTM。", "url": "https://github.com/example-org/example-repo/pull/12#pullrequestreview-2"},
-        {"id": "c2", "at": at(minutes=25), "sender": who("alice"), "format": "markdown", "text": "请看一下重试的退避时间",
-         "url": "https://github.com/example-org/example-repo/pull/12#issuecomment-2"},
-    ] + GH_SENT
-    chat = {"id": "example-org/example-repo#12", "name": "Add retries to the example uploader", "kind": "pr",
-            "url": "https://github.com/example-org/example-repo/pull/12", "reply": "github_comment", "state": "open",
-            "author": who("alice"), "labels": [{"name": "enhancement", "color": "a2eeef"}, {"name": "uploader", "color": "d4c5f9"},
-                                               {"name": "needs review", "color": "fbca04"}],
-            "branch": {"head": "feat/upload-retries", "base": "main"}, "body_format": "markdown",
-            "body": "上传失败时按指数退避重试三次。\n\n## 改了什么\n- 新增 `uploader/retry.go`：等 1、2、4 秒再试\n"
-                    "- 上传失败的错误里带上试了几次\n\n## 怎么测\n`go test ./uploader/...`"}
-    return chat, msgs
-
-
-def github_thread_area(h, method, p, raw):
-    """GitHub's thread page (MOCK_GITHUB_INBOX=1); True when it answered."""
-    if not os.environ.get("MOCK_GITHUB_INBOX") or not p.startswith("/api/v1/connectors/github/"):
-        return False
-    q = parse_qs(urlparse(h.path).query)
-    what = p.rsplit("/", 1)[1]
-    if what == "thread" and method == "GET":
-        if q.get("thread", [""])[0] != "example-org/example-repo#12":
-            return h.send_json({"error": "notification:7 is not a pull request or an issue"}, 502) or True
-        chat, msgs = gh_thread_page()
-        limit, before = int(q.get("limit", ["30"])[0]), q.get("before", [""])[0]
-        end = next((i for i, m in enumerate(msgs) if m["id"] == before), len(msgs)) if before else len(msgs)
-        start = max(0, end - limit)
-        out = {"chat": chat, "messages": msgs[start:end]}
-        if start > 0:
-            out["before"] = msgs[start]["id"]
-        return h.send_json(out) or True
-    if what == "media" and method == "GET":
-        parts = q.get("ref", [""])[0].split(":")
-        if len(parts) != 3 or parts[1] not in GH_AVATAR_COLORS:
-            return h.send_json({"error": "不认识这个媒体"}, 502) or True
-        data = png(96, 96, GH_AVATAR_COLORS[parts[1]])
-        h.send_response(200)
-        h.send_header("Content-Type", "image/png"); h.send_header("Content-Length", str(len(data)))
-        h.send_header("Cache-Control", "private, max-age=31536000, immutable")
-        h.end_headers(); h.wfile.write(data)
-        return True
-    if p.endswith("/thread/reply") and method == "POST":  # from the user's device the real hub posts it at once (#1190)
-        body = json.loads(raw or b"{}")
-        GH_SENT.append({"id": "c%d" % (100 + len(GH_SENT)), "at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-                        "sender": {"id": "sam", "name": "sam", "avatar": "avatar:sam:4"}, "mine": True, "format": "markdown",
-                        "text": body.get("text", "")})
-        SENT.append({"thread": body.get("thread", ""), "action": body.get("action", ""), "text": body.get("text", "")})
-        return h.send_json({"ok": True, "result": "Commented on example-org/example-repo#12"}) or True
-    return False
-
-
-def github_area(h, method, p, raw):
-    """GitHub's device-flow sign-in (MOCK_GITHUB=device); True when it answered."""
-    if p == "/api/v1/connectors/github/auth" and (os.environ.get("MOCK_GITHUB") in ("device", "scopes") or os.environ.get("MOCK_GITHUB_LOGIN")):
-        if method == "PUT" and not set_github_auth(json.loads(raw or b"{}")):
-            return h.send_json({"error": "unknown machine"}, 400) or True
-        return h.send_json(github_auth_view()) or True
-    if os.environ.get("MOCK_GITHUB") != "device" or method != "POST" or p not in ("/api/v1/connectors/github/login", "/api/v1/connectors/github/logout"):
-        return False
-    global GITHUB_CONNECTOR
-    if p.endswith("/logout"):
-        GITHUB_CONNECTOR.update(status="not_signed_in", error="还没登录 GitHub：在下面选一台电脑上的 gh 登录，或者用设备码登录")
-        GITHUB_CONNECTOR.pop("account", None); GITHUB_CONNECTOR.pop("via", None)
-        return h.send_json({"ok": True}) or True
-    body = json.loads(raw or b"{}")
-    step, d = body.get("step") or "", GITHUB_DEVICE
-    device = {"step": "device", "kind": "device_code", "url": "https://github.com/login/device", "user_code": "ABCD-1234", "interval": 1,
-              "hint": "在 GitHub 的验证页输入这个验证码并授权（授权页上显示的是「GitHub CLI」）；授权后这里会自动继续。"}
-    if step == "device":
-        d["polls"] += 1
-        if d["polls"] < 3 or os.environ.get("MOCK_GITHUB_WAIT"):
-            return h.send_json(device) or True
-        GITHUB_CONNECTOR.update(status="ok", account="example-user", via="设备码登录",
-                                last_sync=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
-        GITHUB_CONNECTOR.pop("error", None)
-        return h.send_json({"done": True, "account": "example-user"}) or True
-    if step:
-        return h.send_json({"error": "unknown step %r" % step}, 502) or True
-    d["polls"] = 0
-    return h.send_json(device) or True
 
 
 # MOCK_WECHAT=signed_out|signed_in: the WeChat plugin's connector (status + login only, #1352), signed in by a QR code to
@@ -12823,82 +12672,8 @@ def wechat_connector():
     return c
 
 
-# Settings › Knowledge selection (docs/assistant/knowledge.md "Selection"): the hub's defaults until a PUT replaces them.
-KB_SELECTION_MESSAGES = ["mentions", "mine", "dm", "group", "bot", "official", "muted", "collapsed", "done"]
-KB_SELECTION_DOCS = ["mentions", "comment_mentions", "authored", "viewed"]
-KB_SELECTION = {"doc": None}
-
-
-def kb_selection_defaults():
-    messages = {n: {"on": n in ("mentions", "mine", "dm"), "days": None, "attachment_days": None} for n in KB_SELECTION_MESSAGES}
-    messages["mentions"]["include_all"] = True
-    messages["mine"]["context"] = 50
-    return {"version": 1,
-            "messages": {"order": [["mentions", "mine"]] + [[n] for n in KB_SELECTION_MESSAGES[2:]], "rules": messages},
-            "docs": {"order": [["mentions", "comment_mentions"], ["authored"], ["viewed"]],
-                     "rules": {n: {"on": True, "days": None} for n in KB_SELECTION_DOCS}},
-            "items": [], "history": {}}
-
-
-def kb_selection_problem(doc):
-    """Why the hub would refuse the document (kb.Selection.Validate); None when it would take it."""
-    def days(d):
-        return d is None or (isinstance(d, int) and not isinstance(d, bool) and 1 <= d <= 36500)
-    if not isinstance(doc, dict) or set(doc) - {"version", "messages", "docs", "items", "history"} or doc.get("version") != 1:
-        return "version or fields"
-    for part, names, fields in (("messages", KB_SELECTION_MESSAGES, {"on", "days", "attachment_days", "include_all", "context"}),
-                                ("docs", KB_SELECTION_DOCS, {"on", "days"})):
-        rules = doc.get(part) or {}
-        order = rules.get("order") or []
-        if sorted(n for level in order for n in level) != sorted(names) or any(not level for level in order):
-            return part + ".order"
-        if sorted(rules.get("rules") or {}) != sorted(names):
-            return part + ".rules"
-        for name, rule in rules["rules"].items():
-            if set(rule) - fields or not isinstance(rule.get("on", False), bool):
-                return "%s.%s" % (part, name)
-            if not days(rule.get("days")) or not days(rule.get("attachment_days")):
-                return "%s.%s days" % (part, name)
-            if rule.get("include_all") is not None and name != "mentions":
-                return "%s.%s include_all" % (part, name)
-            context = rule.get("context")
-            if context is not None and (name != "mine" or isinstance(context, bool) or
-                                        not isinstance(context, int) or not 0 <= context <= 200):
-                return "%s.%s context" % (part, name)
-    seen = set()
-    for item in doc.get("items") or []:
-        key = (item.get("source"), item.get("kind"), item.get("id"))
-        if set(item) - {"source", "kind", "id", "name", "read", "store", "days"} or not key[0] or not key[2] or key[1] not in ("chat", "doc"):
-            return "items"
-        if key in seen or (item.get("store") and not item.get("read")) or not days(item.get("days")):
-            return "items"
-        seen.add(key)
-    for source, history in (doc.get("history") or {}).items():
-        if not source or set(history) - {"back_days"} or not days(history.get("back_days")):
-            return "history"
-    return None
-
-
-def kb_selection_route(h, method, p, raw):
-    """GET / PUT /api/v1/kb/selection; True when it answered. MOCK_KB_SELECTION=missing: a hub from before it (404),
-    future: a document with a field no client knows yet, fail: the save is refused."""
-    if p != "/api/v1/kb/selection":
-        return False
-    mode = os.environ.get("MOCK_KB_SELECTION", "")
-    if mode == "missing":
-        return h.send_json({"code": "not_found", "error": "unknown kind"}, 404) or True
-    if method == "PUT":
-        if is_read_only(h):
-            return h.send_json({"error": "read-only device"}, 403) or True
-        if mode == "fail":
-            return h.send_json({"error": "知识库暂时写不进去"}, 503) or True
-        doc = json.loads(raw or b"{}")
-        problem = kb_selection_problem(doc)
-        if problem:
-            return h.send_json({"code": "invalid", "error": "selection: " + problem}, 400) or True
-        KB_SELECTION["doc"] = doc
-    doc = KB_SELECTION["doc"] or kb_selection_defaults()
-    return h.send_json(dict(doc, later={"added": True}) if mode == "future" else doc) or True
+# Settings › Knowledge selection (GET / PUT /api/v1/kb/selection, MOCK_KB_SELECTION): scripts/mock/kb_selection_mock.py,
+# a domain (#11543).
 
 
 def triage_route(h, method, p, raw):
@@ -13213,7 +12988,16 @@ def tg_thread(thread, before, limit):
     out = {"chat": chat, "messages": page}
     if len(msgs) > limit:
         out["before"] = page[0]["id"]
-    return out
+    return thread_avatars("telegram", out)
+
+
+def thread_avatars(source, page):
+    """List each picture on this thread through the hub, keeping its legacy connector ref."""
+    chat = page["chat"]
+    for row in [chat, chat.get("author")] + [m.get("sender") for m in page["messages"]]:
+        if row and row.get("avatar"):
+            row["avatar_url"] = avatar_path(source, row["avatar"])
+    return page
 
 
 def avatar_path(source, value):
@@ -13221,31 +13005,43 @@ def avatar_path(source, value):
     return "/api/v1/avatars/%s/%s" % (source, base64.urlsafe_b64encode(value.encode()).rstrip(b"=").decode())
 
 
-def avatars_area(h, p):
-    """GET /api/v1/avatars/{source}/{value}?size= (#10923, docs/protocol/protocol.md "Avatars"): the made-up pictures the
-    mock's lists name, drawn at the size asked (64, 128, 256 or 512); True when it answered."""
-    if not p.startswith("/api/v1/avatars/"):
-        return False
+def avatar_asked(h, p):
+    """(source, value, size) of a GET /api/v1/avatars/{source}/{value}?size=: value decoded (None when the segment is not
+    one the hub lists) and size the edge the picture is drawn at (64, 128, 256 or 512)."""
     source, _, seg = p[len("/api/v1/avatars/"):].partition("/")
     try:
         value = base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4)).decode()
     except Exception:
-        return h.send_json({"error": "not an avatar", "code": "bad_url"}, 404) or True
+        value = None
     try:
         asked = int(parse_qs(urlparse(h.path).query).get("size", ["128"])[0])
     except ValueError:
         asked = 128
-    size = next((e for e in (64, 128, 256, 512) if e >= asked), 512)
-    parts = value.split(".")
-    if source != "telegram" or not TELEGRAM_MODE or parts[0] != "a" or len(parts) != 3 or parts[1] not in TG_AVATAR_COLORS:
-        return h.send_json({"error": "no such picture", "code": "fetch_failed"}, 502) or True
-    data = tg_avatar(parts[1], size)
+    return source, value, next((e for e in (64, 128, 256, 512) if e >= asked), 512)
+
+
+def send_avatar(h, data):
+    """Answers an avatars request with the PNG data, as the hub sends a picture; True."""
     h.send_response(200)
     h.send_header("Content-Type", "image/png"); h.send_header("Content-Length", str(len(data)))
     h.send_header("X-Content-Type-Options", "nosniff")
     h.send_header("Cache-Control", "private, max-age=31536000, immutable")
     h.end_headers(); h.wfile.write(data)
     return True
+
+
+def avatars_area(h, p):
+    """GET /api/v1/avatars/{source}/{value}?size= (#10923, docs/protocol/protocol.md "Avatars"): the made-up pictures the
+    mock's lists name, drawn at the size asked (64, 128, 256 or 512); True when it answered. GitHub's thread page draws
+    its own first (scripts/mock/github_mock.py, MOCK_GITHUB_INBOX=1); any other is no such picture."""
+    if not p.startswith("/api/v1/avatars/"):
+        return False
+    source, value, size = avatar_asked(h, p)
+    if value is None:
+        return h.send_json({"error": "not an avatar", "code": "bad_url"}, 404) or True
+    if source == "telegram" and TELEGRAM_MODE and len(parts := value.split(".")) == 3 and parts[0] == "a" and parts[1] in TG_AVATAR_COLORS:
+        return send_avatar(h, tg_avatar(parts[1], size))
+    return h.send_json({"error": "no such picture", "code": "fetch_failed"}, 502) or True
 
 
 # GET /mock/telegram_avatars?mode=before|1 (MOCK_TELEGRAM_INBOX, #10923): the Telegram rows as a hub before the avatars
@@ -16325,135 +16121,17 @@ MOMENT_COMMENTS = [
      "content": {"text": "我用的迁移助手，一晚上就好了，你是不是开了 FileVault"}},
 ]
 
-MAIL_ACCOUNTS = [{"id": "acc1", "name": "个人邮箱", "email": "me@example.com", "provider": "imap", "auth": "password",
-                  "imap_host": "imap.example.com", "imap_port": 993, "smtp_host": "smtp.example.com", "smtp_port": 465}]
-if NO_SOURCES:
-    MAIL_ACCOUNTS.clear()
-
-# ---------- area: mail (Android mail lane; fake data only) ----------
-# The mail's write paths: flags, sending, adding / testing / deleting accounts, Google sign-in's start. Nothing is sent
-# anywhere: what the app posted is in GET /mock/mail. MOCK_MAIL=1 adds whole mails for the reader (an HTML one with a
-# tracking pixel, a script and an attachment; a two-mail thread) and a Gmail account whose authorization ran out and a
-# Feishu one; MOCK_GOOGLE=1 makes google/config say configured and google/start answer (with a made-up URL).
-# MOCK_OUTLOOK=1: an Outlook account signed in with Microsoft (the web's Outlook badge and line, #2968).
-if os.environ.get("MOCK_OUTLOOK"):
-    MAIL_ACCOUNTS.append({"id": "acc4", "name": "me@outlook.example", "email": "me@outlook.example", "provider": "outlook", "auth": "oauth2",
-                          "imap_host": "outlook.office365.com", "status": "ok"})
-MAIL_LOG = {"sent": [], "flags": [], "accounts_added": [], "deleted": [], "tested": []}
-MAIL_FULL = {}
+# Mail's accounts and write paths (GET / POST /api/v1/mail/accounts, …/send, …/flags, the sign-ins, GET /mock/mail and
+# MOCK_MAIL's whole mails, MOCK_GOOGLE, MOCK_OUTLOOK, MOCK_OUTLOOK_CLIENT) are scripts/mock/mail_mock.py's, a domain
+# (#11543). MOCK_MAIL=1's inbox row for its two-mail thread stays here, among the inbox's rows, so the switches
+# below that change the inbox (MOCK_LINKS, MOCK_NEEDS) still see it.
 if os.environ.get("MOCK_MAIL"):
-    MAIL_ACCOUNTS += [
-        {"id": "acc2", "name": "me@gmail.example", "email": "me@gmail.example", "provider": "gmail", "auth": "oauth2",
-         "imap_host": "imap.gmail.com", "status": "error", "error": "Google authorization expired or was revoked"},
-        {"id": "acc3", "name": "我的飞书邮箱", "email": "me@corp.example.com", "provider": "feishu", "auth": "password",
-         "imap_host": "imap.larkoffice.com", "status": "ok"},
-    ]
-    MAIL_FULL = {
-        501: {"subject": "下周的分享能不能提前到周二？", "from": {"name": "Lucy Wang", "email": "lucy@example.com"},
-              "to": [{"name": "我", "email": "me@example.com"}], "cc": [{"name": "Tom", "email": "tom@example.com"}],
-              "date": ago(hours=3), "message_id": "<501@example.com>", "references": ["<499@example.com>"],
-              "text": "Hi，\n\n周四我临时要出差，分享能不能挪到周二下午？三点以后都行。\n\nLucy", "html": "", "seen": False},
-        502: {"subject": "你的订单已发货", "from": {"name": "示例商城", "email": "shop@example.com"},
-              "to": [{"name": "", "email": "me@example.com"}], "date": ago(hours=5), "message_id": "<502@example.com>",
-              "text": "", "seen": True,
-              "html": "<html><head><script>alert(1)</script><style>.box{padding:12px}</style></head>"
-                      "<body><div class=box><h2>你的订单已发货</h2><p>订单 <b>2026102800123</b> 已由快递揽收，预计<b>周五</b>送达。</p>"
-                      "<p><img src=\"https://images.example.com/track.png\" width=1 height=1>"
-                      "<img src=\"https://images.example.com/parcel.jpg\" alt=\"包裹\"></p>"
-                      "<p><a href=\"https://shop.example.com/orders/2026102800123\" onclick=\"steal()\">查看物流</a></p></div></body></html>",
-              "attachments": [{"filename": "发票.pdf", "mime": "application/pdf", "size": 48213}]},
-        505: {"subject": "Re: 季度复盘的时间", "from": {"name": "Jack Li", "email": "jack@example.com"},
-              "to": [{"name": "我", "email": "me@example.com"}], "date": ago(hours=30), "message_id": "<505@example.com>",
-              "text": "周三上午可以吗？", "html": "", "seen": True},
-        506: {"subject": "Re: 季度复盘的时间", "from": {"name": "Jack Li", "email": "jack@example.com"},
-              "to": [{"name": "我", "email": "me@example.com"}, {"name": "Tom", "email": "tom@example.com"}], "date": ago(hours=1),
-              "message_id": "<506@example.com>", "references": ["<505@example.com>"], "flagged": True, "seen": False,
-              "text": "改到周三下午两点吧，会议室我订好了。\n\n议程：\n1. 上季度目标回顾\n2. 下季度计划\n\nJack", "html": ""},
-    }
     INBOX.insert(0, {"id": "mail:acc1:t5:505", "source": "mail", "kind": "mail", "account": "acc1", "account_name": "个人邮箱",
                      "title": "Re: 季度复盘的时间", "sender": "Jack Li", "preview": "改到周三下午两点吧，会议室我订好了。", "count": 2,
                      "started_at": ago(hours=30), "updated_at": ago(hours=1), "tier": "action", "summary": "Jack 把季度复盘改到周三下午两点",
                      "reason": "要你确认时间", "read": False,
                      "mail": {"account_id": "acc1", "mailbox": "INBOX", "uids": [505, 506],
                               "from": {"name": "Jack Li", "email": "jack@example.com"}, "direct": True}})
-
-
-def mail_area(h, method, p, q):
-    """The mail paths above (True when it answered)."""
-    if p == "/mock/mail" and method == "GET":
-        h.send_json(MAIL_LOG); return True
-    if not p.startswith("/api/v1/mail/"): return False
-    body = json.loads(getattr(h, "last_body", b"") or b"{}") if method != "GET" else {}
-    parts = p.split("/")  # ['', 'api', 'v1', 'mail', 'messages', aid, uid, (flags)]
-    if p.startswith("/api/v1/mail/messages/") and len(parts) >= 7 and parts[6].isdigit():
-        uid = int(parts[6])
-        if len(parts) > 7 and parts[7] == "flags":
-            MAIL_LOG["flags"].append(dict(body, account_id=unquote(parts[5]), uid=uid))
-            if uid in MAIL_FULL: MAIL_FULL[uid].update({k: body[k] for k in ("seen", "flagged") if k in body})
-            h.send_json({"ok": True}); return True
-        if method == "GET" and uid in MAIL_FULL:
-            h.send_json({"message": dict(MAIL_FULL[uid], account_id=unquote(parts[5]), mailbox=(q.get("mailbox") or ["INBOX"])[0], uid=uid)})
-            return True
-        return False
-    if p.startswith("/api/v1/mail/accounts/") and p.endswith("/test"):
-        aid = unquote(parts[5])
-        a = next((x for x in MAIL_ACCOUNTS if x["id"] == aid), None)
-        MAIL_LOG["tested"].append(aid)
-        h.send_json({"ok": a is not None and a.get("status") != "error", "error": (a or {}).get("error") or (None if a else "no such account")})
-        return True
-    if p.startswith("/api/v1/mail/accounts/") and method == "DELETE":
-        aid = unquote(parts[5])
-        MAIL_ACCOUNTS[:] = [a for a in MAIL_ACCOUNTS if a["id"] != aid]
-        MAIL_LOG["deleted"].append(aid)
-        h.send_json({"ok": True}); return True
-    if p == "/api/v1/mail/accounts" and method == "POST":
-        email = (body.get("email") or "").strip()
-        if "@" not in email or not body.get("password"):
-            h.send_json({"error": "email and password are required"}, 400); return True
-        if body.get("password") == "wrong":
-            h.send_json({"error": "imap login: wrong authorization code"}, 400); return True
-        prov = body.get("provider") or "imap"
-        dom = email.split("@")[1]
-        acc = {"id": "acc_" + uuid.uuid4().hex[:6], "name": body.get("name") or email, "email": email, "provider": prov,
-               "auth": "password", "imap_host": body.get("imap_host") or ("imap.larkoffice.com" if prov == "feishu" else "imap." + dom),
-               "imap_port": body.get("imap_port") or 993, "smtp_host": body.get("smtp_host") or ("smtp.larkoffice.com" if prov == "feishu" else "smtp." + dom),
-               "smtp_port": body.get("smtp_port") or 465, "status": "ok"}
-        MAIL_ACCOUNTS.append(acc)
-        MAIL_LOG["accounts_added"].append({k: v for k, v in body.items() if k != "password"})
-        h.send_json({"account": acc}); return True
-    if p == "/api/v1/mail/send" and method == "POST":
-        if not body.get("to"):
-            h.send_json({"error": "at least one recipient is required"}, 400); return True
-        MAIL_LOG["sent"].append(body)
-        h.send_json({"ok": True}); return True
-    if p == "/api/v1/mail/oauth/google/config":
-        h.send_json({"configured": bool(os.environ.get("MOCK_GOOGLE"))}); return True
-    if p == "/api/v1/mail/oauth/google/start" and method == "POST":
-        if not os.environ.get("MOCK_GOOGLE"):
-            h.send_json({"error": "Google sign-in is not configured on this hub: an admin adds google.client_id to the manager's manager.json and restarts the hub. Until then, add Gmail with an app password.",
-                         "code": "google_not_configured"}, 400); return True
-        h.send_json({"auth_url": "https://accounts.example.com/o/oauth2/auth?state=mock", "callback_scheme": "com.example.mock", "state": "mock"})
-        return True
-    # Outlook's "Sign in with Microsoft": no client ID until the app saves one (MOCK_OUTLOOK_CLIENT=1: already there).
-    if p == "/api/v1/mail/oauth/microsoft/config":
-        if method == "PUT":
-            cid = (body.get("client_id") or "").strip()
-            if cid and not re.fullmatch(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", cid):
-                h.send_json({"error": "这不像 client ID：Entra 应用「概述」页的「应用程序(客户端) ID」，形如 xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}, 400); return True
-            MS_CONFIG.update(configured=bool(cid), client_id=cid or None, source="app" if cid else None)
-            MAIL_LOG.setdefault("microsoft_client", []).append(cid)
-        h.send_json({k: v for k, v in MS_CONFIG.items() if v is not None}); return True
-    if p == "/api/v1/mail/oauth/microsoft/start" and method == "POST":
-        if not MS_CONFIG["configured"]:
-            h.send_json({"error": "还没有 Outlook 登录用的 client ID"}, 400); return True
-        h.send_json({"auth_url": "https://login.example.com/common/oauth2/v2.0/authorize?state=mock", "callback_scheme": "persona-mail-oauth", "state": "mock"})
-        return True
-    return False
-# ---------- end area: mail ----------
-
-MS_CONFIG = {"configured": False, "client_id": None, "source": None, "redirect_uri": "persona-mail-oauth://outlook"}
-if os.environ.get("MOCK_OUTLOOK_CLIENT"):
-    MS_CONFIG.update(configured=True, client_id="11111111-2222-3333-4444-555555555555", source="app")
 
 
 # MOCK_LONG_SLOTS=1: the weather space's tabs have long names (the space page's two-column cards must still fit).
@@ -18939,7 +18617,7 @@ def all_sessions():
     if not AGENT_DIRS_HIDDEN:
         return rows
     return [dict(r, hidden_by_directory=True) if not r.get("assistant") and _hidden_by_directory(r["machine_id"], r.get("cwd")) else r
-            for r in rows]
+            for r in rows if r.get("assistant") or not _hidden_by_directory(r["machine_id"], r.get("cwd"), "block")]
 
 
 def is_child_row(r):
@@ -21228,20 +20906,28 @@ PERSONAL_HIDDEN = {}  # session id -> when (ms)
 PERSONAL_PREFS = {"pins": [], "view": {}, "sections": [], "assign": {}}
 PERSONAL_PREF_FAIL = {"status": 0}
 # The user's navigation choices (#9071, GET / PUT /api/v1/navigation): the start page, the sidebar's pages and Overview's
-# extension cards (#9745). Empty until something is stored; MOCK_NAVIGATION=off is a hub (or a default manager) from
+# extension cards (#9745) with its own sections among them (#10905). Empty until something is stored; MOCK_NAVIGATION=off is a hub (or a default manager) from
 # before, which answers 404 and keeps nothing; MOCK_NAVIGATION=no-overview a default manager from before the cards
 # (#9351's): a PUT of only them is 400, and the record it answers never has them.
 NAVIGATION = {}
 NAVIGATION_START = re.compile(r"(?:[a-z][a-z0-9-]{0,63}|p:[^/\x00-\x20\x7f]{1,128}/[^/\x00-\x20\x7f]{1,128})")
 NAVIGATION_CARD_ID = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")  # an extension's id and a UI contribution's
+NAVIGATION_SECTION = re.compile(r"[a-z][a-z0-9_]{0,31}")  # one of Overview's own sections (#10905)
 
 
 def navigation_overview_ok(cards):
-    """Whether `cards` is Overview's arrangement as the manager takes it (server/internal/assistant/navigation.go)."""
+    """Whether `cards` is Overview's arrangement as the manager takes it (server/internal/assistant/navigation.go): its
+    cards and its own sections (#10905), each once."""
     if not isinstance(cards, list) or len(cards) > 256:
         return False
     seen = set()
     for c in cards:
+        if isinstance(c, dict) and "section" in c:
+            if not isinstance(c["section"], str) or not NAVIGATION_SECTION.fullmatch(c["section"]) or set(c) - {"section", "hidden"} \
+                    or not isinstance(c.get("hidden", False), bool) or c["section"] in seen:
+                return False
+            seen.add(c["section"])
+            continue
         if not isinstance(c, dict) or not all(isinstance(c.get(k), str) and NAVIGATION_CARD_ID.fullmatch(c[k]) for k in ("extension", "id")):
             return False
         if not isinstance(c.get("hidden", False), bool) or c.get("span", "half") not in ("half", "full", ""):
@@ -25987,7 +25673,6 @@ MOCK_HELP = [
     "MOCK_KB_CORRECTIONS=1  Knowledge base: the lists links are held in, so links can be removed, and confirmed facts on one person (#6997)",
     "MOCK_KB_TOPICS_OFF=1  Knowledge points by topic starts off (the assistant's kb_topics), for the off state of the map (#7251)",
     "MOCK_KB_TOPICS=1  Knowledge base: five topics of knowledge points from the example projects and chats (Topics tab, a topic's page, the knowledge map)",
-    "MOCK_KB_SELECTION=missing|future|fail  Settings › Knowledge selection: a hub from before it (404) / a document with a field clients don't know / a save the hub refuses (503)",
     "MOCK_SESSIONS_LIST=1  Paged Agents, counts, exact lookup and by to-do (todo=, #6662); list-mode sockets send hints instead of full lists (#6362)",
     "MOCK_SESSIONS_MANY=<n>  n more idle sessions to page through; GET /mock/sessions/touch expires the old cursors (#4410)",
     "MOCK_SIDE_SESSIONS=1  Three Claude desktop side sessions of the PR review (parent_agent_id, #5935): one waiting for you with its card, one a stopped side of a side; the hub folds them into the review's chat (sessions_side_fold, #7944) unless MOCK_SIDE_FOLD=0",
@@ -27268,8 +26953,6 @@ class H(BaseHTTPRequestHandler):
                 if x is not None: return self.send_json(x)
             for x in INBOX + INBOX_HISTORY:  # an item done long ago: the history's (#2200)
                 if x["id"] == iid: return self.send_json(dict(x, context=x.get("context") or x["preview"]))
-        if mail_area(self, "GET", p, q): return
-        if p == "/api/v1/mail/accounts": return self.send_json({"accounts": MAIL_ACCOUNTS})
         if p.startswith("/api/v1/mail/messages/") and p.count("/") == 6:  # …/{aid}/{uid}
             uid = int(p.rsplit("/", 1)[1]) if p.rsplit("/", 1)[1].isdigit() else -1
             if uid in MAIL_MESSAGES: return self.send_json({"message": MAIL_MESSAGES[uid]})
@@ -27286,12 +26969,9 @@ class H(BaseHTTPRequestHandler):
         if larkcli_thread_area(self, "GET", p): return
         if plugin_connector_area(self, "GET", p, b""): return
         if triage_route(self, "GET", p, b""): return
-        if kb_selection_route(self, "GET", p, b""): return
         if wechat_area(self, "GET", p, b""): return
-        if github_thread_area(self, "GET", p, b""): return
         if subscription_thread_area(self, "GET", p): return
         if assistant_inbox_area(self, "GET", p): return
-        if github_area(self, "GET", p, b""): return
         if p == "/api/v1/connectors":  # Settings › Connectors › GitHub; MOCK_GITHUB=signed_out: its gh login has expired
             listed = [GITHUB_CONNECTOR, {k: v for k, v in _imessage_connector().items() if v is not None}] + ([telegram_connector()] if TELEGRAM_MODE else [])
             listed += [PLUGIN_CONNECTOR] if PLUGIN_CONNECTOR else []
@@ -27953,13 +27633,9 @@ class H(BaseHTTPRequestHandler):
             return self.send_json(s)
         if telegram_area(self, self.command, p, self.last_body): return
         if triage_route(self, self.command, p, self.last_body): return
-        if kb_selection_route(self, self.command, p, self.last_body): return
         if wechat_area(self, self.command, p, self.last_body): return
         if larkcli_area(self, self.command, p, self.last_body): return
-        if github_thread_area(self, self.command, p, self.last_body): return
-        if github_area(self, self.command, p, self.last_body): return
         if plugin_connector_area(self, self.command, p, self.last_body): return
-        if mail_area(self, self.command, p, parse_qs(urlparse(self.path).query)): return
         if MOCK_LARK and fs_post(self, p, parse_qs(urlparse(self.path).query), self.last_body): return  # area: feishu chat page
         if rule_suggestions_area(self, self.command, p): return
         if tasks_area(self, self.command, p, self.last_body): return
@@ -29087,6 +28763,17 @@ class H(BaseHTTPRequestHandler):
             body = json.loads(self.last_body or b"{}")
             PINS.update(spaces=list(body.get("spaces") or []), sessions=list(body.get("sessions") or []))
             return self.send_json(PINS)
+        if p == "/api/v1/assistant" and self.command == "PUT" and not os.environ.get("MOCK_LEGACY_HUB"):
+            body = json.loads(self.last_body or b"{}")
+            if "work_guide" in body:
+                mid = self.headers.get("X-Persona-Manager")
+                if not mid or type(body["work_guide"]) is not bool: return self.send_json({"code": "bad_request"}, 400)
+                other = assistant_for_manager(self)
+                if other and other[1] != 200: return self.send_json(*other)
+                if is_read_only(self): return self.send_json({"code": "forbidden"}, 403)
+                if body.get("expected_work_guide", MANAGER_WORK_GUIDES.get(mid, False)) != MANAGER_WORK_GUIDES.get(mid, False):
+                    return self.send_json({"code": "configuration_conflict"}, 409)
+                MANAGER_WORK_GUIDES[mid] = body["work_guide"]
         if p == "/api/v1/assistant" and self.command == "PUT" and (other := assistant_for_manager(self)) is not None:
             if other[1] != 200: return self.send_json(*other)
             body = json.loads(self.last_body or b"{}")

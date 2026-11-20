@@ -2,7 +2,7 @@
 // (docs/protocol/protocol.md `/mutes`, `/modes`, `/rename`; iOS Pins.togglingMute, SessionModes).
 import { t } from "../i18n";
 import type { AgentMutes } from "./agent-groups";
-import { sessionCan } from "./format";
+import { herdrTabName, sessionCan } from "./format";
 import type { Session } from "./types";
 
 export interface ModeOption {
@@ -138,8 +138,15 @@ export function toggleMute(s: Pick<Session, "machine_id" | "session_id" | "space
 
 /** The rename request (iOS RenameSessionAlert): only what changed; the herdr tab only for an agent in a herdr pane.
  * Returns null when nothing changed. */
-export function renameBody(s: Session, tab: string, title: string): { tab_name?: string; title?: string } | null {
+export function renameBody(s: Session, tab: string, title: string, unified = false): { tab_name?: string; title?: string } | null {
   const t = tab.trim(), n = title.trim();
+  if (unified) {
+    if (!t) return null;
+    const cli = s.agent ?? "claude";
+    const syncTitle = cli === "claude" || cli === "codex";
+    if (t === herdrTabName(s) && (!syncTitle || t === s.title)) return null;
+    return syncTitle ? { tab_name: t, title: t } : { tab_name: t };
+  }
   const body: { tab_name?: string; title?: string } = {};
   if (!s.assistant && s.slot_id && t && t !== (s.slot_name ?? "")) body.tab_name = t;
   if (n && n !== s.title) body.title = n;

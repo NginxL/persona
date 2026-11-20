@@ -14,6 +14,19 @@ class CheckBundleSkillsTests(unittest.TestCase):
     def test_reads_the_redistributable_keys_from_embed_go(self):
         self.assertIn("persona-office", cbs.redistributable(cbs.EMBED_GO.read_text()))
 
+    def test_resolves_the_persona_work_constant_key(self):
+        self.assertIn("persona-work", cbs.redistributable(cbs.EMBED_GO.read_text()))
+        self.assertEqual(cbs.check(skill("persona-work"), cbs.redistributable(cbs.EMBED_GO.read_text())), [])
+
+    def test_constant_key_is_resolved_only_from_the_same_source(self):
+        source = """const workGuideName = \"persona-work\"
+var Redistributable = map[string]string{
+    workGuideName: \"Persona's own guide\",
+    otherGuide: \"Not a constant\",
+}
+"""
+        self.assertEqual(cbs.redistributable(source), {"persona-work"})
+
     def test_allowed_skills_pass(self):
         self.assertEqual(cbs.check(skill("persona-office"), {"persona-office"}), [])
 

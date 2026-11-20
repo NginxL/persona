@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
-// External Markdown images stay unloaded until the reader taps the placeholder (#8162): the host gets no request on
+// External inline Markdown images stay unloaded until the reader taps the placeholder (#8162): the host gets no request on
 // mount, a tap loads the picture without a Referer header, a failed load offers a retry, and the hub's own images
 // render inline.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Markdown } from "./Markdown";
 import { forgetMarkdown } from "./markdown-cache";
+import { loadReplyImages } from "./reply-images-lazy";
+// Block pictures belong to ReplyImages once its chunk loads. Keep that plugin loaded so these fixtures must exercise
+// the inline gate regardless of when the page gets an idle moment.
+beforeAll(() => loadReplyImages());
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -50,11 +54,9 @@ afterEach(() => {
 });
 
 const draw = async (text: string) => {
-  await act(async () => {
-    root.render(<Markdown text={text} />);
-    if (text.includes("tracker.example")) await import("./ExternalImageGate");
-  });
-  await flush();
+  await act(async () => root.render(<Markdown text={`before ${text} after`} />));
+  // The render starts React.lazy's import. A separate direct import can finish before that request settles.
+  await act(async () => { await vi.dynamicImportSettled(); });
 };
 const gate = () => host.querySelector<HTMLButtonElement>("[data-external-image=gate]");
 const retry = () => host.querySelector<HTMLButtonElement>("[data-external-image=retry]");

@@ -124,6 +124,25 @@ func TestStartResultUnknown(t *testing.T) {
 	}
 }
 
+func TestTracksNodeWriteClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		want   bool
+	}{
+		{"session send", DeviceSessionSend, true},
+		{"session start", DeviceSessionStart, true},
+		{"task terminal close", devicewire.MethodCloseTaskTerminal, true},
+		{"unrelated method", DeviceSessionItems, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tracksNodeWrite(tc.method); got != tc.want {
+				t.Fatalf("tracksNodeWrite(%q) = %t, want %t", tc.method, got, tc.want)
+			}
+		})
+	}
+}
+
 // Which failed sends may still have reached the agent (#7539): no answer came, or the node's error says delivered
 // unknown or yes. A refusal, an error that says nothing of delivery, and a request that never went out are definite.
 func TestSendUnknown(t *testing.T) {

@@ -16,12 +16,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Base64
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
@@ -65,8 +68,13 @@ import persona.core.contracts.api.SessionGitShow
 import persona.core.contracts.api.SessionGitStatus
 import persona.core.contracts.api.SessionsRepository
 import persona.core.designsystem.PersonaTheme
+import persona.feature.chat.ChatLinkContext
+import persona.feature.chat.ForwardPlacement
+import persona.feature.chat.ForwardPlacements
+import persona.feature.chat.RestoredPhotos
 import persona.feature.chat.ChatChromeBindings
 import persona.feature.chat.ChatForwarding
+import persona.feature.chat.ComposerAttachment
 import persona.feature.chat.ChatScreen
 import persona.feature.chat.LocalChatForwarding
 
@@ -191,6 +199,123 @@ class NewAgentForwardPhotosTest {
         rule.onNodeWithTag("forward-new-agent", useUnmergedTree = true).performClick()
         rule.waitUntil(5_000) { context != null }
         return requireNotNull(context)
+    }
+
+    private fun photo(id: String, name: String = id) =
+        ComposerAttachment(id, name, "content://example/$id", image = true, size = 20)
+
+    private fun checkRemoval(context: String, available: Boolean = true,
+        block: suspend TestScope.(NewAgentViewModel, MutableStateFlow<List<Machine>>, Sender, MutableList<String>, CompletableDeferred<Unit>) -> Unit,
+    ) = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val online = MutableStateFlow(if (available) listOf(Machine("studio", "Studio", online = true)) else emptyList())
+        val sender = Sender()
+        val discarded = mutableListOf<String>()
+        val pendingUpload = CompletableDeferred<Unit>()
+        val uploads = NewAgentUploads(service = { Composer() }, upload = { _, _, file, _ ->
+            if (file.name == "hold.png") pendingUpload.await()
+            "/up/${file.id}"
+        }, discard = { discarded += it.id }, photosOnly = { "photos" }, filesOnly = { "files" },
+            errorText = { _, e -> e.message.orEmpty() })
+        val model = NewAgentViewModel(Service(), Store(), online, sender, uploads = uploads, prefill = NewAgentPrefill(context = context))
+        try {
+            advanceUntilIdle()
+            block(model, online, sender, discarded, pendingUpload)
+        } finally {
+            pendingUpload.complete(Unit)
+            model.viewModelScope.cancel()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test fun removingAnUploadedForwardSendsOnlyTheIndependentlyPickedPhoto() {
+        val context = forwardToNewAgent(Files())
+        checkRemoval(context) { model, _, sender, discarded, _ ->
+            val owned = model.state.value.attachments.map { it.id }
+            assertEquals(2, owned.size)
+            assertTrue(model.state.value.attachments.all { it.path != null })
+            model.attach(listOf(photo("picked", "first.png")))
+            advanceUntilIdle()
+            model.forwardContext(null)
+            model.prompt("my note")
+            model.submit()
+            advanceUntilIdle()
+            assertEquals("my note\n\n<attached_images>\n/up/picked\n</attached_images>", sender.sent.single().second)
+            assertTrue("the removed group releases its staged files", owned.all { discarded.count { id -> id == it } == 1 })
+        }
+    }
+
+    @Test fun removingAForwardBeforeAComputerIsAvailableCannotRestoreItsPhotosLater() {
+        val context = forwardToNewAgent(Files())
+        checkRemoval(context, available = false) { model, online, sender, discarded, _ ->
+            assertEquals(context, model.state.value.context)
+            assertTrue(model.state.value.attachments.isEmpty())
+            model.forwardContext(null)
+            online.value = listOf(Machine("studio", "Studio", online = true))
+            advanceUntilIdle()
+            model.prompt("only the note")
+            model.submit()
+            advanceUntilIdle()
+            assertEquals("only the note", sender.sent.single().second)
+            assertEquals("both local staged photos are released once", 2, discarded.distinct().size)
+        }
+    }
+
+    @Test fun removingOneSourceCancelsOnlyItsPhotosAndKeepsOtherUploadsAndUserPicks() {
+        fun ref(chat: String, item: String) =
+            ChatLinkContext("forward", chat, "persona://session/mac/$chat?at=$item", "excerpt $item", msg = item)
+        val first = ref("first", "same")
+        val second = ref("first", "next")
+        val other = ref("other", "same")
+        val context = listOf(first, second, other).joinToString("\n") { it.xml() }
+        ForwardPlacements.placeNewAgent(context, listOf(
+            ForwardPlacement(first, RestoredPhotos(listOf(photo("first-pending", "hold.png")))),
+            ForwardPlacement(second, RestoredPhotos(listOf(photo("first-uploaded")))),
+            ForwardPlacement(other, RestoredPhotos(listOf(photo("other-pending", "hold.png")))),
+        ))
+        checkRemoval(context) { model, _, sender, discarded, pending ->
+            model.attach(listOf(photo("picked", "hold.png")))
+            runCurrent()
+            assertEquals("/up/first-uploaded", model.state.value.attachments.single { it.id == "first-uploaded" }.path)
+            assertNull(model.state.value.attachments.single { it.id == "first-pending" }.path)
+            model.forwardContext(other.xml())
+            model.forwardContext(other.xml())
+            runCurrent()
+            assertEquals(setOf("other-pending", "picked"), model.state.value.attachments.map { it.id }.toSet())
+            assertEquals(listOf("first-pending", "first-uploaded"), discarded.sorted())
+            assertTrue(model.state.value.attachments.all { it.path == null })
+            model.prompt("my note")
+            model.submit()
+            runCurrent()
+            assertTrue("the kept uploads still hold Start", sender.sent.isEmpty())
+            pending.complete(Unit)
+            advanceUntilIdle()
+            model.submit()
+            advanceUntilIdle()
+            assertEquals(other.xml() + "\n\nmy note\n\n<attached_images>\n/up/other-pending\n/up/picked\n</attached_images>",
+                sender.sent.single().second)
+        }
+    }
+
+    @Test fun closingWhileOfflineReleasesTheRemainingHandoffsOnlyOnce() {
+        fun ref(session: String) = ChatLinkContext("forward", session, "persona://session/mac/$session?at=same", "text", msg = "same")
+        val first = ref("first")
+        val other = ref("other")
+        val context = first.xml() + "\n" + other.xml()
+        ForwardPlacements.placeNewAgent(context, listOf(
+            ForwardPlacement(first, RestoredPhotos(listOf(photo("removed")))),
+            ForwardPlacement(other, RestoredPhotos(listOf(photo("left")))),
+        ))
+        checkRemoval(context, available = false) { model, online, _, discarded, _ ->
+            model.forwardContext(other.xml())
+            assertEquals(listOf("removed"), discarded)
+            model.closeAttachments()
+            model.closeAttachments()
+            online.value = listOf(Machine("studio", "Studio", online = true))
+            advanceUntilIdle()
+            assertTrue(model.state.value.attachments.isEmpty())
+            assertEquals(listOf("removed", "left"), discarded)
+        }
     }
 
     @Test fun forwardedPhotosAreUploadedByNewAgentAndIncludedInItsExactFirstMessage() {

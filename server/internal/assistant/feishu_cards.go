@@ -481,9 +481,15 @@ func resolutionText(l i18n.Lang, ix proto.Interaction, r proto.Resolution) strin
 }
 
 // interactionCard is the card asking ix, with the app's choices.
-func (s *Service) interactionCard(ctx context.Context, ix proto.Interaction) *feishubot.Card {
+func (s *Service) interactionCard(ctx context.Context, ix proto.Interaction) (card *feishubot.Card) {
 	l := s.botLang(ctx)
-	place := s.ixWhere(ctx, ix)
+	place, secondary := s.feishuAgentPlace(ctx, ix)
+	place = s.ixTaskPlace(ctx, ix, place)
+	defer func() {
+		if card != nil && secondary != "" {
+			card.Note(secondary)
+		}
+	}()
 	where := feishubot.EscapeMarkdown(place)
 	val := func(extra map[string]any) map[string]any {
 		v := map[string]any{"a": "ix", "id": ix.ID}
@@ -649,7 +655,7 @@ func (s *Service) interactionCard(ctx context.Context, ix proto.Interaction) *fe
 		}
 		return safeCard(l, c.Buttons(open), open)
 	case proto.IxElicitation:
-		return safeCard(l, s.elicitationCard(ctx, ix, open), open)
+		return safeCard(l, s.elicitationCard(ctx, ix, open, place), open)
 	}
 	return safeCard(l, feishubot.NewCard(where, feishubot.Grey, "").Buttons(open), open)
 }
@@ -705,7 +711,7 @@ var elicitationURLRe = lazyre.New(`(?i)^https?://[^/\\?#@]`)
 
 // elicitationCard is an MCP server asking to authorize (a link) or to fill in a form: what it asks on the card, its
 // link as a button; a form is filled in the app (its values may be secrets), so only its fields' names are shown.
-func (s *Service) elicitationCard(ctx context.Context, ix proto.Interaction, open feishubot.Button) *feishubot.Card {
+func (s *Service) elicitationCard(ctx context.Context, ix proto.Interaction, open feishubot.Button, place string) *feishubot.Card {
 	l := s.botLang(ctx)
 	var msg, link, host string
 	var fields []string
@@ -727,7 +733,7 @@ func (s *Service) elicitationCard(ctx context.Context, ix proto.Interaction, ope
 			slices.Sort(fields)
 		}
 	}
-	c := feishubot.NewCard("🔑 "+i18n.T(l, "assistant-feishu_cards.elicitation_title", i18n.Args{"where": s.ixWhere(ctx, ix)}), feishubot.Orange,
+	c := feishubot.NewCard("🔑 "+i18n.T(l, "assistant-feishu_cards.elicitation_title", i18n.Args{"where": place}), feishubot.Orange,
 		i18n.T(l, "assistant-feishu_cards.elicitation_summary", i18n.Args{"message": clip(oneLine(msg), 60)}))
 	if msg != "" {
 		c.Markdown(feishubot.EscapeMarkdown(clip(msg, 2000)))
@@ -782,8 +788,12 @@ func questionText(l i18n.Lang, q proto.Question) string {
 
 // answeredCard is an interaction's card once it is over.
 func (s *Service) answeredCard(ctx context.Context, ix proto.Interaction, how string) *feishubot.Card {
-	title := map[string]string{proto.IxQuestion: "❓ ", proto.IxPlan: "📋 ", proto.IxPermission: "🔐 ", proto.IxScreen: "🖥 "}[ix.Kind] + s.ixWhere(ctx, ix)
+	place, secondary := s.feishuAgentPlace(ctx, ix)
+	title := map[string]string{proto.IxQuestion: "❓ ", proto.IxPlan: "📋 ", proto.IxPermission: "🔐 ", proto.IxScreen: "🖥 "}[ix.Kind] + s.ixTaskPlace(ctx, ix, place)
 	c := feishubot.NewCard(title, feishubot.Grey, how)
+	if secondary != "" {
+		c.Note(secondary)
+	}
 	switch ix.Kind {
 	case proto.IxQuestion:
 		qs := ix.Questions
@@ -810,7 +820,11 @@ func (s *Service) answeredCard(ctx context.Context, ix proto.Interaction, how st
 }
 
 func (s *Service) ixWhere(ctx context.Context, ix proto.Interaction) string {
-	place := s.feishuAgentPlace(ctx, ix)
+	place, _ := s.feishuAgentPlace(ctx, ix)
+	return s.ixTaskPlace(ctx, ix, place)
+}
+
+func (s *Service) ixTaskPlace(ctx context.Context, ix proto.Interaction, place string) string {
 	machine := s.canonical(ix.MachineID)
 	t, ok := s.taskOf(ctx, machine, ix.SessionID)
 	// The card may be closing after the task ended or the session moved on.

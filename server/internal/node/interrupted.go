@@ -1,6 +1,10 @@
 package node
 
-import "github.com/nwverse/persona/server/internal/proto"
+import (
+	"time"
+
+	"github.com/nwverse/persona/server/internal/proto"
+)
 
 // A restart takes herdr's panes with it: the agents that ran in them are gone, and herdr brings one back only once a
 // client attaches — which nobody does to a headless server (#1879). The conversation then just reads "Ended", and the
@@ -28,5 +32,21 @@ func (n *Node) markInterrupted(rows []proto.Session, live map[string]bool) {
 			continue // started by this node: it ended on its own, not with a restart
 		}
 		s.Status = proto.StatusInterrupted
+		if st.StopCause == proto.StopUnknown && ranUntilRestart(st.RanAt, n.bootAt) {
+			// Seen running until shortly before this node started: the restart stopped it, not the user (#11441). The
+			// assistant may resume it as after any stop that was not the user's (stop_provenance.go).
+			n.state.stopped(s.SessionID, proto.StopRestart)
+			n.logf("session %s: stopped by the restart (last seen running %s before it)", short(s.SessionID),
+				n.bootAt.Sub(time.Unix(st.RanAt, 0)).Round(time.Second))
+		}
 	}
+}
+
+// ranUntilRestart: an Agent last seen running at ranAt (unix seconds) was still running within restartWindow of boot.
+func ranUntilRestart(ranAt int64, boot time.Time) bool {
+	if ranAt <= 0 || boot.IsZero() {
+		return false
+	}
+	at := time.Unix(ranAt, 0)
+	return !at.After(boot) && boot.Sub(at) <= restartWindow
 }

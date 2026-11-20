@@ -11,8 +11,9 @@ struct ChatLines {
 
     /// Feed cards and messages still arriving are content too, even before transcript history has loaded.
     static func placeholder(lines: [ChatLine], hasTranscript: Bool, hasPending: Bool,
-                            hasLiveText: Bool, loadedOnce: Bool) -> Placeholder {
+                            hasLiveText: Bool, loadedOnce: Bool, historyNotFound: Bool = false) -> Placeholder {
         guard lines.isEmpty, !hasTranscript, !hasPending, !hasLiveText else { return .none }
+        if historyNotFound { return .none } // the error row replaces the first-page loading state
         return loadedOnce ? .empty : .loading
     }
 

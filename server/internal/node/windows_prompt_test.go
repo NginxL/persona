@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -74,52 +73,46 @@ func TestWindowsHerdrPromptDoesNotSubmitIntoADialog(t *testing.T) {
 	}
 }
 
-func TestWindowsCodexStartPastesTheCompleteFirstMessage(t *testing.T) {
+func TestCodexStartKeepsTheCompleteFirstMessageOutOfTerminalInput(t *testing.T) {
 	n, f := stalledCodexNode(t)
 	withCodexWaits(t)
-	oldPaste := codexStartPaste
-	codexStartPaste, codexStartWait = true, 3*time.Second
-	t.Cleanup(func() { codexStartPaste = oldPaste })
+	codexStartWait = 3 * time.Second
 	cwd := filepath.Join(filepath.Dir(n.dir), "proj")
 	home := filepath.Dir(cwd)
-	prompt := "方向 · 合成测试 · 说明\n\nContext body\nLast line: 中文"
-	f.setScreen("w1:p2", cxReady)
-	var initial, pasted string
+	prompt := "方向 · 合成测试 · 说明\n\nContext body 🧪\nLast line: 中文 and \"quotes\" $HOME"
+	var initial string
 	var mu sync.Mutex
 	f.after(func(c herdrCall) {
-		mu.Lock()
-		defer mu.Unlock()
-		switch c.Method {
-		case "pane.send_input":
-			m := startFileRE.FindStringSubmatch(str(c.Params["text"]))
-			if m != nil {
-				var start codexStartFile
-				b, err := os.ReadFile(m[1])
-				if err != nil || json.Unmarshal(b, &start) != nil {
-					t.Error("could not inspect the launch file")
-				}
-				initial = start.Prompt
-			}
-		case "pane.send_text":
-			pasted = str(c.Params["text"])
-			f.setScreen("w1:p2", fmt.Sprintf("› [Pasted Content %d chars]\n\n  gpt-6 xhigh · /tmp/proj\n", len([]rune(prompt))))
-		case "pane.send_keys":
-			if slices.Equal(keysOf(c), []string{"enter"}) {
-				if pasted != pasteStart+prompt+pasteEnd {
-					t.Error("submitted before the complete message was pasted")
-				}
-				writeWaitRollout(t, home, cwd, startThread, time.Now(), strings.TrimSuffix(strings.TrimPrefix(pasted, pasteStart), pasteEnd))
-				f.setScreen("w1:p2", cxReady)
-			}
+		if c.Method != "pane.send_input" {
+			return
 		}
+		m := startFileRE.FindStringSubmatch(str(c.Params["text"]))
+		if m == nil {
+			return
+		}
+		var start codexStartFile
+		b, err := os.ReadFile(m[1])
+		if err != nil || json.Unmarshal(b, &start) != nil {
+			t.Error("could not inspect the launch file")
+			return
+		}
+		mu.Lock()
+		initial = start.Prompt
+		mu.Unlock()
+		writeWaitRollout(t, home, cwd, startThread, time.Now(), start.Prompt)
 	})
-	s, err := n.startCodex(context.Background(), n.defaultHost().(host.Launcher), cwd, "codex", []string{"codex"}, modelExecution{}, prompt, "w1", "", "")
-	if err != nil || s.SessionID != startThread {
-		t.Fatalf("start did not match the complete prompt: %+v %v", s, err)
+	session, err := n.startCodex(context.Background(), n.defaultHost().(host.Launcher), cwd, "codex", []string{"codex"}, modelExecution{}, prompt, "w1", "", "")
+	if err != nil || session.SessionID != startThread {
+		t.Fatalf("complete first message not matched: %+v %v", session, err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if initial != "" || pasted != pasteStart+prompt+pasteEnd || len(f.trace("pane.send_keys")) != 1 {
-		t.Fatalf("initial=%q, pasted=%q, submits=%d", initial, pasted, len(f.trace("pane.send_keys")))
+	if initial != prompt || len(f.trace("pane.send_text", "agent.prompt")) != 0 {
+		t.Fatal("first message was cut or typed into the terminal")
+	}
+	for _, call := range f.calls() {
+		if call.Method == "pane.send_input" && strings.Contains(str(call.Params["text"]), "Context body") {
+			t.Fatal("first message leaked into the shell command")
+		}
 	}
 }

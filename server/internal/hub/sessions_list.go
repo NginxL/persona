@@ -456,7 +456,8 @@ func runtimeSummary(s proto.Session) runtimeRowSummary {
 		TurnError: rowText(s.TurnError, 180), TurnErrorKind: s.TurnErrorKind, TurnErrorCode: s.TurnErrorCode,
 		TurnErrorResetsAt: s.TurnErrorResetsAt, TurnErrorResumes: s.TurnErrorResumes,
 		PendingInteractions: s.PendingInteractions, Rev: s.Rev, Quiet: s.Quiet,
-		Model: s.Model, RequestedModel: s.RequestedModel, Effort: s.Effort, ContextTokens: s.ContextTokens, ContextWindow: s.ContextWindow,
+		Model: s.Model, RequestedModel: s.RequestedModel, Effort: s.Effort, PendingEffort: s.PendingEffort, EffortChangeFailed: s.EffortChangeFailed,
+		ContextTokens: s.ContextTokens, ContextWindow: s.ContextWindow,
 		Hierarchy: s.Hierarchy, // folded_under, children, started_at: the child cards and the parent's state (#5120)
 	}
 	out.SetBackgroundEnded(nil)

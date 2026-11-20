@@ -53,5 +53,6 @@ func reopenedDetail(t *Todo, row db.TodoRow) map[string]any {
 	if row.ReopenedAt != nil {
 		at = *row.ReopenedAt
 	}
-	return map[string]any{"todo": t.ID, "done_by": t.DoneBy, "judge": closedByJudge(t), "after": at.Sub(*t.DoneAt).Seconds()}
+	return map[string]any{"todo": t.ID, "done_by": t.DoneBy, "judge": closedByJudge(t), "after": at.Sub(*t.DoneAt).Seconds(),
+		"was_finished": t.StartError == "" && !t.Cancelled()}
 }

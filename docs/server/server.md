@@ -28,6 +28,54 @@ The hub and the managers apart:
 - **One container in Docker.** The hub image runs the hub and the built-in manager as two processes under `personad supervise`, each restarted on its own, as `persona-hub run` and `persona-manager assistant` unless `PERSONA_SPLIT_PROGRAMS=0` ([docker.md](../operations/docker.md) ("Programs")).
 - **Two services on a new install.** `hub setup` installs the hub's service and the built-in manager's own (`persona-manager-assistant.service` running `persona-manager assistant`, or on a Mac the launchd agent `com.persona.manager.assistant`, running `persona-manager assistant` on a new install, each with `PERSONA_ASSISTANT_DEPLOY=service`), and binds the second to the first with a one-time code. Existing installs keep the hub's child until `hub setup --manager-service` ([upgrade.md](../operations/upgrade.md): every install type, step by step). See [managers.md](../assistant/managers.md) ("The built-in manager as its own service").
 
+## Team project documents pilot
+
+An operator can run `persona-projects` separately to hand a versioned text document to another project member. Build the pilot from source in the `server` directory with `go build -o persona-projects ./cmd/persona-projects`. Provision a dedicated PostgreSQL database and login that can create tables in it. Set `TEAM_PROJECT_DATABASE_URL` in the operator's environment to that database's connection URL. Use a TLS-verified database connection for a remote database.
+
+Run `./persona-projects serve -listen 127.0.0.1:18082` and keep it running. It accepts local connections. For remote members, put an HTTPS reverse proxy on the same host and give them the HTTPS URL. Configure the proxy to keep authorization headers and document bodies out of its logs.
+
+On the service host, grant each member their project role. The operator assigns stable project and member identifiers. Keep each member identifier bound to the same person so earlier authorship and approvals remain attributable. The first grant can use a new project identifier. Each command prints a secret for one member in one project. Deliver each secret privately to its owner. Granting the same member again rotates their token and sets their role. Use `./persona-projects revoke checkout product` to remove a grant.
+
+~~~sh
+umask 077
+./persona-projects grant checkout product writer > product.token
+./persona-projects grant checkout lead approver > lead.token
+./persona-projects grant checkout engineering reader > engineering.token
+~~~
+
+Each member can use curl with their own token. In the examples below, each member saves their token as `member.token` on their own machine, runs the shared setup and performs their role's step. Use the local URL below for a single-host trial, or the team's HTTPS URL from another machine.
+
+~~~sh
+umask 077
+API=http://127.0.0.1:18082/v1/projects/checkout/documents/refund
+awk '{print "Authorization: Bearer " $0}' member.token > member.header
+~~~
+
+1. The writer selects the text to share in a UTF-8 file called `refund.md`. Publish it with the expected head revision (zero for a new document). The response identifies the author, revision and SHA-256 digest.
+
+   ~~~sh
+   jq -n --rawfile text refund.md '{expected_revision: 0, content: $text}' |
+     curl --fail-with-body -H @member.header -H 'Content-Type: application/json' \
+       --data-binary @- "$API/revisions"
+   ~~~
+
+2. The approver reads the exact revision, then approves that number. If another writer has published a newer head in the meantime, approval returns a conflict. Review the newer text before approving again.
+
+   ~~~sh
+   curl --fail-with-body -H @member.header "$API/revisions/1"
+   curl --fail-with-body -H @member.header -H 'Content-Type: application/json' \
+     --data '{"revision":1}' "$API/approvals"
+   ~~~
+
+3. The reader retrieves the approved document. Record its revision and digest with the work that used it. The pinned URL continues to return that revision when someone publishes a new draft.
+
+   ~~~sh
+   curl --fail-with-body -H @member.header "$API/approved"
+   curl --fail-with-body -H @member.header "$API/revisions/1"
+   ~~~
+
+Publishing and approving are separate actions. A reader may retrieve a published, pending revision by number. Members can distinguish approval from authorship using `approved_by`, `approved_at` and `author`. A later draft leaves the previous approved revision current until an approver accepts the new head. Writers editing the same head receive one success and one conflict. A document holds up to 256 KiB of UTF-8 text per revision. The [team project proposal](../design/proposals/team-project-spaces.md) covers the planned Web experience, attachments and opening a revision in a personal agent.
+
 ## Code
 
 | Package | Content |

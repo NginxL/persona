@@ -10,6 +10,96 @@ import PersonaWire
         try JSON.decoder.decode(T.self, from: JSONSerialization.data(withJSONObject: value))
     }
 
+    @Test func messagingAppPicturesUseTheOwningManager() throws {
+        let path = "/api/v1/avatars/chat/bWVkaWEvcGVlcg?messaging=1&account=2"
+        let person: [String: Any] = ["id": "p", "name": "Avery", "avatar": "https://photos.example.invalid/peer.png", "avatar_url": path]
+        let chat = MessagingShape.conversation(person, source: "chat", account: "2")
+        #expect(chat["avatar"] as? String == path)
+        let message = MessagingShape.message(["sender": person, "parts": []], source: "chat", account: "2")
+        #expect(message["sender_avatar"] as? String == path)
+        let profile = try decode(MessagingShape.profile(person.merging(["cover": "https://photos.example.invalid/cover.png"]) { $1 },
+                                                        source: "chat", account: "2"), as: LarkProfile.self)
+        #expect(profile.avatarUrl == path)
+        #expect(profile.coverUrl == "https://photos.example.invalid/cover.png")
+        let a = LarkMedia.url(path, manager: "North")
+        let b = LarkMedia.url(path, manager: "South")
+        #expect(a == path + "&manager=North" && b == path + "&manager=South")
+        #expect(LarkMedia.cacheKey(a, size: 64) != LarkMedia.cacheKey(b, size: 64))
+    }
+
+    @Test func theMentionPickerGetsTheMembersHubPicture() async throws {
+        let hub = FakeHub(url: "https://" + UUID().uuidString + ".invalid")
+        let api = hub.client.lark(2)
+        MessagingSources.set("studiochat", for: hub.url)
+        defer { MessagingSources.set(nil, for: hub.url) }
+        let endpoint = "/api/v1/messaging/studiochat/conversations/room/members"
+        let picture = "/api/v1/avatars/studiochat/bWVkaWEvYQ?messaging=1&account=2"
+        hub.on("GET", endpoint) { req in
+            #expect(req.query["account"] == "2")
+            return try JSONSerialization.data(withJSONObject: ["members": [
+                ["id": "a", "name": "Avery", "avatar": "media/a", "avatar_url": picture], ["id": "r", "name": "Robin"]
+            ]])
+        }
+        let page = try await api.larkMembers("room", query: "")
+        #expect(page.members.map(\.avatar) == [picture, nil])
+        #expect(hub.sent("GET", endpoint).count == 1)
+    }
+
+    @Test func aRestoredPortraitWaitsForItsOwnManagersSource() async {
+        let hub = FakeHub(url: "https://" + UUID().uuidString + ".invalid")
+        var api = hub.client
+        api.managerID = "studio"
+        let raw = "https://pictures.example.invalid/old"
+        #expect(LarkAvatarImage.cachedPicture(raw, using: api) == nil)
+        hub.on("GET", "/api/v1/messaging", json: #"{"sources":[{"id":"studiochat","extension":"example-chat","name":"Studio"}]}"#)
+        await api.readMessagingSource(features: ["messaging"])
+        #expect(LarkAvatarImage.cachedPicture(raw, using: api)?.hasPrefix("/api/v1/avatars/studiochat/") == true)
+        api.managerID = "other"
+        #expect(LarkAvatarImage.cachedPicture(raw, using: api) == nil)
+        await api.readMessagingSource(features: ["an_older_feature"])
+        #expect(LarkAvatarImage.cachedPicture(raw, using: api) == raw)
+    }
+
+    @Test func theSameSourceAndManagerOnTwoHubsKeepSeparateBytes() async throws {
+        let hosts = (0..<2).map { _ in FakeHub(url: "https://" + UUID().uuidString + ".invalid") }
+        let path = "/api/v1/avatars/chat/bWVkaWEvYQ"
+        let picture = LarkMedia.url(path + "?messaging=1&account=2", manager: "studio")
+        let media = LarkMedia()
+        // A new address on every test run ensures the first request reads the fake transport.
+        for (index, hub) in hosts.enumerated() {
+            hub.onAsync("GET", path) { request in
+                #expect(request.query["account"] == "2" && request.query["manager"] == "studio")
+                #expect(request.query["size"] == "128")
+                return Data([UInt8(index + 1)])
+            }
+        }
+        for index in [0, 1, 0] {
+            var client = hosts[index].client
+            client.managerID = "studio"
+            let bytes = try await media.data(picture, size: 128, using: client)
+            #expect(bytes == Data([UInt8(index + 1)]))
+        }
+        #expect(hosts.allSatisfy { $0.sent("GET", path).count == 1 })
+    }
+
+    @Test func anOlderMessagingHubKeepsPublicAvatarRequestsOnTheHub() throws {
+        let raw = "https://photos.example.invalid/peer.png?v=3"
+        let row = MessagingShape.conversation(["avatar": raw], source: "chat", account: nil)
+        let path = try #require(row["avatar"] as? String)
+        #expect(path.hasPrefix("/api/v1/avatars/chat/"))
+        let url = try #require(URLComponents(string: path))
+        #expect(url.queryItems == [URLQueryItem(name: "messaging", value: "1")])
+        let value = String(url.path.split(separator: "/").last ?? "").replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        #expect(Data(base64Encoded: value.padding(toLength: ((value.count + 3) / 4) * 4, withPad: "=", startingAt: 0)) == Data(raw.utf8))
+        #expect(MessagingShape.conversation(["avatar": "media/peer?v=3"], source: "chat", account: "2")["avatar"] as? String ==
+                "/api/v1/messaging/chat/media/peer?v=3&account=2")
+        #expect(MessagingShape.avatar(["avatar": "media/peer"], source: "chat", account: "south + west") ==
+                "/api/v1/messaging/chat/media/peer?account=south%20%2B%20west")
+        #expect(MessagingShape.conversation([:], source: "chat", account: nil)["avatar"] == nil)
+        #expect(MessagingShape.conversation(["avatar_url": raw], source: "chat", account: nil)["avatar"] == nil)
+        #expect(MessagingShape.media(raw, source: "chat", account: nil) == raw)
+    }
+
     @Test func aProfileWithFieldsDecodes() throws {
         let raw: [String: Any] = ["name": "Bob", "fields": [["label": "邮箱", "value": "bob@example.com"],
                                                             ["label": "上级", "value": "Ann", "person": "u7"]]]

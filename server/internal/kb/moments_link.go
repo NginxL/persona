@@ -84,7 +84,7 @@ func (e *Engine) LinkMoments(ctx context.Context, max int) int {
 	}
 	var projects []*Project
 	for _, p := range e.Store.Projects() {
-		if p.Live() && p.Status != "ignored" && p.Status != "done" && len(p.Keywords) > 0 {
+		if p.Live() && !p.referenceOnly() && p.Status != "ignored" && p.Status != "done" && len(p.Keywords) > 0 {
 			projects = append(projects, p)
 		}
 	}
@@ -208,6 +208,10 @@ func (e *Engine) judgeMoments(ctx context.Context, p *Project, cands []*MomentPo
 	if !ok || !cur.Live() {
 		return 0, nil
 	}
+	if cur.referenceOnly() {
+		e.logf("project %s: %v: skipped Moments detail", cur.Slug, ErrReferenceOnly)
+		return 0, nil
+	}
 	var added []ProjectMoment
 	for _, r := range d.Posts {
 		m := byID[r.ID]
@@ -264,7 +268,7 @@ func (e *Engine) projectMomentsForPrompt(p *Project, n int) []prompts.KBMoment {
 func (e *Engine) SeedKeywords(recent time.Duration) int {
 	n := 0
 	for _, p := range e.Store.Projects() {
-		if !p.Live() || p.Status == "ignored" || p.Status == "done" || len(p.Keywords) > 0 || p.Dirty || time.Since(p.Updated) > recent {
+		if !p.Live() || p.referenceOnly() || p.Status == "ignored" || p.Status == "done" || len(p.Keywords) > 0 || p.Dirty || time.Since(p.Updated) > recent {
 			continue
 		}
 		p.Dirty = true

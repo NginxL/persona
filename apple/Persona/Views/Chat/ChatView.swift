@@ -2557,6 +2557,8 @@ struct ChatView: View {
                 store.prepend(page.items, hasMore: page.hasMore)
             } catch {
                 store.isLoadingOlder = false
+                if error.isHistoryNotFound, !Task.isCancelled, shownKey == key, store.history == history,
+                   model.api(key.group)?.config == api.config { store.prepend([], hasMore: false) }
                 if !Task.isCancelled { model.show(error) }
                 return
             }
@@ -3216,7 +3218,7 @@ struct ChatView: View {
             switch ChatLines.placeholder(lines: lines, hasTranscript: !rows.isEmpty,
                                          hasPending: !kept.isEmpty || !pending.isEmpty || !store.pending.isEmpty || !store.arriving.isEmpty,
                                          hasLiveText: drawsLive && !(frozen?.text ?? store.liveText).isEmpty,
-                                         loadedOnce: store.loadedOnce) {
+                                         loadedOnce: store.loadedOnce, historyNotFound: store.historyNotFound) {
             case .loading:
                 ChatSkeleton().flippedBack().accessibilityIdentifier("chat-loading-placeholder")
             case .empty:
@@ -6140,6 +6142,7 @@ struct Composer: View, Equatable {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if isMain {
+                PushHealthNotice(group: key.group)
                 // The main conversation: what it still needs, or a refused send (docs/assistant/onboarding.md 4.4, 5.2).
                 ReadinessHomeCard(key: key, route: $failureRoute)
                     .transition(.move(edge: .bottom).combined(with: .opacity))

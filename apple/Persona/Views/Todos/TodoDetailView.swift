@@ -364,7 +364,7 @@ struct TodoDetailView: View {
             Section {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let stage {
-                        TodoStageBar(stage: stage)
+                        TodoStageBar(stage: stage, done: todo.stageDone)
                     }
                     if let pr {
                         Button { link = LinkTarget(url: pr) } label: {

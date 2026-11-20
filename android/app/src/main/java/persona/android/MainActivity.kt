@@ -39,6 +39,7 @@ import persona.android.platform.PlatformPairing
 import persona.android.platform.PlatformRoot
 import persona.android.ui.AppServices
 import persona.android.ui.AppearanceOverride
+import persona.feature.assistant.conversationOpeningSource
 import persona.core.contracts.LarkFeatures
 import persona.core.contracts.api.HubConnection
 import persona.core.designsystem.GlassThrottle
@@ -136,6 +137,7 @@ class MainActivity : ComponentActivity() {
                 persona.core.designsystem.LocalLanguageHost provides this@MainActivity,
                 persona.core.designsystem.LocalChannels provides channels,
                 persona.feature.assistant.LocalOpenerIcons provides openerIcons,
+                persona.feature.chat.LocalOpeningMessageSource provides ::conversationOpeningSource,
                 persona.core.designsystem.LocalLarkFeatures provides lark,
                 persona.core.designsystem.LocalHubFeatures provides features,
                 persona.core.designsystem.LocalManagerRoster provides managers,

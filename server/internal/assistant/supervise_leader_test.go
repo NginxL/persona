@@ -322,8 +322,12 @@ func TestDigestTo(t *testing.T) {
 		{"handed out after its direction ended: its own", leaders, superviseSignal{Todo: after, Kind: sigReview}, "lead2"},
 		{"a task leader's decision, handed out after the end", leaders, superviseSignal{Todo: after, Kind: sigDecide, To: "lead2"}, "lead2"},
 		{"a decision of a newer worker of a task leader handed out before the end", leaders, superviseSignal{Todo: worker, Kind: sigDecide, To: "lead2"}, "conv1"},
+		{"an ended direction's check", leaders, superviseSignal{Todo: ended, Kind: sigCheck, Report: checkNoProgressReport}, "conv1"},
+		{"the owner's answer to a check on that worker", leaders, superviseSignal{Todo: worker, Kind: sigCheck, Report: checkDecidedReport, To: "lead2"}, "conv1"},
+		{"the owner's answer to a check, handed out after the end", leaders, superviseSignal{Todo: after, Kind: sigCheck, Report: checkDecidedReport, To: "lead2"}, "lead2"},
 		{"a direction again takes its tasks back", again, superviseSignal{Todo: ended, Kind: sigReview}, "lead2"},
 		{"a task leader's decision for a direction again", again, superviseSignal{Todo: ended, Kind: sigDecide, To: "lead2"}, "lead2"},
+		{"the owner's answer to a check for a direction again", again, superviseSignal{Todo: worker, Kind: sigCheck, Report: checkDecidedReport, To: "lead2"}, "lead2"},
 	} {
 		if got := s.digestTo(c.cfg, c.g); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)

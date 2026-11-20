@@ -1,6 +1,7 @@
 // Small pieces the inbox pages share: avatars (chat, mail, document, Moments) with their source mark, tags, counts,
-// the AI twin's draft card, a document row's status menu, and the few glyphs the shared icon set does not have.
-import { useState, type CSSProperties, type ReactNode } from "react";
+// the AI twin's draft card, a document row's status menu, a chat list's hold on its newest message, and the few glyphs
+// the shared icon set does not have.
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { agentDraft, docChangeKey, isDone, isLark, itemKey, keptChanges, movingKey, setDocStatus, useDroppedChanges, useInbox, useUnsentReply, withToken, type DocChange, type DocRow, type DocStatus, type InboxItem } from "../../lib/inbox";
 import { docChangeLine } from "../../lib/inbox-page";
 import { connectorBrand } from "../../lib/connectors";
@@ -68,12 +69,14 @@ function hash(s: string) {
 
 /** `manager`: whose item the picture is of (a list row's; inside an item's view, ItemManager tells), so its URL names
  *  that manager (docs/assistant/managers.md "Clients"). */
-export function Monogram({ name, size = 40, square, neutral, src, manager }: { name: string; size?: number; square?: boolean; neutral?: boolean; src?: string; manager?: string }) {
+export function Monogram({ name, size = 40, square, neutral, src, avatarURL, manager }: { name: string; size?: number; square?: boolean; neutral?: boolean; src?: string; avatarURL?: string; manager?: string }) {
   const owner = useItemManager();
-  // The picture that failed to load: the letter instead of a broken image, until src changes.
+  // A new hub lists its own path; an older one only has the connector media ref in src.
+  const picture = avatarURL?.startsWith("/api/v1/avatars/") ? `${avatarURL}?size=${Math.ceil(size * devicePixelRatio)}` : src;
+  const path = picture && withManager(picture, manager ?? owner);
   const [failed, setFailed] = useState<string>();
   const shape = square ? "rounded-[10px]" : "rounded-full";
-  if (src && failed !== src) return <img src={withToken(withManager(src, manager ?? owner))} alt="" width={size} height={size} onError={() => setFailed(src)} className={cx("shrink-0 object-cover shadow-hairline", shape)} style={{ width: size, height: size }} />;
+  if (path && failed !== path) return <img src={withToken(path)} alt="" width={size} height={size} onError={() => setFailed(path)} className={cx("shrink-0 object-cover shadow-hairline", shape)} style={{ width: size, height: size }} />;
   const first = [...name.trim()][0] ?? "?";
   return (
     <span aria-hidden className={cx("flex shrink-0 items-center justify-center font-semibold", shape)} style={{ width: size, height: size, fontSize: Math.round(size * 0.4), ...(neutral ? MONO[3] : MONO[hash(name) % MONO.length]) }}>
@@ -119,8 +122,7 @@ export function ItemAvatar({ it, size = 40 }: { it: InboxItem; size?: number }) 
     // A connector's thread picture (the other person, a group's own) from the hub's avatars route, asked at the pixels
     // drawn (the route rounds up to the sizes it draws; the browser keeps it, `immutable`); the initial without one or
     // when it cannot be loaded. Inline: the row is on the first screen.
-    const pic = it.connector?.avatar_url;
-    face = <Monogram name={it.sender || it.title} size={size} neutral src={pic && `${pic}?size=${Math.ceil(size * devicePixelRatio)}`} manager={it.manager} />;
+    face = <Monogram name={it.sender || it.title} size={size} neutral avatarURL={it.connector?.avatar_url} manager={it.manager} />;
   }
   const badge = Math.max(14, Math.round(size * 0.42));
   // A connector's own mark on white in the corner; one without a mark a neutral gray, like mail.
@@ -173,6 +175,25 @@ export function MessageBar({ className, children }: { className: string; childre
       </button>
     </div>
   );
+}
+
+/** A chat's list at its newest message keeps it in view when the list's box gets shorter (the keyboard, a longer draft)
+ *  or its messages grow by themselves (a picture loading). `follows()` is asked at each resize whether to; `mounted`
+ *  starts watching once the list is drawn. */
+export function useFollowEnd(scroller: RefObject<HTMLElement | null>, follows: () => boolean, mounted = true) {
+  const latest = useRef(follows);
+  latest.current = follows;
+  useEffect(() => {
+    const el = scroller.current;
+    const content = el?.firstElementChild;
+    if (!el || !content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (latest.current()) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, [scroller, mounted]);
 }
 
 /** A filter or choice that turns on and off: the inbox's sources and kinds, the "Messages" page's Feishu accounts.

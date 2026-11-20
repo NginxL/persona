@@ -124,9 +124,13 @@ func inboxTasks(t *testing.T, h *Hub) []prompts.InboxTask {
 // it that the request matches.
 func fakeScopeOpens(scopes []string, pattern, method, path string) (bool, string) {
 	if slices.Contains(extwire.Routes, pattern) {
+		relayPath := pattern
+		if _, path, qualified := strings.Cut(pattern, " "); qualified {
+			relayPath = path
+		}
 		mux := http.NewServeMux()
 		for p := range extwire.RouteScopes {
-			if _, route, _ := strings.Cut(p, " "); strings.HasPrefix(route, pattern) {
+			if _, route, _ := strings.Cut(p, " "); strings.HasPrefix(route, relayPath) {
 				mux.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})
 			}
 		}

@@ -160,6 +160,7 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
     var choosingProvider by remember { mutableStateOf(false) }
     var pickingModel by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
+    var requestedOpen by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(model) { model.load() }
     LaunchedEffect(model, state.listProvider) { model.loadModels() }
     if (adding && providers != null) {
@@ -174,7 +175,8 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
     val purpose = state.purpose
     JListPage(title = purpose?.displayName ?: stringResource(R.string.settings_src_model_title), onBack = onBack, largeTitle = false, bottomBar = if (purpose == null) null else ({
         Row(Modifier.fillMaxWidth().padding(horizontal = pagePadding, vertical = Tokens.Space.s)) {
-            JButton(stringResource(R.string.settings_src_save), { save(false) }, Modifier.fillMaxWidth(), loading = state.busy, enabled = !state.busy && !state.conflict)
+            JButton(stringResource(R.string.settings_src_save), { save(false) }, Modifier.fillMaxWidth(), loading = state.busy,
+                enabled = !state.busy && !state.conflict && !(state.candidateChanged && state.candidateProblem != null))
         }
     })) {
         item("manager") { ModelConfigurationOwner(owner) }
@@ -185,6 +187,8 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
         }
         if (purpose != null) {
             effective(res, purpose, state)
+            extensionCandidates(state, requestedOpen, onRequested = { requestedOpen = !requestedOpen },
+                onEdit = { model.edit(state.draft.copy(candidates = it)) })
             form(res, purpose, state, onProvider = { choosingProvider = true }, onEdit = model::edit, onRestore = { save(true) },
                 onPickModel = { pickingModel = true }, onRetryModels = { scope.launch { model.loadModels(refresh = true) } })
         }
@@ -298,7 +302,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.form(
     if (purpose.kind == "plugin") item("plugin") { JNotice(stringResource(R.string.settings_src_model_plugin_note), title = stringResource(R.string.settings_src_model_plugin_title)) }
     item("restore") {
         JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.m)) {
-            JRow(stringResource(R.string.settings_src_model_restore), leadingIcon = PhIcons.ArrowUUpLeft, enabled = editable && !state.conflict, chevron = false, onClick = onRestore)
+            JRow(stringResource(R.string.settings_src_model_restore), leadingIcon = PhIcons.ArrowUUpLeft,
+                enabled = editable && !state.conflict && !state.candidateChanged, chevron = false, onClick = onRestore)
         }
     }
 }

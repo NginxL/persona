@@ -41,14 +41,24 @@ try {
   const page = await ctx.newPage();
   const errors = []; page.on("console", (m) => { if (m.type() === "error") console.error(m.text()); }); page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(`${base}/settings?tab=agents`);
-  await page.getByRole("heading", { name: "Hidden Agent folders" }).waitFor().catch(async (e) => { console.error(await page.locator("body").innerText(), errors); await page.screenshot({path: `${shots}/failure.png`}); throw e; });
+  await page.getByRole("heading", { name: "Agent folders" }).waitFor().catch(async (e) => { console.error(await page.locator("body").innerText(), errors); await page.screenshot({path: `${shots}/failure.png`}); throw e; });
   const rule = page.getByRole("switch", { name: "~/workspaces/*", exact: true });
   assert.equal(await rule.getAttribute("aria-checked"), "true");
   await rule.click();
   await page.getByText("Rule off · sessions visible", { exact: true }).waitFor();
   await rule.click();
   await page.getByText("Hidden from Agents and Assistant", { exact: true }).waitFor();
+  // #10053: a new rule blocks unless Hide is chosen; an existing rule's action can be switched.
+  assert.equal(await page.getByRole("combobox", { name: "Action", exact: true }).inputValue(), "block");
+  await page.getByRole("textbox", { name: "Folder or glob", exact: true }).fill("~/.automation/runs");
+  await page.getByRole("button", { name: "Add rule", exact: true }).click();
+  await page.getByText("Blocked · not collected", { exact: true }).waitFor();
+  assert.deepEqual(rules.at(-1), { pattern: "~/.automation/runs", enabled: true, action: "block" });
   await page.screenshot({ path: `${shots}/settings-${theme}.png` });
+  await page.getByRole("combobox", { name: "Action: ~/.automation/runs", exact: true }).selectOption("hide");
+  await page.getByText("Hidden from Agents and Assistant", { exact: true }).nth(1).waitFor();
+  assert.equal(rules.at(-1).action, "hide");
+  rules = rules.slice(0, 1);
   await page.goto(`${base}/agents`);
   await page.getByRole("button", { name: "Include hidden sessions", exact: true }).waitFor();
   assert.equal(await page.getByText("Background workspace", { exact: true }).count(), 0, "default list hides the workspace");
@@ -61,5 +71,5 @@ try {
   assert.deepEqual(errors, []);
   await ctx.close();
  }
- console.log("PASS hidden directory settings toggle and temporary inspection, light/dark");
+ console.log("PASS Agent folder settings (toggle, block / hide action) and temporary inspection, light/dark");
 } finally { await browser.close(); clearTimeout(timer); }

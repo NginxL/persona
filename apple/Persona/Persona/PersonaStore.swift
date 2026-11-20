@@ -13,20 +13,14 @@ import PersonaWire
 /// the hub answers or without it.
 ///
 /// A hub that keeps the choice (GET /api/v1/looks, #2406) is the one truth of it: its choice is shown, a choice made
-/// here goes to it (PUT /api/v1/looks/current) and another device's comes as a `look` push (`follow`); the saved id is
+/// here goes to it (PUT /api/v1/looks/current) and another device's comes as a `look` push (`receive`); the saved id is
 /// then this device's copy of the hub's. With an older hub (404) the choice stays this device's, as before.
 @MainActor @Observable
 final class PersonaStore {
     /// Mochi first, then valid packages the hub has listed (kept across launches).
     private(set) var offered: [Persona] = Persona.builtins
     /// The chosen one as it can be shown now: the built-in until its package is on the phone.
-    private(set) var current: Persona = .builtin {
-        didSet {
-            guard current != oldValue else { return }
-            remember(current)
-            onChange?()
-        }
-    }
+    private(set) var current: Persona = .builtin
     /// Ids being downloaded.
     private(set) var downloading: Set<String> = []
     /// Why the last list or download failed (Settings › Avatar shows it).
@@ -38,49 +32,104 @@ final class PersonaStore {
     @ObservationIgnored var onChange: (() -> Void)?
     @ObservationIgnored let root: URL
     @ObservationIgnored private let defaults: UserDefaults
-    /// The refresh under way: another caller waits for it instead of starting a second one (connecting to the hub
-    /// and Settings opening come together; a second refresh used to clean away the package the first was downloading).
-    /// `n` counts them, so `reload` can tell one that began after it was called. It is cleared as the load ends, before
-    /// anyone waiting on it carries on: a caller that then asks again gets a new one, not the one just finished.
-    @ObservationIgnored private var refreshing: (n: Int, hub: URL, task: Task<Void, Never>)?
-    @ObservationIgnored private var refreshes = 0
-    /// The hub read now (the current hub's address): what a list from another one says is not taken. Read by the tests
-    /// to know the current hub changed.
-    @ObservationIgnored private(set) var hub: URL?
-    /// Whether the hub at an address keeps the choice, as it answered this launch (GET /api/v1/looks: true; 404: false).
-    @ObservationIgnored private var keeps: [URL: Bool] = [:]
-    /// Counts the choices made here, those taken from the hub (a `look` push, a list) and the current hub changing: a
-    /// list read or a download that started before one does not undo it (`latest`). Read by the tests to know one
-    /// got that far.
+    /// Only the active visit owns selection state. A URL can become current again while its old requests are returning.
+    struct Mark: Equatable {
+        fileprivate let generation: Int
+        fileprivate let sequence: Int
+    }
+
+    /// One accepted upload or delete. Its selection is reconciled once, even when its files need a retry.
+    @MainActor final class SelectionReceipt {
+        let started: Mark
+        fileprivate let id: String
+        fileprivate let readsAtAnswer: Int
+        fileprivate var reconciled = false
+
+        fileprivate init(_ id: String, started: Mark, readsAtAnswer: Int) {
+            self.id = id
+            self.started = started
+            self.readsAtAnswer = readsAtAnswer
+        }
+    }
+
+    private struct Tap {
+        var persona: Persona
+        let mark: Mark
+        let api: APIClient?
+        let local: Bool
+    }
+
+    private typealias Work = Task<Void, Never>
+    private struct Visit {
+        var keeps: Bool?
+        var confirmed: (id: String, heard: Int)?
+        var pushes: [String: Int] = [:]
+        var desired: Tap?
+        var inFlight: (tap: Tap, sent: Mark, work: Work)?
+        var queued: Tap?
+        var waitingForPreviousVisit: Work?
+        var acceptedTap = 0
+        var latestAuthoritativeRead = 0
+        /// Last selection that can survive a refused optimistic tap, including an older revision still on screen.
+        var stable: Persona
+    }
+
+    private struct PackageKey: Hashable {
+        let id: String
+        let rev: String
+        init(_ p: Persona) { id = p.id; rev = p.rev }
+    }
+
+    nonisolated private struct Listing: Sendable {
+        let packages: [PersonaInfo]
+        let current: LookCurrent? // nil for an older hub
+    }
+
+    /// The pre-hub device preference moves up once across all hubs. A new visit can observe the receipt without
+    /// adopting the old hub's response as its own choice.
+    private struct Migration {
+        let mark: Mark
+        let localChange: Int
+        let hub: URL
+        let answer: Task<Result<LookCurrent, any Error>, Never>
+    }
+
+    private enum Event {
+        case hubSwitched(URL?)
+        case tap(Mark, Persona, APIClient?)
+        case tapReady(Mark)
+        case push(Mark, chosen: String?, effective: String, APIClient)
+        case followConfirmed(Mark, String, APIClient)
+        case listRequested(Mark, APIClient, after: Int?)
+        case listAnswered(Mark, APIClient, Result<Listing, any Error>)
+        case migrationObserved(Mark, Migration, Bool)
+        case listChoice(Mark, APIClient, LookCurrent?)
+        case listSettled(Mark, APIClient, String?)
+        case listFinished(Mark, Int)
+        case writeAvailable(Mark)
+        case putAnswered(Mark, URL, Result<LookCurrent, any Error>)
+        case uploadChosen(SelectionReceipt, APIClient)
+        case downloadRequested(Mark, Persona, APIClient)
+        case downloadFinished(Mark, Persona, Result<URL, any Error>)
+        case thumbnailFinished(Mark, Persona, Data)
+    }
+
+    @ObservationIgnored private var generation = 0
+    /// The ordering clock, also observed by tests waiting for a push to reach the reducer.
     @ObservationIgnored private(set) var choices = 0
-    /// The choices made here (their `choices`) that put nothing on screen that is still there: waiting for their
-    /// packages, given up when one did not come, not taken by the hub, or never sent (a newer one was). They do not
-    /// count as newer for `latest`: what was there before them is still in force.
-    @ObservationIgnored private var silent: Set<Int> = []
-    /// Each hub's choice as far as this device knows (the last it listed, pushed or took from here) and when it was
-    /// heard (`heard` then): what comes back when that hub does not take one made here.
-    @ObservationIgnored private var hubChoices: [URL: (id: String, heard: Int)] = [:]
-    /// Counts what was heard of the hubs' choices (`hubChoices`, `echoes`): a mark taken before a request tells what
-    /// came after.
-    @ObservationIgnored private(set) var heard = 0
-    /// When each hub last pushed each look (`heard` then), followed or not. The hub pushes every choice in the order it
-    /// takes them: the answer to a request that chose one is older than what came after that one's push, and newer
-    /// than what came before it.
-    @ObservationIgnored private var echoes: [URL: [String: Int]] = [:]
-    /// The package downloads under way, one per id: another caller waits for it (a second `look` push for the same one).
-    @ObservationIgnored private var downloads: [String: (rev: String, token: UUID, task: Task<Void, Never>)] = [:]
-    /// The choices made here and not settled yet (waiting for their packages or on their way to the hub), oldest
-    /// first: the push of an older one, back while a newer one is still to come, changes nothing.
-    @ObservationIgnored private var pending: [String] = []
-    /// One PUT at a time (two at once could reach the hub the wrong way round), and only the newest is sent.
-    @ObservationIgnored private var sending: Task<Void, Never>?
-    /// What was on screen before the choices still on their way to each hub, and how many are: a choice made while
-    /// another one is on its way goes back to what was there before both when the hub takes neither.
-    @ObservationIgnored private var undos: [URL: (undo: Undo, count: Int)] = [:]
+    @ObservationIgnored private(set) var hub: URL?
+    @ObservationIgnored private var visit = Visit(stable: .builtin)
+    @ObservationIgnored private var localChange = 0
+    @ObservationIgnored private var migration: Migration?
+    /// Stale replies cannot change a visit, but an already sent PUT can still reach its server.
+    @ObservationIgnored private var writers: [URL: (sent: Mark, work: Work)] = [:]
+    @ObservationIgnored private var reads = 0
+    @ObservationIgnored private var reading: (number: Int, work: Work)?
+    @ObservationIgnored private var downloads: [PackageKey: Work] = [:]
     #if DEBUG
-    /// `-openPersona <id>`: chosen at launch, on the hub too (a hub that keeps the choice would put its own back).
     @ObservationIgnored private var launchChoice: String?
     #endif
+
     @ObservationIgnored private let frameCache = NSCache<NSString, PersonaFrames>()
     @ObservationIgnored private let imageCache = NSCache<NSString, UIImage>()
 
@@ -95,7 +144,12 @@ final class PersonaStore {
 
     /// The user's choice; kept when its package is gone from the hub, so it comes back with it. With a hub that keeps
     /// the choice, the hub's (its `effective`).
-    var chosenID: String { PersonaSelection.resolve(NativeStateMigration.readPersonaID(from: defaults)) }
+    var chosenID: String {
+        if visit.desired == nil, current.isBuiltin, let retained = defaults.string(forKey: Self.localChoiceKey) {
+            return PersonaSelection.resolve(retained)
+        }
+        return PersonaSelection.resolve(NativeStateMigration.readPersonaID(from: defaults))
+    }
 
     private var followsHub: Bool {
         get { defaults.bool(forKey: Self.followsHubKey) }
@@ -105,42 +159,45 @@ final class PersonaStore {
         }
     }
 
-    /// Saves the choice (the next launch shows it from disk) and tells the watch.
-    private func setChosen(_ id: String) {
-        NativeStateMigration.writePersonaID(id, defaults: defaults)
-        WatchSync.shared.push(persona: id)
-    }
-
-    /// The hub's list came this launch.
     @ObservationIgnored private var listed = false
 
-    /// Nothing newer since choice `n` (a choice, push, list or other hub that put something up), but choices made here
-    /// that have not shown.
-    private func latest(_ n: Int) -> Bool {
-        n >= choices || ((n + 1)...choices).allSatisfy(silent.contains)
+    private var mark: Mark { Mark(generation: generation, sequence: choices) }
+
+    /// Capture before deferring a push or sending an upload/delete. A return to the same URL is a new visit.
+    func mark(for api: APIClient) -> Mark? {
+        guard !api.config.isDemo else { return nil }
+        if hub == nil { apply(.hubSwitched(api.config.url)) }
+        return hub == api.config.url ? mark : nil
     }
 
-    /// `url` is the hub read now. When it was another one, what was under way for that one (a push's download, a
-    /// choice waiting for its package) no longer shows.
-    private func read(_ url: URL) {
-        guard hub != url else { return }
-        hub = url
-        choices += 1
-    }
+    func isCurrent(_ request: Mark) -> Bool { request.generation == generation }
 
-    /// Another group's hub became the current one (`AppModel.hubChanged`): from now on, before its list is read, a
-    /// choice goes to it, and what is still under way for the one before (a late answer, a download) changes nothing
-    /// here. (A push from it still waiting to be handled is dropped by `AppModel.handle`.)
     func switchHub(_ api: APIClient?) {
-        guard let api, !api.config.isDemo else { return }
-        read(api.config.url)
+        apply(.hubSwitched(api.flatMap { $0.config.isDemo ? nil : $0.config.url }))
     }
 
-    /// Notes `id` as `url`'s choice, heard now.
-    private func hear(_ id: String, on url: URL) {
-        heard += 1
-        hubChoices[url] = (id, heard)
+    /// A legacy hub can stop listing a locally chosen pack. Keep that preference separately while Mochi is on screen.
+    private static let localChoiceKey = "persona.localChoice"
+    private var localID: String? {
+        guard !followsHub else { return nil }
+        return (defaults.string(forKey: Self.localChoiceKey) ?? NativeStateMigration.readPersonaID(from: defaults)).map(PersonaSelection.resolve)
     }
+
+    /// Writes the launch id, shown manifest and watch choice from the same displayed revision.
+    private func show(_ p: Persona, explicitlyChosen: Bool = false) {
+        let changed = current != p
+        let cached = NativeStateMigration.readPersonaID(from: defaults)
+        let saveID = cached != p.id && (changed || explicitlyChosen || cached != nil)
+        if saveID {
+            NativeStateMigration.writePersonaID(p.id, defaults: defaults)
+            WatchSync.shared.push(persona: p.id)
+        }
+        if changed || saveID { remember(p) }
+        guard changed else { return }
+        current = p
+        onChange?()
+    }
+
 
     /// The home screen icon the choice puts on (`Persona.appIcon`): a package's is known from the list before the
     /// package is on the phone, so the icon does not go to the default's and back while it downloads. Nil while the
@@ -158,24 +215,24 @@ final class PersonaStore {
         if let data = try? Data(contentsOf: indexURL), let list = try? JSONDecoder().decode([PersonaInfo].self, from: data) {
             offered = Persona.builtins + list.filter(Self.supportedPackage).map(Persona.init(info:))
         }
+        var saved = PersonaSelection.resolve(NativeStateMigration.readPersonaID(from: defaults))
         #if DEBUG
         // `-openPersona <id>`: start with that one (on the phone already, or downloaded when the list comes).
         if let id = defaults.string(forKey: "openPersona"), !id.isEmpty {
-            NativeStateMigration.writePersonaID(id, defaults: defaults)
-            launchChoice = PersonaSelection.resolve(id)
+            saved = PersonaSelection.resolve(id)
+            launchChoice = saved
         }
         #endif
-        if let p = offered.first(where: { $0.id == chosenID }), isOnPhone(p) {
-            current = p
-        } else if let data = try? Data(contentsOf: shownURL), let info = try? JSONDecoder().decode(PersonaInfo.self, from: data),
-                  info.id == chosenID, Self.supportedPackage(info), isOnPhone(Persona(info: info)) {
-            // Not in the last list as it is on the phone (a list read since, of another hub or with a new rev, while the
-            // hub's choice was still downloading): the one that was on screen.
+        if let data = try? Data(contentsOf: shownURL), let info = try? JSONDecoder().decode(PersonaInfo.self, from: data),
+           info.id == saved, Self.supportedPackage(info), isOnPhone(Persona(info: info)) {
             current = Persona(info: info)
+        } else if let p = offered.first(where: { $0.id == saved }), isOnPhone(p) {
+            current = p
         }
+        visit.stable = current
     }
 
-    private static func supportedPackage(_ info: PersonaInfo) -> Bool {
+    nonisolated private static func supportedPackage(_ info: PersonaInfo) -> Bool {
         info.manifest.id == info.id && info.manifest.problem == nil
     }
 
@@ -199,342 +256,477 @@ final class PersonaStore {
 
     // MARK: The hub
 
-    /// What the hub offers now, and its choice when it keeps one; the chosen one is downloaded when its rev is new, and
-    /// revs nobody uses are removed. Another hub's read under way (the current hub changed) is waited for, then this
-    /// one is read.
-    func refresh(_ api: APIClient?) async {
+    func refresh(_ api: APIClient?, since request: Mark? = nil) async { await read(api, since: request, reload: false) }
+    func reload(_ api: APIClient?, since request: Mark? = nil) async { await read(api, since: request, reload: true) }
+
+    private func read(_ api: APIClient?, since request: Mark?, reload: Bool) async {
         guard let api, !api.config.isDemo else { return }
-        read(api.config.url)
-        while let running = refreshing {
-            if running.hub == api.config.url { return await running.task.value }
-            await running.task.value
-        }
-        await startRefresh(api).value
+        if request == nil, hub != api.config.url { apply(.hubSwitched(api.config.url)) }
+        await apply(.listRequested(request ?? mark, api, after: reload ? reads : nil))?.value
     }
 
-    /// The list as the hub has it now, read after this call: for what was just made or deleted there (#2405). A refresh
-    /// already under way may have asked before that, so it is waited for and the list read again, unless another one
-    /// of the same hub began meanwhile (that one asked later). Never two at once, as for `refresh`.
-    func reload(_ api: APIClient?) async {
-        guard let api, !api.config.isDemo else { return }
-        read(api.config.url)
-        let asked = refreshes
-        while let running = refreshing {
-            if running.n > asked, running.hub == api.config.url { return await running.task.value }
-            await running.task.value
-        }
-        await startRefresh(api).value
+    /// Record a Settings tap before its UI action yields or the current hub can change.
+    func tap(_ p: Persona, api: APIClient?) -> Task<Void, Never>? {
+        if let api, !api.config.isDemo, mark(for: api) == nil { return nil }
+        return apply(.tap(mark, p, api))
     }
 
-    private func startRefresh(_ api: APIClient) -> Task<Void, Never> {
-        refreshes += 1
-        let n = refreshes
-        let task = Task {
-            await load(api)
-            if refreshing?.n == n { refreshing = nil }
-        }
-        refreshing = (n, api.config.url, task)
-        return task
+    func choose(_ p: Persona, api: APIClient?) async { await tap(p, api: api)?.value }
+
+    func packagesChanged(on api: APIClient) {
+        guard let request = mark(for: api) else { return }
+        apply(.listRequested(request, api, after: reads))
     }
 
-    private func load(_ api: APIClient) async {
-        let asked = choices
-        // What was heard of the hubs' choices when the list was asked for: a push or an answer heard since is newer.
-        let mark = heard
-        let url = api.config.url
-        let list: [PersonaInfo]
-        var settled: String?
-        do {
-            if let looks = try await api.looks() {
-                keeps[url] = true
-                list = looks.packages.filter(Self.supportedPackage)
-                if hub == url { settled = await settle(looks.current, api) }
-            } else {
-                keeps[url] = false // an older hub: its packages, and the choice stays this device's
-                list = try await api.personas().filter(Self.supportedPackage)
-            }
-        } catch let e as APIError where e.status == 404 {
-            error = String(localized: "This hub can't host avatars yet. Update the hub and check again.")
-            return
-        } catch {
-            if !error.isCancellation { self.error = String(localized: "Couldn't load the avatar list: \(error.localizedDescription)") }
-            return
+    /// Record the socket's position in the event stream before another main-actor action can enter.
+    @discardableResult
+    func receive(_ id: String?, effective: String?, api: APIClient?) -> Task<Void, Never>? {
+        guard let api, let request = mark(for: api), let shown = effective ?? id, !shown.isEmpty else { return nil }
+        return apply(.push(request, chosen: id.map(PersonaSelection.resolve), effective: PersonaSelection.resolve(shown), api))
+    }
+
+    func follow(_ id: String?, effective: String?, api: APIClient?) async {
+        await receive(id, effective: effective, api: api)?.value
+    }
+
+    func receipt(for id: String, since request: Mark) -> SelectionReceipt {
+        SelectionReceipt(id, started: request, readsAtAnswer: reads)
+    }
+
+    /// The server already chose this look on upload or delete. A retry uses the same reply to finish its download.
+    func adopt(_ receipt: SelectionReceipt, api: APIClient) async -> Bool {
+        guard isCurrent(receipt.started) else { return false }
+        if !offered.contains(where: { $0.id == receipt.id }) {
+            await apply(.listRequested(mark, api, after: reads))?.value
         }
-        // Another hub is read now (the current hub changed while this one answered): its read follows.
-        guard hub == url else { return }
-        self.error = nil
-        listed = true
-        // The hub's choice, as this device knows it from now (what a choice it refuses goes back to), unless a push or an
-        // answer heard since the list was asked for is newer. It shows unless a choice was made here or pushed since, or
-        // one made here is still on its way (the hub may not have had it when it answered: its answer decides). It is
-        // saved once its package is on the phone, as a choice made here is: a launch shows the saved one from disk.
-        var target = chosenID
-        if let id = settled, (hubChoices[url]?.heard ?? 0) <= mark {
-            hear(id, on: url)
-            if latest(asked), undos[url] == nil {
-                followsHub = true
-                target = id
+        guard isCurrent(receipt.started), let p = offered.first(where: { $0.id == receipt.id }) else { return false }
+        await apply(.uploadChosen(receipt, api))?.value
+        return isCurrent(receipt.started) && isOnPhone(p)
+    }
+
+    func download(_ p: Persona, _ api: APIClient) async {
+        guard let request = mark(for: api) else { return }
+        await apply(.downloadRequested(request, p, api))?.value
+    }
+
+    /// All changes to the visit, observable properties and launch cache are synchronous. A caller can await the
+    /// returned work without holding up another input. Effects send results back with the mark they captured.
+    @discardableResult
+    private func apply(_ event: Event) -> Work? {
+        switch event {
+        case .hubSwitched(let url):
+            generation += 1
+            choices += 1
+            hub = url
+            visit = Visit(stable: current)
+            reading?.work.cancel()
+            reading = nil
+            for work in downloads.values { work.cancel() }
+            downloads = [:]
+            downloading = []
+            listed = false
+            error = nil
+            guard let migration else { return nil }
+            let request = mark
+            return Task {
+                let answer = await migration.answer.value
+                apply(.migrationObserved(request, migration, (try? answer.get()) != nil))
             }
-        }
-        offered = Persona.builtins + list.filter(Self.supportedPackage).map(Persona.init(info:))
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try? JSONEncoder().encode(list).write(to: indexURL, options: .atomic)
-        if let chosen = offered.first(where: { $0.id == target }) {
-            if !isOnPhone(chosen) { await download(chosen, api) }
-            // Another one chosen, pushed or another hub made current while it downloaded stays.
-            if isOnPhone(chosen), hub == url, latest(asked) || chosen.id == chosenID {
-                if chosen.id != chosenID { setChosen(chosen.id) }
-                current = chosen
+
+        case .tap(let source, let p, let api):
+            guard isCurrent(source), offered.contains(p) else { return nil }
+            let client = api.flatMap { $0.config.isDemo ? nil : $0 }
+            guard client != nil || isOnPhone(p) else {
+                error = String(localized: "“\(p.name)” isn’t on this phone yet. Connect to the hub, then choose it.")
+                return nil
             }
-        } else if latest(asked) {
-            // Not listed (its package gone for a while): the default shows and the choice is kept. A list asked for
-            // before a newer choice may not have that one yet: it is not put back to the default.
-            if target != chosenID { setChosen(target) }
-            current = .builtin
-        }
-        // The others' faces for Settings' cards, one small picture each (the package itself comes when chosen).
-        for p in offered where !isOnPhone(p) && !hasThumbnail(p) {
-            guard let file = p.manifest?.avatarFile(points: Self.thumbnailPoints, scale: 3),
-                  let data = try? await api.personaFile(p.id, file) else { continue }
+            choices += 1
+            let request = mark
+            visit.desired = Tap(persona: p, mark: request, api: client, local: api?.config.isDemo != true)
+            visit.queued = nil
+            error = nil
+            if let client, visit.keeps == nil {
+                let checking = apply(.listRequested(request, client, after: nil))
+                return Task { await checking?.value; await apply(.tapReady(request))?.value }
+            }
+            return apply(.tapReady(request))
+
+        case .tapReady(let request):
+            guard isCurrent(request), var tap = visit.desired, tap.mark == request else { return nil }
+            // A list may have replaced the revision while the tap was waiting for a file or the hub's capabilities.
+            guard let p = offered.first(where: { $0.id == tap.persona.id }) else {
+                visit.desired = nil
+                project()
+                return nil
+            }
+            tap.persona = p
+            if !isOnPhone(p), let api = tap.api {
+                return apply(.downloadRequested(request, p, api))
+            }
+            if let api = tap.api, visit.keeps ?? followsHub {
+                visit.desired = tap
+                if !followsHub, defaults.string(forKey: Self.localChoiceKey) == nil {
+                    defaults.set(localID ?? Persona.builtinID, forKey: Self.localChoiceKey)
+                }
+                project(explicitlyChosen: true)
+                if let move = migration, move.hub == api.config.url {
+                    return Task {
+                        let accepted = (try? await move.answer.value.get()) != nil
+                        apply(.migrationObserved(request, move, accepted))
+                        await apply(.tapReady(request))?.value
+                    }
+                }
+                if let active = visit.inFlight {
+                    if active.tap.mark == request { return active.work }
+                    visit.queued = tap
+                    return active.work
+                }
+                if let older = writers[api.config.url] {
+                    visit.queued = tap
+                    if let waiting = visit.waitingForPreviousVisit { return waiting }
+                    let waiting = Task {
+                        await older.work.value
+                        await apply(.writeAvailable(request))?.value
+                    }
+                    visit.waitingForPreviousVisit = waiting
+                    return waiting
+                }
+                return startPut(tap, api)
+            }
+            if tap.local {
+                localChange = request.sequence
+                followsHub = false
+                defaults.removeObject(forKey: Self.localChoiceKey)
+            }
+            visit.confirmed = nil
+            visit.desired = nil
+            visit.stable = p
+            project(explicitlyChosen: true)
+
+        case .push(let request, let chosen, let id, let api):
+            guard isCurrent(request) else { return nil }
+            let pushed = chosen ?? id
+            let olderTap = visit.desired.map { $0.persona.id != pushed && $0.persona.id != id } == true &&
+                (visit.inFlight?.tap.persona.id == pushed || visit.confirmed?.id == id)
+            choices += 1
+            visit.pushes[id] = choices
+            visit.pushes[pushed] = choices
+            confirm(id)
+            visit.keeps = true
+            if !olderTap {
+                visit.desired = nil
+                visit.queued = nil
+            }
+            let received = mark
+            return Task { await apply(.followConfirmed(received, id, api))?.value }
+
+        case .followConfirmed(let received, let id, let api):
+            // The choice was recorded synchronously. Derive the display with any intervening tap still in place.
+            guard isCurrent(received), visit.confirmed?.heard == received.sequence else { return nil }
+            project()
+            guard let p = offered.first(where: { $0.id == id }) else {
+                return apply(.listRequested(mark, api, after: reads))
+            }
+            return apply(.downloadRequested(mark, p, api))
+
+        case .listRequested(let request, let api, let after):
+            guard isCurrent(request) else { return nil }
+            if let after, reads > after { return reading?.work }
+            if let reading {
+                guard after != nil else { return reading.work }
+                return Task {
+                    await reading.work.value
+                    await apply(.listRequested(request, api, after: after))?.value
+                }
+            }
+            reads += 1
+            let number = reads, asked = mark
+            let task = Task {
+                let answer = await Self.readList(api)
+                await apply(.listAnswered(asked, api, answer))?.value
+                if case .success(let list) = answer, isCurrent(asked) {
+                    for info in list.packages {
+                        let p = Persona(info: info)
+                        guard isCurrent(asked) else { break }
+                        if !isOnPhone(p), !hasThumbnail(p),
+                           let file = p.manifest?.avatarFile(points: Self.thumbnailPoints, scale: 3),
+                           let data = try? await api.personaFile(p.id, file) {
+                            apply(.thumbnailFinished(asked, p, data))
+                        }
+                    }
+                }
+                apply(.listFinished(asked, number))
+            }
+            reading = (number, task)
+            return task
+
+        case .listAnswered(let request, let api, let answer):
+            guard isCurrent(request) else { return nil }
+            switch answer {
+            case .failure(let failure):
+                if let server = failure as? APIError, server.status == 404 {
+                    error = String(localized: "This hub can't host avatars yet. Update the hub and check again.")
+                } else if !failure.isCancellation {
+                    error = String(localized: "Couldn't load the avatar list: \(failure.localizedDescription)")
+                }
+            case .success(let list):
+                error = nil
+                listed = true
+                if list.current != nil, let reading { visit.latestAuthoritativeRead = reading.number }
+                if list.current != nil || (visit.confirmed?.heard ?? 0) <= request.sequence {
+                    visit.keeps = list.current != nil
+                    if list.current == nil { visit.confirmed = nil }
+                }
+                offered = Persona.builtins + list.packages.map(Persona.init(info:))
+                try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                try? JSONEncoder().encode(list.packages).write(to: indexURL, options: .atomic)
+                return apply(.listChoice(request, api, list.current))
+            }
+
+        case .listChoice(let request, let api, let kept):
+            guard isCurrent(request) else { return nil }
+            return settle(kept, api: api, since: request)
+
+        case .migrationObserved(let request, let move, let accepted):
+            guard isCurrent(request), migration?.mark == move.mark else { return nil }
+            migration = nil
+            if accepted, localChange == move.localChange { followsHub = true }
+
+        case .listSettled(let request, let api, let id):
+            guard isCurrent(request) else { return nil }
+            if let id, (visit.confirmed?.heard ?? 0) <= request.sequence, localChange <= request.sequence {
+                choices += 1
+                confirm(id)
+            } else if id == nil, visit.confirmed == nil, visit.desired == nil, localChange <= request.sequence {
+                let local = localID ?? chosenID
+                if let p = offered.first(where: { $0.id == local }) {
+                    if isOnPhone(p) { visit.stable = p; project() }
+                    else { return apply(.downloadRequested(mark, p, api)) }
+                } else {
+                    defaults.set(local, forKey: Self.localChoiceKey)
+                    visit.stable = .builtin
+                    project()
+                }
+                return nil
+            }
+            project()
+            if let id = visit.confirmed?.id, let p = offered.first(where: { $0.id == id }) {
+                return apply(.downloadRequested(mark, p, api))
+            }
+
+        case .listFinished(let request, let number):
+            guard isCurrent(request), reading?.number == number else { return nil }
+            reading = nil
+            prune(keeping: Set(offered.map { "\($0.id)/\($0.rev)" }))
+
+        case .writeAvailable(let request):
+            guard isCurrent(request) else { return nil }
+            visit.waitingForPreviousVisit = nil
+            let queued = visit.queued
+            visit.queued = nil
+            if let queued { return apply(.tapReady(queued.mark)) }
+
+        case .putAnswered(let request, let url, let answer):
+            if writers[url]?.sent == request { writers[url] = nil }
+            guard isCurrent(request), let active = visit.inFlight, active.sent == request else { return nil }
+            visit.inFlight = nil
+            let tap = active.tap
+            let ownsIntent = visit.desired?.mark == tap.mark
+            if ownsIntent { visit.desired = nil }
+            let echoed = (visit.pushes[tap.persona.id] ?? 0) > request.sequence
+            switch answer {
+            case .success(let kept):
+                visit.keeps = true
+                visit.acceptedTap = max(visit.acceptedTap, tap.mark.sequence)
+                if !echoed, tap.mark.sequence >= localChange {
+                    choices += 1
+                    confirm(PersonaSelection.resolve(kept.effective ?? kept.id ?? tap.persona.id))
+                }
+            case .failure(let failure):
+                if !failure.isCancellation, !echoed, tap.mark.sequence >= localChange,
+                   ownsIntent || visit.desired.map({ !isOnPhone($0.persona) }) == true {
+                    error = String(localized: "Couldn’t switch to “\(tap.persona.name)” on the hub: \(failure.localizedDescription)")
+                }
+            }
+            project()
+            let queued = visit.queued
+            visit.queued = nil
+            if let queued, queued.mark == visit.desired?.mark, let api = queued.api { return startPut(queued, api) }
+
+        case .uploadChosen(let receipt, let api):
+            let request = receipt.started, id = receipt.id
+            guard isCurrent(request), let p = offered.first(where: { $0.id == id }) else { return nil }
+            if !receipt.reconciled {
+                receipt.reconciled = true
+                let replaced = (visit.pushes[id] ?? 0) > request.sequence && visit.confirmed?.id != id
+                // A modern list requested after the server replied supplies the current choice even without a push.
+                if visit.latestAuthoritativeRead <= receipt.readsAtAnswer, !replaced,
+                   visit.acceptedTap <= request.sequence, localChange <= request.sequence {
+                    choices += 1
+                    if visit.keeps == true { confirm(id) }
+                    else { visit.confirmed = (id, choices) }
+                    project()
+                }
+            }
+            return apply(.downloadRequested(mark, p, api))
+
+        case .downloadRequested(let request, let p, let api):
+            guard isCurrent(request), p.manifest != nil, !isOnPhone(p) else { return nil }
+            let key = PackageKey(p)
+            if let running = downloads[key] { return running }
+            let folder = directory(p).deletingLastPathComponent()
+            let part = folder.appending(path: ".\(p.rev).\(UUID().uuidString).part", directoryHint: .isDirectory)
+            let task = Task {
+                let answer = await Self.fetch(p, api: api, part: part)
+                await apply(.downloadFinished(request, p, answer))?.value
+            }
+            downloads[key] = task
+            downloading.insert(p.id)
+            return task
+
+        case .downloadFinished(let request, let p, let result):
+            // A stale fetch owns only its unique staging directory, never a current visit's destination.
+            defer { if case .success(let part) = result { try? FileManager.default.removeItem(at: part) } }
+            guard isCurrent(request) else { return nil }
+            downloads[PackageKey(p)] = nil
+            if !downloads.keys.contains(where: { $0.id == p.id }) { downloading.remove(p.id) }
+            let waiting = visit.desired.flatMap { $0.persona.id == p.id ? $0.mark : nil }
+            guard offered.first(where: { $0.id == p.id })?.rev == p.rev else {
+                return waiting.flatMap { apply(.tapReady($0)) }
+            }
+            do {
+                let part = try result.get()
+                if !isOnPhone(p) { try FileManager.default.moveItem(at: part, to: directory(p)) }
+                pictures += 1
+                if let waiting { return apply(.tapReady(waiting)) }
+                if visit.confirmed == nil, visit.desired == nil, (localID ?? chosenID) == p.id { visit.stable = p }
+                project()
+            } catch let failure {
+                if visit.desired?.persona.id == p.id { visit.desired = nil }
+                project()
+                let relevant = waiting != nil || visit.confirmed?.id == p.id || choices == request.sequence
+                if relevant, !failure.isCancellation { error = String(localized: "Couldn’t download “\(p.name)”: \(failure.localizedDescription)") }
+            }
+
+        case .thumbnailFinished(let request, let p, let data):
+            guard isCurrent(request), offered.contains(p) else { return nil }
             try? FileManager.default.createDirectory(at: thumbnails, withIntermediateDirectories: true)
             try? data.write(to: thumbnail(p), options: .atomic)
             pictures += 1
         }
-        prune(keeping: Set(offered.map { "\($0.id)/\($0.rev)" }))
+        return nil
     }
+
+    private func confirm(_ id: String) {
+        visit.confirmed = (id, choices)
+        followsHub = true
+        defaults.removeObject(forKey: Self.localChoiceKey)
+    }
+
+    private func project(explicitlyChosen: Bool = false) {
+        if let id = visit.confirmed?.id, let p = offered.first(where: { $0.id == id }), isOnPhone(p) { visit.stable = p }
+        var shown = visit.stable
+        if let desired = visit.desired {
+            if let p = offered.first(where: { $0.id == desired.persona.id }), isOnPhone(p) { shown = p }
+            else if let active = visit.inFlight { shown = active.tap.persona }
+        }
+        show(shown, explicitlyChosen: explicitlyChosen)
+    }
+
+    private func startPut(_ tap: Tap, _ api: APIClient) -> Work {
+        let sent = mark
+        let work = Task {
+            let answer: Result<LookCurrent, any Error>
+            do {
+                guard isCurrent(sent) else { throw CancellationError() }
+                answer = .success(try await api.chooseLook(tap.persona.id))
+            }
+            catch { answer = .failure(error) }
+            await apply(.putAnswered(sent, api.config.url, answer))?.value
+        }
+        writers[api.config.url] = (sent, work)
+        visit.inFlight = (tap, sent, work)
+        return work
+    }
+
+    private func settle(_ kept: LookCurrent?, api: APIClient, since request: Mark) -> Work? {
+        let effective = kept.map { PersonaSelection.resolve($0.effective ?? $0.id) }
+        #if DEBUG
+        if let id = launchChoice {
+            launchChoice = nil
+            if let p = offered.first(where: { $0.id == id }), visit.desired == nil, choices == request.sequence {
+                if let effective { confirm(effective) }
+                return apply(.tap(mark, p, api))
+            }
+        }
+        #endif
+        guard let kept, kept.id == nil, (visit.confirmed?.heard ?? 0) <= request.sequence,
+              localChange <= request.sequence, let mine = localID, mine != Persona.builtinID else {
+            return apply(.listSettled(request, api, effective))
+        }
+        if let writer = writers[api.config.url] {
+            return Task {
+                await writer.work.value
+                await apply(.listChoice(request, api, kept))?.value
+            }
+        }
+        let move: Migration
+        if let current = migration {
+            move = current
+        } else {
+            let answer = Task<Result<LookCurrent, any Error>, Never> {
+                do { return .success(try await api.chooseLook(mine, ifUnset: true)) }
+                catch { return .failure(error) }
+            }
+            move = Migration(mark: request, localChange: localChange, hub: api.config.url, answer: answer)
+            migration = move
+        }
+        return Task {
+            let answer = try? await move.answer.value.get()
+            apply(.migrationObserved(request, move, answer != nil))
+            guard isCurrent(request) else { return }
+            if move.mark.generation != request.generation {
+                await apply(.listChoice(request, api, kept))?.value
+            } else {
+                await apply(.listSettled(request, api, answer.map { PersonaSelection.resolve($0.effective ?? $0.id) }))?.value
+            }
+        }
+    }
+
+    @concurrent nonisolated private static func readList(_ api: APIClient) async -> Result<Listing, any Error> {
+        do {
+            if let looks = try await api.looks() {
+                return .success(Listing(packages: looks.packages.filter(supportedPackage), current: looks.current))
+            }
+            return .success(Listing(packages: try await api.personas().filter(supportedPackage), current: nil))
+        } catch { return .failure(error) }
+    }
+
+    /// An effect owns a private staging directory; only the reducer can publish the complete revision.
+    @concurrent nonisolated private static func fetch(_ p: Persona, api: APIClient, part: URL) async -> Result<URL, any Error> {
+        do {
+            for file in p.manifest?.files ?? [] {
+                let data = try await api.personaFile(p.id, file)
+                let dest = part.appending(path: file)
+                try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try data.write(to: dest, options: .atomic)
+            }
+            if let missing = p.manifest?.files.first(where: { !FileManager.default.fileExists(atPath: part.appending(path: $0).path(percentEncoded: false)) }) {
+                throw APIError(status: 0, message: String(localized: "Missing \(missing)"))
+            }
+            return .success(part)
+        } catch {
+            try? FileManager.default.removeItem(at: part)
+            return .failure(error)
+        }
+    }
+
 
     /// Settings' cards show faces 64 pt wide.
     static let thumbnailPoints: CGFloat = 64
     private var thumbnails: URL { root.appending(path: ".thumbnails", directoryHint: .isDirectory) }
     private func thumbnail(_ p: Persona) -> URL { thumbnails.appending(path: "\(p.id)-\(p.rev).png") }
     private func hasThumbnail(_ p: Persona) -> Bool { FileManager.default.fileExists(atPath: thumbnail(p).path(percentEncoded: false)) }
-
-    /// The choice to show given the hub's: the hub's own once it has one. When it has none, a choice made on this device
-    /// (not a copy of another hub's) moves up, unless another device's got there first (`if_unset`): the first device
-    /// that meets the hub decides for all. Nil when the hub did not take it (out of reach, or it does not list that one
-    /// now: its package gone for a while): this device's stays, and it is tried again at the next read.
-    private func settle(_ kept: LookCurrent, _ api: APIClient) async -> String? {
-        let shown = PersonaSelection.resolve(kept.effective ?? kept.id)
-        #if DEBUG
-        if let id = launchChoice {
-            launchChoice = nil
-            if let answer = try? await api.chooseLook(id) { return PersonaSelection.resolve(answer.effective ?? id) }
-        }
-        #endif
-        // The default is not sent: it is what a hub without a choice shows anyway, and another device's own may come.
-        guard kept.id == nil, !followsHub, let mine = NativeStateMigration.readPersonaID(from: defaults).map(PersonaSelection.resolve),
-              mine != Persona.builtinID else { return shown }
-        guard let answer = try? await api.chooseLook(mine, ifUnset: true) else { return nil }
-        // Moved up (or another device's got there first): never again, to this hub or the next, also when the current
-        // hub changed while this one answered and its answer is not shown. A choice made here meanwhile with no hub or an
-        // older one is this device's own: that one moves up next.
-        if NativeStateMigration.readPersonaID(from: defaults).map(PersonaSelection.resolve) == mine { followsHub = true }
-        return PersonaSelection.resolve(answer.effective ?? answer.id)
-    }
-
-    /// Picks a persona. A package is downloaded first (on failure, or with no hub to download from, nothing changes and
-    /// `error` says why). It shows here at once and goes to a hub that keeps the choice, so every device follows; when
-    /// the hub does not take it, the one before comes back and `error` says why. With an older hub, or none, it is this
-    /// device's own. A choice made with a hub that is no longer the current one (another group's became current while
-    /// it was read or the package downloaded) is dropped. `onHub`: the hub has chosen it already (an upload with
-    /// `choose`, a delete of the chosen one), as of `heard` then (taken before asking it), so it is only shown here;
-    /// unless the hub replaced it since (`replaced`): that one is newer, and only the package comes.
-    func choose(_ p: Persona, api: APIClient?, onHub: Int? = nil) async {
-        guard offered.contains(p) else { return }
-        let hubAPI = api.flatMap { $0.config.isDemo ? nil : $0 }
-        if let api = hubAPI {
-            if onHub == nil, keeps[api.config.url] == nil { await refresh(api) } // does it keep it?
-            if hub == nil { read(api.config.url) }
-            guard hub == api.config.url else { return }
-            // Before it counts as a choice: that would drop the newer one's download still under way.
-            if let asked = onHub, replaced(p.id, on: api.config.url, since: asked) {
-                if !isOnPhone(p) { await download(p, api) }
-                return
-            }
-        }
-        if !isOnPhone(p), api == nil {
-            error = String(localized: "“\(p.name)” isn’t on this phone yet. Connect to the hub, then choose it.")
-            return
-        }
-        choices += 1
-        let mine = choices
-        pending.append(p.id)
-        defer { if let i = pending.firstIndex(of: p.id) { pending.remove(at: i) } }
-        if let api, !isOnPhone(p) {
-            // Nothing shows for it until its package is here: an earlier one the hub refuses meanwhile still goes back.
-            silent.insert(mine)
-            await download(p, api)
-            // Another one chosen or pushed, or another hub made current, while it downloaded stays.
-            guard isOnPhone(p), mine == choices else { return }
-            silent.remove(mine)
-        }
-        guard let api = hubAPI else {
-            if api == nil { followsHub = false } // no hub: this device's, moved up when one that keeps the choice comes
-            return show(p)
-        }
-        let url = api.config.url
-        let keeps = keeps[url]
-        if let asked = onHub {
-            if replaced(p.id, on: url, since: asked) { return } // while its package downloaded
-            if keeps == true { followsHub = true; hear(p.id, on: url) }
-            return show(p)
-        }
-        // Not known (the hub did not answer): a device that follows a hub tries it; one that never did keeps it here.
-        guard keeps ?? followsHub else {
-            followsHub = false
-            return show(p)
-        }
-        // While an earlier choice is still on its way, what was there before it is what comes back.
-        let before = undos[url]?.undo ?? Undo(shown: current, chosen: chosenID, followed: followsHub)
-        followsHub = true
-        show(p)
-        await send(p, api, mine: mine, before: before)
-    }
-
-    /// The hub chose `id` (as of `heard` mark `asked`) and replaced it since: its push came after that, and another
-    /// choice was heard after it (newer: on screen, or its package on the way).
-    private func replaced(_ id: String, on url: URL, since asked: Int) -> Bool {
-        (echoes[url]?[id] ?? 0) > asked && hubChoices[url].map { $0.id != id } == true
-    }
-
-    /// What a choice sent to the hub replaced: what comes back when the hub does not take it and knows no choice of
-    /// its own here.
-    private struct Undo {
-        var shown: Persona
-        var chosen: String
-        var followed: Bool
-    }
-
-    private func show(_ p: Persona) {
-        error = nil
-        setChosen(p.id)
-        current = p
-    }
-
-    /// Tells the hub, one PUT at a time and only the newest choice (one that another followed while it waited is not
-    /// sent). When the hub does not take the newest, its choice as known now comes back (an earlier tap it took, what
-    /// it listed or pushed meanwhile), else what was there `before`: the one on screen then when it is that one, else
-    /// its package when it is on the phone. While that package is not on the phone (still downloading, or it did not
-    /// come), what was there `before` stays, as when a list or a push brings it. A hub that is no longer the current
-    /// one changes nothing on screen.
-    private func send(_ p: Persona, _ api: APIClient, mine: Int, before: Undo) async {
-        let url = api.config.url
-        undos[url] = (before, (undos[url]?.count ?? 0) + 1)
-        let previous = sending
-        let task = Task {
-            await previous?.value
-            defer { if let u = undos[url] { undos[url] = u.count > 1 ? (u.undo, u.count - 1) : nil } }
-            // Not sent (a newer one is, or another came since): what it put up is gone, it counts as a choice no more.
-            guard latest(mine) else { silent.insert(mine); return }
-            let asked = heard
-            do {
-                _ = try await api.chooseLook(p.id)
-                keeps[url] = true
-                // Its own push came already: that, or what was pushed after it, is the hub's now.
-                if (echoes[url]?[p.id] ?? 0) <= asked { hear(p.id, on: url) }
-            } catch {
-                guard !error.isCancellation else { return }
-                // Not taken: it counts as a choice no more, so what it replaced is in force again (a push or a list from
-                // before it whose package is still downloading shows once that is here).
-                silent.insert(mine)
-                // Since then the hub's push came (it did take it), another choice showed, or another hub became the
-                // current one (its own shows): that one stays. A later choice still waiting for its package does not
-                // count: nothing shows for it yet.
-                guard latest(mine), hub == url else { return }
-                let back = hubChoices[url]?.id ?? before.chosen
-                // The old local choice stays this device's (moved up later) unless the hub's own comes back.
-                followsHub = hubChoices[url] != nil || before.followed
-                if let shown = before.shown.id == back ? before.shown : offered.first(where: { $0.id == back && isOnPhone($0) }) {
-                    setChosen(back)
-                    current = shown
-                } else {
-                    setChosen(before.chosen)
-                    current = before.shown
-                }
-                self.error = String(localized: "Couldn’t switch to “\(p.name)” on the hub: \(error.localizedDescription)")
-            }
-        }
-        sending = task
-        await task.value
-    }
-
-    /// Another device chose `effective` (the hub's `look` push), or the hub went back to the default: shown and saved
-    /// here once its package is on the phone, as when a list brings it (until then the one before stays, also at the next
-    /// launch). This device's own older choice coming back while a newer one is still to come (on its way, or waiting
-    /// for its package) changes nothing on screen (the newer one's push follows), but it is still the hub's choice as
-    /// known here.
-    func follow(_ id: String?, effective: String?, api: APIClient?) async {
-        guard let api, !api.config.isDemo, let pushed = effective ?? id, !pushed.isEmpty else { return }
-        let id = PersonaSelection.resolve(pushed)
-        let url = api.config.url
-        heard += 1
-        echoes[url, default: [:]][id] = heard
-        hear(id, on: url) // what a choice the hub refuses goes back to
-        if pending.contains(id), id != pending.last { return }
-        read(url)
-        choices += 1
-        let mine = choices
-        keeps[url] = true
-        followsHub = true
-        guard let p = offered.first(where: { $0.id == id }) else {
-            // Not listed here yet (just made on another device): the list read brings it, downloads it and shows it.
-            return await reload(api)
-        }
-        if !isOnPhone(p) { await download(p, api) }
-        // Another one chosen or pushed, or another hub made current, while it downloaded stays (a choice made here
-        // still waiting for its package does not count).
-        guard latest(mine), isOnPhone(p) else { return }
-        if id != chosenID { setChosen(id) }
-        current = p
-    }
-
-    /// Fetches the package's files beside its place and moves them in whole. One download per id at a time: a caller
-    /// that comes while one runs waits for it (and fetches its own rev after, when that was another).
-    func download(_ p: Persona, _ api: APIClient) async {
-        guard p.manifest != nil else { return }
-        while let running = downloads[p.id] {
-            await running.task.value
-            if running.rev == p.rev || isOnPhone(p) { return }
-        }
-        let token = UUID()
-        // The entry goes as the download ends, before anyone waiting on it carries on.
-        let task = Task {
-            await fetch(p, api)
-            if downloads[p.id]?.token == token { downloads[p.id] = nil }
-        }
-        downloads[p.id] = (p.rev, token, task)
-        await task.value
-    }
-
-    private func fetch(_ p: Persona, _ api: APIClient) async {
-        guard let m = p.manifest else { return }
-        downloading.insert(p.id)
-        defer { downloading.remove(p.id) }
-        let fm = FileManager.default
-        let part = root.appending(path: p.id).appending(path: ".\(p.rev).part", directoryHint: .isDirectory)
-        try? fm.removeItem(at: part)
-        do {
-            for file in m.files {
-                let data = try await api.personaFile(p.id, file)
-                let dest = part.appending(path: file)
-                try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try data.write(to: dest, options: .atomic)
-            }
-            // Every file there before it is used (nothing else may touch the .part, but a package missing a face
-            // would show the built-in's for good).
-            if let lost = m.files.first(where: { !fm.fileExists(atPath: part.appending(path: $0).path(percentEncoded: false)) }) {
-                throw APIError(status: 0, message: String(localized: "Missing \(lost)"))
-            }
-            let final = directory(p)
-            try? fm.removeItem(at: final)
-            try fm.moveItem(at: part, to: final)
-            pictures += 1
-            error = nil
-        } catch {
-            try? fm.removeItem(at: part)
-            if !error.isCancellation { self.error = String(localized: "Couldn’t download “\(p.name)”: \(error.localizedDescription)") }
-        }
-    }
 
     /// Removes the revs that are neither offered nor on screen; never while a download runs, never a download's .part.
     private func prune(keeping keep: Set<String>) {
@@ -548,7 +740,9 @@ final class PersonaStore {
             let dir = root.appending(path: id)
             for rev in (try? fm.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? [] where !rev.hasPrefix(".") {
                 let key = "\(id)/\(rev)"
-                if !keep.contains(key), key != "\(current.id)/\(current.rev)" { try? fm.removeItem(at: dir.appending(path: rev)) }
+                if !keep.contains(key), key != "\(current.id)/\(current.rev)", key != "\(visit.stable.id)/\(visit.stable.rev)" {
+                    try? fm.removeItem(at: dir.appending(path: rev))
+                }
             }
             if ((try? fm.contentsOfDirectory(atPath: dir.path(percentEncoded: false))) ?? []).isEmpty { try? fm.removeItem(at: dir) }
         }

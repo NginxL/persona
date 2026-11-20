@@ -495,7 +495,7 @@ func (s *Service) machineLauncherRoutes() {
 			list, err = s.pickerLaunchersOn(ctx, mid, host)
 		}
 		var unavailable []unavailableLauncher
-		if err == nil && r.URL.Query().Get("purpose") == "assistant" { // the main chat's menu, and the scheduled tasks' that follow it
+		if purpose := r.URL.Query().Get("purpose"); err == nil && (purpose == "assistant" || purpose == "task") {
 			all := list
 			if list, err = s.assistantLaunchersOf(ctx, mid, all); err == nil {
 				unavailable = s.mainChatUnavailable(ctx, mid, all, list, s.requestLang(r)) // and what it can't run, with why (#5033)

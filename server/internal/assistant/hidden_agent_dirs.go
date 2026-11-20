@@ -12,10 +12,12 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// Hidden Agent folders: per computer, folders whose sessions stay collected but are left out of Agents and the
-// assistant's view (agents_list, live snapshots, tasks, pushes). The rules live with the computer beside its blocked
-// Claude config folders (internal/devices agentdirs.go); this file decides what they hide. The authoritative pending
-// interaction inventory is never filtered by them (pendingInteractions): hiding is a view, not a lifecycle change.
+// Agent folder rules: per computer, folders whose sessions are blocked (the node collects nothing of them, #10053) or
+// hidden (collected, left out of Agents and the assistant's view: agents_list, live snapshots, tasks, pushes). The rules
+// live with the computer beside its blocked Claude config folders (internal/devices agentdirs.go); this file decides
+// what the assistant leaves out: every rule switched on, blocking ones included, so the sessions of a node that does
+// not block yet are hidden at least. The authoritative pending interaction inventory is never filtered by them
+// (pendingInteractions): hiding is a view, not a lifecycle change.
 
 const hiddenAgentDirsKey = "agents.hidden_dirs"
 
@@ -93,11 +95,15 @@ func (s *Service) directorySessionSupervised(machine, sid string) bool {
 // agents.blocked_claude_dirs beside it; add also switches an existing rule on or off.
 func (s *Service) hiddenDirSetting() ownSetting {
 	return ownSetting{Setting: Setting{Key: hiddenAgentDirsKey, Title: i18n.T(i18n.Default, "assistant-hidden_dirs.title"), Actions: []string{"get", "add", "remove"},
-		About: "per machine, folders whose Agent sessions (every runtime) stay collected but are left out of Agents and your view " +
-			"(agents_list, snapshots, tasks, notifications); active supervised tasks stay visible. A rule switched off keeps its place and hides nothing. " +
-			"Unlike agents.blocked_claude_dirs, nothing stops being collected. get lists each machine's rules and how many sessions each hides now",
+		About: "per machine, folders whose Agent sessions (every runtime) Persona blocks or hides. block (the default for a new rule): " +
+			"the computer collects nothing of them, so no app, list, count, notification, Inbox item or your view has them, and their " +
+			"permission / question requests are left to the agent's own interface. hide: they stay collected but are left out of Agents and your view " +
+			"(agents_list, snapshots, tasks, notifications); active supervised tasks stay visible. A rule switched off keeps its place and does nothing. " +
+			"get lists each machine's rules, their action, and how many of its listed sessions each matches now (a blocking rule's are 0 " +
+			"once that computer's node keeps them out; an older node's are only hidden)",
 		Value: `add: {"machine": machine id, "pattern": a path or glob starting with / or ~/ (~ is that machine's home), or a folder name glob ` +
-			`starting with *, e.g. "~/.automation/workspaces/*", "enabled": true (default) or false to switch an existing rule off}; remove: "<machine id>:<pattern>"`},
+			`starting with *, e.g. "~/.automation/workspaces/*", "action": "block" (default for a new rule) or "hide" (an existing rule keeps ` +
+			`its action unless given), "enabled": true (default) or false to switch an existing rule off}; remove: "<machine id>:<pattern>"`},
 		get: s.getHiddenAgentDirs, change: s.changeHiddenAgentDirs}
 }
 
@@ -126,7 +132,7 @@ func (s *Service) getHiddenAgentDirs(ctx context.Context) (string, error) {
 		}
 		for _, r := range rules {
 			if !r.Enabled {
-				fmt.Fprintf(&b, "  - %s (off)\n", r.Pattern)
+				fmt.Fprintf(&b, "  - %s (%s, off)\n", r.Pattern, r.Action)
 				continue
 			}
 			n := 0
@@ -136,7 +142,7 @@ func (s *Service) getHiddenAgentDirs(ctx context.Context) (string, error) {
 					n++
 				}
 			}
-			fmt.Fprintf(&b, "  - %s (on; matches %d sessions)\n", r.Pattern, n)
+			fmt.Fprintf(&b, "  - %s (%s, on; matches %d sessions)\n", r.Pattern, r.Action, n)
 		}
 	}
 	if b.Len() == 0 {
@@ -149,7 +155,7 @@ func (s *Service) changeHiddenAgentDirs(ctx context.Context, action string, v js
 	if s.agentDirs == nil {
 		return nil, errors.New("hidden Agent folders are kept with the computers, and this manager carries none")
 	}
-	var machine, pattern string
+	var machine, pattern, ruleAction string // ruleAction: "" leaves an existing rule's, a new one blocks
 	enabled := true
 	switch action {
 	case "add":
@@ -157,11 +163,15 @@ func (s *Service) changeHiddenAgentDirs(ctx context.Context, action string, v js
 			Machine string `json:"machine"`
 			Pattern string `json:"pattern"`
 			Enabled *bool  `json:"enabled"`
+			Action  string `json:"action"`
 		}
 		if err := json.Unmarshal(v, &a); err != nil {
-			return nil, errors.New(`value must be {"machine", "pattern", "enabled"?}`)
+			return nil, errors.New(`value must be {"machine", "pattern", "action"?, "enabled"?}`)
 		}
-		machine, pattern = a.Machine, a.Pattern
+		machine, pattern, ruleAction = a.Machine, a.Pattern, strings.TrimSpace(a.Action)
+		if ruleAction != "" && ruleAction != proto.AgentDirBlock && ruleAction != proto.AgentDirHide {
+			return nil, fmt.Errorf(`action must be %q or %q, not %q`, proto.AgentDirBlock, proto.AgentDirHide, a.Action)
+		}
 		if a.Enabled != nil {
 			enabled = *a.Enabled
 		}
@@ -195,30 +205,44 @@ func (s *Service) changeHiddenAgentDirs(ctx context.Context, action string, v js
 	args := i18n.Args{"machine": name, "path": p}
 	var key string
 	var edit func([]proto.HiddenAgentDir) ([]proto.HiddenAgentDir, error)
+	want := ruleAction
+	switch {
+	case want != "":
+	case at >= 0:
+		want = rules[at].Action
+	default:
+		want = proto.AgentDirBlock
+	}
 	switch {
 	case action == "remove" && at < 0:
-		return nil, fmt.Errorf("%s is not a hidden folder on %s (get lists the rules)", p, m.ID)
+		return nil, fmt.Errorf("%s is not an Agent folder rule on %s (get lists the rules)", p, m.ID)
 	case action == "remove":
 		key = "remove"
 		edit = func(now []proto.HiddenAgentDir) ([]proto.HiddenAgentDir, error) {
 			return slices.DeleteFunc(now, func(r proto.HiddenAgentDir) bool { return r.Pattern == p }), nil
 		}
-	case at >= 0 && rules[at].Enabled == enabled:
-		return &ownChange{summary: fmt.Sprintf("%s is already a hidden folder on %s, %s.", p, m.ID, map[bool]string{true: "on", false: "off"}[enabled])}, nil
+	case at >= 0 && rules[at].Enabled == enabled && rules[at].Action == want:
+		return &ownChange{summary: fmt.Sprintf("%s is already an Agent folder rule on %s: %s, %s.", p, m.ID, want, map[bool]string{true: "on", false: "off"}[enabled])}, nil
 	default:
-		key = map[bool]string{true: "hide", false: "add_off"}[enabled]
-		if at >= 0 {
+		switch {
+		case !enabled && at < 0:
+			key = "add_off"
+		case at < 0:
+			key = want // "block" or "hide"
+		case rules[at].Action != want:
+			key = "to_" + want // the action switched, the rule on or off as asked
+		default:
 			key = map[bool]string{true: "switch_on", false: "switch_off"}[enabled]
 		}
 		edit = func(now []proto.HiddenAgentDir) ([]proto.HiddenAgentDir, error) {
 			if i := slices.IndexFunc(now, func(r proto.HiddenAgentDir) bool { return r.Pattern == p }); i >= 0 {
-				now[i].Enabled = enabled
+				now[i].Enabled, now[i].Action = enabled, want
 				return now, nil
 			}
-			return append(now, proto.HiddenAgentDir{Pattern: p, Enabled: enabled}), nil
+			return append(now, proto.HiddenAgentDir{Pattern: p, Enabled: enabled, Action: want}), nil
 		}
 	}
-	return &ownChange{summary: "Hidden Agent folder " + p + " on " + m.ID + ": " + key,
+	return &ownChange{summary: "Agent folder rule " + p + " on " + m.ID + ": " + key,
 		cardText: func(l i18n.Lang) string { return i18n.T(l, "assistant-hidden_dirs."+key, args) },
 		apply: func(ctx context.Context) (string, error) {
 			// The edit is made on the rules as they are then, so a change made meanwhile is kept.

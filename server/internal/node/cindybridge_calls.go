@@ -27,6 +27,7 @@ func (b *cindyBridge) request(ctx context.Context, method string, params json.Ra
 		Model          string        `json:"model"`
 		WorkspaceID    string        `json:"workspace_id"`
 		Resume         string        `json:"resume"`
+		BackendRoot    bool          `json:"backend_workspace_root"`
 		OpenElsewhere  bool          `json:"open_elsewhere"`
 	}
 	_ = json.Unmarshal(params, &p)
@@ -47,7 +48,7 @@ func (b *cindyBridge) request(ctx context.Context, method string, params json.Ra
 		b.mu.Unlock()
 		return ok, nil
 	case "session.start":
-		return b.startSession(ctx, p.Cwd, p.Prompt, p.Launcher, p.Model, p.PermissionMode, p.Effort, p.WorkspaceID, p.Resume, p.OpenElsewhere)
+		return b.startSession(ctx, p.Cwd, p.Prompt, p.Launcher, p.Model, p.PermissionMode, p.Effort, p.WorkspaceID, p.Resume, p.OpenElsewhere, p.BackendRoot)
 	}
 
 	b.mu.Lock()
@@ -125,7 +126,7 @@ func (b *cindyBridge) request(ctx context.Context, method string, params json.Ra
 	}
 }
 
-func (b *cindyBridge) startSession(ctx context.Context, cwd, prompt, launcher, model, mode, effort, workspaceID, resume string, openElsewhere bool) (any, error) {
+func (b *cindyBridge) startSession(ctx context.Context, cwd, prompt, launcher, model, mode, effort, workspaceID, resume string, openElsewhere, backendRoot bool) (any, error) {
 	if !b.writable() {
 		return nil, &rpc.Error{Code: "runtime_away", Message: "Cindy 服务没有在运行"}
 	}
@@ -160,6 +161,9 @@ func (b *cindyBridge) startSession(ctx context.Context, cwd, prompt, launcher, m
 				"sessionId": cindyID,
 				"patch":     map[string]any{"status": "active"},
 			}, &row)
+		}
+		if backendRoot && (row.WorkingDir == "" || filepath.Clean(row.WorkingDir) != filepath.Clean(cwd)) {
+			return nil, errors.New("Cindy could not verify the task directory on resume")
 		}
 		if strings.TrimSpace(prompt) != "" {
 			_ = b.postJSON(ctx, "/api/input/enqueue", map[string]any{
@@ -211,6 +215,9 @@ func (b *cindyBridge) startSession(ctx context.Context, cwd, prompt, launcher, m
 	var created cindyDBRow
 	if err := b.postJSON(ctx, "/api/sessions/create", createReq, &created); err != nil {
 		return nil, err
+	}
+	if backendRoot && (created.WorkingDir == "" || filepath.Clean(created.WorkingDir) != filepath.Clean(cwd)) {
+		return nil, errors.New("Cindy opened a different task directory")
 	}
 	if created.ID == "" {
 		return nil, errors.New("Cindy did not return a session id")

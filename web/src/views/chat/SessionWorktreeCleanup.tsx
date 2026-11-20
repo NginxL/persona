@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { errorText } from "../../lib/api";
 import { shortPath } from "../../lib/format";
 import type { Session } from "../../lib/types";
-import { removeAgentWorktree, worktreeLoss, worktreeStatus, type WorktreeStatus } from "../../lib/worktree";
+import { removeAgentWorktree, worktreeLoss, worktreeStatus, type WorktreeStatus } from "../../lib/worktree-cleanup";
 import { t } from "../../i18n";
 import { cx, Switch, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";

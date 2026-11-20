@@ -32,6 +32,7 @@ const resumeSource = "custom:persona"
 
 // agentLaunch is what an agent in a pane was started with, to start it again the same way.
 type agentLaunch struct {
+	AdditionalDirs                   []string `json:"additional_dirs,omitempty"`
 	TaskInstructionFile              string
 	TaskInstructions                 string
 	Agent                            string // "claude" (empty means claude), "codex", "traex", "pi"
@@ -53,6 +54,9 @@ type claudeLaunch = agentLaunch
 // quoting with q.
 func (n *Node) claudeCommandLine(spec claudeLaunch, args string, q func(string) string) string {
 	cmd := n.launcherCommandQ(spec.Launcher, q) + " " + args
+	for _, dir := range spec.AdditionalDirs {
+		cmd += " --add-dir " + q(dir)
+	}
 	if spec.Settings != "" {
 		cmd += " --settings " + q(spec.Settings)
 	}

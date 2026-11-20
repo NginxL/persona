@@ -19,7 +19,7 @@ export class AgyAcpClient extends EventEmitter {
     this.readyPromise = null
     this.nextId = 1
     this.pending = new Map()
-    this.loadedSessions = new Map() // sessionId -> { mcp: boolean, extraDirsKey: string }
+    this.loadedSessions = new Map() // sessionId -> { mcpKey, extraDirsKey }
     this.availableModels = null
     this.agentVersion = ''
     this.supportsAdditionalDirectories = false
@@ -27,6 +27,7 @@ export class AgyAcpClient extends EventEmitter {
     this.generation = 0
     this.closed = false
     this.initTimeoutMs = options.initTimeoutMs ?? 60_000
+    this.promptInactivityMs = options.promptInactivityMs ?? 15 * 60_000
     // How long a stopped agy gets to exit on SIGTERM before it is killed.
     this.killGraceMs = options.killGraceMs ?? 3_000
     // Kills in flight: each resolves once its agy is gone. stop() waits for all of them, so an agy dropped earlier (a
@@ -187,14 +188,28 @@ export class AgyAcpClient extends EventEmitter {
   _rawCall(method, params, timeoutMs = 60_000) {
     const id = this.nextId++
     return new Promise((resolve, reject) => {
-      const timer = timeoutMs > 0 ? setTimeout(() => {
+      const inactivityMs = method === 'session/prompt' && timeoutMs === 0 ? this.promptInactivityMs : 0
+      let timer = timeoutMs > 0 ? setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(`agy acp ${method} timed out after ${timeoutMs}ms`))
       }, timeoutMs) : null
+      let permissions = 0
+      const activity = (permissionDelta = 0) => {
+        clearTimeout(timer)
+        permissions += permissionDelta
+        if (permissions > 0 || !this.pending.has(id)) return
+        timer = setTimeout(() => {
+          this.pending.delete(id)
+          this.notify('session/cancel', { sessionId: params.sessionId })
+          reject(Object.assign(new Error(`Antigravity prompt inactive for ${inactivityMs}ms`), { promptInactive: true }))
+        }, inactivityMs)
+      }
       this.pending.set(id, {
         resolve: (res) => { clearTimeout(timer); resolve(res) },
         reject: (err) => { clearTimeout(timer); reject(err) },
+        ...(inactivityMs > 0 ? { sessionId: params.sessionId, activity } : {}),
       })
+      if (inactivityMs > 0) activity()
       try {
         this._send({ jsonrpc: '2.0', id, method, params })
       } catch (err) {
@@ -253,8 +268,13 @@ export class AgyAcpClient extends EventEmitter {
     }
 
     if (msg.method === 'session/update' && msg.params) {
+      for (const prompt of this._activePrompts(msg.params.sessionId)) prompt.activity()
       this.emit('update', msg.params)
     }
+  }
+
+  _activePrompts(sessionId) {
+    return [...this.pending.values()].filter((entry) => entry.activity && entry.sessionId === sessionId)
   }
 
   /** Answer a request from the agy process `child`. Never throws: the reply may find that process gone. */
@@ -264,6 +284,8 @@ export class AgyAcpClient extends EventEmitter {
       this._reply(child, { jsonrpc: '2.0', id, error: { code: -32000, message: 'agy acp process is gone' } })
       return
     }
+    const prompts = method === 'session/request_permission' ? this._activePrompts(params?.sessionId) : []
+    for (const prompt of prompts) prompt.activity(1)
     try {
       if (method === 'session/request_permission' && this.onPermissionRequest) {
         const result = await this.onPermissionRequest(params)
@@ -284,6 +306,8 @@ export class AgyAcpClient extends EventEmitter {
       this._reply(child, { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } })
     } catch (err) {
       this._reply(child, { jsonrpc: '2.0', id, error: { code: -32000, message: err?.message || 'Internal error' } })
+    } finally {
+      for (const prompt of prompts) prompt.activity(-1)
     }
   }
 
@@ -335,7 +359,8 @@ export class AgyAcpClient extends EventEmitter {
           if (child !== this.proc) return reject(new Error('Antigravity process changed during the conversation operation'))
           let value
           try { value = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch (error) { return reject(error) }
-          if (res.statusCode !== 200) return reject(new Error(value.message || `Antigravity conversation service returned ${res.statusCode}`))
+          if (res.statusCode !== 200) return reject(Object.assign(
+            new Error(value.message || `Antigravity conversation service returned ${res.statusCode}`), { code: value.code }))
           resolve(value)
         })
       })
@@ -350,7 +375,7 @@ export class AgyAcpClient extends EventEmitter {
     const params = { cwd, mcpServers, ...(extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}) }
     const res = await this.call('session/new', params, 30_000)
     if (res?.sessionId) {
-      this.loadedSessions.set(res.sessionId, { mcp: mcpServers.length > 0, extraDirsKey: JSON.stringify(extraDirs) })
+      this.loadedSessions.set(res.sessionId, { mcpKey: JSON.stringify(mcpServers), extraDirsKey: JSON.stringify(extraDirs) })
       if (res.models?.availableModels) this.availableModels = res.models.availableModels
     }
     return res
@@ -360,8 +385,9 @@ export class AgyAcpClient extends EventEmitter {
     await this.ensureStarted()
     const extraDirs = Array.isArray(additionalDirectories) ? additionalDirectories.filter(Boolean) : []
     const extraDirsKey = JSON.stringify(extraDirs)
+    const mcpKey = JSON.stringify(mcpServers)
     const loaded = this.loadedSessions.get(sessionId)
-    if (loaded && (mcpServers.length === 0 || loaded.mcp) && loaded.extraDirsKey === extraDirsKey) {
+    if (loaded && (mcpServers.length === 0 || loaded.mcpKey === mcpKey) && loaded.extraDirsKey === extraDirsKey) {
       return
     }
     const params = {
@@ -371,7 +397,7 @@ export class AgyAcpClient extends EventEmitter {
       ...(extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}),
     }
     const res = await this.call('session/resume', params, 30_000)
-    this.loadedSessions.set(sessionId, { mcp: mcpServers.length > 0, extraDirsKey })
+    this.loadedSessions.set(sessionId, { mcpKey, extraDirsKey })
     if (res?.models?.availableModels) this.availableModels = res.models.availableModels
     return res
   }
@@ -392,7 +418,6 @@ export class AgyAcpClient extends EventEmitter {
   }
 
   async prompt(sessionId, promptBlocks) {
-    // Turn execution can take minutes
     return this.call('session/prompt', { sessionId, prompt: promptBlocks }, 0)
   }
 

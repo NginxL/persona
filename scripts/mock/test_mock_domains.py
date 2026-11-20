@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """The mock hub's domain registry (scripts/mock/mock_domains.py): what a domain registers, and that mock_hub.py
-consults it at its central points (HTTP methods, WebSocket messages and close, features, --help, /mock/reset).
+consults it at its central points (HTTP methods, WebSocket messages and close, features, --help, /mock/reset), and that
+the blocks moved into domain modules stay out of mock_hub.py (MOVED).
 
     python3 scripts/mock/test_mock_domains.py
 
 The end-to-end class starts the mock with one extra probe domain on a free port the kernel picks, and stops it.
 """
+import ast
 import base64
 import contextlib
 import http.client
+import importlib
 import io
 import json
 import os
@@ -182,11 +185,117 @@ class RegistryTests(unittest.TestCase):
                 self.assertEqual((r.loaded, r.help_lines), (["domain_two", "domain_one"], ["two", "one"]))
                 with self.assertRaises(TypeError):
                     mock_domains.load({}, ["domain_bad"])
+                # A second load runs the module again, as a second run of mock_hub.py makes its globals anew (runpy).
+                Path(tmp, "domain_state.py").write_text("SEEN = []\n\ndef register(d):\n    SEEN.append(d.name)\n")
+                mock_domains.load({}, ["domain_state"])
+                mock_domains.load({}, ["domain_state"])
+                self.assertEqual(sys.modules["domain_state"].SEEN, ["domain_state"])
             finally:
                 sys.path.remove(tmp)
-        r = mock_domains.load({})
-        self.assertEqual(r.loaded, mock_domains.DOMAINS)
+        # Every listed domain is a module with register(d). A domain may read the hub's fixtures as it registers, so it
+        # registers on mock_hub.py's own globals in EndToEndTests (the mock would not start otherwise).
+        for name in mock_domains.DOMAINS:
+            self.assertTrue(callable(getattr(importlib.import_module(name), "register", None)), name)
         self.assertEqual(len(set(mock_domains.DOMAINS)), len(mock_domains.DOMAINS))
+
+
+# What each domain module took out of mock_hub.py, by name, with the issue of the move. A branch written before a move
+# that edited the old block can resolve its modify/delete or content conflict by keeping it (#11476, the MCP tool
+# goldens): mock_hub.py then has the domain a second time, the module's routes answer first, the old copy's state goes
+# its own way, and nothing fails. A domain that moves out of mock_hub.py lists its names here.
+MOVED = {
+    "desktops_mock": ("#11053", ("DESKTOPS", "DESKTOP_LOG", "DESKTOP_LOCK", "desktop_registration", "desktops_state",
+                                 "_features_without_desktops")),
+    "github_mock": ("#11543", ("GITHUB_DEVICE", "GH_FULL", "GH_MISSING", "GH_NARROW", "GH_MACHINES", "GITHUB_AUTH",
+                               "github_auth_view", "set_github_auth", "GH_AVATAR_COLORS", "GH_SENT", "gh_thread_page",
+                               "github_thread_area", "github_area")),
+    "kb_selection_mock": ("#11543", ("KB_SELECTION_MESSAGES", "KB_SELECTION_DOCS", "KB_SELECTION", "kb_selection_defaults",
+                                     "kb_selection_problem", "kb_selection_route")),
+    "mail_mock": ("#11543", ("MAIL_ACCOUNTS", "MAIL_LOG", "MAIL_FULL", "MS_CONFIG", "mail_area")),
+}
+
+
+def moved_back(source):
+    """[(line, what, module, issue)]: each moved name mock_hub.py's source defines or uses (its first line), and each of
+    its strings that starts like a moved domain's help line ("MOCK_X=…  what it does")."""
+    owner = {name: (module, issue) for module, (issue, names) in MOVED.items() for name in names}
+    switches = {}
+    for module, (issue, _) in MOVED.items():
+        lines = getattr(importlib.import_module(module), "HELP", ())
+        for line in [lines] if isinstance(lines, str) else lines:
+            switches[line.split("=", 1)[0] + "="] = (module, issue)
+    first, out = {}, []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names = [node.name]
+        elif isinstance(node, ast.Name):
+            names = [node.id]
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            names = node.names
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [alias.asname or alias.name.split(".")[0] for alias in node.names]
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            out += [(node.lineno, "the %s help line" % switch[:-1]) + switches[switch] for switch in switches
+                    if node.value.startswith(switch) and "  " in node.value]
+            continue
+        else:
+            continue
+        for name in names:
+            if name in owner and (name not in first or node.lineno < first[name]):
+                first[name] = node.lineno
+    out += [(line, name) + owner[name] for name, line in first.items()]
+    return sorted(out)
+
+
+def moved_back_report(found):
+    return "\n".join(
+        "mock_hub.py:%d has %s again, which moved to scripts/mock/%s.py (%s): a branch from before the move kept the "
+        "old block when it resolved its conflict. Delete the old copy from mock_hub.py and make the change in "
+        "scripts/mock/%s.py instead." % (line, what, module, issue, module) for line, what, module, issue in found)
+
+
+class MovedBlocksTests(unittest.TestCase):
+    """A block that moved into a domain module stays out of mock_hub.py (MOVED)."""
+
+    def test_every_moved_domain_is_listed(self):
+        self.assertEqual([m for m in MOVED if m not in mock_domains.DOMAINS], [])
+
+    def test_mock_hub_has_none_of_the_moved_blocks(self):
+        found = moved_back((HERE / "mock_hub.py").read_text())
+        if found:
+            self.fail("\n" + moved_back_report(found))
+
+    def test_an_old_block_is_found_with_its_module(self):
+        # desktop registration as mock_hub.py had it before #11053, and Knowledge selection's help line and call site.
+        old = textwrap.dedent('''
+            DESKTOPS = {}  # socket -> device_name
+            DESKTOP_LOCK = threading.Lock()
+
+
+            def desktop_registration(connection, msg):
+                with DESKTOP_LOCK:
+                    DESKTOPS[connection] = msg
+
+
+            MOCK_HELP = [
+                "MOCK_KB_SELECTION=missing|future|fail  Settings › Knowledge selection: a hub from before it (404)",
+            ]
+
+
+            def do_GET(self, p):
+                if kb_selection_route(self, "GET", p, b""): return
+        ''')
+        found = moved_back(old)
+        self.assertEqual([(line, what, module) for line, what, module, _ in found], [
+            (2, "DESKTOPS", "desktops_mock"), (3, "DESKTOP_LOCK", "desktops_mock"),
+            (6, "desktop_registration", "desktops_mock"),
+            (12, "the MOCK_KB_SELECTION help line", "kb_selection_mock"),
+            (17, "kb_selection_route", "kb_selection_mock")])
+        report = moved_back_report(found)
+        self.assertIn("mock_hub.py:6 has desktop_registration again, which moved to scripts/mock/desktops_mock.py (#11053)",
+                      report)
+        self.assertIn("make the change in scripts/mock/kb_selection_mock.py instead", report)
+        self.assertEqual(moved_back("DESKTOP_APPS = []\ndef desktops(): return DESKTOP_APPS\nx = 'MOCK_DESKTOPS'\n"), [])
 
 
 PROBE = textwrap.dedent('''
@@ -409,6 +518,14 @@ class EndToEndTests(unittest.TestCase):
         out = subprocess.run(self.command("--help"), env=env, capture_output=True, text=True, timeout=120).stdout
         self.assertIn("MOCK_PROBE=1  the test's probe domain", out)
         self.assertIn("MOCK_DESKTOPS=1  features list desktops", out)
+        self.assertIn("MOCK_KB_SELECTION=missing|future|fail  Settings › Knowledge selection", out)
+
+    def test_the_moved_domains_answer(self):
+        # Every module in DOMAINS registered on mock_hub.py's own globals (the mock would not have started otherwise),
+        # and these routes are the modules' now (#11543).
+        self.assertEqual(self.get("/api/v1/kb/selection")["version"], 1)
+        self.assertEqual(sorted(self.get("/mock/mail")), ["accounts_added", "deleted", "flags", "sent", "tested"])
+        self.assertEqual([a["id"] for a in self.get("/api/v1/mail/accounts")["accounts"]], ["acc1"])
 
 
 def frame(stream):

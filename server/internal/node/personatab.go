@@ -90,3 +90,39 @@ func (n *Node) markWorktreeShell(ctx context.Context, h host.Host, created *host
 	n.agentRoots[created.Pane.String()] = true
 	n.mu.Unlock()
 }
+
+// closeWorktreeShells closes the first shell of an Agent's worktree in workspace ws (markWorktreeShell) once the
+// Agent's own tab (keep) is open there: an empty tab next to the Agent's otherwise stays until the Agent finishes
+// (finishedPanes). Only a shell worktreeShellLocked still passes (no Agent in it or bound to it, nobody watching it) of
+// the host's last snapshot is closed; a failed close leaves it for finishedPanes.
+func (n *Node) closeWorktreeShells(ctx context.Context, launch host.Launcher, ws, keep string) {
+	h, ok := launch.(host.Host)
+	if !ok {
+		return
+	}
+	org, ok := h.(host.Organizer)
+	if !ok {
+		return
+	}
+	_, marks := h.(host.MetadataReporter)
+	var shells []host.Agent
+	n.mu.Lock()
+	inUse := map[string]bool{}
+	for _, a := range n.agents {
+		inUse[a.PaneID] = true
+	}
+	for _, p := range n.layouts[h.Kind()].panes {
+		if p.WorkspaceID == ws && p.PaneID != "" && p.PaneID != keep && n.worktreeShellLocked(p, marks, inUse) {
+			shells = append(shells, p)
+		}
+	}
+	n.mu.Unlock()
+	for _, p := range shells {
+		if err := org.Close(ctx, n.hosts.Ref(p.PaneID), p.WorkspaceID, p.TabID); err != nil {
+			continue
+		}
+		n.mu.Lock()
+		delete(n.agentRoots, p.PaneID)
+		n.mu.Unlock()
+	}
+}

@@ -145,5 +145,8 @@
   "err_candidates_extension_only": "只有扩展的用途才有候选模型",
   "err_candidates_invalid": "候选模型：请选择“extension”“off”或“custom”，只有“custom”时才列出供应商和模型，每项只出现一次",
   "err_candidates_count": "候选模型：请列出 1 到 {most} 个",
-  "err_candidates_not_callable": "{provider} 不能直接调用，不能作为候选。请选择直连 API 的供应商，或有地址和密钥的供应商"
+  "err_candidates_not_callable": "{provider} 不能直接调用，不能作为候选。请选择直连 API 的供应商，或有地址和密钥的供应商",
+  "candidate_not_offered": "设置中的模型供应商均未提供此模型",
+  "candidate_not_direct": "无法直接调用供应商 {provider}",
+  "candidate_provider_gone": "供应商 {provider} 已移除或无法直接调用"
 }

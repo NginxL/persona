@@ -7,6 +7,7 @@
   "not_delivered": "届きませんでした：{error}",
   "interrupted": "中断しました",
   "interrupt_failed": "中断できませんでした：{error}",
+  "send_now_failed": "今すぐ送信できませんでした：{error}",
   "new_chat": "新しいチャット",
   "session": "セッション",
   "not_found_title": "会話が見つかりません",

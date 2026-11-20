@@ -41,6 +41,9 @@ type Devices interface {
 	// Summary is List's entry for the machine id names (Canonical(id)'s), false when List has none: one machine,
 	// without building the others.
 	Summary(id string) (devices.Summary, bool)
+	// Shown is whether a machine's list is its node's and until when it is shown as before while its node is away
+	// (devices.Shown); false when there is no such machine.
+	Shown(id string) (devices.Shown, bool)
 	// MachineResources returns the retained system and latest sample, including a stale sample's timestamp.
 	MachineResources(id string) (*proto.Machine, *proto.MetricSample, *bool)
 	Canonical(id string) string

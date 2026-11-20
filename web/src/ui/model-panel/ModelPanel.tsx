@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, us
 import { createPortal } from "react-dom";
 import "./ModelPanel.css";
 import { t } from "../../i18n";
+import { afterBack, useCloseOnBack } from "../../lib/back-close";
 import {
   engineChoices,
   engineSetup,
@@ -66,7 +67,8 @@ export interface ModelPanelProps {
   onPreset?: (key: string) => boolean | Promise<boolean>;
   /** The flyout lists the other engines its model runs with here (other providers listing it) and picks one on a click. */
   engines?: boolean;
-  /** "How to fix" after the reason under a provider that can't take a pick (New Agent's launcher that failed its check). */
+  /** "How to fix" after the reason under a provider that can't take a pick (New Agent's launcher that failed its check);
+   *  the panel closes first. */
   onHelp?: (provider: string) => void;
   /** "Configure models" instead of opening Settings › Model providers from here (a dialog that closes first). */
   onConfigure?: () => void;
@@ -260,6 +262,16 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
   // ── closing from outside ──
   const latest = useRef({ fly, onClose, held });
   latest.current = { fly, onClose, held };
+  // On a narrow screen Back closes it, its flyout with it, and stays where it opened
+  useCloseOnBack(true, onClose, narrow);
+  // Going elsewhere from it (Configure models, a provider's How to fix) waits for its entry to come off first: the caller
+  // may also close a sheet under it and navigate, which would otherwise leave the sheet's entry under the new page.
+  const leave = (go: () => void) => {
+    onClose();
+    if (narrow) afterBack(go);
+    else go();
+  };
+  const help = onHelp && ((provider: string) => leave(() => onHelp(provider)));
   useEffect(() => {
     const inside = (n: Node | null) => Boolean(n && (panel.current?.contains(n) || anchor.contains(n) || (n instanceof Element && n.closest("[data-model-flyout]"))));
     const down = (e: PointerEvent) => {
@@ -605,7 +617,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
                               setExpanded((now) => new Set([...now, p.id]));
                             }}
                             onReload={onReload}
-                            onHelp={onHelp}
+                            onHelp={help}
                           />
                         ))}
                         {found.map(renderRow)}
@@ -622,7 +634,7 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
                             frozen={picking}
                             onToggle={() => toggleLauncher(s.provider!.id)}
                             onReload={onReload}
-                            onHelp={onHelp}
+                            onHelp={help}
                           />
                           {expanded.has(s.provider!.id) && (
                             <div className="ml-2 border-l border-line pl-1">
@@ -688,11 +700,10 @@ export function ModelPanel({ anchor, onClose, providers, state, scope, onPick, o
           <div className="flex shrink-0 items-center border-t border-line px-3.5 py-[9px]">
             <button
               type="button"
-              onClick={() => {
-                onClose();
+              onClick={() => leave(() => {
                 if (onConfigure) onConfigure();
                 else navigate(settingsHref("models", null, phone, null, "providers"));
-              }}
+              })}
               className="flex min-w-0 items-center gap-1.5 text-[13px] whitespace-nowrap text-ink-2 transition-colors duration-150 hover:text-ink"
             >
               <Icon name="plus" size={14} className="shrink-0" />

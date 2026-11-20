@@ -258,12 +258,17 @@ func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *feishub
 	// The agents at work.
 	card.HR().Markdown("**🤖 " + wbAgentsLine(l, c) + "**")
 	icons := map[string]string{proto.StateNeedsYou: "🔴", proto.StateWorking: "🟢", proto.StateUnread: "🔵"}
+	preferTab := s.useHerdrTabName(ctx)
 	for i, r := range busy {
 		if i == wbHomeRows {
 			break
 		}
-		label := clip(oneLine(agentLabel(r.sess)), 24)
+		primary, secondary := feishuSessionNames(r.sess, preferTab)
+		label := clip(oneLine(primary), 24)
 		line := icons[r.sess.State] + " **" + feishubot.EscapeMarkdown(label) + "** · " + feishubot.EscapeMarkdown(r.d.Name)
+		if secondary != "" {
+			line += "\n" + feishubot.EscapeMarkdown(secondary)
+		}
 		if r.sess.LastText != "" {
 			line += "\n" + feishubot.EscapeMarkdown(clip(oneLine(stripMarkdownMarks(r.sess.LastText)), 70))
 		}

@@ -1,5 +1,6 @@
 {
   "region": "送信待ちのメッセージ",
+  "status": "送信待ち（未送信）",
   "summary_other": "{count}件待機中",
   "row_label": "キューの{n}件目：{text}",
   "relayed_from": "別の会話",
@@ -7,6 +8,7 @@
   "relayed_note": "この会話が空いたら届きます",
   "relayed_summary_other": "別の会話からのメッセージ {count} 件",
   "drag": "キューの{n}件目をドラッグして並べ替え",
+  "send_now": "今すぐ送信",
   "send_now_tip": "{agent} の次のステップを待たずに、待機中のメッセージをすべて今すぐ送信",
   "edit": "編集",
   "edit_label": "キューの{n}件目を編集",

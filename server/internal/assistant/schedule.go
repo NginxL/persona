@@ -52,6 +52,8 @@ type Task struct {
 	FreshEachRun bool           `json:"fresh_each_run,omitempty"`
 	StateNote    *TaskStateNote `json:"state_note,omitempty"`
 	stateRunKey  string
+	// runGrantBasis belongs only to the model/task snapshot consumed by this run, never the stored task.
+	runGrantBasis string
 
 	WorkoutID string `json:"workout_id,omitempty"`
 	ID        string `json:"id"`
@@ -100,6 +102,13 @@ type Task struct {
 	RunMachineID string `json:"run_machine_id,omitempty"`
 	RunSessionID string `json:"run_session_id,omitempty"`
 	RunLauncher  string `json:"run_launcher,omitempty"`
+
+	RunExecution *TaskExecution `json:"run_execution,omitempty"`
+	// ExecutionMachineID is independent of MachineID, which belongs to the source conversation.
+	ExecutionMachineID string         `json:"execution_machine_id,omitempty"`
+	Cwd                string         `json:"cwd,omitempty"`
+	Execution          *TaskExecution `json:"execution,omitempty"` // resolved view, never trusted from clients
+	ExecutionError     string         `json:"execution_error,omitempty"`
 	// How claude runs, chosen in the app only (the assistant can't raise its own permissions): "" = the assistant's
 	// launcher, Claude Code's default mode, the launcher's effort.
 	Launcher       string `json:"launcher,omitempty"`
@@ -133,8 +142,8 @@ type Task struct {
 	// A cron task's expression in words in the reader's language and its next runs; set on the view (tasksView), never stored.
 	CronText string      `json:"cron_text,omitempty"`
 	NextRuns []time.Time `json:"next_runs,omitempty"`
-	// ArmedAt is when a daily or cron task was last created, switched on or given another time or weekdays (rearm): a run
-	// due before that is no run it missed (#3816).
+	// ArmedAt records the owner's schedule changes. A daily or cron run due before it was never missed (#3816).
+	// For interval tasks it distinguishes an explicit start edit from the scheduler advancing At.
 	ArmedAt time.Time `json:"armed_at,omitempty"`
 }
 
@@ -283,22 +292,27 @@ type Followup struct {
 
 // ScheduleRun is one entry of the history: a task that ran, failed to start, or was skipped.
 type ScheduleRun struct {
-	TodoProgress     *ScheduleTodoAssessment `json:"todo_progress,omitempty"`
-	ID               string                  `json:"id"`
-	Kind             string                  `json:"kind"`   // routine / followup (Task.kind)
-	RefID            string                  `json:"ref_id"` // the task's id
-	Title            string                  `json:"title"`
-	Due              time.Time               `json:"due"` // when it was meant to run (the tap for "Run now")
-	At               time.Time               `json:"at"`  // when it ran
-	Status           string                  `json:"status"`
-	Error            string                  `json:"error,omitempty"`
-	RunIfError       string                  `json:"run_if_error,omitempty"`
-	ConditionSkipped bool                    `json:"condition_skipped,omitempty"`
-	Manual           bool                    `json:"manual,omitempty"` // "Run now"
-	MachineID        string                  `json:"machine_id,omitempty"`
-	SessionID        string                  `json:"session_id,omitempty"`
+	TodoProgress       *ScheduleTodoAssessment `json:"todo_progress,omitempty"`
+	Conversation       string                  `json:"conversation,omitempty"` // source / resumed / new
+	ConversationReason string                  `json:"conversation_reason,omitempty"`
+	Execution          *TaskExecution          `json:"execution,omitempty"`
+	ID                 string                  `json:"id"`
+	Kind               string                  `json:"kind"`   // routine / followup (Task.kind)
+	RefID              string                  `json:"ref_id"` // the task's id
+	Title              string                  `json:"title"`
+	Due                time.Time               `json:"due"` // when it was meant to run (the tap for "Run now")
+	At                 time.Time               `json:"at"`  // when it ran
+	Status             string                  `json:"status"`
+	Error              string                  `json:"error,omitempty"`
+	RunIfError         string                  `json:"run_if_error,omitempty"`
+	ConditionSkipped   bool                    `json:"condition_skipped,omitempty"`
+	Manual             bool                    `json:"manual,omitempty"` // "Run now"
+	MachineID          string                  `json:"machine_id,omitempty"`
+	SessionID          string                  `json:"session_id,omitempty"`
 	// Retried: this run is the automatic retry after a failure (so a retry that fails again does not retry forever).
 	Retried bool `json:"retried,omitempty"`
+	// DeliveryUnknown: the send may have reached the agent without a conversation receipt; it also cancels older retries.
+	DeliveryUnknown bool `json:"delivery_unknown,omitempty"`
 	// NotReady: skipped because a required computer or model was not ready, including temporary offline states.
 	// It stays in the history but neither counts toward nor ends a failure streak (schedule_streak.go).
 	NotReady bool `json:"not_ready,omitempty"`
@@ -555,10 +569,10 @@ func (s *Service) saveLocked(sc *schedule, tasks []Task) error {
 	if tasks == nil {
 		tasks = []Task{} // null would read as "never moved over"
 	}
-	dropStaleGrants(tasks) // a prompt or target changed since the owner's grant: it no longer applies (schedule_grant.go)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	dropEditedTaskGrants(sc.tasks, tasks)
 	if st := s.store(); st != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		if err := st.PutSetting(ctx, tasksKey, tasks); err != nil {
 			s.logf("save tasks: %v", err)
 			return errScheduleSave
@@ -944,6 +958,7 @@ func (s *Service) scheduleOwn(ctx context.Context, sessionID, title, rawPrompt, 
 	}
 	tasks := slices.Clone(sc.tasks)
 	t := &tasks[i]
+	previous := *t
 	if title = strings.TrimSpace(title); title != "" {
 		t.Title = title
 	}
@@ -991,6 +1006,10 @@ func (s *Service) scheduleOwn(ctx context.Context, sessionID, title, rawPrompt, 
 		return "", t.ID, true, err
 	}
 	isolateScheduledConversation(t, mayBeMain)
+	if err := s.checkTaskSourceRestore(ctx, previous, *t); err != nil {
+		sc.mu.Unlock()
+		return "", t.ID, true, err
+	}
 	// until applies only once the task is repeating. A one-off ignores it, including a bad value; checkUntil
 	// clears it. Absent keeps the stored end time; null clears it. A past end time on an enabled task fails
 	// before anything is saved.
@@ -1303,6 +1322,10 @@ func (s *Service) toolScheduleRoutine(ctx context.Context, machine, self string,
 	applyUntil(&t, end, hasUntil, clearUntil)
 	dropStaleUntil(&t, hasUntil, now)
 	isolateScheduledConversation(&t, mayBeMain)
+	if err := s.checkTaskSourceRestore(ctx, old, t); err != nil {
+		sc.mu.Unlock()
+		return "", err
+	}
 	if err := checkTask(&t, now); err != nil {
 		sc.mu.Unlock()
 		return "", err
@@ -1762,6 +1785,13 @@ func (s *Service) recordRun(r ScheduleRun) string {
 		if r.SessionID != "" {
 			t.LastSessionID = r.SessionID
 		}
+		// Learn the observed identity on a successful resume. Keep the last observation through an outage
+		// and leave an in-flight "New chat next time" intact.
+		if r.Conversation == "resumed" && r.Execution != nil && r.Execution.Fingerprint != "" &&
+			r.SessionID == t.RunSessionID && r.MachineID == t.RunMachineID &&
+			(t.RunExecution == nil || t.RunExecution.BindingFingerprint == "" || t.RunExecution.Fingerprint == "") {
+			t.RunExecution = r.Execution
+		}
 	}
 	streakTask, streakN, streak := streakToldLocked(sc, len(sc.runs)-1, false) // told once per streak (schedule_streak.go)
 	r = sc.runs[len(sc.runs)-1]
@@ -1869,14 +1899,28 @@ func (s *Service) runTask(t Task, due, now time.Time, manual, retried bool) (pro
 	loc, kb := s.location(ctx), s.kbReady(ctx)
 	run := ScheduleRun{Kind: t.kind(), RefID: t.ID, Title: t.label(), Due: due.UTC(), At: time.Now().UTC(), Manual: manual, Status: runOK,
 		Retried: retried, of: now.UTC()}
-	if t.TodoID != "" && t.Repeat != repeatOnce {
-		run.TodoProgress = &ScheduleTodoAssessment{TodoID: t.TodoID, State: "pending"}
-	}
 	if !s.sched.begin(t.ID) { // the same task is being sent right now ("Run now" as it came due)
+		if t.TodoID != "" && t.Repeat != repeatOnce {
+			run.TodoProgress = &ScheduleTodoAssessment{TodoID: t.TodoID, State: "pending"}
+		}
 		return proto.Session{}, s.skipRun(run, errTaskBusy)
 	}
 	defer s.sched.end(t.ID)
-	fresh := t.FreshEachRun && t.Repeat != repeatOnce
+	t, model, err := s.taskRunSnapshot(ctx, t)
+	run.Kind, run.Title = t.kind(), t.label()
+	if t.TodoID != "" && t.Repeat != repeatOnce {
+		run.TodoProgress = &ScheduleTodoAssessment{TodoID: t.TodoID, State: "pending"}
+	}
+	if err != nil {
+		// Task/model admission precedes normal fact preparation; its failure still needs this run's fixed facts.
+		if t.Facts || t.Report {
+			t.factsText = s.runFacts(ctx, t, time.Now())
+		}
+		return s.failTaskRun(ctx, t, run, err, false)
+	}
+	legacyExecution := t.SessionID == "" && t.Space == "" && t.StartGrant == nil &&
+		t.ExecutionMachineID == "" && t.Cwd == "" && model.override == (ModelBinding{})
+	fresh := t.startsFresh()
 	if fresh {
 		// Override the destination only for this dispatch. Keeping the origin on the saved task
 		// lets the user restore same-chat runs without losing where the follow-up came from.
@@ -1935,50 +1979,72 @@ func (s *Service) runTask(t Task, due, now time.Time, manual, retried bool) (pro
 	// A schedule the owner let start some kinds by itself runs each round in a new conversation of its own whose
 	// context leaves out the live snapshot (schedule_grant.go cleanRound): only such a round may use the grant. Not a
 	// retry: it goes on in the round's conversation, which has its earlier work, and its plans ask.
-	clean := t.SessionID == "" && !retried && t.grantEligible() && t.liveGrant() != nil
+	clean := t.SessionID == "" && !retried && t.grantEligible() && t.liveGrant(t.runGrantBasis) != nil
 	if t.SessionID != "" {
-		if m, ok := s.device(ctx, t.MachineID); ok {
+		sourceCwd, sourceOK := s.taskSourceCwd(ctx, t)
+		if m, ok := s.device(ctx, t.MachineID); ok && m.Online && sourceOK {
 			// A follow-up the assistant scheduled for itself is a turn of that conversation: it keeps the
 			// conversation's launcher like a message from the phone does. On the task's category launcher (Agents
 			// then) it moved the main conversation onto another one (plain claude, not logged in there) for good (#1518).
-			params := map[string]any{"session_id": t.SessionID, "text": taskPrompt(t, due, now, loc, manual, kb, false), "message_source": taskMessageSource(t), "permission_mode": t.PermissionMode}
+			params := taskSourceParams(t, taskPrompt(t, due, now, loc, manual, kb, false), sourceCwd)
 			err := s.sendModel(ctx, t.MachineID, t.SessionID, params, s.lang(ctx))
+			unsent := err != nil // model preparation has not sent the task's message
 			if err == nil {
-				s.noteRound(m.ID, t.SessionID, t.ID, time.Now()) // before it is sent: its turn may plan at once (schedule_grant.go)
+				s.noteRound(m.ID, t.SessionID, t.ID, t.runGrantBasis, time.Now()) // before it is sent: its turn may plan at once (schedule_grant.go)
 				if err = s.call(ctx, m.ID, DeviceAssistantSend, params, nil); err != nil {
 					s.endRound(m.ID, t.SessionID, t.ID)
 				}
+				// Offline/no-device and capability-gate errors are pre-dispatch; gone is a resume-only preflight refusal.
+				// A lost RPC answer or closed link says nothing about whether the turn already started.
+				unsent = taskSourceDefinitelyUnsent(err, t.SessionID)
 			}
 			if err == nil {
 				run.MachineID, run.SessionID = t.MachineID, t.SessionID
+				run.Conversation = "source"
+				run.Execution = s.sourceTaskExecution(ctx, t, params)
 				s.scheduledWake(t.SessionID, time.Now()) // a new chain of messages between conversations (#10099)
 				s.logf("task %s ran %s after its time", t.ID, lateness(due, time.Now()))
 				startRun(&m)
 				return proto.Session{MachineID: t.MachineID, SessionID: t.SessionID}, nil
 			}
-			s.logf("task %s into %s: %v; starting a new conversation", t.ID, t.SessionID, err)
+			if !unsent {
+				return s.failSourceTaskRun(ctx, t, run, err)
+			}
+			s.logf("task %s into %s refused before delivery: %v; using its own conversation", t.ID, t.SessionID, err)
+		}
+		run.ConversationReason = "source_unavailable"
+	}
+	ex, err := s.taskExecution(ctx, t, true, model.effective)
+	run.Execution = &ex
+	if err != nil {
+		return s.failTaskRun(ctx, t, run, err, false)
+	}
+	here, launcher := ex.MachineID, ex.Launcher
+	ex.LegacyCompatible = legacyExecution && !proto.IsExternalLauncher(launcher)
+	t.PermissionMode = ex.PermissionMode
+	run.Conversation = "new"
+	// With default directories, prepare once per run so the canonical node directory is part of compatibility.
+	if t.Cwd == "" {
+		ex.Cwd, err = s.prepareSpace(ctx, here, t.Space)
+		if err != nil {
+			return s.failTaskRun(ctx, t, run, err, false)
 		}
 	}
-	here := s.settings(ctx).MachineID
-	binding, err := s.resolveModel(ctx, "task."+t.ID)
-	if err != nil {
-		run.Status, run.Error = runFailed, err.Error()
-		s.recordRun(run)
-		s.oneOffNotStarted(ctx, t, run)
-		return proto.Session{}, err
-	}
-	launcher := strings.TrimPrefix(binding.Provider, "launcher.")
+	run.Execution = &ex
 	if clean && s.launcherAgent(ctx, here, launcher) != "claude" {
 		clean = false // only Claude Code starts a conversation under the id the hub picks: another keeps its own
 	}
 	if t.RunSessionID != "" {
 		m, ok := s.device(ctx, t.RunMachineID)
 		switch {
+		case s.taskConversationChanged(t, ex, model.override, &run):
 		case t.RunLauncher != launcher:
+			run.ConversationReason = "execution_changed"
 			s.logf("task %s: launcher %s → %s, its conversation %s can't go on; starting a new one", t.ID, t.RunLauncher, launcher, short(t.RunSessionID))
 		case (t.pushesOnlyAsked() || t.Repeat != repeatOnce) && s.mayBeMain(ctx, t.RunSessionID):
 			s.logf("task %s: its conversation %s is (or may be) the main one, which is never quiet; starting a new one", t.ID, short(t.RunSessionID))
 		case t.RunMachineID != here || !ok:
+			run.ConversationReason = "execution_changed"
 			s.logf("task %s: the assistant moved off %s, its conversation %s stays there; starting a new one", t.ID, t.RunMachineID, short(t.RunSessionID))
 		case t.Repeat != repeatOnce && s.sessionBusy(ctx, m.ID, t.RunSessionID):
 			s.logf("task %s: its conversation %s is still on the last run; skipped", t.ID, short(t.RunSessionID))
@@ -1991,31 +2057,41 @@ func (s *Service) runTask(t Task, due, now time.Time, manual, retried bool) (pro
 		case fresh || clean:
 			// Keep the prior session for busy detection, then start a new one below.
 		default:
-			params := map[string]any{"session_id": t.RunSessionID, "text": taskPrompt(t, due, now, loc, manual, kb, true), "message_source": taskMessageSource(t), "permission_mode": t.PermissionMode, "resume_only": true}
-			err := s.applyModel(ctx, "task."+t.ID, params)
+			resumed := ex
+			// Older snapshots without provenance may have started with explicit choices.
+			resumed.LegacyCompatible = ex.LegacyCompatible && (t.RunExecution == nil || t.RunExecution.LegacyCompatible) &&
+				s.taskOwnOrigin(ctx, t) && !s.mayBeMain(ctx, t.RunSessionID)
+			params := taskResumeParams(t, taskPrompt(t, due, now, loc, manual, kb, true), resumed)
+			err := s.finishModel(ctx, "task."+t.ID, params, ModelBinding{Provider: launcherProvider(ex.Launcher), Model: ex.Model, Effort: ex.Effort})
+			preparationFailed := err != nil // no task text has been sent while building the model parameters
 			if err == nil {
-				s.noteRound(m.ID, t.RunSessionID, t.ID, time.Now())
+				s.noteRound(m.ID, t.RunSessionID, t.ID, t.runGrantBasis, time.Now())
 				if err = s.resumeOwn(ctx, m.ID, t.RunSessionID, params); err != nil {
 					s.endRound(m.ID, t.RunSessionID, t.ID)
 				}
 			}
 			if err == nil {
 				run.MachineID, run.SessionID = t.RunMachineID, t.RunSessionID
+				run.Conversation = "resumed"
+				run.Execution = &resumed
 				s.scheduledWake(t.RunSessionID, time.Now()) // a new chain of messages between conversations (#10099)
 				s.logf("task %s ran %s after its time (its conversation %s)", t.ID, lateness(due, time.Now()), short(t.RunSessionID))
 				startRun(&m)
 				return proto.Session{MachineID: t.RunMachineID, SessionID: t.RunSessionID}, nil
 			}
+			if !taskConversationUnavailable(err, t.RunSessionID) {
+				return s.failTaskRun(ctx, t, run, err, !preparationFailed && sendUnknown(err))
+			}
+			run.ConversationReason = "conversation_gone"
 			s.logf("task %s into its conversation %s: %v; starting a new one", t.ID, short(t.RunSessionID), err)
 		}
 	}
-	sp := startParams{Text: taskPrompt(t, due, now, loc, manual, kb, false), Source: taskMessageSource(t), PermissionMode: t.PermissionMode,
-		Purpose: "task." + t.ID, Space: t.Space, Origin: OriginTask, OriginRef: t.ID}
+	sp := taskStartParams(t, taskPrompt(t, due, now, loc, manual, kb, false), ex)
 	if clean {
 		sp.NewSessionID = newGuestSessionID()
 		// Before it starts: its first message's context asks, and its turn may plan at once.
 		s.noteCleanRound(sp.NewSessionID, t.ID)
-		s.noteRound(here, sp.NewSessionID, t.ID, time.Now().Add(-roundEarly))
+		s.noteRound(here, sp.NewSessionID, t.ID, t.runGrantBasis, time.Now().Add(-roundEarly))
 	}
 	sess, err := s.startConversation(ctx, sp)
 	if clean && (err != nil || sess.SessionID != sp.NewSessionID || sess.MachineID != here) {
@@ -2023,15 +2099,12 @@ func (s *Service) runTask(t Task, due, now time.Time, manual, retried bool) (pro
 	}
 	if err != nil {
 		s.logf("task %s: %v", t.ID, err)
-		run.Status, run.Error = runFailed, err.Error()
-		s.recordRun(run)
-		s.oneOffNotStarted(ctx, t, run)
-		return proto.Session{}, err
+		return s.failTaskRun(ctx, t, run, err, sendUnknown(err))
 	}
 	run.MachineID, run.SessionID = sess.MachineID, sess.SessionID
-	s.noteRound(sess.MachineID, sess.SessionID, t.ID, time.Now().Add(-roundEarly)) // sent already: its prompt is older
+	s.noteRound(sess.MachineID, sess.SessionID, t.ID, t.runGrantBasis, time.Now().Add(-roundEarly)) // sent already: its prompt is older
 	s.logf("task %s ran %s after its time (new conversation %s, kept for the next runs)", t.ID, lateness(due, time.Now()), short(sess.SessionID))
-	s.adoptConversation(t.ID, sess.MachineID, sess.SessionID, sess.Launcher)
+	s.adoptConversation(t.ID, sess.MachineID, sess.SessionID, sess.Launcher, ex)
 	s.titleFixed(sess.MachineID, sess.SessionID, time.Now(), titleTask, t.label()) // "MMDD | scheduled | task name", the same for every run in it
 	var m *Device
 	if d, ok := s.device(ctx, sess.MachineID); ok {
@@ -2062,18 +2135,8 @@ func (s *Service) resumeOwn(ctx context.Context, machine, sid string, params map
 	return err
 }
 
-// oneOffNotStarted handles an ordinary one-off whose scheduled run could not even start (its machine offline, the
-// launcher not starting, no model). Facts/Report runs divert to briefNotStarted's fixed-facts fallback first. A one-off
-// is off as soon as it is due and has no next time, so this was its only run: recorded as failed and nothing else, the
-// follow-up the user counted on was gone without a word (#5030). The user is told, as a run whose turn failed is
-// (watchScheduledRun), and it is tried once more after runRetryDelay, as the task is then (deleted: not). A failed retry
-// is told too, and not tried again. A repeating task runs again at its next time and has its streak notice (#4658);
-// Run now is answered in the app.
-func (s *Service) oneOffNotStarted(ctx context.Context, t Task, run ScheduleRun) {
-	if t.Facts || t.Report {
-		s.briefNotStarted(ctx, t, run)
-		return
-	}
+// oneOffFailed keeps the failure notice even when delivery is unknown and retrying is unsafe.
+func (s *Service) oneOffFailed(ctx context.Context, t Task, run ScheduleRun) {
 	if t.Repeat != repeatOnce || run.Manual {
 		return
 	}
@@ -2083,7 +2146,22 @@ func (s *Service) oneOffNotStarted(ctx context.Context, t Task, run ScheduleRun)
 		name, _ = healthNotice(l)
 	}
 	s.push(ctx, Notification{Title: i18n.T(l, "assistant-schedule.run_failed", i18n.Args{"name": name}), Body: clip(oneLine(run.Error), 300)})
-	if run.Retried {
+}
+
+// oneOffNotStarted handles confirmed pre-delivery failures; Facts/Report runs use the fixed-facts fallback first.
+// An ordinary one-off's scheduled run could not even start (its machine offline, the launcher not starting, no
+// model). A one-off is off as soon as it is due and has no next time, so this was its only run: recorded as failed and
+// nothing else, the follow-up the user counted on was gone without a word (#5030). The user is told, as a run whose turn
+// failed is (watchScheduledRun), and it is tried once more after runRetryDelay, as the task is then (deleted: not). A
+// failed retry is told too, and not tried again. A repeating task runs again at its next time and has its streak notice
+// (#4658); Run now is answered in the app.
+func (s *Service) oneOffNotStarted(ctx context.Context, t Task, run ScheduleRun) {
+	if t.Facts || t.Report {
+		s.briefNotStarted(ctx, t, run)
+		return
+	}
+	s.oneOffFailed(ctx, t, run)
+	if t.Repeat != repeatOnce || run.Manual || run.Retried {
 		return
 	}
 	delay := runRetryDelay
@@ -2392,7 +2470,7 @@ func (s *Service) retryStillDueChecked(ctx context.Context, id string, failed Sc
 // retryCancelled is why the retry of failed, due at now, does not go ("" when it does). cur is the task now (found:
 // false when it was deleted); runs is the history, newest last.
 //   - Another run of the task went out after the failed one (a Run now, or its next time): it already ran again. A
-//     run that could not start (no conversation) or was skipped did nothing, so the retry still goes.
+//     run confirmed not started or skipped did nothing, so the retry still goes. A lost receipt is not that proof.
 //   - A one-off is switched on again with its time after now (moved later, or earlier but still ahead): the
 //     scheduler runs it then. A one-off that is due is off (runDue), so being on again means the owner set it.
 //   - A repeating task switched off. (A repeating task's next time is always ahead, so its time says nothing.)
@@ -2401,7 +2479,7 @@ func retryCancelled(cur Task, found bool, failed ScheduleRun, runs []ScheduleRun
 		return "deleted"
 	}
 	for _, r := range slices.Backward(runs) {
-		if r.RefID == cur.ID && r.At.After(failed.At) && r.Status != runSkipped && r.SessionID != "" {
+		if r.RefID == cur.ID && r.At.After(failed.At) && r.Status != runSkipped && (r.SessionID != "" || r.DeliveryUnknown) {
 			return "run again"
 		}
 	}
@@ -2612,11 +2690,15 @@ func (sc *schedule) end(id string) {
 
 // adoptConversation makes a new conversation task id's own, and keeps it listed on
 // its machine however quiet it gets (keepListed), so the app can open it and the next run can see it is busy.
-func (s *Service) adoptConversation(id, machine, session, launcher string) {
+func (s *Service) adoptConversation(id, machine, session, launcher string, execution ...TaskExecution) {
 	if sc, err := s.lockedSchedule(context.Background()); err == nil {
 		if i := sc.indexLocked(id); i >= 0 {
 			t := &sc.tasks[i]
 			t.RunMachineID, t.RunSessionID, t.RunLauncher = machine, session, launcher
+			if len(execution) > 0 {
+				ex := execution[0]
+				t.RunExecution = &ex
+			}
 			// The conversation already exists. Keep it in memory on a failed save; recordRun retries the write.
 			_ = s.saveLocked(sc, sc.tasks)
 		}
@@ -2640,6 +2722,7 @@ func (s *Service) forgetConversation(ctx context.Context, id string) (Task, bool
 		tasks := slices.Clone(sc.tasks)
 		t := &tasks[i]
 		t.RunMachineID, t.RunSessionID, t.RunLauncher = "", "", ""
+		t.RunExecution = nil
 		if err := s.saveLocked(sc, tasks); err != nil {
 			sc.mu.Unlock()
 			return Task{}, false, err
@@ -2714,7 +2797,7 @@ func (s *Service) taskViews(ctx context.Context) []TaskView {
 			at = t.next(now, loc)
 		}
 		out = append(out, TaskView{ID: t.ID, Label: t.label(), Repeat: t.Repeat, Enabled: t.Enabled, At: at, EveryMinutes: t.EveryMinutes,
-			MachineID: t.MachineID, RunMachineID: t.RunMachineID, RunSessionID: t.RunSessionID, Push: t.Push})
+			MachineID: t.MachineID, ExecutionMachineID: t.ExecutionMachineID, RunMachineID: t.RunMachineID, RunSessionID: t.RunSessionID, Push: t.Push})
 	}
 	return out
 }
@@ -2728,9 +2811,10 @@ func (s *Service) tasksView(ctx context.Context, keep func(Task) bool) []Task {
 	machine := s.settings(ctx).MachineID
 	now := time.Now()
 	sc.mu.Lock()
-	defer sc.mu.Unlock()
+	tasks := slices.Clone(sc.tasks)
+	sc.mu.Unlock()
 	out := []Task{}
-	for _, t := range sc.tasks {
+	for _, t := range tasks {
 		if t.done() || (keep != nil && !keep(t)) {
 			continue
 		}
@@ -2747,6 +2831,17 @@ func (s *Service) tasksView(ctx context.Context, keep func(Task) bool) []Task {
 			t.MachineID = machine
 		}
 		t.Launcher, t.Model, t.Effort = "", "", ""
+		if record, err := s.modelRecord(ctx, "task."+t.ID); err == nil {
+			t.Launcher = strings.TrimPrefix(record.Binding.Provider, "launcher.")
+			t.Model, t.Effort, t.ModelRevision = record.Binding.Model, record.Binding.Effort, record.Revision
+		} else {
+			t.ExecutionError = err.Error()
+		}
+		if ex, err := s.taskExecution(ctx, t, false); err == nil {
+			t.Execution = &ex
+		} else {
+			t.ExecutionError = err.Error()
+		}
 		// The apps show last_run with last_status: the time of the run that status is of, not of one still starting.
 		t.LastRun, t.StatusRun = t.lastShown(), time.Time{}
 		out = append(out, t)
@@ -2785,6 +2880,7 @@ func editTask(old, in Task, now time.Time) Task {
 		switch {
 		case !in.At.IsZero() && in.At.After(now) && !in.At.Equal(old.At) && in.At.Before(now.Add(every)):
 			t.At = in.At
+			t.ArmedAt = now.UTC()
 		case old.Repeat != repeatInterval || old.EveryMinutes != t.EveryMinutes || !old.At.After(now) || (!old.Enabled && t.Enabled):
 			t.At = now.Add(every)
 		}
@@ -2861,15 +2957,17 @@ func (s *Service) scheduleRoutes() {
 			return
 		}
 		rearm(Task{}, &t, now)
-		sc, err := s.lockedSchedule(r.Context())
-		if err != nil {
+		if err := s.scheduleReadable(r.Context()); err != nil {
 			apierr.Write(w, http.StatusServiceUnavailable, err)
 			return
 		}
-		err = s.saveLocked(sc, append(slices.Clone(sc.tasks), t))
-		sc.mu.Unlock()
+		edit, err := s.prepareTaskExecutionEdit(r.Context(), Task{}, &t, raw)
 		if err != nil {
-			apierr.Write(w, http.StatusServiceUnavailable, err)
+			writeTaskExecutionError(w, err)
+			return
+		}
+		if err := s.commitTaskExecutionEdit(r.Context(), nil, t, edit); err != nil {
+			writeTaskExecutionCommitError(w, err)
 			return
 		}
 		s.broadcastSchedule()
@@ -2911,31 +3009,29 @@ func (s *Service) scheduleRoutes() {
 			apierr.Write(w, http.StatusNotFound, i18n.Err("assistant-schedule.gone"))
 			return
 		}
+		old := sc.tasks[i]
+		sc.mu.Unlock()
 		var in Task
 		encoded, _ := json.Marshal(raw)
 		if err := json.Unmarshal(encoded, &in); err != nil {
-			sc.mu.Unlock()
 			apierr.Write(w, 400, err)
 			return
 		}
-		if _, has := raw["cron"]; !has && sc.tasks[i].Repeat == repeatCron {
+		if _, has := raw["cron"]; !has && old.Repeat == repeatCron {
 			// An app that does not know cron tasks keeps the task's rule (an older iOS app reads one as a one-off,
 			// Android and the web send its repeat back without the expression).
-			old := sc.tasks[i]
 			in.Repeat, in.Cron, in.At, in.Time, in.Weekdays, in.EveryMinutes = old.Repeat, old.Cron, old.At, "", nil, 0
 		}
-		t := editTask(sc.tasks[i], in, now)
+		t := editTask(old, in, now)
 		if hasRunIf {
 			t.RunIf = runIf
 		}
 		if err := editTaskState(&t, in, raw, now); err != nil {
-			sc.mu.Unlock()
 			writeTaskStateError(w, err)
 			return
 		}
 		push, has, err := pushIn(raw)
 		if err != nil {
-			sc.mu.Unlock()
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
@@ -2943,7 +3039,6 @@ func (s *Service) scheduleRoutes() {
 			t.Push = push
 		}
 		if mode, has, err := inboxIn(raw); err != nil {
-			sc.mu.Unlock()
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		} else if has { // and its inbox setting
@@ -2951,14 +3046,12 @@ func (s *Service) scheduleRoutes() {
 		}
 		if v, ok := raw["facts"]; ok { // and its facts: set only when the body has them
 			if err := json.Unmarshal(v, &t.Facts); err != nil {
-				sc.mu.Unlock()
 				apierr.Write(w, http.StatusBadRequest, err)
 				return
 			}
 		}
 		if v, ok := raw["report"]; ok { // and whether it is a daily report, the same way
 			if err := json.Unmarshal(v, &t.Report); err != nil {
-				sc.mu.Unlock()
 				apierr.Write(w, http.StatusBadRequest, err)
 				return
 			}
@@ -2967,17 +3060,17 @@ func (s *Service) scheduleRoutes() {
 		dropStaleUntil(&t, hasUntil, now)
 		isolateScheduledConversation(&t, mayBeMain)
 		if err := checkTask(&t, now); err != nil {
-			sc.mu.Unlock()
 			apierr.Write(w, http.StatusBadRequest, err)
 			return
 		}
-		rearm(sc.tasks[i], &t, now)
-		tasks := slices.Clone(sc.tasks)
-		tasks[i] = t
-		err = s.saveLocked(sc, tasks)
-		sc.mu.Unlock()
+		rearm(old, &t, now)
+		edit, err := s.prepareTaskExecutionEdit(r.Context(), old, &t, raw)
 		if err != nil {
-			apierr.Write(w, http.StatusServiceUnavailable, err)
+			writeTaskExecutionError(w, err)
+			return
+		}
+		if err := s.commitTaskExecutionEdit(r.Context(), &old, t, edit); err != nil {
+			writeTaskExecutionCommitError(w, err)
 			return
 		}
 		s.broadcastSchedule()

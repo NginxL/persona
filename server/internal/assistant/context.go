@@ -30,10 +30,11 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 	}
 	background := s.isBackground(ctx, p.SessionID)
 	snapshot := ""
-	if !s.cleanRoundSession(p.SessionID) { // a granted schedule's round reads nothing from outside (schedule_grant.go)
+	cleanRound := s.cleanRoundSession(p.SessionID)
+	if !cleanRound { // a granted schedule's round reads nothing from outside (schedule_grant.go)
 		snapshot = s.contextSnapshot(ctx, s.snapshotScope(ctx, p.SessionID), background)
 	}
-	c := prompts.AssistantContext{Snapshot: snapshot, Owner: s.owner(ctx),
+	c := prompts.AssistantContext{ScheduledWorkPlan: cleanRound && s.settings(ctx).workGuideOn(), Snapshot: snapshot, Owner: s.owner(ctx),
 		Main: s.isMain(ctx, p.SessionID), Leader: s.isLeader(ctx, p.SessionID), Background: background}
 	switch {
 	case c.Main:
@@ -344,6 +345,8 @@ func (s *Service) ProfileChanged(context.Context) {
 	s.prefs.mu.Lock()
 	s.prefs.at = time.Time{}
 	s.prefs.mu.Unlock()
+	// A manager.json pin may have changed the supervision interval even though the saved settings did not.
+	s.rescheduleSupervision()
 }
 
 type snapshotAgentGroupKind string

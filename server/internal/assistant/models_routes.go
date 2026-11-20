@@ -71,6 +71,14 @@ func (s *Service) modelPurpose(ctx context.Context, id string, providers []Model
 			}
 		}
 	}
+	if p.Candidates != nil {
+		for _, provider := range s.candidateProviders(ctx, p.Effective.Provider) {
+			id := "launcher." + provider.Name
+			if slices.Contains(p.ProviderIDs, id) {
+				p.Candidates.DirectProviderIDs = append(p.Candidates.DirectProviderIDs, id)
+			}
+		}
+	}
 	if p.Kind == "launcher" {
 		p.Fields = append(p.Fields, "effort")
 	}

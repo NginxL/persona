@@ -180,6 +180,32 @@ func (n *Node) renameSession(ctx context.Context, id string, tab, title *string)
 	return nil
 }
 
+// renameObservedTab rechecks the host label before applying an automatic name based on a potentially stale inventory.
+func (n *Node) renameObservedTab(ctx context.Context, id, tab, expected, name string) error {
+	a, live := n.agent(id)
+	if !live || tab == "" || a.TabID != tab {
+		return fmt.Errorf("the session's tab changed")
+	}
+	h, _, err := n.paneHost(a.PaneID)
+	if err != nil {
+		return err
+	}
+	org, ok := h.(host.Organizer)
+	if !ok || h.Kind() != host.Herdr && h.Kind() != host.HerdrCore {
+		return unsupported(h)
+	}
+	layout, err := h.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(layout.Slots, func(slot host.Slot) bool {
+		return slot.ID == tab && strings.TrimSpace(slot.Label) == expected
+	}) {
+		return fmt.Errorf("the tab name changed")
+	}
+	return org.RenameSlot(ctx, tab, name)
+}
+
 // titleRetry is how often a title given before its conversation's transcript existed looks for it again, titleWait how
 // long it looks (a conversation that has not written its first turn by then is not going to). Tests shorten them.
 var (

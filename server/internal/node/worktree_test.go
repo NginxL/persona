@@ -694,6 +694,29 @@ func TestWorktreeFromPaneDirectory(t *testing.T) {
 	}
 }
 
+// createdFromCwd: worktree.create went to herdr once, from the repository's own folder (--cwd) rather than a workspace,
+// and no plain workspace was opened: herdr's worktree workspace carries its repository (repo_key), so the sidebar files
+// it under that repository; a plain one carried only the repository's name as its label.
+func createdFromCwd(t *testing.T, w worktreeFixture, repo string) {
+	t.Helper()
+	calls := w.f.trace("worktree.create")
+	if len(calls) != 1 || len(w.f.trace("workspace.create")) != 0 {
+		t.Fatalf("must use herdr's worktree create and no plain workspace: worktree.create %v, workspace.create %d",
+			calls, len(w.f.trace("workspace.create")))
+	}
+	if !strings.Contains(calls[0], `"cwd":`) || !strings.Contains(calls[0], filepath.Base(repo)) || strings.Contains(calls[0], `"workspace_id"`) {
+		t.Fatalf("must name the requested repository's folder, not a workspace: %s", calls[0])
+	}
+}
+
+// fromCwdOr models herdr's source: --cwd is the repository that folder is in, --workspace that workspace's source.
+func fromCwdOr(p map[string]any, workspaceSource string) string {
+	if c := str(p["cwd"]); c != "" {
+		return c
+	}
+	return workspaceSource
+}
+
 func TestWorktreeWithoutHoldingSpaceKeepsIsolation(t *testing.T) {
 	for _, automatic := range []bool{false, true} {
 		t.Run(map[bool]string{false: "explicit", true: "automatic"}[automatic], func(t *testing.T) {
@@ -716,9 +739,7 @@ func TestWorktreeWithoutHoldingSpaceKeepsIsolation(t *testing.T) {
 			if path == "" || path == w.repo || branchOf(t, w.repo) != "main" || branchOf(t, path) != str(res["branch"]) {
 				t.Fatalf("lost isolation: %v", res)
 			}
-			if len(w.f.trace("worktree.create")) != 0 || len(w.f.trace("workspace.create")) != 1 {
-				t.Fatal("must use Git and open a plain workspace")
-			}
+			createdFromCwd(t, w, w.repo)
 			plain := mkdir(t, filepath.Join(w.home, "not-git"))
 			if _, err := request(t, w.n, "worktree.prepare", map[string]any{"cwd": plain}); err == nil {
 				t.Fatal("accepted non-Git directory")
@@ -752,7 +773,7 @@ func TestWorktreeFromSecondRepositoryPaneKeepsItsSource(t *testing.T) {
 			))
 			// Model herdr's source selection: the workspace's first pane belongs to the other repository.
 			w.f.handle("worktree.create", func(p map[string]any) any {
-				runPullGit(t, other, "worktree", "add", "-b", str(p["branch"]), "--", str(p["path"]))
+				runPullGit(t, fromCwdOr(p, other), "worktree", "add", "-b", str(p["branch"]), "--", str(p["path"]))
 				return map[string]any{
 					"workspace": map[string]any{"workspace_id": "w2"},
 					"tab":       map[string]any{"tab_id": "w2:t1"}, "root_pane": map[string]any{"pane_id": "w2:p1"},
@@ -783,9 +804,7 @@ func TestWorktreeFromSecondRepositoryPaneKeepsItsSource(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(path, "other.txt")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("included the other repository: %v", err)
 			}
-			if len(w.f.trace("worktree.create")) != 0 || len(w.f.trace("workspace.create")) != 1 {
-				t.Fatal("ambiguous workspace must use Git and open a plain workspace")
-			}
+			createdFromCwd(t, w, w.repo) // an ambiguous workspace is not the source
 			if branchOf(t, w.repo) != "main" || branchOf(t, other) != "main" {
 				t.Fatal("changed a source checkout")
 			}
@@ -826,10 +845,10 @@ func TestWorktreeCwdDoesNotUseAnAncestorWorkspaceSource(t *testing.T) {
 				w.f.reply("session.snapshot", snapshot([]any{workspace}, []any{map[string]any{"workspace_id": "w1", "tab_id": "w1:t1"}}, nil, panes))
 				// herdr creates from the workspace's source, not from the requested nested repository.
 				w.f.handle("worktree.create", func(p map[string]any) any {
-					if !scenario.repository {
+					if str(p["cwd"]) == "" && !scenario.repository {
 						return herdrFail{Code: "not_git_worktree", Message: "workspace is not a Git worktree"}
 					}
-					runPullGit(t, w.home, "worktree", "add", "-b", str(p["branch"]), "--", str(p["path"]))
+					runPullGit(t, fromCwdOr(p, w.home), "worktree", "add", "-b", str(p["branch"]), "--", str(p["path"]))
 					return map[string]any{
 						"workspace": map[string]any{"workspace_id": "w2"},
 						"tab":       map[string]any{"tab_id": "w2:t1"}, "root_pane": map[string]any{"pane_id": "w2:p1"},
@@ -856,9 +875,7 @@ func TestWorktreeCwdDoesNotUseAnAncestorWorkspaceSource(t *testing.T) {
 				if _, err := os.Stat(filepath.Join(path, ".bashrc")); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("included ancestor dotfiles: %v", err)
 				}
-				if len(w.f.trace("worktree.create")) != 0 || len(w.f.trace("workspace.create")) != 1 {
-					t.Fatal("an ancestor source must use Git and open a plain workspace")
-				}
+				createdFromCwd(t, w, w.repo) // an ancestor workspace is not the source
 				if branchOf(t, w.repo) != "main" {
 					t.Fatal("changed the source checkout")
 				}
@@ -936,7 +953,7 @@ func TestSpaceHoldingPaneCandidates(t *testing.T) {
 	}
 }
 
-func TestWorktreeWithOnlyLinkedWorkspaceUsesGit(t *testing.T) {
+func TestWorktreeWithOnlyLinkedWorkspaceUsesTheMainCheckout(t *testing.T) {
 	for _, automatic := range []bool{false, true} {
 		t.Run(map[bool]string{false: "explicit", true: "automatic"}[automatic], func(t *testing.T) {
 			w := worktreeNode(t)
@@ -950,8 +967,17 @@ func TestWorktreeWithOnlyLinkedWorkspaceUsesGit(t *testing.T) {
 			w.f.reply("pane.list", map[string]any{"panes": []any{
 				map[string]any{"workspace_id": "w2", "pane_id": "w2:p1", "cwd": linked},
 			}})
-			// herdr refuses a linked workspace as the source even when its repo_root matches.
-			w.f.reply("worktree.create", herdrFail{Code: "linked_worktree_source", Message: "start from the repo parent workspace"})
+			// herdr refuses a linked workspace as the source even when its repo_root matches; the main checkout's own
+			// folder (--cwd) it takes.
+			w.f.mu.Lock()
+			createFromRepo := w.f.on["worktree.create"]
+			w.f.mu.Unlock()
+			w.f.handle("worktree.create", func(p map[string]any) any {
+				if str(p["cwd"]) == "" {
+					return herdrFail{Code: "linked_worktree_source", Message: "start from the repo parent workspace"}
+				}
+				return createFromRepo(p)
+			})
 			w.f.reset()
 			prep, err := request(t, w.n, "worktree.prepare", map[string]any{"cwd": w.repo})
 			if err != nil || prep["root"] != resolved(t, w.repo) {
@@ -972,9 +998,7 @@ func TestWorktreeWithOnlyLinkedWorkspaceUsesGit(t *testing.T) {
 			if b, err := os.ReadFile(filepath.Join(path, "app.txt")); err != nil || string(b) != "one\n" {
 				t.Fatalf("main repository contents: %q, %v", b, err)
 			}
-			if len(w.f.trace("worktree.create")) != 0 || len(w.f.trace("workspace.create")) != 1 {
-				t.Fatal("a main repository with only a linked workspace must use Git and open a plain workspace")
-			}
+			createdFromCwd(t, w, w.repo)
 			if branchOf(t, w.repo) != "main" || branchOf(t, linked) != "feature/linked" {
 				t.Fatal("changed a source checkout")
 			}

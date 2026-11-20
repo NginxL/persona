@@ -42,6 +42,9 @@ func listKeyFmt(list []proto.Session) string {
 		if s.Model != "" || s.PermissionMode != "" || s.Effort != "" {
 			fmt.Fprintf(&b, "modes:%q/%q/%q\n", s.Model, s.PermissionMode, s.Effort)
 		}
+		if s.PendingEffort != nil {
+			fmt.Fprintf(&b, "pending-effort:%q/%v\n", *s.PendingEffort, s.EffortChangeFailed)
+		}
 		fmt.Fprintf(&b, "source:%s/%s/%s/%s/%v/%v/%s/%s\n", s.SourceKind, s.SourceThreadID, s.SourceInstanceID, s.ReadOnlyReason, capsFmt(s.Capabilities), s.Attached, s.CodexRoute, s.CodexRouteNote)
 		for _, t := range s.Background {
 			b.WriteString(t.ID + ",")
@@ -402,5 +405,17 @@ func TestListKeyModelCapability(t *testing.T) {
 	}
 	if key(nil) == key(proto.CanModes(false)) || key(proto.CanModes(false)) == key(proto.CanModes(true)) {
 		t.Fatal("model capability change was lost")
+	}
+}
+
+func TestListKeyQueuedEffort(t *testing.T) {
+	rows := []proto.Session{{SessionID: "s1", Status: proto.StatusIdle, Effort: "low"}}
+	base := listKey(rows)
+	rows[0].PendingEffort = new("high")
+	pending := listKey(rows)
+	rows[0].EffortChangeFailed = true
+	failed := listKey(rows)
+	if base == pending || pending == failed || failed != listKeyFmt(rows) {
+		t.Fatal("the effort choice and its failure must each change the session list key")
 	}
 }

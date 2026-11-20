@@ -14,8 +14,9 @@ import (
 
 // Parked tasks (docs/assistant/todos.md "Parked tasks"). New parks require a typed external wait and source-backed
 // evidence (park_evidence.go). An owner decision belongs in needs_user, never a new owner_priority park. Existing
-// records remain readable without inventing contacts. A parked task stays open: no ask, no push, no conclusion
-// card, and none of the signals that say work stopped (stalled, idle, orphaned, overdue, undecidable). At its time its
+// records remain readable without inventing contacts. A parked task stays open: no new ask, push or conclusion card.
+// A verified interaction_id instead keeps the worker's existing pending request in Needs you, without another card.
+// No stalled, idle, orphaned, overdue or undecidable signal is raised for the park. At its time its
 // supervisor gets one parked_due signal: decide, park again with a new reason, or close it. Its agent starting a turn
 // (someone sent it something) ends the parking, and it is supervised as before. So does a decision of the owner's
 // recorded on a task parked for them or for someone else (parkDecided, #8044): its supervisor gets the decision.
@@ -179,15 +180,19 @@ func parkedAnswer(id string, p Parked, loc *time.Location) string {
 			"it too, and a supervision message brings you the decision."
 	}
 	left := 1 + maxReparks - p.Count
+	asked := "the user is not asked"
+	if p.Evidence != nil && p.Evidence.InteractionID != "" {
+		asked = "no new request is created: the existing linked owner request remains actionable"
+	}
 	again := fmt.Sprintf("It can be parked again %d more time(s) with no agent turn in between.", left)
 	if left <= 0 {
 		again = "It cannot be parked again unless its agent works in between: next time, decide or close it."
 	}
-	return fmt.Sprintf("Task %s is parked until %s (waiting_on %s; parked %d time(s) in a row). It stays open; the user is not asked, and "+
+	return fmt.Sprintf("Task %s is parked until %s (waiting_on %s; parked %d time(s) in a row). It stays open; %s, and "+
 		"no stalled, idle, orphaned or overdue signal is raised for it meanwhile.%s At that time a supervision message (parked_due) brings it "+
 		"back to you: decide, park it again with a new reason, or close it. Its agent starting a turn ends the parking (anything sent "+
 		"to it does that, so tell it what it needs before you park, not after).%s %s", id, p.Until.In(loc).Format(toolTimeLayout), p.WaitingOn,
-		p.Count, owner, decided, again)
+		p.Count, asked, owner, decided, again)
 }
 
 // parkedDueSignal: supervised open task t is parked and its time came, and no supervision message carried that yet

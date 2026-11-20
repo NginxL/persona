@@ -194,6 +194,10 @@ func (s *Service) statusCard(ctx context.Context, t botTarget) (*feishubot.Card,
 	to := i18n.T(l, "assistant-feishu_cards.status_to", i18n.Args{"target": feishubot.EscapeMarkdown(label)})
 	head.WriteString(to)
 	fb.WriteString(fallbackText.Replace(i18n.T(l, "assistant-feishu_cards.status_to", i18n.Args{"target": label}))) // ends its own line
+	if rt.secondary != "" {
+		head.WriteString(feishubot.EscapeMarkdown(rt.secondary) + "\n")
+		fb.WriteString(fallbackText.Replace(rt.secondary) + "\n")
+	}
 	if running := len(s.channelRuns(channel.Feishu)); running > 0 {
 		waiting := i18n.T(l, "assistant-feishu_cards.status_waiting", i18n.Args{"count": running})
 		head.WriteString(waiting)
@@ -477,6 +481,7 @@ func (s *Service) agentsCard(ctx context.Context, query string) (*feishubot.Card
 	var b strings.Builder
 	b.WriteString(title + "\n")
 	icons := map[string]string{proto.StateNeedsYou: "🔴", proto.StateWorking: "🟢", proto.StateUnread: "🔵", proto.StateIdle: "⚪️"}
+	preferTab := s.useHerdrTabName(ctx)
 	for i, r := range rows {
 		if i == 10 {
 			more := i18n.T(l, "assistant-feishu_cards.more_agents", i18n.Args{"count": len(rows) - 10})
@@ -484,9 +489,13 @@ func (s *Service) agentsCard(ctx context.Context, query string) (*feishubot.Card
 			b.WriteString(more + "\n")
 			break
 		}
-		label := clip(oneLine(agentLabel(r.sess)), botListNameMost)
+		primary, secondary := feishuSessionNames(r.sess, preferTab)
+		label := clip(oneLine(primary), botListNameMost)
 		name := clip(oneLine(r.d.Name), botListNameMost)
 		line := icons[r.sess.State] + " **" + feishubot.EscapeMarkdown(label) + "** · " + feishubot.EscapeMarkdown(name) + " · " + i18n.T(l, "assistant-feishu_cards.state_"+r.sess.State)
+		if secondary != "" {
+			line += "\n" + feishubot.EscapeMarkdown(secondary)
+		}
 		if r.sess.LastText != "" {
 			line += "\n" + feishubot.EscapeMarkdown(clip(oneLine(r.sess.LastText), 90))
 		}

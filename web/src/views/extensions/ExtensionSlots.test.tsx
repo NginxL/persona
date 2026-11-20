@@ -2,6 +2,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { loadPages } from "../../lib/lazy-page";
+import { arrangeOverview, type ArrangedCard } from "../../lib/overview-cards";
+import type { UIPlace } from "../../lib/extension-ui";
 import { ExtensionNavPage, MachineExtensionSections, nameBesideTitle, OverviewCards } from "./ExtensionSlots";
 
 type Place = { extension: string; id: string; title?: string; extension_name?: string; placement?: string; opens?: string };
@@ -14,6 +16,12 @@ vi.mock("../settings/ExtensionView", () => ({
     return null;
   },
 }));
+
+// Overview's row of the hub's cards, as Overview hands it over (#9745, #10905): nothing arranged here, so the hub's order
+const row = () => {
+  const items = arrangeOverview((data.slots.overview_card ?? []) as UIPlace[], []);
+  return <OverviewCards cards={items.filter((i): i is ArrangedCard<UIPlace> => "card" in i)} items={items} />;
+};
 
 /** The page's top bar: its title, then the extension's name unless that only says the title again (#3115). */
 function header(place: typeof data.place) {
@@ -61,7 +69,10 @@ describe("the extension's name beside a title (#10940)", () => {
         { extension: "plain", id: "card", title: "Plain", placement: "overview_card" },
       ],
     };
-    const html = renderToStaticMarkup(<OverviewCards />);
+    // Overview hands the row its cards as arranged (#9745, #10905): nothing arranged here, so the hub's order
+    const items = arrangeOverview(data.slots.overview_card as UIPlace[], []);
+    const cards = items.filter((i): i is ArrangedCard<UIPlace> => "card" in i);
+    const html = renderToStaticMarkup(<OverviewCards cards={cards} items={items} />);
     expect(count(html, "data-extension-card=")).toBe(3);
     expect(names(html)).toEqual(["模型用量"]);
     expect(count(html, "行情")).toBe(1);
@@ -69,7 +80,7 @@ describe("the extension's name beside a title (#10940)", () => {
 
   it("keeps the cards of a row one height: each as tall as its own content left ragged rows (#11093, back in #11109)", () => {
     data.slots = { overview_card: [{ extension: "a", id: "card", title: "A", placement: "overview_card" }, { extension: "b", id: "card", title: "B", placement: "overview_card" }] };
-    const grid = renderToStaticMarkup(<OverviewCards />).match(/<div id="[^"]*" class="([^"]*)"/)![1]!.split(" ");
+    const grid = renderToStaticMarkup(row()).match(/<div id="[^"]*" class="([^"]*)"/)![1]!.split(" ");
     expect(grid).toContain("grid");
     expect(grid).not.toContain("items-start");
   });
@@ -77,7 +88,7 @@ describe("the extension's name beside a title (#10940)", () => {
   it("asks for each Overview card's last view and marks its heading while that is on screen (#11091)", () => {
     data.slots = { overview_card: [{ extension: "a", id: "card", title: "A", placement: "overview_card" }] };
     seen.length = 0;
-    const html = renderToStaticMarkup(<OverviewCards />);
+    const html = renderToStaticMarkup(row());
     expect(seen).toEqual([{ extension: "a", ui: "card", compact: true, remember: true }]);
     // the mark is in the card's heading, drawn only while the card holds a kept view (a CSS :has on the card)
     const mark = html.match(/<span[^>]*data-card-updating[^>]*>/)![0];

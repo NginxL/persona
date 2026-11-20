@@ -134,11 +134,10 @@ def request_row(entry):
 
 
 class Breakdown:
-    def __init__(self, since=None):
-        self.since = since
+    def __init__(self):
         self.rows = []
 
-    def add_file(self, path):
+    def add_file(self, path, includes_timestamp):
         inv = Inventory()
         runtime = "claude"
         observed = False
@@ -166,7 +165,7 @@ class Breakdown:
                         inv.add("instructions", value)
                         instructions_seen = True
                     continue
-                if self.since and str(entry.get("timestamp", "")) < self.since:
+                if not includes_timestamp(entry.get("timestamp")):
                     continue
                 if kind == "request":
                     row = request_row(entry)

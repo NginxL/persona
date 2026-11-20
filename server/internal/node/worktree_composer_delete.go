@@ -86,6 +86,9 @@ func (n *Node) worktreeDelete(ctx context.Context, kind, id string, raw json.Raw
 	if err != nil {
 		return nil, err
 	}
+	if err := n.guardBackendDeletion(w.Path); err != nil {
+		return nil, err
+	}
 	if prior != nil && !sameComposerWorkspace(prior.workspace, w) {
 		return nil, composerError(ctx, "preview_stale")
 	}

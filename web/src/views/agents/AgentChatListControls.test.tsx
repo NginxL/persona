@@ -245,6 +245,24 @@ describe("Agents list Filter menu (#4397) on the title row, the search in ⌘K (
     await act(async () => filterAgentList("orca"));
     expect(block().getAttribute("aria-expanded")).toBe("true");
   });
+
+  // #11511: 4 px apart, each button's centred 44 px touch-hit square overlapped the next, and the later one took the
+  // earlier one's taps (the right of Filter opened ⋯, the right of ⋯ opened New agent): on a touch screen each is a real
+  // 44 px box, as the fold-all button is
+  it("gives Filter, ⋯ and + a 44 px box of their own on a touch screen", async () => {
+    seed();
+    await act(async () => {
+      root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />);
+    });
+    const row = host.querySelector<HTMLElement>('[data-sidebar-agents-controls] [data-testid="agent-filter-button"]')!.parentElement!;
+    const classes = (label: string) => row.querySelector<HTMLElement>(`:scope > button[aria-label^="${label}"]`)!.className.split(/\s+/);
+    expect(classes(t("lib-agent-filter.filter"))).toEqual(expect.arrayContaining(["[@media(pointer:coarse)]:h-11", "[@media(pointer:coarse)]:min-w-11"]));
+    expect(classes(t("sidebar.list_menu"))).toContain("[@media(pointer:coarse)]:size-11");
+    expect(classes(t("sidebar.new_agent"))).toContain("[@media(pointer:coarse)]:size-11");
+    // the look on a pointer is the one it had
+    expect(classes(t("lib-agent-filter.filter"))).toEqual(expect.arrayContaining(["h-5", "min-w-5"]));
+    expect(classes(t("sidebar.list_menu"))).toContain("size-5");
+  });
 });
 
 describe("an associated tab name in the complete Agents list (#7595)", () => {

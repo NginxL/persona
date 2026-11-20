@@ -207,7 +207,7 @@ struct ConnectorThreadRow: View {
                     Spacer(minLength: 0)
                 } else {
                     Group {
-                        if endsRun { ThreadAvatar(connector: connector, name: m.sender.name, ref: m.sender.avatar) } else { Color.clear }
+                        if endsRun { ThreadAvatar(connector: connector, person: m.sender) } else { Color.clear }
                     }
                     .scaledFrame(width: Theme.Size.wellM, height: endsRun ? Theme.Size.wellM : Theme.Size.line)
                 }

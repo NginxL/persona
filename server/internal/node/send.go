@@ -56,6 +56,15 @@ func (n *Node) send(ctx context.Context, id, text string, images []proto.Image, 
 
 // sendLocked sends to the agent with its input lock held.
 func (n *Node) sendLocked(ctx context.Context, id, text string, images []proto.Image, opts sendOpts) error {
+	if opts.WaitForEffort {
+		if change := n.switches().effortChange(id); change.target != "" {
+			if n.effortPaneStillLive(ctx, id, change.pane) {
+				return change.refusal()
+			}
+			n.switches().setEffortChange(id, effortChange{})
+			n.notifySessionsSoon()
+		}
+	}
 	selectionText := text
 	if opts.SwitchNow {
 		// The assistant's agent_switch (#5973): the switch it picked goes with this message now, or nothing does

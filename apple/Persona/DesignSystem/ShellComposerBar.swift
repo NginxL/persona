@@ -562,6 +562,12 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                     .fixedSize()
                     .accessibilityHidden(true)
             }
+            if let change = title.effortChange {
+                ThemedIcon(change.symbol)
+                    .font(Theme.Font.label)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
             // Claude Code's ultracode on, or a Codex thread at "ultra" (#1307): read out with the title (`spoken`).
             if title.mark != nil {
                 UltracodeMark(font: Theme.Font.labelStrong, spoken: nil).transition(.opacity)

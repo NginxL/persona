@@ -167,6 +167,18 @@ struct PushRegistrarTests {
         #expect(health.health.routes["g"] == nil && health.health.unchecked == nil)
     }
 
+    /// The main-screen notice also sees the system switch turned off after a successful registration (#9612 item 4).
+    @Test func returningAfterRegistrationRefreshesTheNotificationSwitch() async {
+        let fake = FakeSystem(), hub = Hub()
+        let (r, health) = await registered(fake, hub)
+        #expect(health.health.notificationsAllowed == true)
+
+        fake.allowed = false
+        await r.foreground()?.value
+        #expect(health.health.notificationsAllowed == false)
+        #expect(hub.posts == 1)
+    }
+
     // MARK: - Registering again (#9612)
 
     /// A hub that takes this device's registration; `retired` is its push registration gone (#9611), which a

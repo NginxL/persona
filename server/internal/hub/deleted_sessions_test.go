@@ -126,6 +126,44 @@ func TestDeleteSessions(t *testing.T) {
 	}
 }
 
+// An untouched start can be removed by the Hub while the machine is offline. The inventory remains the node's.
+func TestRemoveUntouchedStartWithoutNode(t *testing.T) {
+	h, n := conversationsHub(t)
+	const sid = "ghost-0026"
+	row := proto.Session{SessionID: sid, Cwd: "/work", Status: proto.StatusUnknown, StartedByPersona: true, PaneID: "w1:p1"}
+	editSessions(n.m, func(list []proto.Session) []proto.Session { return append(list, row) })
+	n.m.mu.Lock()
+	n.m.peer = nil
+	n.m.online = false
+	n.m.mu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /api/v1/sessions/{mid}/{sid}", h.withMachine(h.deleteSession))
+	remove := func(role string) int {
+		req := httptest.NewRequest(http.MethodDelete, "/api/v1/sessions/server/"+sid, nil)
+		req = req.WithContext(context.WithValue(req.Context(), principalKey{}, principal{Role: role}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w.Code
+	}
+	if got := remove(roleAnswer); got != http.StatusForbidden {
+		t.Fatalf("restricted device removed session: %d", got)
+	}
+	if got := remove(roleFull); got != http.StatusOK {
+		t.Fatalf("offline list removal: %d", got)
+	}
+	if strings.Contains(ids(h.shown("server", h.decorated(n.m))), sid) {
+		t.Fatal("removed session still listed")
+	}
+	if _, found := h.decoratedSession(n.m, sid); !found {
+		t.Fatal("Hub forgot the node's inventory")
+	}
+	row.UpdatedAt = time.Now().Add(time.Second)
+	if len(h.shown("server", []proto.Session{row})) != 1 {
+		t.Fatal("new activity did not revive the row")
+	}
+}
+
 // Old notes remain: manager snapshots can outlive the node inventory indefinitely.
 func TestDeletedNotesDoNotExpire(t *testing.T) {
 	h, _ := conversationsHub(t)

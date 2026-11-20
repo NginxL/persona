@@ -6,7 +6,7 @@ struct SettingsAgentView: View {
         SettingsForm {
             Section {
                 NavigationLink { HiddenAgentDirsView() } label: {
-                    SettingsRow(title: String(localized: "Hidden Agent Folders"), symbol: Theme.Icon.options, tint: Theme.ai)
+                    SettingsRow(title: String(localized: "agentDirs.title", defaultValue: "Agent Folders"), symbol: Theme.Icon.options, tint: Theme.ai)
                 }
                 .lineLimit(1)
                 NavigationLink(value: SettingsPage.claude) {

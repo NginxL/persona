@@ -300,18 +300,23 @@ SERVER_CLIENT_INPUTS = [
     "apple/LiveActivity/**", "apple/PersonaTests/**", "apple/Packages/PersonaWire/**", "android/core/contracts/**",
 ]
 
+# CI's lanes. check-fast's own per-path table, for the checks it runs beyond the web plan above, is beside this file in
+# scripts/ci/check_fast_map.py (#11535): a module of its own, because importing this one scans web/ and check-fast asks
+# the table on every run.
 FILTERS = {
     "server": ["server/**", "sdk/go/**", "sdk/ts/src/**", "schema/**", "spec/**", "integrations/**", "docs/assistant/prompts.md", "docs/protocol/**", "scripts/test/server_test_env.py", "scripts/test/go_trimpath.sh", "scripts/ci/*server*", "scripts/ci/postgres.py", "scripts/ci/gofmt.py", ".github/workflows/server-test.yml"] + SERVER_CLIENT_INPUTS,
     # The files outside web/ that web/src and its tests read are derived, never listed (web_inputs).
     "web": ["web/**", *web_inputs(), "scripts/ci/web.sh", ".github/workflows/web-test.yml"],
     "android": ["android/**", "native/app-core/**", "schema/**", "spec/**", "scripts/app/*android*", "scripts/ci/*android*", ".github/workflows/android-test.yml"],
     "apple": ["apple/**", "native/app-core/**", "schema/**", "spec/**", "scripts/app/sim-boot.sh", "scripts/i18n/**", "scripts/ci/apple*", "scripts/test/isolation-lint*", "scripts/test/isolation-lint/**", "scripts/test/apple_isolation_baseline.json", "scripts/test/test_apple_no_callkit.py", "scripts/release/check_no_callkit.py", ".github/workflows/apple-test.yml"],
-    "core": ["native/app-core/**", "spec/fixtures/continuity/**", "android/core/rustcore/src/main/kotlin/**", "apple/Packages/PersonaCore/**", "harmony/entry/src/main/ets/core/rustcore/**", "harmony/entry/src/main/ets/core/PersonaCore.ts",
+    "core": ["native/app-core/**", "spec/fixtures/continuity/**", "spec/fixtures/sync-driver/**", "android/core/rustcore/src/main/kotlin/**", "apple/Packages/PersonaCore/**", "harmony/entry/src/main/ets/core/rustcore/**", "harmony/entry/src/main/ets/core/PersonaCore.ts",
                    "harmony/entry/src/main/cpp/types/libpersona_core/**", "harmony/tests/rustcore-*.test.mjs", "harmony/tests/core-host/**",
                    "scripts/ci/core.sh", ".github/workflows/core-test.yml"],
     "runtimes": ["integrations/**", "sdk/ts/**", "schema/**", "spec/**", "scripts/ci/runtimes.sh", ".github/workflows/runtimes-test.yml"],
-    # The lane builds and loads the web client, drives the synthetic hub and compiles the shared bridge type.
+    # The lane builds and loads the web client, drives the synthetic hub and compiles the shared bridge type. The hub
+    # loads every module of mock_domains.DOMAINS as it starts.
     "desktop": ["desktop/**", "web/**", "scripts/mock/mock_hub.py", "scripts/mock/mock_domains.py", "scripts/mock/desktops_mock.py",
+                  "scripts/mock/github_mock.py", "scripts/mock/kb_selection_mock.py", "scripts/mock/mail_mock.py",
                   "scripts/mock/stream_trace.py", "scripts/mock/test_desktops_mock.py", "spec/desktop-bridge.d.ts",
                   # web/scripts/build-pake.mjs compiles these Go sources into the sign-in WebAssembly.
                   "server/cmd/password-wasm/**", "server/internal/passwordpake/**", "server/go.mod", "server/go.sum", "scripts/ci/desktop*.sh", ".github/workflows/desktop-test.yml"],

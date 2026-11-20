@@ -491,6 +491,7 @@ export interface ThreadPerson {
   id?: string;
   name: string;
   avatar?: string;
+  avatar_url?: string;
 }
 
 export interface ThreadMedia {
@@ -530,6 +531,7 @@ export interface ThreadChat {
   kind: string; // dm | group | channel | pr | issue
   url?: string;
   avatar?: string;
+  avatar_url?: string;
   members?: number;
   /** The action that answers here; absent: the user cannot answer in this thread. */
   reply?: string;

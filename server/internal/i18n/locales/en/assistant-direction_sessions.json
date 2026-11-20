@@ -1,0 +1,15 @@
+{
+  "full_access_required": "Filing a session under a direction needs a device with full access.",
+  "machine_not_found": "This computer is not available to this assistant.",
+  "session_not_found": "This session is not available to this assistant.",
+  "direction_not_found": "This direction does not exist.",
+  "direction_ended": "This direction has ended.",
+  "direction_full": "A direction can contain at most {max} filed sessions.",
+  "supervised_task": "This Agent follows its open supervised task. Move the task instead.",
+  "main_conversation": "The main conversation cannot be filed under a direction.",
+  "background_supervisor": "The background supervisor cannot be filed under a direction.",
+  "leader_conversation": "A direction's leader conversation cannot be filed under a direction.",
+  "space_mismatch": "This session and direction belong to different spaces.",
+  "unavailable": "Direction sessions could not be read or saved. Try again.",
+  "ended_task_not_found": "The ended-task cursor was not found. Read the latest page again."
+}

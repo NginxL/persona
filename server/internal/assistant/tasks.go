@@ -16,6 +16,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/taskworkspace"
 )
 
 // Tasks dispatched from an assistant conversation (docs/assistant/unified-entry.md, #930). The assistant hands the user a plan
@@ -62,14 +63,17 @@ type PlanTask struct {
 	Workspace         *TaskWorkspace         `json:"workspace,omitempty"`
 	WorkspaceResolved *TaskWorkspaceResolved `json:"workspace_resolved,omitempty"`
 	// Hub-owned identity for the default branch's preview, before a todo exists.
-	ReservedTodoID    string `json:"reserved_todo_id,omitempty"`
-	WorkspaceInferred bool   `json:"workspace_inferred,omitempty"`
-	Launcher          string `json:"launcher,omitempty"`
-	Model             string `json:"model,omitempty"`
-	Effort            string `json:"effort,omitempty"`
-	Speed             string `json:"speed,omitempty"`
-	Tier              string `json:"tier,omitempty"`
-	Permission        string `json:"permission,omitempty"`
+	ReservedTodoID     string                 `json:"reserved_todo_id,omitempty"`
+	BackendStartDigest string                 `json:"backend_start_digest,omitempty"`
+	WorkspaceError     *taskworkspace.Problem `json:"workspace_error,omitempty"`
+	backendRequest     *taskworkspace.Request
+	WorkspaceInferred  bool   `json:"workspace_inferred,omitempty"`
+	Launcher           string `json:"launcher,omitempty"`
+	Model              string `json:"model,omitempty"`
+	Effort             string `json:"effort,omitempty"`
+	Speed              string `json:"speed,omitempty"`
+	Tier               string `json:"tier,omitempty"`
+	Permission         string `json:"permission,omitempty"`
 	// Ultracode: the agent starts with Claude Code's ultracode on (#12). A pointer so that an edit from the card can
 	// turn it off, and one from a client that does not know it keeps the assistant's choice.
 	Ultracode *bool `json:"ultracode,omitempty"`
@@ -184,6 +188,8 @@ type PlanTask struct {
 	rememberKind bool
 	// task_spawn preserves the caller's mode instead of applying a fresh task's Claude-family permission default.
 	preservePermission bool
+	// A spawned session can inherit a known launcher default even when agent.new configures another model.
+	launcherDefaultModel bool
 	// planFirst: start defaults asked for the self-planning constraint in the prompt (start_defaults.go); never
 	// serialized, this try only.
 	planFirst bool
@@ -194,6 +200,9 @@ type PlanTask struct {
 	// startFilled: what the start-defaults policy filled in on this start try (start_defaults.go): the next try goes
 	// back to callerPick first, and the plan keeps the task's own value for exactly those. Never serialized.
 	startFilled startFill
+	// startedAgent is the kind this start's answer reported, or the explicitly resolved launcher kind when that answer omitted it.
+	// Kept only until the Agent is linked; never serialized.
+	startedAgent string
 	// admissionRelease, once the admission gate passed, releases this start's held machine/direction slot. It is kept
 	// across the whole start (not the session.start RPC alone) and run when the agent is linked or the start failed for
 	// good, so the slot stays counted through the metrics/ledger gap. Never serialized (admission.go).
@@ -962,7 +971,7 @@ func (s *Service) taskRoutes() {
 	})
 	s.handle("POST /api/v1/assistant/conversations/{id}/route", func(w http.ResponseWriter, r *http.Request) {
 		if !fullRole(r) {
-			apierr.Write(w, http.StatusForbidden, errors.New("read-only role cannot send"))
+			writeTypedNothing(w, http.StatusForbidden, "", errors.New("read-only role cannot send"))
 			return
 		}
 		var in struct {
@@ -971,11 +980,11 @@ func (s *Service) taskRoutes() {
 			AskedAt string `json:"asked_at"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
-			apierr.Write(w, http.StatusBadRequest, err)
+			writeTypedNothing(w, http.StatusBadRequest, "", err)
 			return
 		}
 		if strings.TrimSpace(in.Text) == "" || in.TodoID == "" {
-			apierr.Write(w, http.StatusBadRequest, errors.New("todo_id and text are required"))
+			writeTypedNothing(w, http.StatusBadRequest, "", errors.New("todo_id and text are required"))
 			return
 		}
 		var it FeedItem
@@ -985,8 +994,12 @@ func (s *Service) taskRoutes() {
 		} else {
 			it, err = s.routeToTask(r.Context(), r.PathValue("id"), in.TodoID, in.Text)
 		}
-		if err != nil {
-			apierr.Write(w, http.StatusConflict, err)
+		if err != nil { // 409 with delivered: send_in_doubt for words that may be with the Agent (todo_write_outcome.go)
+			keys := routeInDoubtKeys
+			if in.AskedAt != "" { // words that answer a decision, which may still show when they could not be recorded
+				keys = answerInDoubtKeys
+			}
+			writeRouteError(w, err, keys)
 			return
 		}
 		apierr.WriteJSON(w, map[string]any{"item": it})

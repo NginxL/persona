@@ -167,7 +167,7 @@ fi
 BUILD="${PERSONA_RELEASE_BUILD:-$(date -u +%Y%m%d%H%M)}"
 [[ "$BUILD" =~ ^[0-9]{12}$ ]] || { echo "PERSONA_RELEASE_BUILD must be UTC YYYYMMDDHHMM" >&2; exit 2; }
 # The nearest vX.Y.Z tag, a lightweight one too, as deploy.sh names its builds (#7201).
-VERSION="${VERSION:-$(git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)-$BUILD}"
+VERSION="${PERSONA_RELEASE_VERSION:-${VERSION:-$(git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)-$BUILD}}"
 COMMIT="$(git rev-parse HEAD)"
 # A release is the committed code: latest.json says which commit and lists every one it contains, and a hub
 # installs a release by itself only when its own commit is among them (docs/operations/hub-update.md "No regression"). Published with
@@ -272,7 +272,7 @@ adhoc_identifiers() {
 # Before anything hashes or packs them.
 adhoc_identifiers "$OUT/bin"
 cleanup
-python3 scripts/persona_identity.py --render-installer scripts/deploy/install.sh "$OUT/install.sh" "$PERSONA_PUBLISH_URL/dl"
+python3 scripts/persona_identity.py --render-installer scripts/deploy/install.sh "$OUT/install.sh" "$UPDATE_URL"
 
 # Anyone can download these: no private values in them (CLAUDE.md), and no copied skill (only the built-in ones
 # assistantskills.Redistributable lists; a copied skill lives in the user's ~/.persona/skills or comes with its
@@ -295,7 +295,17 @@ done
 
 # Releases only move forward: a larger build number than the one served, and the served commit an ancestor of this one.
 curl -fsSL "$PERSONA_PUBLISH_URL/dl/latest.json" -o "$OUT/served.json" 2>/dev/null || : > "$OUT/served.json"
-"$host_bin" release check-next "$OUT/served.json" --build "$BUILD" --commit "$COMMIT" || exit 1
+RETRY_SAME_BUILD=0
+if ! "$host_bin" release check-next "$OUT/served.json" --build "$BUILD" --commit "$COMMIT"; then
+  # A retry of the exact same commit/build is allowed only after the served manifest verifies against these bytes.
+  if [ -s "$OUT/served.json" ] \
+    && [ "$(python3 -c 'import json; print(json.load(open("'"$OUT"'/served.json"))["build"])' 2>/dev/null)" = "$BUILD" ] \
+    && [ "$(python3 -c 'import json; print(json.load(open("'"$OUT"'/served.json"))["commit"])' 2>/dev/null)" = "$COMMIT" ]; then
+    RETRY_SAME_BUILD=1
+  else
+    exit 1
+  fi
+fi
 
 # The privacy scan checked the raw binaries; only the gzipped ones are published (to the bucket, see above).
 for bin in "$OUT/bin"/personad-* "$OUT/bin"/persona-link-* "$OUT/bin"/persona-node-* "$OUT/bin"/persona-hub-* "$OUT/bin"/persona-manager-* \
@@ -303,6 +313,9 @@ for bin in "$OUT/bin"/personad-* "$OUT/bin"/persona-link-* "$OUT/bin"/persona-no
   [ -f "$bin" ] || continue # no helper built here
   gzip -n -9 -c "$bin" > "$bin.gz"
 done
+if [ "$RETRY_SAME_BUILD" = 1 ]; then
+  "$host_bin" release verify --dir "$OUT/bin" --manifest "$OUT/served.json"
+fi
 # Only current product names are public downloads; command compatibility stays inside installed services.
 (cd "$OUT/bin" && shasum -a 256 *.gz > SHA256SUMS && printf '%s\n' "$VERSION" > VERSION)
 

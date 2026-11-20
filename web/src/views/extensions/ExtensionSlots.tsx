@@ -1,12 +1,11 @@
 // The extensions' places among the web's own pages (docs/extensions/extensions.md "UI slots"): a nav_page's full page (/extension/<id>/<ui>,
-// its entry is on the sidebar), the cards on "Overview" (overview_card, as the user arranged them: lib/overview-cards.ts)
-// and the sections on a machine's page (machine_section). Each draws the extension's declarative View with ExtensionUI;
+// its entry is on the sidebar), the cards on "Overview" (overview_card, as the user arranged them: lib/overview-cards.ts,
+// laid out among Overview's own sections by views/OverviewBody.tsx) and the sections on a machine's page (machine_section). Each draws the extension's declarative View with ExtensionUI;
 // the list comes from lib/extension-slots.ts.
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { useFolded } from "../../lib/use-folded";
 import { uiIcon, type UIIcon, type UIPlace, type UITone } from "../../lib/extension-ui";
 import { useExtensionPlace, useExtensionSlot } from "../../lib/extension-slots";
-import { arrangeCards, halvesPaired, useOverviewPrefs, type ArrangedCard, type CardSpan } from "../../lib/overview-cards";
+import { halvesPaired, type ArrangedCard, type ArrangedItem, type CardSpan, type SectionId } from "../../lib/overview-cards";
 import { href, navigate, onLinkClick, type Route } from "../../lib/router";
 import { useKnownDefault } from "../../lib/manager-choice";
 import { useStore } from "../../lib/store";
@@ -21,8 +20,8 @@ import { ExtensionOwnerScope } from "../../lib/extension-owner";
 // titles, and the first screen draws no extension UI. A page, a card and a section each wait under their own Suspense
 // (the page keeps its top bar) with the Loading that ExtensionUI shows while it asks for its view.
 const ExtensionUI = lazyPage(() => import("../settings/ExtensionView").then((m) => m.ExtensionUI));
-// Arranging Overview's cards (#9745) is its own chunk too: the first screen draws the cards, never their editor (its
-// heading, and each card's controls and drag).
+// Arranging Overview (#9745, #10905) is its own chunk too: the first screen draws the cards and the sections, never
+// their editor (its heading, each card's controls and each section's bar, and the drag).
 const OverviewArrange = lazyPage(() => import("./OverviewArrange").then((m) => m.OverviewArrange));
 
 // Whose extension is being drawn (ExtensionView knows it, the items it draws do not): the graph's per-key store is
@@ -85,69 +84,69 @@ export function ExtensionNavPage({ extension, ui, onToggleSidebar }: { extension
   );
 }
 
-/** Overview's button that starts and ends arranging its cards (#9745), beside New agent; none while there is no card. */
+/** Overview's button that starts and ends arranging it (#9745, #10905), beside New agent: there is always something to
+ *  arrange, Overview's own sections if no card. */
 export function OverviewArrangeButton({ on, onClick }: { on: boolean; onClick: () => void }) {
-  const cards = useExtensionSlot("overview_card");
-  if (!cards.length && !on) return null;
-  return <IconButton icon="grid" label={t("home.arrange_cards")} pressed={on} onClick={onClick} />;
+  return <IconButton icon="grid" label={t("home.arrange")} pressed={on} onClick={onClick} />;
 }
 
-/** The cards on "Overview" (overview_card), the page's last block, under the agents' sections and the computers
- *  (#11147), as the user arranged them (lib/overview-cards.ts): in their order, a hidden one not drawn (nor asked for),
- *  each half a row or the whole row. Half-row cards go two a row once there are two of them; one alone fills the row,
- *  and on a page wide enough for two columns of rows takes one of them. `editing`: the cards are being arranged
- *  (dragged, moved with their arrows, widened, hidden or shown), the hidden ones drawn in their place without content.
- *  A section like the page's others, with their heading (its name and how many cards it shows), and it folds (#11148):
- *  kept per browser with the sidebar's folds (`fold:overview-cards`), open until the owner folds it. Folded, no card is
- *  mounted, so none is asked for either. Arranging the cards opens it, and its fold button is away meanwhile. */
-export function OverviewCards({ editing = false, onDone }: { editing?: boolean; onDone?: () => void }) {
-  const cards = useExtensionSlot("overview_card");
-  const prefs = useOverviewPrefs();
-  const arranged = useMemo(() => arrangeCards(cards, prefs), [cards, prefs]);
-  const shown = useMemo(() => arranged.filter((c) => !c.hidden), [arranged]);
-  const drawn = editing ? arranged : shown;
-  const [folded, toggle] = useFolded("overview-cards", false, { all: false });
+/** While Overview is arranged: the heading over it (`onDone`), or a section's bar (`section`), from the editor's chunk.
+ *  `items`: Overview's cards and sections as arranged. */
+export function OverviewArranging(props: { items: readonly ArrangedItem<UIPlace>[]; section?: SectionId; onDone?: () => void }) {
+  return (
+    <Suspense fallback={null}>
+      <OverviewArrange {...props} />
+    </Suspense>
+  );
+}
+
+/** A row of the cards on "Overview" (overview_card) that come one after another in the user's arrangement
+ *  (lib/overview-cards.ts, views/OverviewBody.tsx; with nothing arranged, one row, the page's last block, under the
+ *  agents' sections and the computers, #11147): in their order, a hidden one not drawn (nor asked for), each half a
+ *  row or the whole row. Half-row cards go two a row once there are two of them; one alone fills the row, and on a
+ *  page wide enough for two columns of rows takes one of them. `editing`: Overview is being arranged (cards dragged,
+ *  moved with their arrows, widened, hidden or shown; `items`, all of them and the sections), the hidden ones drawn in
+ *  their place without their content. */
+export function OverviewCards({ cards, items, editing = false, fold }: { cards: readonly ArrangedCard<UIPlace>[]; items: readonly ArrangedItem<UIPlace>[]; editing?: boolean; fold?: readonly [boolean, () => void] }) {
+  const shown = cards.filter((c) => !c.hidden);
+  const drawn = editing ? cards : shown;
+  // A section like the page's others, with their heading (its name and how many cards it shows), and it folds (#11148):
+  // `fold` is Overview's one fold for all its rows of cards (views/OverviewBody.tsx); folded, no card is mounted, so
+  // none is asked for either. Arranging opens it, and its fold button is away meanwhile; without `fold`, it is open
+  // and has none.
+  const folded = fold?.[0] === true;
   const open = editing || !folded;
   const grid = useId();
-  // the section is the page's last block and the button that arranges it is at the page's top: arranging brings it in
-  const section = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (editing) section.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
-  }, [editing]);
   if (!drawn.length) return null;
   return (
-    <section ref={section} aria-label={t("extensions-extensionslots.extensions")} data-overview-cards>
+    <section aria-label={t("extensions-extensionslots.extensions")} data-overview-cards>
       <div className={cx("flex items-baseline gap-2", open && "mb-2.5")}>
         <h2 className="text-meta font-medium text-ink">{t("extensions-extensionslots.extensions")}</h2>
         <span className="text-label text-ink-3 tabular-nums">{shown.length}</span>
         <span className="flex-1" />
-        {!editing && (
-          <button type="button" aria-expanded={!folded} aria-controls={folded ? undefined : grid} onClick={toggle} className="shrink-0 whitespace-nowrap rounded-control px-1.5 text-label text-ink-3 transition-colors hover:bg-hover hover:text-ink-2">
+        {fold && !editing && (
+          <button type="button" aria-expanded={!folded} aria-controls={folded ? undefined : grid} onClick={fold[1]} className="shrink-0 whitespace-nowrap rounded-control px-1.5 text-label text-ink-3 transition-colors hover:bg-hover hover:text-ink-2">
             {folded ? t("extensions-extensionslots.cards_expand") : t("extensions-extensionslots.cards_collapse")}
           </button>
         )}
       </div>
-      {open && (
-        // a card is never wider than one of the overview's two columns of rows above it (Home's GRID.rows, from 60rem
-        // of the page) unless the user made it a full row: alone at 1920 px it stretched its chart to 1540 px of
-        // sparse bars, and to 1300 px at 1680. While arranging, the hidden cards count where they stand.
-        // the cards of a row are one height (the grid's default stretch): each as tall as its own content left a gap
-        // under the shorter one in every row, and the rows read as ragged (#11093 tried it, #11109 took it back)
-        <div
-          id={grid}
-          className={cx("grid grid-cols-1 gap-3 @min-[60rem]:grid-cols-2", halvesPaired(drawn, editing) && "md:grid-cols-2")}
-        >
-          {editing && (
-            <Suspense fallback={null}>
-              <OverviewArrange cards={arranged} onDone={() => onDone?.()} />
-            </Suspense>
-          )}
-          {drawn.map((c, i) => (
-            <OverviewCard key={c.key} place={c.card} i={i} span={c.span} hidden={c.hidden} edit={editing ? arranged : undefined} />
-          ))}
-        </div>
-      )}
+      {open && <CardGrid id={grid} items={items} drawn={drawn} editing={editing} />}
     </section>
+  );
+}
+
+function CardGrid({ id, items, drawn, editing }: { id: string; items: readonly ArrangedItem<UIPlace>[]; drawn: readonly ArrangedCard<UIPlace>[]; editing: boolean }) {
+  return (
+    // a card is never wider than one of the overview's two columns of rows below it (Home's GRID.rows, from 60rem of
+    // the page) unless the user made it a full row: alone at 1920 px it stretched its chart to 1540 px of sparse bars,
+    // and to 1300 px at 1680. While arranging, the hidden cards count where they stand.
+    // the cards of a row are one height (the grid's default stretch): each as tall as its own content left a gap under
+    // the shorter one in every row, and the rows read as ragged (#11093 tried it, #11109 took it back)
+    <div id={id} className={cx("grid grid-cols-1 gap-3 @min-[60rem]:grid-cols-2", halvesPaired(drawn, editing) && "md:grid-cols-2")}>
+      {drawn.map((c, i) => (
+        <OverviewCard key={c.key} place={c.card} i={i} span={c.span} hidden={c.hidden} edit={editing ? items : undefined} />
+      ))}
+    </div>
   );
 }
 
@@ -159,8 +158,9 @@ const INTERACTIVE = "a,button,input,select,textarea,label,[role=radio],[role=swi
 const CARD_MAX = "max-h-[18.75rem]";
 const CARD_FADE = "[mask-image:linear-gradient(to_bottom,black_calc(100%-2.75rem),transparent)]";
 
-/** One card; `edit`: the cards being arranged, this one among them (its controls and drag are the editor's). */
-function OverviewCard({ place, i, span = "half", hidden = false, edit }: { place: UIPlace; i: number; span?: CardSpan; hidden?: boolean; edit?: readonly ArrangedCard<UIPlace>[] }) {
+/** One card; `edit`: Overview's cards and sections being arranged, this one among them (its controls and drag are the
+ *  editor's). */
+function OverviewCard({ place, i, span = "half", hidden = false, edit }: { place: UIPlace; i: number; span?: CardSpan; hidden?: boolean; edit?: readonly ArrangedItem<UIPlace>[] }) {
   const [gone, setGone] = useState(false);
   // its entrance plays once: a card moved while arranging is moved in the DOM, which would play it again (and keep the
   // card invisible for its delay), so once played it is dropped; the card looks the same after it either way
@@ -228,7 +228,7 @@ function OverviewCard({ place, i, span = "half", hidden = false, edit }: { place
     >
       {edit ? (
         <Suspense fallback={head(false)}>
-          <OverviewArrange cards={edit} card={place} />
+          <OverviewArrange items={edit} card={place} />
         </Suspense>
       ) : (
         head(true)

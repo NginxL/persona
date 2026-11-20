@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/osproc"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/runtimepkg"
 )
 
@@ -24,8 +25,9 @@ import (
 // Persona assistant and Agents work out of the box without a manual launchd/systemd setup.
 
 const (
-	agyPackage   = "persona-antigravity-runtime"
-	agyRuntimeID = "agy"
+	agyPackage    = "persona-antigravity-runtime"
+	agyRuntimeID  = "agy"
+	agyYieldGrace = 5 * time.Second
 )
 
 var (
@@ -39,31 +41,28 @@ var (
 var agyInstanceSeq atomic.Uint64
 
 type agyBridge struct {
-	mu       sync.Mutex
-	cancel   context.CancelFunc
-	done     chan struct{}
-	instance string
-	yieldCh  chan struct{}
+	mu         sync.Mutex
+	cancel     context.CancelFunc
+	done       chan struct{}
+	instance   string
+	wakeCh     chan struct{}
+	yieldGrace time.Duration
+	takeover   sync.Mutex
 }
 
-func (rh *RuntimeHost) isBuiltinAgyInstance(instance string) bool {
-	if instance == "" {
-		return false
-	}
+func (rh *RuntimeHost) builtinAgyInstance() string {
 	rh.agy.mu.Lock()
 	defer rh.agy.mu.Unlock()
-	return rh.agy.instance == instance
+	return rh.agy.instance
 }
 
-func (rh *RuntimeHost) yieldAgyBridge() {
+func (rh *RuntimeHost) wakeAgyBridge() {
 	rh.agy.mu.Lock()
-	ch := rh.agy.yieldCh
+	wake := rh.agy.wakeCh
 	rh.agy.mu.Unlock()
-	if ch != nil {
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
+	select {
+	case wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -84,6 +83,7 @@ func (rh *RuntimeHost) setAgyBridge(on bool) {
 	if !on {
 		b.cancel()
 		b.cancel = nil
+		b.wakeCh = nil
 		done := b.done
 		b.mu.Unlock()
 		<-done
@@ -96,7 +96,8 @@ func (rh *RuntimeHost) setAgyBridge(on bool) {
 	}
 	ctx, cancel := context.WithCancel(base)
 	b.cancel, b.done = cancel, make(chan struct{})
-	go rh.agyBridgeLoop(ctx, b.done)
+	b.wakeCh = make(chan struct{}, 1)
+	go rh.agyBridgeLoop(ctx, b.done, b.wakeCh)
 }
 
 // findAgyExecutable finds an installed `agy` CLI binary without spawning a login shell.
@@ -212,7 +213,7 @@ func (rh *RuntimeHost) agyConnected() bool {
 	return rh.reg.byRuntime(agyRuntimeID) != nil
 }
 
-func (rh *RuntimeHost) agyBridgeLoop(ctx context.Context, done chan struct{}) {
+func (rh *RuntimeHost) agyBridgeLoop(ctx context.Context, done chan struct{}, wake <-chan struct{}) {
 	defer close(done)
 	wait := agyBridgeRestartMin
 	loggedMissingJS := false
@@ -222,12 +223,13 @@ func (rh *RuntimeHost) agyBridgeLoop(ctx context.Context, done chan struct{}) {
 			select {
 			case <-ctx.Done():
 				return
+			case <-wake:
 			case <-time.After(agyBridgeProbeEvery):
 			}
 			continue
 		}
 		started := time.Now()
-		yielded, err := rh.runAgyBridge(ctx, agyBin)
+		yielded, err := rh.runAgyBridge(ctx, agyBin, wake)
 		if ctx.Err() != nil {
 			return
 		}
@@ -257,18 +259,15 @@ func (rh *RuntimeHost) agyBridgeLoop(ctx context.Context, done chan struct{}) {
 	}
 }
 
-func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string) (bool, error) {
+func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string, wake <-chan struct{}) (bool, error) {
 	instance := fmt.Sprintf("builtin-agy-%d-%d", os.Getpid(), agyInstanceSeq.Add(1))
-	yieldCh := make(chan struct{}, 1)
 	rh.agy.mu.Lock()
 	rh.agy.instance = instance
-	rh.agy.yieldCh = yieldCh
 	rh.agy.mu.Unlock()
 	defer func() {
 		rh.agy.mu.Lock()
 		if rh.agy.instance == instance {
 			rh.agy.instance = ""
-			rh.agy.yieldCh = nil
 		}
 		rh.agy.mu.Unlock()
 	}()
@@ -313,15 +312,70 @@ func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string) (bool, e
 			<-exited
 		}
 	}
-	select {
-	case err := <-exited:
-		return false, err
-	case <-yieldCh:
-		rh.logger.Printf("agy runtime: yielding to external agy runtime")
-		stopChild()
-		return true, nil
-	case <-ctx.Done():
-		stopChild()
-		return false, ctx.Err()
+	for {
+		if _, external := rh.agyPeers(instance); external {
+			rh.logger.Printf("agy runtime: yielding to external agy runtime")
+			stopChild()
+			return true, nil
+		}
+		select {
+		case err := <-exited:
+			return false, err
+		case <-wake:
+		case <-ctx.Done():
+			stopChild()
+			return false, ctx.Err()
+		}
 	}
+}
+
+func (rh *RuntimeHost) agyPeers(instance string) (builtin *runtimeConn, external bool) {
+	rh.reg.mu.Lock()
+	defer rh.reg.mu.Unlock()
+	for _, conn := range rh.reg.conns {
+		select {
+		case <-conn.peer.Done():
+			continue
+		default:
+		}
+		conn.mu.Lock()
+		ready, hello := conn.ready, conn.hello
+		conn.mu.Unlock()
+		if ready && hello.Runtime == agyRuntimeID {
+			if hello.Instance != instance {
+				external = true
+			} else if builtin == nil || conn.serial > builtin.serial {
+				builtin = conn
+			}
+		}
+	}
+	return builtin, external
+}
+
+func (h *runtimeConn) waitAgyIdle(ctx context.Context) {
+	if h.peer.WaitPending(ctx) != nil {
+		return
+	}
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for h.agyWorking() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.peer.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+func (h *runtimeConn) agyWorking() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, session := range h.sessions {
+		if session.Status == proto.StatusWorking {
+			return true
+		}
+	}
+	return false
 }

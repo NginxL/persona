@@ -2,16 +2,19 @@ package node
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
@@ -19,12 +22,10 @@ import (
 )
 
 // Subscription rate-limit windows of the agents on this machine (#2432, docs/server/usage-windows.md): how much of an
-// account's 5-hour and weekly allowance is used. Only local files are read, never an account API and never a
-// credential:
+// account's 5-hour and weekly allowance is used. Persona never reads login credentials:
 //
-//   - Codex writes the limits into every rollout's token_count event (rate_limits.primary / secondary with
-//     used_percent, window_minutes and resets_at). The collector reads the tail of the newest rollouts of each Codex
-//     home. Moshi also asks ChatGPT's usage endpoint for them; that needs the login token, so it is not done here.
+//   - Codex app-server can return the limits together with the account ID. The node sends only a digest of that ID.
+//     When the app-server cannot supply windows, read the newest rollout's token_count event without an account ID.
 //   - Claude Code hands the limits to a status line command (the rate_limits field of its JSON input) and keeps them
 //     nowhere else; the API that has them needs the OAuth token, so it is skipped too. The way in is opt-in: a
 //     status line wrapper drops the JSON into <node dir>/usage/claude*.json, which is read here.
@@ -41,86 +42,119 @@ const (
 )
 
 type usageWindowsState struct {
-	off atomic.Bool // the hub said usage_windows false
-
 	mu       sync.Mutex
+	off      bool // the hub said usage_windows false
+	cancel   context.CancelFunc
 	at       time.Time
-	accounts map[string]proto.UsageAccount // by source ("codex:<home>", "claude:<file>")
+	accounts map[string]proto.UsageNodeAccount // by source ("codex:<source digest>", "claude:<file>")
 }
 
 // setUsageWindows is the hub's word (node.configure usage_windows): whether the node reads the windows at all. Off
 // forgets what was read.
 func (n *Node) setUsageWindows(on bool) {
-	n.usageWin.off.Store(!on)
+	st := &n.usageWin
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.off = !on
 	if !on {
-		n.usageWin.mu.Lock()
-		n.usageWin.at, n.usageWin.accounts = time.Time{}, nil
-		n.usageWin.mu.Unlock()
+		if st.cancel != nil {
+			st.cancel()
+		}
+		st.at, st.accounts = time.Time{}, nil
 	}
 }
 
 // runUsageWindows polls on a schedule so that an answer is never a cold scan for the hub.
-func (n *Node) runUsageWindows(done <-chan struct{}) {
+func (n *Node) runUsageWindows(ctx context.Context) {
 	t := time.NewTimer(usageWindowsFirst)
 	defer t.Stop()
 	for {
 		select {
-		case <-done:
+		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
-		n.usageSnapshot(true)
+		n.refreshUsageWindows(ctx)
 		t.Reset(usageWindowsEvery)
 	}
 }
 
-// usageSnapshot is usage.windows: the last poll, or a fresh one when there is none yet or it is older than the
-// schedule (force: poll anyway).
-func (n *Node) usageSnapshot(force bool) proto.UsageSnapshot {
-	if n.usageWin.off.Load() {
-		return proto.UsageSnapshot{Enabled: false, Accounts: []proto.UsageAccount{}}
+// refreshUsageWindows keeps app-server calls outside the lock, so an RPC can still read local files or return the
+// last sample while Codex checks the account. Disabling polling also cancels and discards an in-flight round.
+func (n *Node) refreshUsageWindows(ctx context.Context) {
+	st := &n.usageWin
+	st.mu.Lock()
+	if st.off || ctx.Err() != nil {
+		st.mu.Unlock()
+		return
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	st.cancel = cancel
+	st.mu.Unlock()
+	defer cancel()
+
+	homes := n.usageWindowCodexHomes()
+	found := n.collectUsageWindows(time.Now(), homes)
+	collectCodexAppUsage(ctx, homes, found)
+
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.cancel = nil
+	if ctx.Err() == nil {
+		st.at = time.Now()
+		st.accounts = mergeUsage(st.accounts, found, st.at)
+	}
+}
+
+// usageSnapshot is usage.windows: the last poll, or local files until the first poll finishes.
+func (n *Node) usageSnapshot() proto.UsageSnapshot {
 	st := &n.usageWin
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	now := time.Now()
-	if force || st.accounts == nil || now.Sub(st.at) >= usageWindowsEvery {
-		st.accounts = mergeUsage(st.accounts, n.collectUsageWindows(now), now)
-		st.at = now
+	if st.off {
+		return proto.UsageSnapshot{Accounts: []proto.UsageNodeAccount{}}
+	}
+	if st.accounts == nil {
+		st.at = time.Now()
+		st.accounts = n.collectUsageWindows(st.at, n.usageWindowCodexHomes())
 	}
 	keys := make([]string, 0, len(st.accounts))
 	for k := range st.accounts {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	out := proto.UsageSnapshot{Enabled: true, CollectedAt: st.at, Accounts: []proto.UsageAccount{}}
+	out := proto.UsageSnapshot{Enabled: true, CollectedAt: st.at, Accounts: []proto.UsageNodeAccount{}}
 	for _, k := range keys {
 		out.Accounts = append(out.Accounts, st.accounts[k])
 	}
 	return out
 }
 
-// mergeUsage lays this poll over the kept samples: a source read now replaces its old sample, one that was not
-// found keeps the last until it is older than usageWindowsMaxAge.
-func mergeUsage(kept, found map[string]proto.UsageAccount, now time.Time) map[string]proto.UsageAccount {
-	out := map[string]proto.UsageAccount{}
+// mergeUsage lays this poll over the kept samples. An old rollout does not displace a newer verified Codex
+// snapshot during a failed refresh. A quiet source keeps its last sample for usageWindowsMaxAge.
+func mergeUsage(kept, found map[string]proto.UsageNodeAccount, now time.Time) map[string]proto.UsageNodeAccount {
+	out := map[string]proto.UsageNodeAccount{}
 	for k, a := range kept {
 		if now.Sub(a.SampledAt) <= usageWindowsMaxAge {
 			out[k] = a
 		}
 	}
 	for k, a := range found {
+		if previous := out[k]; previous.AccountKey != "" && a.AccountKey == "" && !a.SampledAt.After(previous.SampledAt) {
+			continue
+		}
 		out[k] = a
 	}
 	return out
 }
 
-// collectUsageWindows reads every source once.
-func (n *Node) collectUsageWindows(now time.Time) map[string]proto.UsageAccount {
-	out := map[string]proto.UsageAccount{}
-	for _, home := range n.usageCodexHomes() {
+// collectUsageWindows reads the local files of every source once.
+func (n *Node) collectUsageWindows(now time.Time, homes []string) map[string]proto.UsageNodeAccount {
+	out := map[string]proto.UsageNodeAccount{}
+	for _, home := range homes {
 		if a, ok := codexUsageAccount(home, now); ok {
-			out["codex:"+home] = a
+			source := codexUsageKey(realPath(home))
+			out["codex:"+source] = proto.UsageNodeAccount{UsageAccount: a, SourceKey: source}
 		}
 	}
 	files, _ := filepath.Glob(filepath.Join(n.dir, "usage", "claude*.json"))
@@ -134,13 +168,25 @@ func (n *Node) collectUsageWindows(now time.Time) map[string]proto.UsageAccount 
 			continue
 		}
 		if a, ok := parseClaudeStatusLimits(data, st.ModTime(), now); ok {
-			out["claude:"+filepath.Base(p)] = a
+			out["claude:"+filepath.Base(p)] = proto.UsageNodeAccount{UsageAccount: a}
 		}
 	}
 	return out
 }
 
-// usageCodexHomes are the Codex homes whose rollouts are read: the default one and the registered ones.
+// The registry may list the default home again through an alias. Poll one source for each physical home, using
+// the first spelling to start the app-server with the same CODEX_HOME as the existing local install.
+func (n *Node) usageWindowCodexHomes() []string {
+	seen := map[string]bool{}
+	return slices.DeleteFunc(n.usageCodexHomes(), func(home string) bool {
+		path := realPath(home)
+		duplicate := seen[path]
+		seen[path] = true
+		return duplicate
+	})
+}
+
+// usageCodexHomes are the default and registered Codex homes.
 func (n *Node) usageCodexHomes() []string {
 	homes := []string{n.codexHome()}
 	if r := n.codices; r != nil {
@@ -153,6 +199,11 @@ func (n *Node) usageCodexHomes() []string {
 		r.mu.Unlock()
 	}
 	return homes
+}
+
+func codexUsageKey(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(digest[:])
 }
 
 func containsString(list []string, s string) bool {
@@ -289,17 +340,23 @@ func parseCodexRateLimits(line []byte) (codexLimitSample, bool) {
 		s.plan = strings.ToLower(strings.TrimSpace(*rl.PlanType))
 	}
 	for _, w := range []*codexLimitWindow{rl.Primary, rl.Secondary} {
-		if w == nil || w.UsedPercent == nil || w.WindowMinutes == nil || *w.WindowMinutes <= 0 {
-			continue
+		if w != nil {
+			s.windows = appendCodexWindow(s.windows, w.UsedPercent, w.WindowMinutes, w.ResetsAt)
 		}
-		win := proto.UsageWindow{Label: proto.WindowLabel(*w.WindowMinutes), WindowMinutes: *w.WindowMinutes, UsedPercent: clampPercent(*w.UsedPercent)}
-		if w.ResetsAt != nil && *w.ResetsAt > 0 {
-			t := time.Unix(*w.ResetsAt, 0).UTC()
-			win.ResetsAt = &t
-		}
-		s.windows = append(s.windows, win)
 	}
 	return s, len(s.windows) > 0
+}
+
+func appendCodexWindow(windows []proto.UsageWindow, usedPercent *float64, minutes *int, resetsAt *int64) []proto.UsageWindow {
+	if usedPercent == nil || minutes == nil || *minutes <= 0 {
+		return windows
+	}
+	win := proto.UsageWindow{Label: proto.WindowLabel(*minutes), WindowMinutes: *minutes, UsedPercent: clampPercent(*usedPercent)}
+	if resetsAt != nil && *resetsAt > 0 {
+		t := time.Unix(*resetsAt, 0).UTC()
+		win.ResetsAt = &t
+	}
+	return append(windows, win)
 }
 
 func clampPercent(p float64) float64 {

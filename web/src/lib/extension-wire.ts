@@ -2811,6 +2811,8 @@ export interface MessagingAccount {
   id: string;
   name?: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   tenant?: string;
   signed_in: boolean;
   unread?: number;
@@ -2828,6 +2830,8 @@ export interface MessagingConversation {
   id: string;
   name: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   kind: MessagingConversationKind;
   unread: number;
   marked_unread?: boolean;
@@ -2852,6 +2856,8 @@ export interface MessagingPerson {
   id?: string;
   name: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   kind?: string;
 }
 
@@ -3265,6 +3271,8 @@ export interface MessagingProfile {
   id: string;
   name: string;
   avatar?: string;
+  /** Hub-supplied avatar path derived from avatar. Old sources supply only avatar. */
+  avatar_url?: string;
   cover?: string;
   kind?: string;
   subtitle?: string;

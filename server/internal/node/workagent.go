@@ -402,6 +402,10 @@ func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Age
 			return nil, fmt.Errorf("send: %w", err), true
 		}
 		n.lostFirst.clear(id) // the message the start could not deliver went in now, or another one
+		// Working until herdr shows the turn, so an interrupt right after the send stops it (worksent.go, #11437).
+		n.workSent.mark(a.PaneID, time.Now())
+		n.notifySessionsSoon()
+		time.AfterFunc(workSentGrace+100*time.Millisecond, func() { n.notifySessionsSoon() })
 		return okResult(nil), nil, true
 	case "session.interrupt":
 		return okResult(n.sendKeys(ctx, a.PaneID, "escape")), nil, true

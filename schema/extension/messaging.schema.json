@@ -102,6 +102,7 @@
         "id": {"type": "string", "minLength": 1, "maxLength": 200},
         "name": {"type": "string", "maxLength": 200},
         "avatar": {"type": "string", "maxLength": 2000},
+        "avatar_url": {"type": "string", "maxLength": 8192, "description": "Hub-supplied avatar path derived from avatar. Old sources supply only avatar."},
         "tenant": {"type": "string", "maxLength": 200},
         "signed_in": {"type": "boolean"},
         "unread": {"type": "integer", "minimum": 0}
@@ -123,6 +124,7 @@
         "id": {"type": "string", "minLength": 1, "maxLength": 200},
         "name": {"type": "string", "maxLength": 500},
         "avatar": {"type": "string", "maxLength": 2000},
+        "avatar_url": {"type": "string", "maxLength": 8192, "description": "Hub-supplied avatar path derived from avatar. Old sources supply only avatar."},
         "kind": {"$ref": "#/$defs/MessagingConversationKind"},
         "unread": {"type": "integer", "minimum": 0},
         "marked_unread": {"type": "boolean"},
@@ -158,6 +160,7 @@
         "id": {"type": "string", "maxLength": 200},
         "name": {"type": "string", "maxLength": 200},
         "avatar": {"type": "string", "maxLength": 2000},
+        "avatar_url": {"type": "string", "maxLength": 8192, "description": "Hub-supplied avatar path derived from avatar. Old sources supply only avatar."},
         "kind": {"type": "string", "enum": ["user", "bot", "system"]}
       },
       "required": ["name"]
@@ -636,6 +639,7 @@
         "id": {"type": "string", "maxLength": 200},
         "name": {"type": "string", "maxLength": 200},
         "avatar": {"type": "string", "maxLength": 2000},
+        "avatar_url": {"type": "string", "maxLength": 8192, "description": "Hub-supplied avatar path derived from avatar. Old sources supply only avatar."},
         "cover": {"type": "string", "maxLength": 2000},
         "kind": {"type": "string", "enum": ["user", "bot"]},
         "subtitle": {"type": "string", "maxLength": 500},

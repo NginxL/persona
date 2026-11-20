@@ -219,7 +219,7 @@ func (b *cindyBridge) run(ctx context.Context, version string) error {
 		"agent":     "claude",
 		"version":   version,
 		"instance":  newUUID(),
-		"caps":      map[string]any{"send": w, "interrupt": w, "start": w, "resume": w, "close": w, "modes": w},
+		"caps":      map[string]any{"send": w, "interrupt": w, "start": w, "resume": w, "close": w, "modes": w, "backend_workspace_root": w},
 		"launchers": launchers,
 	}
 	if err := b.peer.Call(ctx, "runtime.hello", hello, nil); err != nil {

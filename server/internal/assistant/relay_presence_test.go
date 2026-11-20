@@ -263,6 +263,8 @@ func TestScheduledRunWaitsForTheOwner(t *testing.T) {
 	}{
 		{"into the conversation the owner talks in", Task{SessionID: "conv1"}, at, 90 * time.Second},
 		{"into its own conversation the owner talks in", Task{RunSessionID: "own1"}, at, 90 * time.Second},
+		{"fresh recurring task does not interrupt its source", Task{SessionID: "conv1", Repeat: repeatInterval, FreshEachRun: true}, at, 0},
+		{"one-off still waits for its source", Task{SessionID: "conv1", Repeat: repeatOnce, FreshEachRun: true}, at, 90 * time.Second},
 		{"due 4 minutes ago: one more", Task{SessionID: "conv1"}, at.Add(-4 * time.Minute), time.Minute},
 		{"due 5 minutes ago: it runs", Task{SessionID: "conv1"}, at.Add(-5 * time.Minute), 0},
 		{"into another conversation", Task{SessionID: "conv9"}, at, 0},

@@ -1,5 +1,6 @@
 {
   "region": "Queued messages",
+  "status": "Queued, not sent yet",
   "summary_one": "{count} queued",
   "summary_other": "{count} queued",
   "row_label": "Queued message {n}: {text}",
@@ -9,6 +10,7 @@
   "relayed_summary_one": "{count} message from another chat",
   "relayed_summary_other": "{count} messages from other chats",
   "drag": "Drag queued message {n} to reorder",
+  "send_now": "Send now",
   "send_now_tip": "Send all queued messages now, without waiting for {agent}'s next step",
   "edit": "Edit",
   "edit_label": "Edit queued message {n}",

@@ -71,7 +71,7 @@ node web/e2e/overview-cards.mjs <loopback-web-origin> <artifact-directory> --old
 ```
 
 Against an exclusively owned mock-backed web server, in Simplified Chinese. Four made-up cards (the gateway's usage,
-Quota left, Needs me, Agenda): with nothing arranged they come in the hub's order, two a row; **整理卡片** then drags
+Quota left, Needs me, Agenda): with nothing arranged they come in the hub's order, two a row; **整理总览** then drags
 Agenda onto the first card, makes it a full row, moves Needs me earlier with the keyboard and switches Quota left off
 (drawn as its outline while arranging). After **完成**, Agenda spans the row over two half cards, the hub keeps the
 arrangement, a reload and a second browser draw the same and never send the hidden card's render request, and Reset
@@ -80,6 +80,22 @@ in the browser, survives a reload and that the edit state says it is kept in thi
 screenshots of Overview as it was, the edit state, the arranged result and the edit state with the hidden card at
 1440 × 900, the arranged result and the edit state at 390 × 844, and `results.json`, go to the artifact directory; a
 300-second watchdog ends the run.
+
+## Overview's own sections (#10905)
+
+```sh
+MOCK_EXTENSIONS=1 MOCK_OVERVIEW_CARDS=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/overview-sections.mjs <loopback-web-origin> <artifact-directory> [Chromium executable]
+```
+
+Against an exclusively owned mock-backed web server, in Simplified Chinese. With nothing arranged the sections come
+first in their order and the cards last (#11147); **整理总览** draws each section as a bar (需要你 and 卡住了，要你去看
+without a switch, 始终显示), drags 进行中的任务 onto 需要你 and switches 工作中 off. After **完成**, 进行中的任务 is right
+under the greeting, above 需要你, the cards still last, and 工作中 is not drawn; the hub keeps the arrangement (every section named), a
+reload and a second browser draw the same, and Reset puts Overview back. Light and dark screenshots of Overview as it
+was, the edit state and 进行中的任务 moved first, at 1440 × 1300 and 390 × 1600, and `results-sections.json`, go to the
+artifact directory; a 300-second watchdog ends the run.
 
 ## Sidebar groups (#9071)
 

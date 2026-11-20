@@ -22,15 +22,16 @@ import (
 const agyTranscriptPath = ".system_generated/logs/transcript.jsonl"
 
 type agyStep struct {
-	Index           *int     `json:"step_index"`
-	Type            string   `json:"type"`
-	Source          string   `json:"source"`
-	Status          string   `json:"status"`
-	CreatedAt       string   `json:"created_at"`
-	Content         string   `json:"content"`
-	Thinking        string   `json:"thinking"`
-	Error           string   `json:"error"`
-	TruncatedFields []string `json:"truncated_fields"`
+	Index           *int            `json:"step_index"`
+	Type            string          `json:"type"`
+	Source          string          `json:"source"`
+	Status          string          `json:"status"`
+	CreatedAt       string          `json:"created_at"`
+	Content         string          `json:"content"`
+	Thinking        string          `json:"thinking"`
+	Error           string          `json:"error"`
+	TruncatedFields []string        `json:"truncated_fields"`
+	Media           json.RawMessage `json:"media"`
 	ToolCalls       []*struct {
 		Name string          `json:"name"`
 		Args json.RawMessage `json:"args"`
@@ -46,6 +47,7 @@ type agyHistory struct {
 	items []proto.Item
 	// A compact export can leave full tool output in its step directory.
 	outputs map[string]int
+	media   map[string]agyMedia
 }
 
 type agyRevision struct {
@@ -287,7 +289,21 @@ func mapAgySteps(steps []agyStep, fallback time.Time) agyHistory {
 					break
 				}
 			}
-			// Pane transcripts omit media because they have no session.image handler.
+			var entries []json.RawMessage
+			if json.Unmarshal(step.Media, &entries) == nil {
+				for index, entry := range entries {
+					var media agyMedia
+					if json.Unmarshal(entry, &media) != nil || !media.isImage() {
+						continue
+					}
+					image := add("media"+strconv.Itoa(index), "assistant", proto.KindImage, "")
+					image.ToolUseID, image.Image = callID, &proto.Image{Mime: media.Mime, Lazy: true}
+					if history.media == nil {
+						history.media = make(map[string]agyMedia)
+					}
+					history.media[image.ID] = media
+				}
+			}
 		case "ERROR_MESSAGE":
 			text := step.Error
 			if text == "" {

@@ -6,7 +6,7 @@
 // it as "Close…" (#7125, closeOffer), which closes a busy agent too after saying what that interrupts.
 import { useSyncExternalStore } from "react";
 import { api, ApiError, errorText, sessionPath } from "./api";
-import { sessionMenuActions, sessionTitle, stateOf } from "./format";
+import { sessionDeletable, sessionMenuActions, sessionTitle, stateOf } from "./format";
 import { dropSession, getState, refresh, upsertSession, useStore } from "./store";
 import { toast } from "../ui/atoms";
 import { t } from "../i18n";
@@ -69,15 +69,27 @@ export function archiveOffers(s: Session, features: readonly string[]): { archiv
  *  offered (offline, the assistant's, nothing to close it with). */
 export type CloseOffer = "archive" | "close" | "busy" | "no";
 export function closeOffer(s: Session, features: readonly string[]): CloseOffer {
+  if (isUntouchedStart(s)) return "no";
   const archived = archiveOffers(s, features).close;
   if (archived === "ok") return "archive";
   if (sessionMenuActions(s).includes("close")) return "close";
   return archived === "busy" ? "busy" : "no";
 }
 
-/** Without archives on the hub, the old "Delete chat" stays (an older hub); with them, archive takes its place. */
-export function deleteInsteadOfArchive(features: readonly string[]): boolean {
-  return !features.includes(AGENT_ARCHIVES_FEATURE);
+// An old inventory can retain the original pane after a refused start. A pane ID alone does not establish a running Agent.
+export function isUntouchedStart(s: Session): boolean {
+  return s.started_by_persona === true && s.status === "unknown" && (!s.state || s.state === "unknown") &&
+    (!s.updated_at || s.updated_at === "0001-01-01T00:00:00Z") && !s.capabilities && !s.source_kind &&
+    !s.awaiting_first_message && !s.last_text && !s.rev &&
+    !closeBusy(s) && !s.undelivered?.some((message) => message.computer);
+}
+
+/** Failed starts can be removed by the Hub even with the computer offline. Older Hubs offer Delete for all eligible rows. */
+export function offerSessionDelete(s: Session, features: readonly string[]): boolean {
+  if (s.archived || !sessionDeletable(s)) return false;
+  if (!features.includes(AGENT_ARCHIVES_FEATURE)) return true;
+  if (!s.start_error) return isUntouchedStart(s);
+  return !closeBusy(s) && !s.undelivered?.some((message) => message.computer);
 }
 
 /** What "Archive and close" did beyond the archive (the hub's `close`). */

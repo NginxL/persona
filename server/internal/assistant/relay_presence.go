@@ -283,9 +283,9 @@ func (s *Service) ownersPresent(now time.Time) map[string]time.Time {
 // the owner set, so it waits relayDecisionMax past that time at most, as a message that waits on a decision does;
 // "Run now" is the owner's own and is not held (it does not come through runDue).
 func runHold(present map[string]time.Time, t Task, due, now time.Time) time.Duration {
-	id := t.SessionID
-	if id == "" {
-		id = t.RunSessionID
+	id := t.RunSessionID
+	if t.continuesSource() {
+		id = t.SessionID
 	}
 	spoke, ok := present[id]
 	if !ok || id == "" {

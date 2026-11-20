@@ -1,0 +1,505 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "two_background_wakes",
+      "description": "While suspended, configuration, refresh and network recovery cannot open a socket. Each push owns a distinct 25-second deadline. The earlier one closes the later wake's connection.",
+      "source": "apple/Persona/App/HubLinks.swift resumeLinks/suspendLinks/wakeLinks; apple/Persona/App/PersonaApp.swift didReceiveRemoteNotification; apple/Shared/LiveConnection.swift disconnect/wake/ensureConnected/reconnectNow",
+      "from_test": "apple/PersonaTests/LiveConnectionSuspendTests.swift suspendedOpensNothing/aSilentPushConnectsThoughSuspended",
+      "input": {
+        "features": "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1",
+        "initial": {
+          "config": null, "socket": "idle", "generation": 0, "cursor": null, "resumed": false,
+          "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+          "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 0,
+          "timers": []
+        },
+        "events": [
+          {"now": 0, "kind": "background"},
+          {"now": 1, "kind": "connect", "config": {"hub": 1, "credential": 1}},
+          {"now": 2, "kind": "ensure_connected"},
+          {"now": 3, "kind": "reconnect_now"},
+          {"now": 100, "kind": "wake_push"},
+          {"now": 200, "kind": "wake_push"},
+          {"now": 210, "kind": "frame", "generation": 2, "meta": {"kind": "broadcast"}},
+          {"now": 25100, "kind": "tick", "timer": {"kind": "suspend", "id": 1, "at": 25100}},
+          {"now": 25101, "kind": "reconnect_now"},
+          {"now": 25200, "kind": "tick", "timer": {"kind": "suspend", "id": 3, "at": 25200}},
+          {"now": 25201, "kind": "frame", "generation": 2, "meta": {"kind": "hello", "stream": "late", "seq": 77}}
+        ]
+      },
+      "expected": [
+        {
+          "state": {
+            "config": null, "socket": "idle", "generation": 1, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": true, "network_up": true, "shown": "online", "timer_serial": 0,
+            "timers": []
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "idle", "generation": 1, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": true, "network_up": true, "shown": "online", "timer_serial": 0,
+            "timers": []
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "idle", "generation": 1, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": true, "network_up": true, "shown": "online", "timer_serial": 0,
+            "timers": []
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "idle", "generation": 1, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": true, "network_up": true, "shown": "online", "timer_serial": 0,
+            "timers": []
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 2,
+            "timers": [{"kind": "suspend", "id": 1, "at": 25100}, {"kind": "phase", "id": 2, "at": 1600}]
+          },
+          "actions": [
+            {"kind": "open_socket", "generation": 2, "config": {"hub": 1, "credential": 1}, "query": [["features", "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1"]]},
+            {"kind": "schedule", "timer": {"kind": "suspend", "id": 1, "at": 25100}},
+            {"kind": "schedule", "timer": {"kind": "phase", "id": 2, "at": 1600}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "suspend", "id": 1, "at": 25100}, {"kind": "phase", "id": 2, "at": 1600}, {"kind": "suspend", "id": 3, "at": 25200}]
+          },
+          "actions": [
+            {"kind": "schedule", "timer": {"kind": "suspend", "id": 3, "at": 25200}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "suspend", "id": 1, "at": 25100}, {"kind": "suspend", "id": 3, "at": 25200}]
+          },
+          "actions": [
+            {"kind": "send_ws", "generation": 2, "message": "client_hello"},
+            {"kind": "did_connect", "generation": 2, "refetch": true},
+            {"kind": "cancel_timer", "timer": {"kind": "phase", "id": 2, "at": 1600}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "idle", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": true, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "suspend", "id": 3, "at": 25200}]
+          },
+          "actions": [
+            {"kind": "close_socket", "generation": 2, "code": 1001}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "idle", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": true, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "suspend", "id": 3, "at": 25200}]
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "idle", "generation": 4, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": true, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": []
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "idle", "generation": 4, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": true, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": []
+          },
+          "actions": [
+          ]
+        }
+      ]
+    },
+    {
+      "name": "foreground_at_wake_deadline",
+      "description": "Foreground resumption keeps an in-flight attempt. Each push deadline rechecks the current lifecycle, and a foreground socket stays open.",
+      "source": "apple/Persona/App/HubLinks.swift resumeLinks/suspendLinks/wakeLinks; apple/Persona/App/PersonaApp.swift didReceiveRemoteNotification; apple/Shared/LiveConnection.swift wake/ensureConnected",
+      "from_test": "apple/PersonaTests/LiveConnectionSuspendTests.swift backInFrontConnects",
+      "input": {
+        "features": "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1",
+        "initial": {
+          "config": null, "socket": "idle", "generation": 0, "cursor": null, "resumed": false,
+          "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+          "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 0,
+          "timers": []
+        },
+        "events": [
+          {"now": 0, "kind": "connect", "config": {"hub": 1, "credential": 1}},
+          {"now": 1, "kind": "background"},
+          {"now": 100, "kind": "wake_push"},
+          {"now": 200, "kind": "foreground"},
+          {"now": 300, "kind": "frame", "generation": 3, "meta": {"kind": "broadcast"}},
+          {"now": 400, "kind": "wake_push"},
+          {"now": 25100, "kind": "tick", "timer": {"kind": "suspend", "id": 2, "at": 25100}},
+          {"now": 25400, "kind": "tick", "timer": {"kind": "suspend", "id": 4, "at": 25400}},
+          {"now": 25401, "kind": "tick", "timer": {"kind": "suspend", "id": 4, "at": 25400}}
+        ]
+      },
+      "expected": [
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 1, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 1,
+            "timers": [{"kind": "phase", "id": 1, "at": 1500}]
+          },
+          "actions": [
+            {"kind": "open_socket", "generation": 1, "config": {"hub": 1, "credential": 1}, "query": [["features", "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1"]]},
+            {"kind": "schedule", "timer": {"kind": "phase", "id": 1, "at": 1500}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "idle", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": true, "network_up": true, "shown": "online", "timer_serial": 1,
+            "timers": []
+          },
+          "actions": [
+            {"kind": "close_socket", "generation": 1, "code": 1001},
+            {"kind": "cancel_timer", "timer": {"kind": "phase", "id": 1, "at": 1500}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": true, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "suspend", "id": 2, "at": 25100}, {"kind": "phase", "id": 3, "at": 1600}]
+          },
+          "actions": [
+            {"kind": "open_socket", "generation": 3, "config": {"hub": 1, "credential": 1}, "query": [["features", "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1"]]},
+            {"kind": "schedule", "timer": {"kind": "suspend", "id": 2, "at": 25100}},
+            {"kind": "schedule", "timer": {"kind": "phase", "id": 3, "at": 1600}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "suspend", "id": 2, "at": 25100}, {"kind": "phase", "id": 3, "at": 1600}]
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "suspend", "id": 2, "at": 25100}]
+          },
+          "actions": [
+            {"kind": "send_ws", "generation": 3, "message": "client_hello"},
+            {"kind": "did_connect", "generation": 3, "refetch": true},
+            {"kind": "cancel_timer", "timer": {"kind": "phase", "id": 3, "at": 1600}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 4,
+            "timers": [{"kind": "suspend", "id": 2, "at": 25100}, {"kind": "suspend", "id": 4, "at": 25400}]
+          },
+          "actions": [
+            {"kind": "schedule", "timer": {"kind": "suspend", "id": 4, "at": 25400}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 4,
+            "timers": [{"kind": "suspend", "id": 4, "at": 25400}]
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 4,
+            "timers": []
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 4,
+            "timers": []
+          },
+          "actions": [
+          ]
+        }
+      ]
+    },
+    {
+      "name": "path_change_and_stalled_socket",
+      "description": "A returning path replaces a hanging or stalled socket. A working socket stays open; an up-to-up path probes it. A delayed title shows the current phase and old health reports are fenced.",
+      "source": "apple/Persona/App/ConnectionStatus.swift pathChanged/update; apple/Shared/LiveConnection.swift ensureConnected/reconnectNow/probe/ping",
+      "derived": true,
+      "input": {
+        "features": "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1",
+        "initial": {
+          "config": null, "socket": "idle", "generation": 0, "cursor": null, "resumed": false,
+          "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+          "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 0,
+          "timers": []
+        },
+        "events": [
+          {"now": 0, "kind": "connect", "config": {"hub": 1, "credential": 1}},
+          {"now": 1, "kind": "foreground"},
+          {"now": 2, "kind": "network_path", "up": false},
+          {"now": 1500, "kind": "tick", "timer": {"kind": "phase", "id": 1, "at": 1500}},
+          {"now": 1501, "kind": "network_path", "up": true},
+          {"now": 1502, "kind": "frame", "generation": 1, "meta": {"kind": "hello", "stream": "stale", "seq": 5}},
+          {"now": 1503, "kind": "socket_health", "generation": 1, "stalled": true},
+          {"now": 1504, "kind": "frame", "generation": 2, "meta": {"kind": "broadcast"}},
+          {"now": 1505, "kind": "network_path", "up": true},
+          {"now": 1506, "kind": "network_path", "up": false},
+          {"now": 1507, "kind": "network_path", "up": true},
+          {"now": 1508, "kind": "socket_health", "generation": 2, "stalled": true},
+          {"now": 1509, "kind": "network_path", "up": false},
+          {"now": 1510, "kind": "network_path", "up": true},
+          {"now": 1511, "kind": "reconnect_now"},
+          {"now": 1512, "kind": "socket_failed", "generation": 2, "jitter": 0, "http_status": 401},
+          {"now": 1513, "kind": "tick", "timer": {"kind": "phase", "id": 2, "at": 3006}}
+        ]
+      },
+      "expected": [
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 1, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 1,
+            "timers": [{"kind": "phase", "id": 1, "at": 1500}]
+          },
+          "actions": [
+            {"kind": "open_socket", "generation": 1, "config": {"hub": 1, "credential": 1}, "query": [["features", "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1"]]},
+            {"kind": "schedule", "timer": {"kind": "phase", "id": 1, "at": 1500}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 1, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 1,
+            "timers": [{"kind": "phase", "id": 1, "at": 1500}]
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 1, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": false, "shown": "online", "timer_serial": 1,
+            "timers": [{"kind": "phase", "id": 1, "at": 1500}]
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 1, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": false, "shown": "waiting", "timer_serial": 1,
+            "timers": []
+          },
+          "actions": [
+            {"kind": "show_phase", "phase": "waiting"}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "connecting", "timer_serial": 1,
+            "timers": []
+          },
+          "actions": [
+            {"kind": "close_socket", "generation": 1, "code": 1001},
+            {"kind": "open_socket", "generation": 2, "config": {"hub": 1, "credential": 1}, "query": [["features", "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1"]]},
+            {"kind": "show_phase", "phase": "connecting"}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "connecting", "timer_serial": 1,
+            "timers": []
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "connecting", "timer_serial": 1,
+            "timers": []
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 1,
+            "timers": []
+          },
+          "actions": [
+            {"kind": "send_ws", "generation": 2, "message": "client_hello"},
+            {"kind": "did_connect", "generation": 2, "refetch": true},
+            {"kind": "show_phase", "phase": "online"}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 1,
+            "timers": []
+          },
+          "actions": [
+            {"kind": "ping", "generation": 2}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": false, "shown": "online", "timer_serial": 2,
+            "timers": [{"kind": "phase", "id": 2, "at": 3006}]
+          },
+          "actions": [
+            {"kind": "schedule", "timer": {"kind": "phase", "id": 2, "at": 3006}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 2,
+            "timers": []
+          },
+          "actions": [
+            {"kind": "cancel_timer", "timer": {"kind": "phase", "id": 2, "at": 3006}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": true, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "phase", "id": 3, "at": 3008}]
+          },
+          "actions": [
+            {"kind": "schedule", "timer": {"kind": "phase", "id": 3, "at": 3008}}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connected", "generation": 2, "cursor": null, "resumed": false,
+            "stalled": true, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": false, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "phase", "id": 3, "at": 3008}]
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 3, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "phase", "id": 3, "at": 3008}]
+          },
+          "actions": [
+            {"kind": "close_socket", "generation": 2, "code": 1001},
+            {"kind": "open_socket", "generation": 3, "config": {"hub": 1, "credential": 1}, "query": [["features", "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1"]]}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 4, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "phase", "id": 3, "at": 3008}]
+          },
+          "actions": [
+            {"kind": "close_socket", "generation": 3, "code": 1001},
+            {"kind": "open_socket", "generation": 4, "config": {"hub": 1, "credential": 1}, "query": [["features", "session_live,sessions_delta,extension_operations,managers,desktops_link,persona_contracts_v1"]]}
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 4, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "phase", "id": 3, "at": 3008}]
+          },
+          "actions": [
+          ]
+        },
+        {
+          "state": {
+            "config": {"hub": 1, "credential": 1}, "socket": "connecting", "generation": 4, "cursor": null, "resumed": false,
+            "stalled": false, "rejected": false, "restart_notice": false, "backoff_ms": 1000, "drop": null,
+            "background": false, "suspended": false, "network_up": true, "shown": "online", "timer_serial": 3,
+            "timers": [{"kind": "phase", "id": 3, "at": 3008}]
+          },
+          "actions": [
+          ]
+        }
+      ]
+    }
+  ]
+}

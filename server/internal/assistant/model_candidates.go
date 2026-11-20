@@ -48,6 +48,8 @@ type ModelCandidates struct {
 	Requested []RequestedChain `json:"requested"` // the lists the extension sent lately, newest first
 	Modes     []string         `json:"modes"`     // the modes the hub takes
 	Most      int              `json:"most"`      // how many candidates a list may have
+
+	DirectProviderIDs []string `json:"direct_provider_ids"` // callable providers permitted for this purpose
 }
 
 // CandidateView is one candidate and where it would run now: Provider is empty and Available false when no provider
@@ -58,6 +60,9 @@ type CandidateView struct {
 	ProviderName string `json:"provider_name,omitempty"`
 	Available    bool   `json:"available"`
 	Problem      string `json:"problem,omitempty"`
+
+	// Custom rows retain the exact setting. An empty setting uses the provider's current default model.
+	ConfiguredModel *string `json:"configured_model,omitempty"`
 }
 
 // RequestedChain is one list the extension sent, with when it last did.
@@ -113,7 +118,7 @@ func (s *Service) modelCandidates(ctx context.Context, purpose string, models []
 	case candidatesCustom:
 		chain := make([]modelCandidate, 0, len(setting.Custom))
 		for _, b := range setting.Custom {
-			chain = append(chain, s.pickedCandidate(ctx, b))
+			chain = append(chain, s.pickedCandidate(ctx, b, ""))
 		}
 		return chain
 	}
@@ -126,7 +131,7 @@ func (s *Service) modelCandidates(ctx context.Context, purpose string, models []
 	}
 	chain := make([]modelCandidate, 0, len(models))
 	for _, m := range models {
-		chain = append(chain, s.offeredCandidate(ctx, own, m))
+		chain = append(chain, s.offeredCandidate(ctx, own, m, ""))
 	}
 	return chain
 }
@@ -183,14 +188,14 @@ func providerLabel(l storedLauncher) string { return cmp.Or(l.DisplayName, l.Nam
 //
 // Any other provider without a list is not tried: an extension's model never lands on a connection the user did not
 // choose for it.
-func (s *Service) offeredCandidate(ctx context.Context, own ModelBinding, model string) modelCandidate {
-	problem := "no provider in Settings › Model providers offers it"
+func (s *Service) offeredCandidate(ctx context.Context, own ModelBinding, model string, lang i18n.Lang) modelCandidate {
+	var problem string
 	providers := s.candidateProviders(ctx, own.Provider)
 	try := func(l storedLauncher) (modelCandidate, bool) {
 		config, err := s.apiConfig(ctx, ModelBinding{Provider: "launcher." + l.Name, Model: model})
 		if err != nil || config.RunLauncher != "" || !config.Configured() {
 			if err != nil {
-				problem = providerLabel(l) + ": " + i18n.Localize(err, s.lang(ctx))
+				problem = providerLabel(l) + ": " + i18n.Localize(err, lang.Or(s.lang(ctx)))
 			}
 			return modelCandidate{}, false
 		}
@@ -211,11 +216,14 @@ func (s *Service) offeredCandidate(ctx context.Context, own ModelBinding, model 
 			}
 		}
 	}
+	if problem == "" {
+		problem = mc(lang.Or(i18n.En), "candidate_not_offered")
+	}
 	return modelCandidate{model: model, problem: problem}
 }
 
 // pickedCandidate is a candidate the user picked in Settings: their provider, and its default model when b has none.
-func (s *Service) pickedCandidate(ctx context.Context, b ModelBinding) modelCandidate {
+func (s *Service) pickedCandidate(ctx context.Context, b ModelBinding, lang i18n.Lang) modelCandidate {
 	name := strings.TrimPrefix(b.Provider, "launcher.")
 	for _, l := range s.candidateProviders(ctx, "") {
 		if l.Name != name {
@@ -225,13 +233,13 @@ func (s *Service) pickedCandidate(ctx context.Context, b ModelBinding) modelCand
 		model := cmp.Or(b.Model, config.Model, l.Model)
 		switch {
 		case err != nil:
-			return modelCandidate{model: model, id: b.Provider, problem: providerLabel(l) + ": " + i18n.Localize(err, s.lang(ctx))}
+			return modelCandidate{model: model, id: b.Provider, problem: providerLabel(l) + ": " + i18n.Localize(err, lang.Or(s.lang(ctx)))}
 		case config.RunLauncher != "" || !config.Configured():
-			return modelCandidate{model: model, id: b.Provider, problem: providerLabel(l) + " cannot be called directly"}
+			return modelCandidate{model: model, id: b.Provider, problem: mc(lang.Or(i18n.En), "candidate_not_direct", i18n.Args{"provider": providerLabel(l)})}
 		}
 		return modelCandidate{model: model, provider: providerLabel(l), id: "launcher." + l.Name, config: config}
 	}
-	return modelCandidate{model: cmp.Or(b.Model, name), id: b.Provider, problem: "the provider " + name + " is gone or cannot be called directly"}
+	return modelCandidate{model: cmp.Or(b.Model, name), id: b.Provider, problem: mc(lang.Or(i18n.En), "candidate_provider_gone", i18n.Args{"provider": name})}
 }
 
 // runCandidates makes c on each of chain in turn until one answers with something (that matches the schema, with
@@ -355,13 +363,15 @@ func (s *Service) noteRequested(ctx context.Context, purpose string, models []st
 
 // purposeCandidates is what Settings shows of purpose's candidates (an extension's purpose only).
 func (s *Service) purposeCandidates(ctx context.Context, purpose string, setting *candidateSetting, effective ModelBinding) *ModelCandidates {
-	out := &ModelCandidates{Mode: candidatesExtension, Custom: []CandidateView{}, Requested: []RequestedChain{},
+	lang := s.requestCtxLang(ctx)
+	out := &ModelCandidates{Mode: candidatesExtension, DirectProviderIDs: []string{}, Custom: []CandidateView{}, Requested: []RequestedChain{},
 		Modes: []string{candidatesExtension, candidatesOff, candidatesCustom}, Most: assistantwire.ModelCandidatesMost}
 	if setting != nil {
 		out.Mode = cmp.Or(setting.Mode, candidatesExtension)
 		for _, b := range setting.Custom {
-			c := s.pickedCandidate(ctx, b)
-			out.Custom = append(out.Custom, candidateView(c))
+			view := candidateView(s.pickedCandidate(ctx, b, lang))
+			view.ConfiguredModel = &b.Model
+			out.Custom = append(out.Custom, view)
 		}
 	}
 	if st := s.store(); st != nil {
@@ -370,7 +380,7 @@ func (s *Service) purposeCandidates(ctx context.Context, purpose string, setting
 			for _, r := range list {
 				chain := RequestedChain{Models: []CandidateView{}, LastUsed: r.LastUsed}
 				for _, m := range r.Models {
-					c := s.offeredCandidate(ctx, effective, m)
+					c := s.offeredCandidate(ctx, effective, m, lang)
 					chain.Models = append(chain.Models, candidateView(c))
 				}
 				out.Requested = append(out.Requested, chain)
@@ -435,7 +445,7 @@ func (s *Service) patchCandidates(ctx context.Context, p ModelPurpose, raw json.
 		if slices.Contains(out.Custom, b) {
 			return nil, i18n.Err("assistant-models.err_candidates_invalid")
 		}
-		if c := s.pickedCandidate(ctx, b); c.problem != "" {
+		if c := s.pickedCandidate(ctx, b, ""); c.problem != "" {
 			return nil, i18n.Err("assistant-models.err_candidates_not_callable", i18n.Args{"provider": e.Provider})
 		}
 		out.Custom = append(out.Custom, b)

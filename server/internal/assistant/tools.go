@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/taskworkspace"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
@@ -38,7 +40,7 @@ var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "sched
 	"conversations_list", "conversation_read", "conversation_rename", "conversation_archive", "conversation_unarchive",
 	"conversation_tags_set",
 	"conversation_new", "conversation_send", "task_plan", "task_plan_withdraw", "task_review", "task_scope", "task_decided", "task_start_screen", "task_start_keys", "task_retry",
-	"todo_repositories_get", "todo_repositories_set", "todo_repository_links_set", "todo_repository_links_add", "todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
+	"todo_workspace", "todo_repositories_get", "todo_repositories_set", "todo_repository_links_set", "todo_repository_links_add", "todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
 	"direction_name", "leader_progress"}
 
 // Tools are the assistant's tools (assistant.tools).
@@ -168,6 +170,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			}
 		}
 		return res, err
+	case "todo_workspace":
+		return s.toolTodoWorkspace(ctx, machine, self, args)
 	case "todo_repository_links_add":
 		return s.toolTodoRepositoryLinksAdd(ctx, machine, self, name, args)
 	case "todo_repositories_get", "todo_repositories_set", "todo_repository_links_set":
@@ -675,7 +679,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentStartTimeout)
 		defer cancel()
 		// The tab is named from the prompt as written; the agent gets its project's background before it (#2820).
-		params := map[string]any{"cwd": a.Cwd, "launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed, "tab_name": s.tabName(sctx, a.Prompt)}
+		title := s.tabName(sctx, a.Prompt)
+		params := map[string]any{"cwd": a.Cwd, "launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed, "tab_name": title, "title": title}
 		prompt := s.withCloseoutBrief(sctx, a.Prompt, false)
 		params["prompt"] = s.withProjectContext(sctx, am.ID, a.Cwd, self, prompt)
 		if a.Ultracode {
@@ -821,10 +826,11 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			if startResultUnknown(err) {
 				// The node may already have the session and a running agent although the answer never came back:
 				// do not report failure (the model would start it again, duplicating the run).
-				return s.startedWithoutAnswer(ctx, self, am, picked, a.Cwd, a.Prompt, params["tab_name"], note, expectID, knownIDs), nil
+				return s.startedWithoutAnswer(ctx, self, am, picked, fit.snapshot, a.Cwd, a.Prompt, params["tab_name"], note, expectID, knownIDs), nil
 			}
 			return "", err
 		}
+		s.nameStartedAgent(sctx, am.ID, res.Session, title)
 		s.recordStartSuccess(ctx, am.ID, ranLauncher(launcher, res.Instead, res.Session))
 		if said := s.startInsteadNote(ctx, am, res.Instead, res.Session); said != "" {
 			note += " Note: " + said + "." // the engine ran another of the same kind, its default model, a lower effort (#8140)
@@ -833,7 +839,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return s.waitAgentReply(ctx, receipt, inputID, wait, fixedWaitTarget(am.ID, res.Session.SessionID))
 		}
 		s.inboxAgentStarted(ctx, self, am.ID, res.Session.SessionID, a.Prompt) // an inbox event's conversation: its chain
-		if told, ok := s.quietAgentTask(ctx, self, am, a.Cwd, a.Prompt, params["tab_name"], res.Session.SessionID); ok {
+		if told, ok := s.quietAgentTask(ctx, self, am, a.Cwd, a.Prompt, params["tab_name"], res.Session.SessionID, cmp.Or(res.Session.Agent, fit.snapshot)); ok {
 			return finish(fmt.Sprintf("Started on %s in %s: session %s, a task of this conversation (its card is in the conversation; "+
 				"%s).%s", am.Name, a.Cwd, res.Session.SessionID, told, note)), nil
 		}
@@ -863,6 +869,9 @@ var agentStartAdoptRetry = 200 * time.Millisecond
 // missing one or a request the node refused is definite and stays an error; rpc.ErrDropped answers the same words
 // as rpc.ErrClosed (a relay passes them through), so the rpc.Error message form counts too.
 func startResultUnknown(err error) bool {
+	if p, ok := errors.AsType[*taskworkspace.Problem](err); ok {
+		return p.Code == "operation_unknown"
+	}
 	var re *rpc.Error
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
 		errors.Is(err, rpc.ErrClosed) || errors.As(err, &re) && re.Message == rpc.ErrClosed.Error()
@@ -949,9 +958,9 @@ var liveSendWait = 90 * time.Second
 // text: check the Agents list first and never start a second copy. A failed pre-start list disables only the
 // heuristic, not an exact expectID match. expectID is the session id the hub asked this start to use
 // (session_adopt.go).
-func (s *Service) startedWithoutAnswer(ctx context.Context, conversation string, m Device, launcher, cwd, prompt string, tab any, note, expectID string, knownIDs map[string]bool) string {
+func (s *Service) startedWithoutAnswer(ctx context.Context, conversation string, m Device, launcher, launcherKind, cwd, prompt string, tab any, note, expectID string, knownIDs map[string]bool) string {
 	if sess, ok := s.adoptStartedSession(ctx, m, launcher, cwd, expectID, knownIDs); ok {
-		if told, ok := s.quietAgentTask(ctx, conversation, m, cwd, prompt, tab, sess.SessionID); ok {
+		if told, ok := s.quietAgentTask(ctx, conversation, m, cwd, prompt, tab, sess.SessionID, cmp.Or(sess.Agent, launcherKind)); ok {
 			return fmt.Sprintf("Started on %s in %s: session %s (the start took longer than the wait; the session was "+
 				"confirmed from the machine's own list), a task of this conversation (its card is in the conversation; "+
 				"%s).%s",

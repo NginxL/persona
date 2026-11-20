@@ -74,6 +74,12 @@ func (d *mirrorDevices) Summary(id string) (devices.Summary, bool) {
 	return devices.Summary{}, false
 }
 
+// Shown: a test machine's list is always its node's, and none is shown as before.
+func (d *mirrorDevices) Shown(id string) (devices.Shown, bool) {
+	_, ok := d.Summary(id)
+	return devices.Shown{Listed: ok}, ok
+}
+
 func (d *mirrorDevices) MachineResources(string) (*proto.Machine, *proto.MetricSample, *bool) {
 	return nil, nil, nil
 }

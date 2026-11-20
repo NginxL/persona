@@ -7,6 +7,7 @@
   "not_delivered": "没送到：{error}",
   "interrupted": "已中断",
   "interrupt_failed": "中断失败：{error}",
+  "send_now_failed": "立即发送失败：{error}",
   "new_chat": "新对话",
   "session": "会话",
   "not_found_title": "找不到这条对话",

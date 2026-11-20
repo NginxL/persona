@@ -152,7 +152,7 @@ func herdrTaskHost(m Device, params map[string]any) bool {
 // that predates this change); non-herdr leaders never lose their explicit workspace_id.
 func (s *Service) withTaskSpaceStart(ctx context.Context, t PlanTask, m Device, params map[string]any) (context.Context, func(), error) {
 	root := taskSpaceRoot(t)
-	if root == "" || !herdrTaskHost(m, params) {
+	if t.backendWorkspace() || root == "" || !herdrTaskHost(m, params) {
 		return ctx, func() {}, nil
 	}
 	unlock := s.lockTaskSpace(root)

@@ -45,6 +45,43 @@ struct ConnectorThreadTests {
         #expect(hub.sent("GET", "/api/v1/connectors/telegram/thread").map { $0.query["thread"] } == ["u1", "u1", "u1"])
     }
 
+    @Test func conversationPictureFieldsSurvivePageDecoding() throws {
+        // An old app can still read the source ref; an updated app also sees each distinct hub path.
+        let page = try JSON.decoder.decode(ThreadPage.self, from: Data(#"""
+        {"chat":{"id":"demo","kind":"issue","name":"Layout","avatar":"room","avatar_url":"/api/v1/avatars/github/cm9vbQ",
+                 "author":{"name":"Author","avatar":"author","avatar_url":"/api/v1/avatars/github/YXV0aG9y"}},
+         "messages":[{"id":"1","at":"2026-11-03T09:00:00Z","sender":{"name":"Reviewer","avatar":"reviewer","avatar_url":"/api/v1/avatars/github/cmV2aWV3ZXI"}}]}
+        """#.utf8))
+        #expect(page.chat.avatar == "room")
+        #expect(page.chat.avatarURL == "/api/v1/avatars/github/cm9vbQ")
+        let author = try #require(page.chat.author)
+        #expect(author.avatar == "author")
+        #expect(author.picture(in: "github", manager: nil) == "/api/v1/avatars/github/YXV0aG9y")
+        let sender = try #require(page.messages.first?.sender)
+        #expect(sender.avatar == "reviewer")
+        let studio = try #require(sender.picture(in: "github", manager: "studio"))
+        let garden = try #require(sender.picture(in: "github", manager: "garden"))
+        #expect(studio == "/api/v1/avatars/github/cmV2aWV3ZXI?manager=studio")
+        #expect(LarkMedia.cacheKey(studio, size: 64) != LarkMedia.cacheKey(garden, size: 64))
+        let legacy = try JSON.decoder.decode(ThreadPerson.self, from: Data(#"{"name":"Guest","avatar":"a.u1.501"}"#.utf8))
+        #expect(legacy.picture(in: "telegram", manager: "studio") == "/api/v1/connectors/telegram/media?ref=a.u1.501&manager=studio")
+        #expect(ThreadPerson(name: "Guest").picture(in: "telegram", manager: nil) == nil)
+    }
+
+    @Test func conversationReadsAndRepliesUseTheItemsManager() async throws {
+        let hub = hub()
+        let path = "/api/v1/connectors/telegram/thread"
+        hub.on("POST", path + "/reply") { _ in Data(#"{"ok":true}"#.utf8) }
+        let thread = ConnectorThreadModel(connector: "telegram", thread: "u1", manager: "studio", api: { hub.client })
+        await thread.load()
+        #expect(await thread.loadOlder())
+        #expect(await thread.reply("Hello", to: nil))
+        let reads = hub.sent("GET", path)
+        let replies = hub.sent("POST", path + "/reply")
+        #expect(reads.count == 3 && replies.count == 1)
+        #expect((reads + replies).allSatisfy { $0.headers[APIClient.managerHeader] == "studio" })
+    }
+
     /// The reply goes to the hub with the thread's action and the message it answers, then the newest page is read again.
     @Test func replyThroughTheHub() async throws {
         let hub = hub()

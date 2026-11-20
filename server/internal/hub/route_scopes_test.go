@@ -148,3 +148,21 @@ func TestCodexTakeoverRequiresFullCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestBackendWorkspacesRequireFullCredentials(t *testing.T) {
+	patterns := routePatterns(t)
+	for _, pattern := range []string{
+		"GET /api/v1/todos/{id}/backend-workspace",
+		"GET /api/v1/todos/{id}/backend-workspace/operations/{operation_id}",
+		"POST /api/v1/todos/{id}/backend-workspace/prepare",
+		"POST /api/v1/todos/{id}/backend-workspace/cancel",
+		"POST /api/v1/todos/{id}/backend-workspace/cleanup",
+	} {
+		if !slices.Contains(patterns, pattern) {
+			t.Errorf("missing backend workspace route %s", pattern)
+		}
+		if scope := extwire.RouteScopes[pattern]; scope != "" {
+			t.Errorf("backend workspace route %s grants extension scope %s", pattern, scope)
+		}
+	}
+}

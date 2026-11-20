@@ -284,6 +284,9 @@ func (e *Engine) ApplyExtension(kind, id string, u Update, w ExtensionWrite) (Ex
 	e.Store.applyMu.Lock()
 	defer e.Store.applyMu.Unlock()
 	if kind == KindProject {
+		if err := e.projectSourceUpdate(id, &UserUpdate{Update: u}); err != nil {
+			return ExtensionResult{}, err
+		}
 		u = e.projectUpdate(u)
 	}
 	target := fieldRef{kind: kind, id: e.resolve(kind, id)}
@@ -321,7 +324,7 @@ func (e *Engine) ApplyExtension(kind, id string, u Update, w ExtensionWrite) (Ex
 	if u.Source == "" && u.Log != "" {
 		u.Source = w.Extension
 	}
-	out, err := e.apply(kind, id, u, extensionEdit(u))
+	out, err := e.apply(kind, id, UserUpdate{Update: u}, extensionEdit(u), by)
 	if err != nil || u.MergeInto != "" {
 		return ExtensionResult{ID: out, Before: before, Ignored: ignored}, err
 	}

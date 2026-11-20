@@ -367,7 +367,7 @@ MOCK_PY
     MOCK_ADDRESS="http://$LOOPBACK:$MOCK_PORT"
     # Discover fixture identifiers only from the process started above.
     python3 - "$MOCK_ADDRESS" >"$OUTPUT/fixture.tsv" <<'SHOTS_PY'
-import json, sys, urllib.parse, urllib.request
+import json, os, sys, urllib.parse, urllib.request
 base = sys.argv[1]
 def get(path):
     with urllib.request.urlopen(base + path, timeout=5) as response:
@@ -380,6 +380,13 @@ agent = next(s for s in sessions if not s.get('assistant'))
 assistant = next((s for s in sessions if s.get('assistant')), None)
 print('chat\t%s/%s' % (agent['machine_id'], agent['session_id']))
 if assistant: print('assistant-chat\t%s/%s' % (assistant['machine_id'], assistant['session_id']))
+if os.environ.get('MOCK_EXTERNAL') == '1' and os.environ.get('MOCK_AUTO_CONVERSATIONS') == '1':
+    for origin, name in [('lark_agent', 'external-lark'), ('extension', 'external-extension')]:
+        session = next(s for s in sessions if s.get('assistant') and s.get('origin') == origin)
+        target = '%s/%s' % (session['machine_id'], session['session_id'])
+        items = get('/api/v1/sessions/' + urllib.parse.quote(target, safe='/') + '/items')['items']
+        reply = next(i['text'] for i in items if i.get('role') == 'assistant' and i.get('kind') == 'text')
+        print('%s\t%s\t%s' % (name, target, reply))
 if requests:
     r = requests[0]
     print('request\t%s\t%s/%s' % (r['id'], r['machine_id'], r['session_id']))
@@ -428,13 +435,24 @@ SHOTS_PY
       exit 0
     fi
     capture() {
-      local theme="$1" name="$2"
+      local theme="$1" name="$2" expected_text=""
       shift 2
+      if [ "${1:-}" = --wait-for-text ]; then expected_text=$2; shift 2; fi
       "$ADB" -s "$SERIAL" shell am force-stop "$APP_ID"
       freeze_clock
       "$ADB" -s "$SERIAL" shell am start -W -n "$APP_ID/persona.android.debug.DebugEntryActivity" \
         --es debug.theme "$theme" --es debug.automation true ${STYLE_ARGS[@]+"${STYLE_ARGS[@]}"} "$@" >/dev/null
       sleep "$SETTLE"
+      if [ -n "$expected_text" ]; then
+        # A cold Assistant launch first paints the main chat. Capture the requested fixture after its transcript arrives.
+        local ready=0
+        for attempt in {1..10}; do
+          if "$ADB" -s "$SERIAL" exec-out uiautomator dump /dev/tty 2>/dev/null | grep -F -- "$expected_text" >/dev/null; then
+            ready=1; break
+          fi
+        done
+        [ "$ready" = 1 ] || { echo "截图未进入指定对话：$theme-$name" >&2; return 1; }
+      fi
       freeze_clock
       "$ADB" -s "$SERIAL" exec-out screencap -p >"$OUTPUT/$theme-$name.png"
       if [ -n "$FROZEN_SET" ]; then
@@ -454,11 +472,12 @@ SHOTS_PY
     }
     for theme in light dark; do
       for tab in Persona Agents Inbox Settings; do capture "$theme" "$tab" --es debug.openTab "$tab"; done
-      while IFS=$'\t' read -r page target request_session <&3; do
+      while IFS=$'\t' read -r page target detail <&3; do
         case "$page" in
           chat) capture "$theme" chat --es debug.openSession "$target" --es debug.conversationKind agent ;;
-          assistant-chat) capture "$theme" assistant-chat --es debug.openSession "$target" --es debug.conversationKind assistant ;;
-          request) capture "$theme" request --es debug.openRequest "$target" --es debug.session "$request_session" --es debug.conversationKind agent ;;
+          assistant-chat) capture "$theme" "$page" --es debug.openSession "$target" --es debug.conversationKind assistant ;;
+          external-lark|external-extension) capture "$theme" "$page" --wait-for-text "$detail" --es debug.openSession "$target" --es debug.conversationKind assistant ;;
+          request) capture "$theme" request --es debug.openRequest "$target" --es debug.session "$detail" --es debug.conversationKind agent ;;
           # adb shell hands the command line to the device shell, so links with & are quoted again for it.
           terminal|lark|mail) capture "$theme" "$page" --es debug.openLink "'$target'" ;;
         esac

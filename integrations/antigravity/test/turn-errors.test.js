@@ -16,6 +16,7 @@ const FAKE = fileURLToPath(new URL('./fake-acp-rewind.mjs', import.meta.url))
 const AT = '2026-01-02T12:00:00Z'
 const RESET = '2026-01-03T18:00:00Z'
 const MESSAGE = 'Individual quota reached. Resets in 30h.'
+const TRANSIENT_401 = 'UNAUTHENTICATED (code 401): Request is missing required authentication credential'
 const input = { step_index: 0, type: 'USER_INPUT', source: 'USER_EXPLICIT', status: 'DONE', created_at: AT, content: 'Check the result.' }
 const error = {
   type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE', metadata: { createdAt: AT },
@@ -74,6 +75,7 @@ async function fixture(t, options = {}) {
       ...(options.rpcError ? [] : [error]),
     ] },
     promptError: options.rpcError,
+    promptPlan: options.promptPlan,
   }
   writeFileSync(nativeFile, JSON.stringify(snapshot))
   const db = new DatabaseSync(join(config, 'conversation_summaries.db'))
@@ -85,7 +87,8 @@ async function fixture(t, options = {}) {
   writeFileSync(binary, `#!/bin/sh\nexec '${process.execPath}' '${FAKE}' '${home}' "$@"\n`)
   chmodSync(binary, 0o700)
   const node = await startFakeNode(t)
-  const runtimeOptions = { home, agyDir: config, agyBin: binary, socketPath: node.path, log: () => {} }
+  const runtimeOptions = { home, agyDir: config, agyBin: binary, personadBin: binary, socketPath: node.path, log: () => {},
+    transient401RetryDelayMs: options.retryDelay ?? 10, exportPollMs: 20 }
   let runtime = createAgyRuntime(runtimeOptions)
   t.after(async () => { await runtime.stop(); db.close(); rmSync(home, { recursive: true, force: true }) })
   runtime.start()
@@ -106,7 +109,73 @@ async function fixture(t, options = {}) {
     runtime.start()
     await until('restarted inventory', () => node.all('runtime.sessions').length > before)
   }
-  return { node, row, calls, items, write, state, refresh, restart, transcript, nativeFile }
+  return { node, row, calls, items, write, state, refresh, restart, transcript, nativeFile, idle: () => runtime.idle() }
+}
+
+for (const exported of [false, true]) {
+  test(`retries one transient 401 ${exported ? 'recorded in the transcript' : 'returned by ACP'} without duplicating the user message`, async (t) => {
+    const { node, row, calls, items, idle } = await fixture(t, { initialCount: 1, promptPlan: [
+      { error: TRANSIENT_401, export: exported }, { reply: 'Finished.', export: exported },
+    ] })
+    const send = (text, client_msg_id) => node.peer.call('session.send', { session_id: SESSION, text, client_msg_id })
+    await send('Continue.', 'request-1')
+    await until('retry succeeds', () => row()?.last_text === 'Finished.' && idle())
+    assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 2)
+    assert.equal(row().turn_error, undefined)
+    const page = await items()
+    const users = page.items.filter((item) => item.role === 'user')
+    assert.deepEqual(users.map((item) => item.text), [input.content, 'Continue.'])
+    assert.equal(users.at(-1).client_msg_id, 'request-1')
+    assert.equal(page.items.some((item) => item.text?.includes('UNAUTHENTICATED')), false)
+    if (exported) {
+      await send('Continue.', 'request-2')
+      await until('next send settles', idle)
+      assert.equal((await items()).items.filter((item) => item.text === 'Continue.').length, 2)
+    }
+  })
+}
+
+for (const [reason, plan, attempts, retryDelay] of [
+  ['revoked login', [{ error: `${TRANSIENT_401}; invalid_grant` }], 1],
+  ['assistant text', [{ error: TRANSIENT_401, reply: 'Partial answer' }], 1],
+  ['tool work', [{ error: TRANSIENT_401, tool: true }], 1],
+  ['tool work received during the delay', [{ error: TRANSIENT_401, lateTool: 30 }], 1, 250],
+  ['a second transient failure', [{ error: TRANSIENT_401 }, { error: TRANSIENT_401 }], 2],
+]) {
+  test(`does not retry after ${reason}`, async (t) => {
+    const { node, row, calls } = await fixture(t, { initialCount: 1, promptPlan: plan, retryDelay })
+    await node.peer.call('session.send', { session_id: SESSION, text: 'Continue.' })
+    await until('failure published', () => row()?.turn_error?.startsWith(TRANSIENT_401))
+    assert.equal(calls().filter((call) => call.method === 'session/prompt').length, attempts)
+  })
+}
+
+test('interrupt aborts the transient 401 delay and settles the turn', async (t) => {
+  const { node, row, calls, idle } = await fixture(t, { initialCount: 1, retryDelay: 60_000,
+    promptPlan: [{ error: TRANSIENT_401 }, { reply: 'Next.' }] })
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Continue.' })
+  await until('first prompt sent', () => calls().some((call) => call.method === 'session/prompt'))
+  assert.equal((await node.peer.call('session.interrupt', { session_id: SESSION })).settled, true)
+  assert.equal(idle(), true)
+  assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 1)
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Try again.' })
+  await until('next send completes', () => row()?.last_text === 'Next.')
+})
+
+for (const assistant of [false, true]) {
+  test(`assistant sends use assistant MCP after ${assistant ? 'assistant' : 'ordinary'} modes`, async (t) => {
+    const { node, calls } = await fixture(t, { initialCount: 1 })
+    const modes = (flags = {}) => node.peer.call('session.modes', { session_id: SESSION, permission_mode: 'default', ...flags })
+    const resumes = () => calls().filter((call) => call.method === 'session/resume').map((call) => call.params.mcpServers[0])
+    const assistantMcp = (server) => server.env.some(({ name, value }) => name === 'PERSONA_ASSISTANT' && value === '1')
+    await modes({ assistant })
+    await modes()
+    assert.deepEqual(resumes().map(assistantMcp), [assistant])
+    await node.peer.call('session.send', { session_id: SESSION, text: 'Continue.', assistant: true })
+    await modes()
+    assert.deepEqual(resumes().map(assistantMcp), assistant ? [true] : [false, true])
+    assert.match(resumes().at(-1).args[0], /mcp-proxy\.mjs$/)
+  })
 }
 
 test('runtime recovers an omitted native error through a cached bounded tail without resuming the session', async (t) => {

@@ -550,13 +550,15 @@ extension APIClient {
         try await post("/api/v1/launchers/discover", body: probe, timeout: 45)
     }
     /// Import from ~/.zshrc: what the machine's claude aliases come to (409 `node_outdated` from a node too old to say).
-    func launcherImportPreview(machine: String) async throws -> LauncherImportPreview {
-        try JSON.decoder.decode(LauncherImportPreview.self,
-                                from: await request("GET", "/api/v1/launchers/import", query: ["machine": machine], timeout: 45))
+    func launcherImportPreview(machine: String, alias: String? = nil) async throws -> LauncherImportPreview {
+        var query = ["machine": machine]
+        query["alias"] = alias
+        return try JSON.decoder.decode(LauncherImportPreview.self,
+                                       from: await request("GET", "/api/v1/launchers/import", query: query, timeout: 45))
     }
-    func importLaunchers(machine: String, providers: [String]) async throws -> LauncherImportResult {
-        struct Body: Encodable { var machine: String; var providers: [String] }
-        return try await post("/api/v1/launchers/import", body: Body(machine: machine, providers: providers), timeout: 45)
+    func importLaunchers(machine: String, providers: [String], alias: String? = nil) async throws -> LauncherImportResult {
+        struct Body: Encodable { var machine: String; var providers: [String]; var alias: String? }
+        return try await post("/api/v1/launchers/import", body: Body(machine: machine, providers: providers, alias: alias), timeout: 45)
     }
 }
 

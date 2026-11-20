@@ -23,7 +23,6 @@
   "connecting": "接続中…",
   "retry": "再試行",
   "tab_gone": "このタブはもうありません",
-  "open_sidebar": "サイドバーを開く",
   "joining": "Personaに接続中…",
   "session_choices_one": "IDが{sid}で始まるセッションが{count}件あります。開くものを選んでください",
   "session_choices_other": "IDが{sid}で始まるセッションが{count}件あります。開くものを選んでください",

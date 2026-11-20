@@ -984,10 +984,19 @@ struct AssistantSidebar: View {
     @ViewBuilder private var placesTally: some View {
         if placesFolded {
             let inbox = InboxStore.shared.unreadCount
-            let todos = TodoStore.shared.isSupported ? TodoStore.shared.badgeCount : 0
+            let todos = TodoStore.shared.isSupported ? TodoStore.shared.sidebarCount : 0
             HStack(spacing: Theme.Space.xs) {
                 if inbox > 0 { CountBadge(count: inbox, look: .needs, label: String(localized: "Inbox")) }
-                if todos > 0 { CountBadge(count: todos, look: .needs, label: String(localized: "To-dos")) }
+                if todos > 0 {
+                    if TodosV1.shared.isOn {
+                        // The V1 list's N, readable by its tests (#10465); today's tally stays as it was.
+                        CountBadge(count: todos, look: .needs, label: String(localized: "To-dos"))
+                            .accessibilityValue(String(todos))
+                            .accessibilityIdentifier("sidebar-fold-places.todos")
+                    } else {
+                        CountBadge(count: todos, look: .needs, label: String(localized: "To-dos"))
+                    }
+                }
             }
         }
     }
@@ -1311,7 +1320,7 @@ extension AssistantSidebar {
                 meetingRow
                 action(String(localized: "Inbox"), Theme.Icon.inbox, id: "sidebar-inbox", count: InboxStore.shared.unreadCount, place: .inbox, run: openInbox)
                 if TodoStore.shared.isSupported {
-                    action(String(localized: "To-dos"), Theme.Icon.todo, id: "sidebar-todos", count: TodoStore.shared.badgeCount, place: .todos, run: { (openTodos ?? openInbox)() })
+                    action(String(localized: "To-dos"), Theme.Icon.todo, id: "sidebar-todos", count: TodoStore.shared.sidebarCount, place: .todos, run: { (openTodos ?? openInbox)() })
                 }
                 action(String(localized: "Scheduled Tasks"), Theme.Icon.schedule, place: .routines, run: openRoutines)
                 action(String(localized: "Knowledge"), Theme.Icon.knowledge, place: .knowledge, run: openKnowledge)

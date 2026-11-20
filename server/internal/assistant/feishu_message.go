@@ -143,6 +143,7 @@ type resolvedTarget struct {
 	machineName string
 	session     proto.Session
 	label       string
+	secondary   string
 	main        bool
 	isNew       bool // no conversation yet: the message starts one
 }
@@ -161,7 +162,8 @@ func (s *Service) resolveBotTarget(ctx context.Context, t botTarget) (resolvedTa
 		if stoppedAgent(sess) { // read-only (#4754)
 			return resolvedTarget{}, errors.New(i18n.T(l, "assistant-feishu.agent_stopped"))
 		}
-		return resolvedTarget{machine: d.ID, machineName: d.Name, session: sess, label: agentLabel(sess) + " · " + d.Name}, nil
+		label, secondary := feishuSessionNames(sess, s.useHerdrTabName(ctx))
+		return resolvedTarget{machine: d.ID, machineName: d.Name, session: sess, label: label + " · " + d.Name, secondary: secondary}, nil
 	default:
 		cfg := s.settings(ctx)
 		d, ok := s.device(ctx, cfg.MachineID)
@@ -228,7 +230,9 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 			s.botUnreact(context.WithoutCancel(ctx), msg.MessageID, reaction)
 		}
 	}()
-	in := prompts.BotMessage{Persona: !t.agent(), Topic: topic != nil, Owner: s.owner(ctx), Text: content.Text}
+	hello := s.hello(ctx)
+	lang := i18n.Lang(hello.Locale)
+	in := prompts.BotMessage{Persona: !t.agent(), Topic: topic != nil, Owner: strings.TrimSpace(hello.Owner), Language: answerLanguage(hello.Locale), Text: content.Text}
 	if t.TodoID != "" && topic == nil {
 		todo, ok, err := s.todo(ctx, t.TodoID)
 		if err != nil {
@@ -254,13 +258,13 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 	}
 	if msg.ParentID != "" && !ours && topic == nil {
 		var quoted []feishubot.Media
-		in.Quote, quoted = s.botQuote(ctx, msg.ParentID)
+		in.Quote, quoted = s.botQuote(ctx, msg.ParentID, lang)
 		for _, md := range quoted {
 			media = append(media, botMedia{of: msg.ParentID, quoted: true, Media: md})
 		}
 	}
 	if content.Forward && topic == nil {
-		in.Forward = s.botForward(ctx, msg.MessageID)
+		in.Forward = s.botForward(ctx, msg.MessageID, lang)
 	}
 	var images []proto.Image
 	var tooLarge []string // files too large to pass on
@@ -389,7 +393,7 @@ func botProbe(text string, in prompts.BotMessage) string {
 }
 
 // botQuote is the message a message replies to, and the pictures and files in it.
-func (s *Service) botQuote(ctx context.Context, id string) (*prompts.BotQuote, []feishubot.Media) {
+func (s *Service) botQuote(ctx context.Context, id string, lang i18n.Lang) (*prompts.BotQuote, []feishubot.Media) {
 	items, err := s.botMessages(ctx, id)
 	if err != nil || len(items) == 0 {
 		return nil, nil
@@ -398,7 +402,7 @@ func (s *Service) botQuote(ctx context.Context, id string) (*prompts.BotQuote, [
 	c := feishubot.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
 	who := "Persona"
 	if it.Sender.SenderType == "user" {
-		who = s.botName(ctx, it.Sender.ID)
+		who = s.botName(ctx, it.Sender.ID, lang)
 	}
 	if c.Text == "" {
 		c.Text = "[" + it.MsgType + "]"
@@ -407,10 +411,10 @@ func (s *Service) botQuote(ctx context.Context, id string) (*prompts.BotQuote, [
 }
 
 // botForward reads a merged forward: one line per message, oldest first.
-func (s *Service) botForward(ctx context.Context, id string) string {
+func (s *Service) botForward(ctx context.Context, id string, lang i18n.Lang) string {
 	items, err := s.botMessages(ctx, id)
 	if err != nil {
-		return "（读不到转发的内容：" + err.Error() + "）"
+		return i18n.T(lang, "assistant-feishu.forward_error", i18n.Args{"error": i18n.Verbatim(err.Error())})
 	}
 	loc := s.location(ctx)
 	var lines []string
@@ -423,28 +427,29 @@ func (s *Service) botForward(ctx context.Context, id string) string {
 		text := c.Text
 		if text == "" {
 			text = "[" + it.MsgType + "]"
-		}
-		for _, md := range c.Media {
-			if md.Kind == "image" && !strings.Contains(text, "[图片]") {
-				text += " [图片]"
+			if it.MsgType == "image" && len(c.Media) != 0 {
+				// A standalone image has no text. Rich posts already carry their own media placeholders.
+				text = i18n.T(lang, "assistant-feishu.forward_image")
 			}
 		}
-		who := "某人"
+		who := i18n.T(lang, "assistant-feishu.unknown_sender")
 		if it.Sender.SenderType == "user" {
-			who = s.botName(ctx, it.Sender.ID)
+			who = s.botName(ctx, it.Sender.ID, lang)
 		} else if it.Sender.SenderType == "app" {
-			who = "机器人"
+			who = i18n.T(lang, "assistant-feishu.bot_sender")
 		}
-		line := fmt.Sprintf("%s %s：%s", it.At().In(loc).Format("01-02 15:04"), who, text)
+		line := i18n.T(lang, "assistant-feishu.forward_line", i18n.Args{
+			"time": it.At().In(loc).Format("01-02 15:04"), "sender": i18n.Verbatim(who), "text": i18n.Verbatim(text),
+		})
 		n += len([]rune(line))
 		if n > 30000 {
-			lines = append(lines, "（后面的太长，略）")
+			lines = append(lines, i18n.T(lang, "assistant-feishu.forward_clipped"))
 			break
 		}
 		lines = append(lines, line)
 	}
 	if len(lines) == 0 {
-		return "（转发里没有能读的消息）"
+		return i18n.T(lang, "assistant-feishu.forward_empty")
 	}
 	return strings.Join(lines, "\n")
 }

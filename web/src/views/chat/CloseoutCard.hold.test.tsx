@@ -142,9 +142,9 @@ describe("CloseoutCard and its evidence chunk", () => {
 
   it("starts the chunk once the store holds a closeout a card would show, before any card, and not with Data Saver", async () => {
     const { applyCompleteSessions } = await import("../../lib/store");
-    const { preloadCloseoutEvidence } = await import("./CloseoutCard");
-    const saver = preloadCloseoutEvidence({ navigator: { connection: { saveData: true } } });
-    const stop = preloadCloseoutEvidence({});
+    const { preloadCloseout } = await import("./closeout-chunks");
+    const saver = preloadCloseout({ navigator: { connection: { saveData: true } } });
+    const stop = preloadCloseout({});
     applyCompleteSessions([{ ...row, session_id: "w", state: "working", work: { ...row.work!, phase: "working" } } as Session]);
     expect(chunk.calls).toBe(0); // a working session shows no card
     applyCompleteSessions([row]);

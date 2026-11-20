@@ -1027,7 +1027,7 @@ struct InboxSourcePage: View {
         case .document:
             InboxDocDetailView(item: item)
         case .connector:
-            InboxConnectorDetailView(item: item)
+            InboxConnectorDetailView(item: item, manager: model.itemManager(item.manager))
         case .moment:
             if let moment = item.moment {
                 LarkMomentsPostView(postID: moment.postID, pushed: true, manager: model.linkManager(item.manager))

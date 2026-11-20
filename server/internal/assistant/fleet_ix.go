@@ -254,7 +254,8 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 			}
 		}
 	}
-	ix = nodeCard(ix, s.fleetStore() != nil, s.ixInHealth(ctx, ix), s.ixInAssistant(ctx, ix))
+	inAssistant := s.ixInAssistant(ctx, ix)
+	ix = nodeCard(ix, s.fleetStore() != nil, s.ixInHealth(ctx, ix), inAssistant)
 	if ix.Kind == proto.IxPermission {
 		l := s.lang(ctx)
 		ix.ToolTitle = personaToolTitle(l, ix.ToolName, ix.ToolInput)
@@ -262,11 +263,36 @@ func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (pr
 			ix.ToolNameTitle = name // the tool alone, for what Always covers: no report's kind
 		}
 	}
+	ix.Detachable = ix.Detachable && ix.Kind == proto.IxPermission && ix.SessionID != "" && inAssistant &&
+		len(ix.ToolInput) > 0 && ix.ExecutionCwd != ""
+	if ix.Detachable && ix.Resumable {
+		// The original request is never its own continuation. In particular it
+		// must not spend its unused grant or re-enter through a newly stored
+		// Always rule. A late outcome carries ApprovalID and waitDetachedCard
+		// turns it into a non-executing replay result.
+		replay, err := s.detachedOriginalReplay(ctx, ix)
+		if err != nil {
+			return proto.Resolution{}, err
+		}
+		if replay {
+			return s.waitDetachedCard(ctx, ix)
+		}
+	}
+	if ix.Detachable {
+		if r, ok, err := s.consumeDetachedGrant(ctx, ix); err != nil {
+			return proto.Resolution{}, err
+		} else if ok {
+			return r, nil
+		}
+	}
 	if r, ok := s.alwaysAllowed(ctx, ix); ok {
 		if ix.Resumable { // its hook's earlier attempt left the card pending: it is answered too
 			_ = s.resolveRemembered(ix.ID, r, false)
 		}
 		return r, nil
+	}
+	if ix.Detachable {
+		return s.waitDetachedCard(ctx, ix)
 	}
 	return s.waitInteraction(ctx, ix)
 }
@@ -291,8 +317,15 @@ func (s *Service) waitInteractionPrepared(ctx context.Context, ix proto.Interact
 	}
 	again := false
 	if ix.Resumable {
+		restartPrepared := false
 		s.fleet.mu.Lock()
 		if p := s.fleet.interactions[ix.ID]; p != nil && p.local == nil {
+			if p.prepared != nil {
+				// The reconnecting hook is now the caller whose lifetime governs the
+				// initial wait. The disconnected context must not expire a card its
+				// resumable request has already reclaimed.
+				p.prepared.caller = ctx
+			}
 			if p.graceEnded {
 				// The grace period ended and the card is being ended outside the lock (the history, the apps): the
 				// hook hands over, as one back just after would (#5043's kind of gap).
@@ -303,7 +336,18 @@ func (s *Service) waitInteractionPrepared(ctx context.Context, ix proto.Interact
 				p.orphaned.Stop() // fired but not decided yet: it finds p.orphaned nil and leaves the card to the hook
 				p.orphaned = nil
 			}
+			if a := p.prepared; a != nil && !a.clarified && !a.terminal {
+				// The initial timer may have fired while the card was orphaned and
+				// deliberately done nothing. Reclaiming starts a fresh initial wait.
+				if a.decisionTimer != nil {
+					a.decisionTimer.Stop()
+				}
+				restartPrepared = true
+			}
 			s.fleet.mu.Unlock()
+			if restartPrepared {
+				s.startPreparedTimer(p)
+			}
 			if ix.Kind == proto.IxElicitation && !s.elicitationReachable(ix) {
 				_ = s.resolve(ix.ID, proto.Resolution{Dismiss: true})
 			}
@@ -1287,6 +1331,7 @@ func (s *Service) NodeDetached(machine string) {
 	}
 	s.cancelMachineInteractions(machine)
 	s.sessionsChanged(machine)
+	s.directionTreeSessions(DeviceSessions{MachineID: machine}) // a direction's session there now has its computer offline
 }
 
 func (s *Service) cancelMachineInteractions(machineID string) {

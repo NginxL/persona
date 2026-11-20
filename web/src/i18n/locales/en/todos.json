@@ -17,6 +17,7 @@
   "stage_merge": "Merge",
   "stage_deploy": "Deploy",
   "stage_verify": "Verified",
+  "stage_done": "Done",
   "stage_pr": "PR",
   "stage_pr_n": "PR #{n}",
   "stage_mr_n": "MR !{n}",

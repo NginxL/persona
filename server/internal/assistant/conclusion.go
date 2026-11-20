@@ -65,6 +65,10 @@ func acceptedNote(l i18n.Lang, a *acceptAsk) string {
 	switch {
 	case decideAsk(a) && a.ByDefault:
 		return i18n.T(l, "assistant-reports.verdict_taken_default")
+	case decideAsk(a) && a.Check != "" && a.Chosen != "": // a check's decision: it went to the supervisor (checkDecided)
+		return i18n.T(l, "assistant-reports.decision_chosen_supervisor", i18n.Args{"option": a.Chosen})
+	case decideAsk(a) && a.Check != "" && a.Response == "":
+		return i18n.T(l, "assistant-reports.verdict_taken_supervisor")
 	case decideAsk(a) && a.Chosen != "":
 		return i18n.T(l, "assistant-reports.decision_chosen_noted", i18n.Args{"option": a.Chosen})
 	case decideAsk(a) && a.Response != "":
@@ -201,6 +205,8 @@ type conclusionInput struct {
 	ForBriefing bool
 	// RaisedBy: the leader conversation or background supervisor that raised it, kept while it is held (acceptAsk).
 	RaisedBy string
+	// Check: the recurring schedule whose progress check raised the decision (acceptAsk.Check).
+	Check string
 	// Verified: the supervisor checked the evidence (supervisorVerified): a done or cannot conclusion tells the owner and
 	// is not left for them to acknowledge (#3240).
 	Verified bool
@@ -240,7 +246,7 @@ func (s *Service) askConclusion(ctx context.Context, t Todo, in conclusionInput)
 	if in.Outcome == outcomeDecide {
 		a.WhyOwner, a.Options, a.CostOfWaiting = in.Decision.WhyOwner, in.Decision.Options, in.Decision.CostOfWaiting
 		a.From, a.Stands = s.decisionBackground(ctx, t) // the hub's, not the model's: where it came from, where it stands
-		a.ForBriefing = in.ForBriefing
+		a.ForBriefing, a.Check = in.ForBriefing, in.Check
 		if a.ForBriefing {
 			a.RaisedBy = in.RaisedBy
 		}
@@ -327,7 +333,9 @@ func (s *Service) askCopy(id string) (acceptAsk, bool) {
 // deadline and the hub took it, #3127): it is kept in the todo's decisions and sent to the task's agent, whose next stop
 // comes back to the supervisor (userDecided). With no Agent to receive an explicit owner choice, the choice is recorded
 // and handed to the supervisor instead. Any other delivery error takes nothing and leaves the round retryable. A
-// failed automatic default keeps the old rollback and owner-reminder behavior.
+// failed automatic default keeps the old rollback and owner-reminder behavior. A decision a recurring check raised
+// (a.Check) is about the supervisor's approach, not the Agent's work: it is recorded and goes to the supervisor with
+// what the option leads to, and the Agent hears only what the supervisor then tells it (checkDecided, #11587).
 func (s *Service) takeRecommendation(ctx context.Context, id string, a acceptAsk) (acceptResult, error) {
 	t, ok := s.todoNow(id)
 	if !ok {
@@ -343,14 +351,16 @@ func (s *Service) takeRecommendation(ctx context.Context, id string, a acceptAsk
 		row.Reason, row.Source = defaultReason(l, s.location(ctx), a.Deadline), db.DecisionAgent
 	}
 	var sendErr error
-	if _, err := s.relayToTask(ctx, t.Origin, id, msg, func(cur Todo) bool {
-		return cur.DoneAt == nil && !acceptAskStale(&a, cur)
-	}); err != nil {
-		s.logf("task %s: conclusion to agent: %v", id, err)
-		if a.ByDefault || !noAgentCanTake(err) {
-			return acceptResult{}, err // a retryable failure or an automatic default takes nothing
+	if a.Check == "" {
+		if _, err := s.relayToTask(ctx, t.Origin, id, msg, func(cur Todo) bool {
+			return cur.DoneAt == nil && !acceptAskStale(&a, cur)
+		}); err != nil {
+			s.logf("task %s: conclusion to agent: %v", id, err)
+			if a.ByDefault || !noAgentCanTake(err) {
+				return acceptResult{}, err // a retryable failure or an automatic default takes nothing
+			}
+			sendErr = err
 		}
-		sendErr = err
 	}
 	if st := s.todoDB(); st != nil {
 		at := decisionNow()
@@ -364,10 +374,14 @@ func (s *Service) takeRecommendation(ctx context.Context, id string, a acceptAsk
 			s.decisionsChanged(ctx, id, at)
 		}
 	}
-	if sendErr != nil {
+	switch {
+	case a.Check != "":
+		s.checkDecided(ctx, t, &a, a.Recommend)
+	case sendErr != nil:
 		return s.decisionNotDelivered(ctx, id, a.AskedAt, a.Recommend, sendErr), nil
+	default:
+		s.userDecided(ctx, id)
 	}
-	s.userDecided(ctx, id)
 	return acceptSucceeded(), nil
 }
 

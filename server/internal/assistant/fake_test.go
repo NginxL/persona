@@ -239,6 +239,10 @@ func (f *fakeHub) Hello(context.Context) (Hello, error) {
 	return h, nil
 }
 
+// deviceCallsForTest records calls made with the test's context under fakeHub.mu.
+// Background refreshes can reach the same node independently of the action under test.
+type deviceCallsForTest struct{}
+
 // afterListCall marks the context of the call a test arms afterList for (listHooked).
 type afterListCall struct{}
 
@@ -320,6 +324,9 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, p)
+	if trace, ok := ctx.Value(deviceCallsForTest{}).(*[]DeviceCall); ok {
+		*trace = append(*trace, p)
+	}
 	if p.Method == DeviceAssistantWarm && f.refuseConfigDir && strings.Contains(string(p.Params), `"config_dir"`) {
 		return nil, &rpc.Error{Code: proto.CodeNodeOutdated, Message: "update Persona on this computer"}
 	}
@@ -436,7 +443,7 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			}
 		}
 		return json.Marshal(map[string]any{"items": items})
-	case DeviceSessionRename:
+	case DeviceSessionRename, assistantwire.DeviceSessionRenameTabIfCurrent:
 		f.sends = append(f.sends, map[string]any{"rename": a})
 		return json.RawMessage(`{"ok":true}`), nil
 	case assistantwire.DeviceLaunchersCheck:
@@ -574,6 +581,8 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			checks = append(checks, map[string]string{"name": "claude-version", "status": "ok", "state": f.doctorState[p.Device], "detail": detail})
 		}
 		return json.Marshal(map[string]any{"ok": true, "checks": checks})
+	case assistantwire.DeviceAssistantDirectory:
+		return json.Marshal(map[string]any{"cwd": a["path"]})
 	case DeviceAssistantPrepare:
 		f.prepared = append(f.prepared, a)
 		return json.Marshal(map[string]any{"cwd": "/home/me/.persona/assistant"})
@@ -1051,6 +1060,12 @@ func (m *memStore) SettingsPrefix(_ context.Context, prefix string) (map[string]
 		values[key] = append(json.RawMessage(nil), raw...)
 	}
 	return values, nil
+}
+
+func (m *memStore) setFailPut(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failPut = err
 }
 
 func (m *memStore) PutSetting(_ context.Context, key string, v any) error {

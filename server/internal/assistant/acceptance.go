@@ -83,6 +83,10 @@ type acceptAsk struct {
 	Response      string           `json:"response,omitempty"`
 	// Chosen: the option the owner chose when it was not the recommended one.
 	Chosen string `json:"chosen,omitempty"`
+	// Check: the recurring schedule whose progress check raised this decision (schedule_todo.go, #11587). The option
+	// the owner takes is about the supervisor's approach, so it goes to the task's supervisor, not its Agent
+	// (checkDecided).
+	Check string `json:"check,omitempty"`
 	// ForBriefing: a decision that can wait (#4930, decision_wait.go), raised without a push and without a card, while
 	// it waits for a briefing to bring it to the owner; cleared once one did, or once it was pushed after all, at
 	// PushedAt: its card is due from then (retryAcceptance).

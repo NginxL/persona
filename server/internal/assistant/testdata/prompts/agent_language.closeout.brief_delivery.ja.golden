@@ -1,8 +1,10 @@
-終了記録（hubがこのターンの到達点を把握し、再確認を不要にするためのもの）：ファイルを変更するかコマンドを実行したターンの最後の返答は、下の形式の記録で終えてください。「交付：」の納品行の後に置き、両方を書き、マージ・本番反映の事実を一致させてください。質問に答えただけでファイル変更もコマンド実行もないターンには不要です。ただし、末尾が会話を続けるだけの質問や任意の提案で、返答がなくても作業に支障がなければ、status="done"でmissingのない記録を書き、hubにユーザー待ちと誤認させないでください。
+終了記録（hubがこのターンの到達点を把握し、再確認を不要にするためのもの）：ファイルを変更するかコマンドを実行したターンの最後の返答は、下の形式の記録で終えてください。納品・障害・対応者はその中のdelivery / missing / unblockで記録し、納品行は別に書かないでください。質問に答えただけでファイル変更もコマンド実行もないターンには不要です。ただし、末尾が会話を続けるだけの質問や任意の提案で、返答がなくても作業に支障がなければ、status="done"でmissingのない記録を書き、hubにユーザー待ちと誤認させないでください。
 
 <closeout status="done|not_done|blocked" merged="yes|no|n/a" deployed="yes|no|n/a">
 did: <what changed, one sentence; up to three such lines>
 artifact: <pr|commit|branch|doc|build|url|file> <reference>
+delivery: <live|pr|merged|off|none; omit when no delivery standard applies>
+unblock: <user|agent|other; omit without a delivery gate>
 verified: <what you ran or measured and its reading, or "untested">
 missing: <what you still need from someone, if anything>
 waiting: <for status="blocked": who or what you wait for>

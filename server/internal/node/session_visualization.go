@@ -17,7 +17,7 @@ const visualizationMaxBytes = 1 << 20
 func (n *Node) visualizationHTML(sessionID, itemID string) (string, error) {
 	f, err := n.file(sessionID)
 	if err != nil {
-		return "", readErr(err)
+		return "", n.readErr(sessionID, err)
 	}
 	n.refresh(sessionID, f)
 	it, err := f.Full(itemID)

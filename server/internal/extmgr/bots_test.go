@@ -164,6 +164,10 @@ func newFakeOpenAPI(t *testing.T) *fakeOpenAPI {
 				return
 			}
 			reply(map[string]any{"code": 0, "data": map[string]any{"items": items}})
+		case p == "/open-apis/cardkit/v1/cards" && r.Method == "POST":
+			reply(map[string]any{"code": 0, "data": map[string]any{"card_id": fmt.Sprintf("ck%d", n)}})
+		case strings.HasPrefix(p, "/open-apis/cardkit/v1/cards/"):
+			reply(map[string]any{"code": 0})
 		case r.Method == "PATCH":
 			reply(map[string]any{"code": 0})
 		case p == "/open-apis/im/v1/message_cot" && r.Method == "POST":
