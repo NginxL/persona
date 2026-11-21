@@ -40,6 +40,11 @@
       "params": "StorageClaimParams",
       "result": "StorageClaimResult"
     },
+    "storage.queue.renew": {
+      "from": "program",
+      "params": "StorageRenewParams",
+      "result": "StorageJobResult"
+    },
     "storage.queue.ack": {
       "from": "program",
       "params": "StorageSettleParams",
@@ -472,6 +477,41 @@
       },
       "required": [],
       "description": "One claimed job; job is absent when no pending job is due."
+    },
+    "StorageRenewParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "key": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "lease": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "lease_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        }
+      },
+      "required": [
+        "request_id",
+        "key",
+        "id",
+        "lease",
+        "lease_seconds"
+      ],
+      "description": "Extend only the current run's unexpired lease on this exact key, job and token. The host sets lease_until to the later of its current value and renewal time plus lease_seconds; job state and attempts do not change."
     },
     "StorageSettleParams": {
       "type": "object",

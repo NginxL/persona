@@ -16,5 +16,12 @@
   "effort_parent": "这个会话的思考档位由父 Agent 控制。",
   "effort_read_only": "这个会话是只读的，请在运行它的应用中修改思考档位。",
   "effort_model_fixed": "这个模型不提供可调的思考档位。",
-  "effort_terminal": "这个 Codex 会话没有共享控制连接，请在它的终端中修改思考档位。"
+  "effort_terminal": "这个 Codex 会话没有共享控制连接，请在它的终端中修改思考档位。",
+  "switch_title": "切换此对话的连接？",
+  "switch_explanation": "使用最近的消息和摘要，在 {name} 上继续。对话及其任务仍留在这里，部分细节会被概括。新连接将在你发送下一条消息时接手。",
+  "switch_confirm": "切换连接",
+  "switch_requested": "已请求切换，可在此对话中继续。",
+  "switch_unavailable": "暂时无法切换连接，请刷新对话后重试。",
+  "switch_unconfirmed": "尚未确认切换结果。重试会使用同一请求，不会再次发起切换。{error}",
+  "supervision_unavailable": "此连接无法接收独立的任务跟进指令。"
 }

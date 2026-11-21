@@ -16,6 +16,7 @@ import persona.core.contracts.Machine
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.MessageSender
+import persona.core.contracts.api.MessageVia
 import persona.core.contracts.parseTime
 import persona.core.domain.ChatTaps
 import persona.core.domain.tasks.AssistantConversation
@@ -64,7 +65,7 @@ internal fun rememberChatPageTaskHost(
         AssistantTaskHost(store, key.sessionId, (localSessions + taskAgentSessions.values).distinctBy { it.key },
             { id -> machines.firstOrNull { it.id == GroupKeys.machine(id, namespace) }?.displayName ?: id },
             onOpen = { k -> chrome.onOpenSession?.invoke(GroupKeys.key(k, namespace)) }, onError = { onNotice(operationFeedback(it).text.resolve(res)) },
-            say = { text -> scope.launch { runCatching { sender.send(key, text, UUID.randomUUID().toString()) } } },
+            say = { text -> scope.launch { runCatching { sendTodayCardMessage(sender, key, text, UUID.randomUUID().toString()) } } },
             sheet = taskSheet, machines = machines.filter { GroupKeys.namespaceOf(it.id) == namespace }.map { it.copy(id = GroupKeys.raw(it.id)) },
             pending = taskCards.filter { GroupKeys.namespaceOf(it.machineId) == namespace }.map { it.copy(machineId = GroupKeys.raw(it.machineId)) },
             manager = session?.manager,
@@ -78,3 +79,7 @@ internal class ChatPageTaskHost(
     val host: AssistantTaskHost?,
     val backgroundOpen: MutableState<Boolean>,
 )
+
+/** A Today-card button writes from data the app read; it is not the user's typed words. */
+internal suspend fun sendTodayCardMessage(sender: MessageSender, key: SessionKey, text: String, clientMessageId: String) =
+    sender.send(key, text, clientMessageId, null, null, null, MessageVia.Card)

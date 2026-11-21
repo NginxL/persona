@@ -262,7 +262,9 @@ func (d *DB) InteractionRecord(ctx context.Context, id string) (*InteractionReco
 // partial index (migration 0393); TestPendingInteractionsIndexed checks the plans of these exact constants.
 const (
 	resumablePendingSQL = `SELECT payload FROM interactions WHERE status = 'pending'
-		AND (payload->>'resumable')::boolean IS TRUE AND (payload->>'expires_at')::timestamptz > now()`
+		AND (payload->>'resumable')::boolean IS TRUE
+		AND ((payload->>'expires_at')::timestamptz > now()
+			OR ((payload->>'owner_proposal')::boolean IS TRUE AND (payload->>'no_expiry')::boolean IS TRUE))`
 	cancelPendingSQL = `UPDATE interactions SET status = 'cancelled', resolved_at = now()
 		WHERE status = 'pending' AND NOT (id = ANY($1))
 		AND id NOT IN (SELECT interaction_id FROM session_work WHERE interaction_id <> '')

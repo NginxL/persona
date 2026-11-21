@@ -19,8 +19,9 @@ class NodeDownloadPublicationTests(unittest.TestCase):
             root = Path(directory)
             (root / 'bin').mkdir()
             staged = root / 'releases/hub-main/.upload-fixture'
-            manifest = release(staged)
+            manifest = release(staged, nodes=True)
             hub = copy.deepcopy(manifest)
+            hub.pop('nodes')
             hub['files'] = {'linux-amd64': hub['files']['linux-amd64']}
             (staged / 'latest.json').write_text(json.dumps(hub))
             (root / 'hub.json').write_text(json.dumps({'auto_update_nodes': False}))
@@ -59,7 +60,8 @@ class NodeDownloadPublicationTests(unittest.TestCase):
 
             def command(argv, **kwargs):
                 if argv[-1] == 'node-update-check':
-                    return native_result(manifest)
+                    program = Path(argv[0]).name.removesuffix('-linux-amd64')
+                    return native_result(manifest, program)
                 self.assertEqual(argv[1:], ['hub', 'switch', '--status'])
                 return 'pid 123'
 
@@ -82,8 +84,12 @@ class NodeDownloadPublicationTests(unittest.TestCase):
             self.assertEqual([c for c in calls if c[1] != 'GET'], [('hub/update/check', 'POST')])
             self.assertFalse(staged.exists())
             canonical = json.loads((downloads / 'latest.json').read_text())
-            for artifact in canonical['files'].values():
+            self.assertEqual(set(canonical['nodes']['persona-node']), {'linux-amd64', 'darwin-arm64'})
+            for program, platform, artifact in node_artifacts.node_files(canonical):
+                self.assertEqual(artifact['name'], f'{program}-{platform}.gz')
                 node_artifacts.verify_archive(downloads / manifest['version'], artifact)
+                self.assertEqual((root / 'bin/nodes' / f'{program}-{platform}.version').read_text().strip(),
+                                 manifest['version'])
             self.assertEqual(canonical['version'], manifest['version'])
             self.assertEqual(canonical['commit'], manifest['commit'])
             self.assertFalse((root / 'releases/hub/node-packages').exists())

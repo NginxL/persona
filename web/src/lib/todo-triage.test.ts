@@ -373,6 +373,43 @@ describe("triageTodos", () => {
     expect([r.open, r.shelved, r.finished]).toEqual([1, 1, 2]);
   });
 
+  it("keeps TriageGroup.key stable when live activity swaps which member leads (#12417)", () => {
+    const base = [
+      todo("task-3", { title: "Fix #412 login timeout (step 3)", plan_id: "plan-412", updated_at: hoursAgo(3), agents: [agent("s3")] }),
+      todo("task-5", { title: "Fix #412 login timeout (step 5)", plan_id: "plan-412", updated_at: hoursAgo(4), agents: [agent("s5")] }),
+      todo("task-1", { title: "Fix #412 login timeout (step 1)", plan_id: "plan-412", updated_at: hoursAgo(5), agents: [agent("s1")] }),
+    ];
+    const look1 = makeSessionLookup([
+      session("s3", "working", 1),
+      session("s5", "working", 2),
+      session("s1", "working", 3),
+    ]);
+    const r1 = triageTodos(base, look1, NOW);
+    expect(r1.sections.working).toHaveLength(1);
+    expect(r1.sections.working[0].lead.id).toBe("task-3");
+    expect(r1.sections.working[0].key).toBe("task-1");
+
+    // task-5 gets a newer activity tick and becomes lead
+    const look2 = makeSessionLookup([
+      session("s3", "working", 1),
+      session("s5", "working", 0.5),
+      session("s1", "working", 3),
+    ]);
+    const r2 = triageTodos(base, look2, NOW);
+    expect(r2.sections.working[0].lead.id).toBe("task-5");
+    expect(r2.sections.working[0].key).toBe("task-1");
+
+    // task-1 gets the newest activity tick and becomes lead
+    const look3 = makeSessionLookup([
+      session("s3", "working", 1),
+      session("s5", "working", 0.5),
+      session("s1", "working", 0.1),
+    ]);
+    const r3 = triageTodos(base, look3, NOW);
+    expect(r3.sections.working[0].lead.id).toBe("task-1");
+    expect(r3.sections.working[0].key).toBe("task-1");
+  });
+
   it("related keys ignore case, spaces, punctuation and a PR link's trailing slash", () => {
     expect(relatedKeys(todo("a", { title: "Fix: the  Widget!", pr_url: "https://Example.com/pull/3/" }))).toEqual(["pr:https://example.com/pull/3", "title:fixthewidget"]);
   });

@@ -92,7 +92,7 @@ func TestAPushOnlyAboutItsOwn(t *testing.T) {
 		}
 	}
 	tell(a, proto.Interaction{ID: "ix_a", MachineID: "ma", SessionID: "s3", Kind: proto.IxPermission, Summary: "A's summary"})
-	tell(b, proto.Interaction{ID: "ix_b", Kind: proto.IxPermission, Summary: "B's summary"})
+	tell(b, proto.Interaction{ID: "ix_b", MachineID: "mb", SessionID: "b1", Kind: proto.IxPermission, Summary: "B's summary"})
 	eventually(t, 5*time.Second, "both cards", func() bool { return h.interactionOwner("ix_a") != "" && h.interactionOwner("ix_b") != "" })
 
 	// B: A's card, a card it never reported, and its own card claiming A's session; a turn of A's session.

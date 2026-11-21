@@ -38,7 +38,8 @@ import java.util.Locale
 
 /**
  * About with a build commit, and without one, drawn on the JVM in English, Chinese and Japanese, in every style, light and
- * dark. Written as PNGs to `build/about-commit-shots/` (or `-Dpersona.shots=<dir>`) to look at.
+ * dark. Each run writes PNGs to a fresh `run-*` child beneath `build/about-commit-shots/` (or the `persona.shots`
+ * base) and reports its exact directory for review evidence.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -46,7 +47,9 @@ import java.util.Locale
 class AboutBuildCommitShotsTest {
     @get:Rule val rule = createComposeRule()
 
-    private fun out(): File = File(System.getProperty("persona.shots") ?: "build/about-commit-shots").also { it.mkdirs() }
+    private val outputDirectory by lazy {
+        newAboutCaptureRun("build/about-commit-shots", System.getProperty("persona.shots"))
+    }
 
     private fun inLanguage(tag: String): Context {
         val base = ApplicationProvider.getApplicationContext<Context>()
@@ -81,7 +84,7 @@ class AboutBuildCommitShotsTest {
             for (y in 0 until bitmap.height step 5) for (x in 0 until bitmap.width step 5) if (bitmap.getPixel(x, y) != background) other++
             assertTrue("drew nothing", other > 100)
             val name = "about-commit-$tag-${if (present) "present" else "unknown"}-${s.name.lowercase()}-${if (d) "dark" else "light"}.png"
-            File(out(), name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            File(outputDirectory, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
     }
 }

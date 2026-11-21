@@ -228,8 +228,10 @@
     <string name="designsystem_core_engine_herdr_app">デスクトップアプリで開いたターミナル</string>
     <string name="designsystem_core_engine_orca">Orcaのターミナル</string>
     <string name="designsystem_core_engine_tern">Ternのターミナル</string>
+    <string name="designsystem_core_engine_rex">Rexのターミナル</string>
     <string name="designsystem_core_engine_paseo">Paseoのエージェント</string>
     <string name="designsystem_core_engine_cindy">Cindyのエージェント</string>
+    <string name="designsystem_core_engine_t3code">T3 Codeのエージェント</string>
     <string name="designsystem_core_engine_none">ターミナルエンジンなし</string>
     <string name="designsystem_core_engine_none_detail">デスクトップアプリのセッションのみ</string>
     <string name="designsystem_core_engine_offline">オフラインのため検出情報がありません</string>
@@ -412,6 +414,7 @@
     <string name="designsystem_core_headline_agent_permission">%1$sが%2$sの使用をリクエスト</string>
     <string name="designsystem_core_headline_agent_permission_detail">%1$sが%2$sの使用をリクエスト：%3$s</string>
     <string name="designsystem_core_headline_secret_run">%1$sでパスワードを使って実行</string>
+    <string name="designsystem_core_headline_secret_handoff">シークレットを Agent に渡しますか？</string>
     <string name="designsystem_core_headline_screen">ターミナルで対応が必要です</string>
     <string name="designsystem_core_headline_needs_you">要対応</string>
     <string name="designsystem_core_ask_question">質問があります</string>

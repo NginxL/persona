@@ -112,6 +112,7 @@ func (s *Service) taskExecution(ctx context.Context, t Task, validate bool, bind
 		}
 	}
 	ex.Launcher, ex.Model, ex.Effort = strings.TrimPrefix(b.Provider, "launcher."), b.Model, b.Effort
+	ex.PermissionMode = cmp.Or(t.PermissionMode, b.PermissionMode, s.settings(ctx).DefaultPermissionMode, "bypassPermissions")
 	ex.BindingFingerprint, ex.Fingerprint = s.taskExecutionFingerprints(ctx, machine, b)
 	if !validate {
 		ex.Agent = s.launcherAgent(withUnhidden(ctx, ex.Launcher), machine, ex.Launcher)
@@ -139,7 +140,11 @@ func (s *Service) taskExecution(ctx context.Context, t Task, validate bool, bind
 	if err := checkModelID(b.Model); err != nil {
 		return ex, err
 	}
-	known, err := s.checkTaskLauncher(ctx, machine, ex.Launcher)
+	previous := t.RunExecution
+	if t.RunSessionID == "" {
+		previous = nil
+	}
+	known, err := s.checkTaskLauncher(ctx, machine, ex.Launcher, previous)
 	if err != nil {
 		return ex, err
 	}
@@ -335,7 +340,7 @@ func (s *Service) validateTaskExecutionModel(ctx context.Context, p ModelPurpose
 // A successful task catalog is authoritative, including an empty list. The ordinary assistant's legacy fallback
 // treats an empty list as unknown; tasks must not silently retain a removed choice or substitute another launcher.
 // Configured wrappers and managed providers are merged before checking. Failed discovery remains unknown.
-func (s *Service) checkTaskLauncher(ctx context.Context, machine, name string) (known bool, err error) {
+func (s *Service) checkTaskLauncher(ctx context.Context, machine, name string, previous ...*TaskExecution) (known bool, err error) {
 	stored, known := s.storedLaunchersKnown(ctx)
 	if !known {
 		return false, nil
@@ -354,7 +359,15 @@ func (s *Service) checkTaskLauncher(ctx context.Context, machine, name string) (
 	if slices.ContainsFunc(fits, named) {
 		return true, nil
 	}
-	if slices.ContainsFunc(picker, named) {
+	if i := slices.IndexFunc(picker, named); i >= 0 {
+		// The terminal agy entry remains discoverable when its Assistant companion is away.
+		// Refuse this run without suggesting a different launcher or losing the conversation binding.
+		bound := len(previous) > 0 && previous[0] != nil && previous[0].Agent == "agy" &&
+			previous[0].MachineID == machine && previous[0].Launcher == name
+		if bound && cmp.Or(picker[i].AgentType, picker[i].Agent) == "agy" && machineSource(picker[i].Source) {
+			d, _ := s.device(ctx, machine)
+			return true, i18n.Err("assistant-schedule.execution_antigravity_unavailable", i18n.Args{"machine": firstNonEmpty(d.Name, machine)})
+		}
 		return true, s.mainChatRefusal(ctx, machine, name, "")
 	}
 	return true, i18n.Err("assistant-models.err_provider_missing")
@@ -368,6 +381,7 @@ func taskEditConfig(t Task) Task {
 	t.LastRun, t.StatusRun = time.Time{}, time.Time{}
 	t.LastSessionID, t.LastStatus, t.LastError = "", "", ""
 	t.TodoProgress, t.StateNote = nil, nil
+	t.clearSkip() // a skip can be armed or consumed while a configuration edit is being validated
 	if t.Repeat == repeatInterval {
 		t.At = time.Time{} // due runs advance At; ArmedAt records a deliberate retime
 	}
@@ -392,6 +406,7 @@ func mergeTaskEditRuntime(task *Task, before, current Task) error {
 		task.ArmedAt.Equal(before.ArmedAt) && task.Enabled == before.Enabled && !current.At.Equal(before.At) {
 		task.At = current.At
 	}
+	task.keepSkipFrom(current)
 	return nil
 }
 

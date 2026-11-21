@@ -28,6 +28,15 @@ The answer adds `sync`: one item per computer, with `state` `ok` / `offline` / `
 (settings `launchers.zshrc.meta`). A computer that didn't answer still shows its last list, but the entries' `stale` names that computer; every client marks them “Not updated” and explains why in the per-computer group.
 An entry's `rc_files` are the files it came from (`source: "zshrc"` only; older nodes don't report it, so it is `~/.zshrc`).
 
+The Assistant picker gives shell discovery 10 seconds and reserves one further second for own-service checks. A check
+cut short by this budget uses the last answer if one exists. On a shell timeout the picker can show that computer's
+last known shell and PATH launchers and the providers in its current scope.
+Runtime launchers require a live response. Confirmed unavailable providers still show their reason. If the picker has
+neither available nor unavailable entries, it returns a timeout so the client can offer Retry. The node bounds the
+shell scan and stops its child processes when it times out. An incomplete scan keeps the previous launcher list for
+one more minute when one exists. Retry asks the node to scan again. If the new scan is slow or fails, the picker can
+read the node's last completed shell list and live runtime entries within the same 10-second discovery budget.
+
 ## External model adapters (#7940)
 
 For advanced users who already manage connections in another local tool, an optional adapter supplies the model
@@ -168,7 +177,7 @@ disabling the registry takes effect when the node is restarted; it does not rewr
 
 ## Which shell
 
-The node runs the list script and the launchers in an interactive shell (`loginShellProgram`): zsh when there is one, but bash when the user's login shell is bash (`$SHELL`, or `/etc/passwd` under systemd, where it is unset) and there is no `~/.zshrc`;
+The node runs the list script and shell-defined launchers in an interactive shell (`loginShellProgram`): zsh when there is one, but bash when the user's login shell is bash (`$SHELL`, or `/etc/passwd` under systemd, where it is unset) and there is no `~/.zshrc`;
 always bash without zsh (Git Bash on Windows). Bash runs as `bash -ic` and reads `~/.bashrc`, not `~/.bash_profile` / `~/.profile`: aliases kept there aren't listed.
 Bash has no zsh `(z)` / `(Q)`, and macOS's bundled bash 3.2 has no `BASH_ALIASES`, so under bash the script prints `alias -p`, and the node splits words and strips quotes by the shell's rules itself (nothing expanded or run, `node/launchers_shell.go`) before handing them to the same parser.
 
@@ -244,6 +253,11 @@ The script frames what it prints with begin/end markers, and node reads only bet
   A function-based launcher's `--settings` is not visible and still gets overridden on these claude versions.
 - Model listing (`node/launcher_models.go`) passes `--settings '{"disableAllHooks":true}'` to avoid triggering hooks (alias and managed-launcher settings are still merged). A function's own
   `--settings` is still overridden here, so the listed models omit its effects: disabling hooks can only be specified in `--settings`, and merging requires first reading the settings supplied by the function (#1411).
+  On Unix, model discovery for a Persona-managed Claude Code provider invokes `personad launch` directly for native
+  CLI binaries and for npm scripts whose Node.js is already available. For npm installations, including Node Version
+  Manager (NVM) and Homebrew prefixes, the probe uses the matching Node.js executable when it finds one and keeps the
+  child's search path in its original order. Other launcher scripts and CLIs that need shell setup run through the
+  user's interactive shell.
 
 ## How herdr recognizes Agents started by launchers (`HERDR_AGENT`, #3454)
 
@@ -274,7 +288,9 @@ Supported since herdr 0.7.1 (Linux) / 0.7.5 (macOS); ignored by older herdr and 
 
 ## Work agents: pi, the Cursor CLI, the Antigravity CLI
 
-pi, the Cursor CLI (`cursor-agent`) and the Antigravity CLI (`agy`) are agents the user works with, started in a herdr pane the way Claude and Codex are (`server/internal/node/workagent.go`). A machine lists each as a launcher when its program is on the login shell's PATH (`pi`, `cursor-agent`, `agy`), so New Agent and `task_plan` / `agent_start` offer it there and nowhere else. `launcher` is the agent's name (`pi`, `cursor`, `agy`); `model` is passed as `--model` (a provider and model, such as `ag-chat/cursor/grok-4.7` for pi). They take no permission mode or ultracode.
+pi, the Cursor CLI (`cursor-agent`) and the Antigravity CLI (`agy`) are agents the user works with, started in a herdr pane the way Claude and Codex are (`server/internal/node/workagent.go`). A machine lists each as a launcher when its program is on the login shell's PATH (`pi`, `cursor-agent`, `agy`), so New Agent and `task_plan` / `agent_start` offer it there and nowhere else. `launcher` is the agent's name (`pi`, `cursor`, `agy`); `model` is passed as `--model` (a provider and model, such as `ag-chat/cursor/grok-4.7` for pi). pi and Cursor take no permission mode, and none of them takes ultracode.
+
+**agy's permission mode is its start's.** An agy start runs in Allow all (`--dangerously-skip-permissions`) unless it names another mode: `acceptEdits` passes `--mode accept-edits`, `auto` passes `--mode auto`, and `default` passes no flag (agy's own approval). Like Claude Code, an agy worker from `agent_start` or `task_plan` gets Allow all when nothing names a mode (`startAgent.allowAll`), since nobody at the pane answers agy's approval prompt; a mode the call or plan names stays. The row reports the mode it started in as `permission_mode`, and a herdr restart resumes it with the same flag. The mode, effort and model cannot be changed afterwards: `session.modes` on an agy or Cursor pane is refused with `modes_unsupported` (409) and no key reaches the pane, and their rows say `capabilities.modes: false`, so no client offers the chips. agy cycles its own modes with shift+tab, but its footer is not Claude Code's and Allow all is a start flag outside that cycle, so the node does not drive it. Antigravity's runtime (`agy acp`, the companion conversation) keeps its own mode switch.
 
 For herdr starts, the Antigravity model picker reads the local launcher's `models` output and uses the standard catalog cache and refresh. Picking an effort passes `--effort` with one of `low`, `medium`, `high`, `xhigh` or `max`. Leaving an override unset uses the launcher's default. pi and Cursor keep their own effort.
 
@@ -303,7 +319,7 @@ A new terminal Agent can take an explicit `speed`: `standard`, `fast` or `ultraf
 
 - **Codex:** `fast` becomes `-c service_tier=priority`; `ultrafast` becomes `-c service_tier=ultrafast`. Before launch the node checks that the selected model's own catalog advertises that native tier. An invalid or unadvertised choice is refused rather than letting Codex run it silently; the rollout's `turn_context` records the native `service_tier`.
 - **Claude Code:** `fast` adds `"fastMode": true` to a merged, per-start `--settings` file, preserving the launcher's effective settings. `ultrafast` is refused. If a shell function supplies `--settings` that cannot be merged, `fast` is refused before launch rather than replacing them. Claude Code itself falls back to standard when its account or model cannot run fast mode (currently fast mode requires Opus on the first-party API with usage credits), so Persona cannot guarantee the faster output speed.
-- **Everything else and resumes:** faster speed is refused before approval or launch. This includes work agents, traex, omp, external runtimes, Paseo providers, desktop apps and every resume. A node without `session_start_speed` returns `node_outdated` for `fast` or `ultrafast` instead of silently starting standard.
+- **Everything else and resumes:** faster speed is refused before approval or launch. This includes work agents, TRAE CLI, omp, external runtimes, Paseo providers, desktop apps and every resume. A node without `session_start_speed` returns `node_outdated` for `fast` or `ultrafast` instead of silently starting standard.
 
 Speed is start-only: it is not kept in the execution fingerprint or herdr's automatic-resume command, and a later resume uses the launcher's own setting. The current New Agent form and plan cards do not show or edit speed; the launcher-list and worker-preset responses expose it for clients and extensions.
 
@@ -726,6 +742,8 @@ picked otherwise. They also count for the send check (`launcherHasModel`), so a 
 “Quota” on the launcher page reads how much allowance its key has left at the gateway. **Which gateways to read and how is the quota extension's responsibility** (`docs/extensions/extensions.md`, “Quota”): the open-source repository contains no gateway-specific readers.
 Without a quota extension, this section explains that querying is unavailable, without an error. Code: shared `server/internal/quota` (report shape, delegated requests), manager-side `assistant/models_quota.go` (routes, cache, gateway selection), hub-side `extmgr/extension_quota.go` (extension quota reading, `app.call plugins.quota`),
 and node-side `node/launcherquota.go`.
+
+A launcher whose provider reports a prepaid balance rather than an allowance window is separate from the Quota extension: an official DeepSeek launcher added in Persona has its `GET /user/balance` read by the manager with the same sealed key and shown as an amount and currency in the sidebar's usage panel (`docs/server/usage-windows.md`, “Prepaid balances (#11825)”). The key never leaves the manager, and a launcher found in a shell rc file keeps its key on that computer, so only launchers added in Persona report a balance.
 
 - Extensions **cannot see keys**: They answer `quota.query` and pass requests through `quota.http` to the party holding the key, which replaces `${launcher_key}` in the request with the key.
   Requests may go only to the launcher's own gateway (same origin, including redirects); key occurrences in responses are replaced with the placeholder again.

@@ -20,15 +20,17 @@ class ServerShardCommandTests(unittest.TestCase):
     node = ["example/server/internal/node", "example/server/internal/node/sub"]
 
     def test_the_node_shard_runs_internal_node_in_its_partitions_beside_its_other_packages(self):
-        runs = server.commands(self.node, "node", "/tmp/db.json", {"./internal/node": ["^(TestA|TestC)$", "^(TestB)$"]})
-        self.assertEqual(len(runs), 3)
+        runs = server.commands(self.node, "node", "/tmp/db.json",
+                               {"./internal/node": ["^(TestA|TestD)$", "^(TestB|TestE)$", "^(TestC|TestF)$"]})
+        self.assertEqual(len(runs), 4)
         for run in runs:
             self.assertEqual(run[run.index("go"):run.index("go") + 7],
                              ["go", "test", "-json", "-p", "1", "-count=1", "-timeout=10m"])
             self.assertIn("/tmp/db.json", run)
         self.assertEqual(runs[0][-1], "example/server/internal/node/sub")
-        self.assertEqual([run[-3:] for run in runs[1:]], [["-run", "^(TestA|TestC)$", "./internal/node"],
-                                                          ["-run", "^(TestB)$", "./internal/node"]])
+        self.assertEqual([run[-3:] for run in runs[1:]], [["-run", "^(TestA|TestD)$", "./internal/node"],
+                                                          ["-run", "^(TestB|TestE)$", "./internal/node"],
+                                                          ["-run", "^(TestC|TestF)$", "./internal/node"]])
 
     def test_the_managers_shard_runs_internal_assistant_in_its_partitions_beside_hub_and_voice(self):
         managers = ["example/server/internal/assistant", "example/server/internal/assistant/fleet",

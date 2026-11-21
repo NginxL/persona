@@ -110,6 +110,22 @@ afterEach(() => {
   dropImportLink();
 });
 
+it("filters Model providers by the TRAE CLI command and display name", async () => {
+  const legacy = { name: "traex", display_name: "traecli", source: "persona" };
+  const named = { name: "trae-cli", display_name: "Team relay", source: "persona" };
+  LIST.launchers = [GW, legacy, named];
+  await mount();
+  const search = host.querySelector<HTMLInputElement>(`input[aria-label="${t("settings.search_providers")}"]`)!;
+  expect(search).not.toBeNull();
+  type(search, "traecli");
+  expect(host.textContent).toContain("TRAE CLI");
+  expect(host.textContent).toContain("Team relay");
+  expect(host.textContent).not.toContain("Example Gateway");
+  type(search, "Team relay");
+  expect(host.textContent).toContain("Team relay");
+  expect(host.textContent).not.toContain("TRAE CLI");
+});
+
 describe("a page opened with an import link", () => {
   it("opens Add on the link, takes it once, and forgets it when the wizard closes", async () => {
     holdImportLink(LINK);

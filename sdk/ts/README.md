@@ -55,12 +55,15 @@ Request a mutation ID with `store.request()` and retain that exact ID and payloa
 for an uncertain outcome. The client never retries automatically. Transactions
 combine revision-checked entries and queue reservation/completion writes in one
 commit. Request receipts expire after five minutes, and a replay cannot bypass a
-withdrawn grant or resurrect an expired/replaced lease. Unknown external outcomes
-are not safe new sends; protocol-specific confirmations and recovery still apply.
-The generic store does not import legacy files or provide media URLs, lease
-renewal or external-effect authority. Full bounds, lifecycle and owner-only
-retained-data restore are in `docs/extensions/extensions.md` ("Installation-owned
-business storage"). Production/source publication gates remain unchanged.
+withdrawn grant or resurrect an expired/replaced lease. `store.renew()` extends
+only the current run's unexpired `(key, job ID, lease token)` by 1–60 seconds,
+without changing job state or attempts or granting external-effect authority.
+Unknown external outcomes are not safe new sends; protocol-specific confirmations
+and recovery still apply. The generic store does not import legacy files or
+provide media URLs or external-effect authority. Full bounds, lifecycle and
+owner-only retained-data restore are in `docs/extensions/extensions.md`
+("Installation-owned business storage"). Production/source publication gates
+remain unchanged.
 
 ## Finite page loading
 

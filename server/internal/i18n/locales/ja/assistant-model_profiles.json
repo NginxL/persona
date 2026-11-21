@@ -25,8 +25,12 @@
   "err_profiles": "モデルプロファイルは最大 {max} 個です。",
   "err_active": "プロファイル {name} は使用中です。削除する前に切り替えてください。",
   "err_role": "モデルプロファイルの変更にはフルアクセスが必要です。",
+  "err_active_profile_missing": "使用中のモデルプロファイル「{profile}」は存在しません。model_profile_switchで別のプロファイルに切り替えるか、tierを指定しないでください。",
+  "err_no_active_profile": "使用中のモデルプロファイルがありません。model_profile_switchでプロファイルを選択するか、tierを指定しないでください。",
+  "err_tier_not_found": "使用中のモデルプロファイル「{profile}」には階層{tier}がありません。利用可能な階層：{tiers}。",
   "err_tier_model": "プリセット {tier}：{model} はモデル ID ではありません。英字か数字で始め、英数字と . _ - / : @ [ ] だけを使ってください。",
   "err_tier_description": "プリセット {tier} の説明は 1 行、{max} 文字以内にしてください。",
   "tier_strong": "このプロファイル作成時のメインチャットのモデル：設計、レビュー、難しい問題。",
-  "tier_standard": "このプロファイル作成時の新規 Agent のモデル：日常のコーディング。"
+  "tier_standard": "このプロファイル作成時の新規 Agent のモデル：日常のコーディング。",
+  "err_permission_mode": "{where} の権限モード {mode} は無効です。選択肢：{modes}。"
 }

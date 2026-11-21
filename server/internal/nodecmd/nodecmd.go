@@ -40,8 +40,10 @@ const Usage = `  personad hook             Claude Code hook entry (reads hook JS
                            1 denied, 2 usage, 3 timeout, 4 phone unreachable (docs/integrations/script-cli.md)
   personad notify "title" [body] [--silent] [--error] [--strict]
                            one notification to the phone; exit 0 whatever happens unless --strict (docs/integrations/script-cli.md)
+  personad decision raise --file decision.json | get <id> | withdraw <id>
+                           raise a rich owner decision without waiting, then poll or withdraw it (docs/integrations/script-cli.md)
   personad tool <tool> [<json args> | -] | --cli <connector> [--format json|text] <words…>
-                           a connector's tools from the assistant's shell, or task_spawn from a supervised Agent's pane
+                           a connector's tools from the assistant's shell, or an Agent's own tools from its pane
                            (docs/protocol/connector-protocol.md "Command line"; personad tool --help)
   personad office docx|pptx|xlsx|check …
                            write a Word document or a deck from Markdown, a workbook from JSON / CSV, or say what is in
@@ -98,6 +100,8 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 		os.Exit(scriptcli.Ask(ctx, rest, os.Stdin, os.Stdout, os.Stderr))
 	case "notify":
 		os.Exit(scriptcli.Notify(ctx, rest, os.Stdout, os.Stderr))
+	case "decision":
+		os.Exit(scriptcli.Decision(ctx, rest, os.Stdin, os.Stdout, os.Stderr))
 	case "office":
 		os.Exit(office.Main(rest, os.Stdout, os.Stderr))
 	case "claude-plugin": // the Persona plugin for Claude Code here, as JSON (node/claudeplugin.go; persona-link plugin)

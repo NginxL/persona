@@ -56,11 +56,8 @@ func (s *Service) AgentStartParams(ctx context.Context, p AgentStartParams) (map
 		}
 		clearStandardSpeed(params)
 	} else {
-		own := pickOf(params)
-		if err := s.applyStartTier(ctx, params); err != nil {
-			return nil, badRequest(err, s.appLang(ctx, p.Lang))
-		}
-		if err := s.applyModel(ctx, "agent.new", params); err != nil {
+		own, err := s.resolveStart(ctx, params, false)
+		if err != nil {
 			return nil, badRequest(err, s.appLang(ctx, p.Lang)) // a typed model that is no id among them
 		}
 		if params["launch"] != "engine" {
@@ -69,12 +66,15 @@ func (s *Service) AgentStartParams(ctx context.Context, p AgentStartParams) (map
 		// Held to what the computer has (#2640): a launcher picked that it lacks is refused, a default it lacks gives
 		// way to one it has.
 		if m, ok := s.device(ctx, p.MachineID); ok {
-			note, agent, err := s.fitLauncher(ctx, m, own, params)
+			note, agent, err := s.fitNewLauncher(ctx, m, own, params)
 			if err != nil {
 				return nil, badRequest(err, s.appLang(ctx, p.Lang))
 			}
 			if err := checkStartSpeed(params, agent, ""); err != nil {
 				return nil, badRequest(err, s.appLang(ctx, p.Lang))
+			}
+			if mode, _ := params["permission_mode"].(string); mode != "" && own.permission == "" && !agent.supportsPermissionMode(mode) {
+				delete(params, "permission_mode")
 			}
 			leaveLauncherNote(ctx, note) // the app says so (agents_bus.go launcher_note, #4661)
 			// AGY returns a session only after startup, including for a launcher resolved from Model settings.

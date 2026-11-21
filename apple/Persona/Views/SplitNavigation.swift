@@ -131,9 +131,11 @@ struct SplitNavigation<Sidebar: View, Empty: View, Destinations: ViewModifier>: 
                 sidebar.modifier(destinations)
                     #if os(iOS)
                     // Roots (#8603): the column has its own fold button and each root its own sidebar button
-                    // (`ListButtonItem`); the system's toggle was not drawn again after a root's drill-down was popped.
-                    // Under side bars (the Duo on its side) their Show Sidebar is the system's, and stays.
-                    .toolbar(removing: rootsSwap && !sideBars ? .sidebarToggle : nil)
+                    // (`ListButtonItem`; an Agent's chat its header's, or under side bars its side column's first item);
+                    // the system's toggle was not drawn again after a root's drill-down was popped. Under side bars (the
+                    // Duo on its side) too (#11636): there it was missing after a pop as well, and on an Agent's chat,
+                    // which removes the bar's title row the toggle is drawn in, always.
+                    .toolbar(removing: rootsSwap ? .sidebarToggle : nil)
                     .safeAreaPadding(.top, topPad(listSafeTop))
                     .background { readsSafeTop { listSafeTop = $0 } }
                     #endif
@@ -448,7 +450,8 @@ private struct SplitDetailPage: ViewModifier {
         // The Sidebar layout on a phone (#6332): a first page opens the drawer where its back would be.
         .modifier(DrawerButtonItem(shown: !ownsBack && split?.drawer == true && split?.isFirstPage == true))
         // A first page with its list folded beside or over it (#8603): the sidebar's button where a back would be.
-        .modifier(ListButtonItem(shown: !ownsBack && split?.roots == true && split?.drawer != true && split?.sideBars != true
+        // Under side bars it is the side column's first item, where Back is on a sub-page (#11636).
+        .modifier(ListButtonItem(shown: !ownsBack && split?.roots == true && split?.drawer != true
                                     && split?.isFirstPage == true && split?.listHidden == true))
         #endif
         #endif

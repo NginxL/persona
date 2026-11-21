@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { agentId, agentName, sessionAgent } from "./agent-kind";
+import { agentId, agentName, isTraeCli, sessionAgent } from "./agent-kind";
 import { modelShort } from "./context-usage";
 import { baseName, failureReason, sessionPreview, sessionTitle, stateOf } from "./format";
 import { machineWithHub } from "./mesh";
@@ -117,6 +117,7 @@ export function getSearchAsCodeProvider(): SearchAsCodeProvider | null {
 /** Normalized harness id for a session (`claude`, `codex`, `opencode`, `pi`, `gemini`, `cursor`, `trae`, or custom). */
 export function sessionHarnessId(s: Session): string {
   const { agent } = sessionAgent(s);
+  if (isTraeCli(agent || s.launcher)) return "traex";
   if (agent) return agentId(agent);
   if (s.launcher) {
     const low = s.launcher.trim().toLowerCase();
@@ -130,6 +131,19 @@ export function sessionHarnessId(s: Session): string {
 export function sessionHarnessLabel(s: Session): string {
   const { agent, label } = sessionAgent(s);
   return agentName(agent || s.launcher, label || s.agent_name);
+}
+
+/** Search can also use the CLI's single-word executable, including in a harness operator. */
+function searchableHarnessLabel(s: Session): string {
+  const label = sessionHarnessLabel(s);
+  return isTraeCli(label) ? `${label} · traecli` : label;
+}
+
+const canonicalHarness = (target: string) => isTraeCli(target) ? "traex" : target;
+
+/** TRAE desktop and TRAE CLI share a prefix, so their selectors use exact harness IDs. */
+function matchesHarness(id: string, target: string, label = id): boolean {
+  return target === "trae" || target === "traex" ? id === target : id.includes(target) || label.includes(target);
 }
 
 /** Normalized project name for a session (from repo_root, space_name, workspace_cwd, or cwd). */
@@ -336,7 +350,7 @@ export function scopeHaystacks(s: Session, scope: SearchScope, ctx: EvalContext)
   const errText = [s.start_error, s.turn_error, failureReason(s), s.attention_reason, s.work?.phase === "blocked" ? s.work.line : ""]
     .filter(Boolean)
     .join(" · ");
-  const meta = [s.cwd, s.repo_root, s.branch, s.space_name, s.slot_name, sessionHarnessLabel(s), sessionModelId(s), s.activity]
+  const meta = [s.cwd, s.repo_root, s.branch, s.space_name, s.slot_name, searchableHarnessLabel(s), sessionModelId(s), s.activity]
     .filter(Boolean)
     .join(" · ");
 
@@ -485,7 +499,7 @@ export function compileSearchAsCode(
   }
 
   // 3. Detect harnesses from filter pills, operators, or natural language mentions
-  const harnessTargets = new Set<string>([...filters.harnesses.map((h) => h.toLowerCase()), ...parsed.harnesses]);
+  const harnessTargets = new Set<string>([...filters.harnesses.map((h) => h.toLowerCase()), ...parsed.harnesses].map(canonicalHarness));
   for (const h of nl ? ["claude", "codex", "opencode", "pi", "gemini", "cursor", "trae"] : []) {
     if (parsed.terms.some((w) => w.toLowerCase() === h)) harnessTargets.add(h);
   }
@@ -494,8 +508,8 @@ export function compileSearchAsCode(
     clauses.push(list.length === 1 ? `s.harness === ${JSON.stringify(list[0])}` : `${JSON.stringify(list)}.includes(s.harness)`);
     predicates.push((s) => {
       const hid = sessionHarnessId(s).toLowerCase();
-      const hlabel = sessionHarnessLabel(s).toLowerCase();
-      return list.some((target) => hid.includes(target) || hlabel.includes(target));
+      const hlabel = searchableHarnessLabel(s).toLowerCase();
+      return list.some((target) => matchesHarness(hid, target, hlabel));
     });
   }
 
@@ -620,7 +634,7 @@ function evaluateCustomPlanCode(code: string, s: Session, ctx: EvalContext): boo
   for (const m of code.matchAll(/s\.(machine|project|harness|model|state|title)\s*===\s*["']([^"']+)["']/g)) {
     const field = m[1];
     const target = m[2].toLowerCase();
-    if (!String(record[field] ?? "").includes(target)) return false;
+    if (field === "harness" ? !matchesHarness(String(record.harness), canonicalHarness(target)) : !String(record[field] ?? "").includes(target)) return false;
   }
   for (const m of code.matchAll(/\/([^/]+)\/[a-z]*\.test\(s\.(machine|project|harness|model|title)\)/g)) {
     try {

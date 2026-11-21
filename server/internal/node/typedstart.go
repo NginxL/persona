@@ -235,9 +235,9 @@ func (n *Node) closeNewTab(ctx context.Context, launch host.Launcher, created *h
 	if !ok || adoptedPane(ctx) != nil {
 		return
 	}
-	space := ws
+	space := created.SpaceID
 	if space == "" {
-		space = created.SpaceID
+		space = ws
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	_ = org.Close(cctx, created.Pane, space, created.SlotID)

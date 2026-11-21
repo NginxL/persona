@@ -18,8 +18,9 @@ import { StatusMark } from "../../ui/StatusMark";
 import { t } from "../../i18n";
 
 /** How the Agent came to the task (a `task` feed item's `wake`): started for it (New), running already when the task
- *  took it over (Already active), or closed and resumed by the hand-off's message (Resumed). */
-export type HandoffWake = "created" | "active" | "resumed";
+ *  took it over (Already active), or closed and resumed by the hand-off's message (Resumed). A plan can also
+ *  carry on an existing task (Continuation). */
+export type HandoffWake = "created" | "active" | "resumed" | "continuation";
 
 /** A `task` feed item's wake; anything else (none, an older hub) is New. */
 export function feedWake(wake: string | undefined): HandoffWake {
@@ -98,7 +99,7 @@ export interface Handoff {
  *  (TASK_LINE_SLACK_MS for a standalone task line, none for a plan's). */
 export function taskHandoffs(todo: Todo | undefined, planned: { key: string; title: string; error?: string; todoId?: string; superseded?: boolean } | undefined, wake: HandoffWake, plans: Record<string, TaskPlan>, loaded = true, since?: string, slack = 0): Handoff[] {
   // a task made of a running Agent, or resumed: its Agent may be linked before the line; one a plan started never is
-  const shown = handoffAgents(todo?.agents ?? [], since, wake !== "created" || Boolean(planned?.superseded), slack);
+  const shown = handoffAgents(todo?.agents ?? [], since, wake === "active" || wake === "resumed" || Boolean(planned?.superseded), slack);
   if (todo && shown.length > 0) {
     return shown.map((a) => ({ key: `${a.machine_id}/${a.session_id}`, title: todo.title, wake, mid: a.machine_id, sid: a.session_id, agentTitle: a.title, todo: todo.id }));
   }
@@ -137,7 +138,7 @@ export function HandoffCard({ handoff }: { handoff: Handoff }) {
   const closed = useStore((s) => Boolean(todo && s.todos.find((x) => x.id === todo)?.done_at));
   useNow(60_000, Boolean(agent)); // "last active" moves on by the minute
   const title = session?.title?.trim() || handoff.agentTitle?.trim() || handoff.title || t("assistant-tasks.task_fallback");
-  const badge = wake === "active" ? t("assistant-tasks.handoff_wake_active") : wake === "resumed" ? t("assistant-tasks.handoff_wake_resumed") : t("assistant-tasks.handoff_wake_created");
+  const badge = t(`assistant-tasks.handoff_wake_${wake}`);
   const interactive = Boolean(agent || todo);
   const open = () => {
     if (agent) openAgent(agent.mid, agent.sid);
@@ -172,7 +173,9 @@ export function HandoffCard({ handoff }: { handoff: Handoff }) {
       )}
     </>
   ) : failure ? (
-    <span data-handoff-failure className="truncate text-[12px] leading-4 text-red">{startFailureCardLine(failure)}</span>
+    <span data-handoff-failure className={cx("min-w-0 text-[12px] leading-4 text-red", interactive ? "truncate" : "break-words")}>
+      {startFailureCardLine(failure, interactive)}
+    </span>
   ) : handoff.ended ? (
     <span className="truncate text-[12px] leading-4 text-ink-3">{todo ? t("assistant-tasks.handoff_closed") : t("assistant-tasks.handoff_gone")}</span>
   ) : (
@@ -190,7 +193,7 @@ export function HandoffCard({ handoff }: { handoff: Handoff }) {
             data-handoff-wake={wake}
             className={cx(
               "shrink-0 rounded-full px-2 py-[2px] text-[10px] leading-4 font-medium tracking-[0.4px] whitespace-nowrap uppercase",
-              // cindy: New and Resumed filled (just started or woken), Already active outlined
+              // Only Already active is outlined.
               wake === "active" ? "border border-ink bg-surface text-ink" : "bg-ink text-surface",
             )}
           >

@@ -34,4 +34,13 @@ class PermissionSummaryTest {
         assertEquals(PermissionSummary(CoreText.plain("Custom tool")), request.copy(toolInput = null).permissionSummary())
         assertEquals(PermissionSummary(CoreText.plain("[]")), request.copy(toolInput = Json.parseToJsonElement("[]")).permissionSummary())
     }
+
+    @Test fun secretHandoffNeverUsesItsSummaryOrRawInput() {
+        val input = Json.parseToJsonElement("""{"variables":[{"name":"TOKEN","reference":"op://sentinel/reference","value":"sentinel-value"}]}""")
+        val request = Interaction("request", kind = "permission", toolName = "secret_handoff", toolInput = input,
+            summary = "sentinel-summary")
+        val safe = PermissionSummary(CoreText.of(CoreText.Key.HeadlineSecretHandoff))
+        assertEquals(safe, request.permissionSummary())
+        assertEquals(safe, request.copy(summary = null).permissionSummary())
+    }
 }

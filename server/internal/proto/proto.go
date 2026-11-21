@@ -42,6 +42,7 @@ var Features = []string{
 	FeatureMessageSendState,    // informational receipt support; trust only authenticated hello.message_send_state == 1
 	FeatureTodoSendState,       // informational: a to-do write's receipts (#10465); trust only authenticated hello.todo_send_state == 1
 	"client_ops",               // durable operation receipts and read-only status queries
+	FeatureAgentTerminalSend,   // paired terminal sends to exact Agent sessions
 	"send_refusals",            // 409 dialog_open / input_draft, clear_draft
 	"screen_dialog",            // interaction.dialog, Resolution.option, 409 prompt_changed
 	"resumable_interactions",   // hook questions survive hub / node restarts

@@ -27,6 +27,13 @@ interface InteractionCenter {
         resolve(id, resolution)
         return ResolveOutcome()
     }
+    /** A full-card hand-off approval declares itself on this request alone; all other calls keep the old path. */
+    suspend fun resolveOutcome(id: String, resolution: Resolution, handoffCard: Boolean): ResolveOutcome =
+        resolveOutcome(id, resolution)
+
+    /** Replies to the exact proposal and removes it only after the hub confirms that same target. */
+    suspend fun replyOwnerApproval(interaction: Interaction, phrase: String): Unit =
+        throw UnsupportedOperationException("Exact owner replies unavailable")
 
     /**
      * Questions the assistant answered for the user, oldest first (iOS `AppModel.delegatedAnswers`): from

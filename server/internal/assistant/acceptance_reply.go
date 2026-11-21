@@ -43,6 +43,11 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 	}
 	t, ok := s.todoNow(id)
 	ask, _ := s.askCopy(id)
+	card := slices.IndexFunc(ids, func(mid string) bool { return mid != "" && slices.Contains(ask.Messages, mid) })
+	if card < 0 {
+		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+		return true
+	}
 	if decideAsk(&ask) && !ask.AcceptedAt.IsZero() { // taken, or its review moved on: over
 		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		return true
@@ -60,7 +65,7 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 				return true
 			}
 		}
-		if result, err := s.acceptTry(ctx, id, ""); errors.Is(err, errAcceptStore) {
+		if result, err := s.acceptTry(ctx, id, ids[card]); errors.Is(err, errAcceptStore) {
 			s.botNote(ctx, messageID, i18n.T(l, "http-status.unavailable"))
 		} else if note := inDoubtNote(l, err); note != "" { // it may be with the agent already: look before saying it again
 			s.botNote(ctx, messageID, note)
@@ -76,12 +81,43 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 		}
 		return true
 	}
+	// Outside decision replies take the task's action lock in answerDecisionText.
+	if decideAsk(&ask) && ask.OutsideID != "" {
+		result, err := s.answerDecisionText(ctx, id, ask.AskedAt.UTC().Format(timeKeyLayout), text)
+		switch {
+		case errors.Is(err, errAcceptStore):
+			s.botNote(ctx, messageID, i18n.T(l, "http-status.unavailable"))
+		case err != nil:
+			s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.accept_not_taken", i18n.Args{"error": clip(oneLine(i18n.Localize(err, l)), 120)}))
+		case !result.taken:
+			s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+		default:
+			s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.outside_answered"))
+		}
+		return true
+	}
+	s.reviewDismissals.actions.acquire(id)
+	t, ok = s.todoNow(id)
 	if !ok {
+		s.reviewDismissals.actions.release(id)
 		s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.accept_gone"))
 		return true
 	}
-	if a, _ := s.acceptAskLocked(id); a != nil && acceptAskStale(a, t) { // old round's change is answered, not routed
+	if a, _ := s.acceptAskLocked(id); a == nil || !a.AskedAt.Equal(ask.AskedAt) || acceptAskStale(a, t) {
+		s.reviewDismissals.actions.release(id)
 		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+		return true
+	}
+	// Feedback starts its work round before delivery, which may wait for an offline Agent to resume.
+	var reopenErr error
+	if t.StartError == "" {
+		reopenErr = s.reopenTodo(ctx, id)
+	}
+	s.reviewDismissals.actions.release(id)
+	if reopenErr != nil {
+		s.logf("task %s: acceptance reopen: %v", id, reopenErr)
+		s.botNote(ctx, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_not_sent",
+			i18n.Args{"error": clip(oneLine(reopenErr.Error()), 120)}), media))
 		return true
 	}
 	question, msg := i18n.T(l, "assistant-reports.accept_question"), i18n.T(l, "assistant-reports.accept_to_agent", i18n.Args{"feedback": text})
@@ -105,14 +141,6 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 			s.decisionsChanged(ctx, id, at)
 		}
 	}
-	// Not accepted: the work goes on. A task the hub (or the user) closed meanwhile is open again before its agent is
-	// told, so the turn the change starts is followed (receipt, judgment, the next "Please verify") and the task shows as in
-	// progress, not done (#3457). It stays open when the send fails: the change is still to be made.
-	if t.StartError == "" {
-		if err := s.reopenTodo(ctx, id); err != nil {
-			s.logf("task %s: acceptance reopen: %v", id, err)
-		}
-	}
 	if _, err := s.relayToTask(ctx, t.Origin, id, msg, nil); err != nil {
 		s.logf("task %s: acceptance to agent: %v", id, err)
 		why := clip(oneLine(err.Error()), 120)
@@ -122,7 +150,7 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 		}
 		// A decision answered in words is made even when its agent cannot take it now: recorded above, its ask is answered,
 		// and its supervisor is told to pass it on. Never resent by the hub, so the agent cannot get it twice.
-		s.answeredInWords(ctx, id)
+		s.answeredInWords(ctx, id, ask.AskedAt)
 		s.decisionNotDelivered(ctx, id, ask.AskedAt, text, err)
 		s.botNote(ctx, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_decided_not_sent", i18n.Args{"error": why}), media))
 		return true
@@ -130,17 +158,22 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 	if decideAsk(&ask) {
 		s.userDecided(ctx, id) // decided: its agent's next stop goes back to the supervisor
 	}
-	s.answeredInWords(ctx, id)
+	s.answeredInWords(ctx, id, ask.AskedAt)
 	s.botNote(ctx, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_sent"), media))
 	return true
 }
 
 // answeredInWords: the owner's words answered task id's ask. Changed again: the next deploy asks again. A decision is answered:
 // its card stays known, and says so to a reply.
-func (s *Service) answeredInWords(ctx context.Context, id string) {
+func (s *Service) answeredInWords(ctx context.Context, id string, askedAt time.Time) {
 	b := &s.accept
 	b.mu.Lock()
-	if a := b.asks[id]; a != nil && decideAsk(a) {
+	a := b.asks[id]
+	if a == nil || !a.AskedAt.Equal(askedAt) {
+		b.mu.Unlock()
+		return
+	}
+	if decideAsk(a) {
 		a.AcceptedAt = time.Now().UTC()
 	} else {
 		delete(b.asks, id)
@@ -194,11 +227,20 @@ func (s *Service) acceptTry(ctx context.Context, id, card string) (acceptResult,
 func (s *Service) acceptTryAs(ctx context.Context, id, card string, byDefault bool) (acceptResult, error) {
 	s.reviewDismissals.actions.acquire(id)
 	defer s.reviewDismissals.actions.release(id)
-	return s.acceptTryAsDismissalLocked(ctx, id, card, byDefault)
+	return s.acceptTryAsDismissalLocked(ctx, id, card, time.Time{}, byDefault)
+}
+
+// ownerPassPending follows this round's durable owner Pass through completion, ledger and verification writes.
+func ownerPassPending(a *acceptAsk, t Todo) bool {
+	return a != nil && !a.AskedAt.IsZero() && !a.AcceptedAt.IsZero() &&
+		!decideAsk(a) && !a.Conclusion && !a.ByAssistant && !a.BySupervisor &&
+		userCheckAsked(t) && !acceptAskStale(a, t) &&
+		(t.Supervision.State == reviewUserCheck ||
+			t.Supervision.State == reviewAccepted && t.DoneAt != nil && !t.stageVerified)
 }
 
 // acceptTryAsDismissalLocked holds only this task's action lock across its send, not the book mutex.
-func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card string, byDefault bool) (acceptResult, error) {
+func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card string, askedAt time.Time, byDefault bool) (acceptResult, error) {
 	t, todoOK := s.todoNow(id)
 	if todoOK && byDefault { // Hidden is not answered: no default is taken for a dismissed round
 		if dismissed, err := s.decisionDismissed(ctx, t); err != nil || dismissed {
@@ -212,13 +254,22 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 		return acceptResult{}, errAcceptStore
 	}
 	a, ok := b.asks[id]
-	if !ok || a.AskedAt.IsZero() || !a.AcceptedAt.IsZero() || (todoOK && acceptAskStale(a, t)) || (card != "" && card != a.MessageID && !slices.Contains(a.Messages, card)) ||
+	resumeOwnerPass := ok && todoOK && ownerPassPending(a, t)
+	ownerCheck := todoOK && t.Supervision != nil && (t.Supervision.State == reviewUserCheck || resumeOwnerPass)
+	if !ok || a.AskedAt.IsZero() || !askedAt.IsZero() && !a.AskedAt.Equal(askedAt) ||
+		!a.AcceptedAt.IsZero() && !resumeOwnerPass || (todoOK && acceptAskStale(a, t)) || (card != "" && card != a.MessageID && !slices.Contains(a.Messages, card)) ||
 		decideAsk(a) && (a.Recommend == "" || todoOK && acceptAskEnded(a, t) || !a.RecheckAt.IsZero() || todoOK && ownerDecisionReturned(t.Supervision)) ||
 		byDefault && !(decideAsk(a) && a.Reversible && !a.Deadline.IsZero() && a.DueAt.IsZero() && !time.Now().Before(a.Deadline)) {
 		b.mu.Unlock()
 		return acceptResult{}, nil
 	}
 	completeDismissal := func() {}
+	if a.OutsideID != "" {
+		asked := a.AskedAt.UTC().Format(timeKeyLayout)
+		recommend := a.Recommend
+		b.mu.Unlock()
+		return s.answerOutside(ctx, id, asked, outsideAnswer{Option: recommend}, byDefault)
+	}
 	if todoOK && !byDefault {
 		var err error
 		completeDismissal, err = s.prepareDismissalForAnswer(ctx, t)
@@ -227,24 +278,61 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 			return acceptResult{}, err
 		}
 	}
-	previousDueAt := a.DueAt
-	a.AcceptedAt = time.Now().UTC()
+	previousDueAt, previousAcceptedAt := a.DueAt, a.AcceptedAt
+	if a.AcceptedAt.IsZero() {
+		a.AcceptedAt = time.Now().UTC()
+	}
 	if byDefault {
 		a.ByDefault, a.DueAt = true, a.AcceptedAt
 	}
-	if err := s.saveAcceptErrLocked(ctx); err != nil {
-		// Kept only in memory, it would wait again after a restart: not accepted, and nothing that follows one runs.
-		a.AcceptedAt, a.ByDefault, a.DueAt = time.Time{}, false, previousDueAt
-		b.mu.Unlock()
-		s.logf("task %s: acceptance: save: %v", id, err)
-		return acceptResult{}, fmt.Errorf("%w: %w", errAcceptStore, err)
+	if !resumeOwnerPass {
+		if err := s.saveAcceptErrLocked(ctx); err != nil {
+			// Kept only in memory, it would wait again after a restart: not accepted, and nothing that follows one runs.
+			a.AcceptedAt, a.ByDefault, a.DueAt = previousAcceptedAt, false, previousDueAt
+			b.mu.Unlock()
+			s.logf("task %s: acceptance: save: %v", id, err)
+			return acceptResult{}, fmt.Errorf("%w: %w", errAcceptStore, err)
+		}
 	}
 	cp := *a
 	b.mu.Unlock()
 	s.askChanged(ctx) // it no longer waits
 	if !decideAsk(&cp) && !cp.Conclusion {
+		if ownerCheck {
+			closed := false
+			if t.DoneAt == nil {
+				var err error
+				closed, err = s.reviewDoneTodo(ctx, id, acceptedNote(s.botLang(ctx), &cp), true)
+				if err != nil {
+					b.mu.Lock()
+					if a := b.asks[id]; a != nil && a.AskedAt.Equal(cp.AskedAt) {
+						a.AcceptedAt = previousAcceptedAt
+						s.saveAcceptLocked(ctx)
+					}
+					b.mu.Unlock()
+					s.askChanged(ctx)
+					return acceptResult{}, fmt.Errorf("%w: %w", errAcceptStore, err)
+				}
+			}
+			v, changed, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
+				if v.State != reviewUserCheck {
+					return false
+				}
+				v.State = reviewAccepted
+				return true
+			})
+			if err != nil {
+				s.logf("task %s: owner verification: %v", id, err)
+				return acceptResult{}, fmt.Errorf("%w: %w", errAcceptStore, err)
+			}
+			if closed || changed {
+				s.taskReviewed(ctx, v.Supervisor, id, reviewAccepted, v)
+			}
+		}
 		completeDismissal()
-		s.taskVerified(ctx, id, cp)
+		if !ownerCheck || !t.stageVerified {
+			s.taskVerified(ctx, id, cp)
+		}
 		return acceptSucceeded(), nil
 	}
 	result := acceptSucceeded()

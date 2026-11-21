@@ -96,6 +96,7 @@ func (n *Node) markStopped(s *proto.Session) {
 	if n.isAssistantSession(s.SessionID) || n.runtimeAssistant(s.SessionID) || n.freshFork(s.SessionID) {
 		return
 	}
+	n.noteGatewayStop(s)
 	s.Capabilities = &proto.SessionCapabilities{Read: true, Terminal: true, StopCause: n.stopCause(s.SessionID)}
 	s.ReadOnlyReason = stoppedReason
 }

@@ -206,10 +206,24 @@ internal object ExtensionText {
         return if (text.isNullOrEmpty()) res.getString(R.string.settings_ext_not_set) else res.getString(R.string.settings_ext_default_value, text)
     }
 
-    fun secretState(res: Resources, secret: persona.core.contracts.api.ExtensionSecret): String = when {
-        secret.set -> res.getString(R.string.settings_ext_secret_set)
-        secret.required == true -> res.getString(R.string.settings_ext_secret_required)
-        else -> res.getString(R.string.settings_ext_not_set)
+    fun secretState(res: Resources, secret: persona.core.contracts.api.ExtensionSecret): String {
+        secret.reference?.let { reference ->
+            if (reference.providerLabel.isNotBlank()) return res.getString(
+                R.string.settings_ext_secret_from_provider, reference.providerLabel, reference.reference)
+            return reference.title?.takeIf { it.isNotBlank() } ?: reference.reference
+        }
+        return when {
+            secret.set -> res.getString(R.string.settings_ext_secret_set)
+            secret.required == true -> res.getString(R.string.settings_ext_secret_required)
+            else -> res.getString(R.string.settings_ext_not_set)
+        }
+    }
+
+    /** The provider-described item beneath a saved reference, or its raw reference when the provider is gone. */
+    fun secretReferenceDetail(secret: persona.core.contracts.api.ExtensionSecret): String? {
+        val reference = secret.reference ?: return null
+        return if (reference.providerLabel.isNotBlank()) reference.title?.takeIf { it.isNotBlank() }
+        else reference.reference.takeIf { reference.title?.isNotBlank() == true && it != reference.title }
     }
 
     /**
@@ -691,7 +705,16 @@ internal class ExtensionModel(
         return busy { run { api.setSecret(id, name, trimmed) } }
     }
 
+    suspend fun setSecretReference(name: String, reference: String): Boolean {
+        val trimmed = reference.trim()
+        if (trimmed.isEmpty()) return false
+        return busy { run { api.setSecretReference(id, name, trimmed) } }
+    }
+
     suspend fun clearSecret(name: String): Boolean = busy { run { api.clearSecret(id, name) } }
+
+    suspend fun removeHandoffRule(rule: persona.core.contracts.api.HandoffRule): Boolean =
+        busy { run { api.removeHandoffRule(id, rule.id) } }
 
     /** A market extension's own auto-upgrade switch (docs/extensions/extensions.md "Auto-upgrade"). */
     suspend fun setAutoUpgrade(on: Boolean): Boolean = busy {

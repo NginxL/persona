@@ -112,6 +112,8 @@ internal fun ChatPageReaderContent(
     subagentCards: Boolean,
     messageMenu: MessageMenuState,
     turnLauncher: String?,
+    earlierEngines: EarlierEnginePresentation?,
+    onReadEarlierText: (SessionKey, Item) -> Unit,
 ) {
     val horizontalPadding = pagePadding
     val res = LocalResources.current
@@ -247,6 +249,7 @@ internal fun ChatPageReaderContent(
                         item(key = "outbox-${message.clientMessageId}", contentType = "outbox") { outboxBubble(message) }
                     }
                 }
+                if (earlierEngines != null) earlierEngineHistory(earlierEngines, scope, loader, renderStyle, onReadEarlierText)
                 if (snapshot.loadingOlder) item(key = "loading-older", contentType = "loading") { JLoading() }
                 if (snapshot.hasOlder && !snapshot.loadingOlder) item(key = "older", contentType = "older") {
                     JTextButton(stringResource(R.string.chat_screen_load_older), {
@@ -263,7 +266,7 @@ internal fun ChatPageReaderContent(
                     bottom = listBottomInset + Tokens.Space.m))
                 else JLoading(Modifier.align(Alignment.Center).padding(readerPadding).padding(horizontal = horizontalPadding))
             }
-            else if (!settling && lines.isEmpty() && messages.isEmpty() && heldRows.isEmpty() && undeliveredRows.isEmpty() && snapshot.error == null)
+            else if (!settling && lines.isEmpty() && messages.isEmpty() && heldRows.isEmpty() && undeliveredRows.isEmpty() && snapshot.error == null && earlierEngines == null)
                 JEmptyState(stringResource(R.string.chat_screen_empty_title),
                     emptyChatHint(res, session, machineName, readOnly),
                     Modifier.align(Alignment.Center).padding(readerPadding).padding(horizontal = horizontalPadding))

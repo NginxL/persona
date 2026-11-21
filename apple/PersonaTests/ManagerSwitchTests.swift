@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import Persona
 import PersonaWire
@@ -224,6 +225,36 @@ struct ManagerSwitchTests {
     private func waitUntil(_ what: () -> Bool) async {
         let deadline = Date.now + 5
         while !what(), Date.now < deadline { try? await Task.sleep(for: .milliseconds(20)) }
+    }
+
+    // MARK: whose page it is
+
+    /// The screenshot banner (#9508) names the page as the top bar does (#12243): with one assistant the current one
+    /// (the localized assistant name in the sidebar's head and the bar), not the persona's name, which the banner drew before; with
+    /// several the picked one; without a roster the persona's. The composer, calls and voice keep `assistantShownName`.
+    @Test func theScreenshotBannerSaysTheTopBarsName() throws {
+        let model = try model(FakeHub(), roster: try Self.roster(Self.oneManager))
+        let bar = "助手" // i18n-ignore: the made-up roster's assistant
+        #expect(model.persona.name != bar && model.managerRoster?.isMulti == false && model.assistantManager == nil)
+        #expect(model.assistantTitleName == bar, "one assistant: the bar's and the sidebar head's name")
+        #expect(model.assistantTitleName(in: SessionKey(machineID: "box", sessionID: "chat")) == bar)
+        #expect(model.assistantShownName == model.persona.name, "the composer and calls keep the persona's name")
+        #expect(try drawn(PersonaBrandLockup(size: .banner), model) == drawn(PersonaBrandLockup(size: .banner, name: bar), model),
+                "the banner draws the bar's name")
+        #expect(try drawn(PersonaBrandLockup(size: .banner), model) != drawn(PersonaBrandLockup(size: .banner, name: model.persona.name), model))
+
+        model.managerRosters[""] = try Self.roster()
+        model.selectAssistantManager("m-1")
+        #expect(model.assistantTitleName == "工作" && model.assistantShownName == "工作", "several: the picked one") // i18n-ignore: made-up name
+        model.managerRosters[""] = nil
+        #expect(model.assistantTitleName == model.persona.name, "no roster: the persona's name, as the sidebar's head")
+    }
+
+    /// A banner as a picture, drawn with `model`.
+    private func drawn(_ v: some View, _ model: AppModel) throws -> Data {
+        let r = ImageRenderer(content: v.frame(width: 370, alignment: .leading).background(Color.white).environment(model))
+        r.scale = 2
+        return try #require(r.uiImage?.pngData())
     }
 
     // MARK: the page's manager

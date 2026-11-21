@@ -25,15 +25,16 @@ class PlatformEntryTest {
             SharedAttachment(first.name, "first.txt"), SharedAttachment(second.name, "second.txt")), queued = true)
         writePlatformFile(file, JsonCodec.encodeToString(QueuedShare.serializer(), entry))
         val uploads = mutableListOf<String>()
-        val sent = mutableListOf<Pair<String, String>>()
-        val main: suspend (String, String) -> Unit = { text, id -> sent += id to text }
-        val agent: suspend (SessionKey, String, String) -> Unit = { _, _, _ -> error("Wrong destination") }
+        val prepared = mutableListOf<String>()
+        val sent = mutableListOf<Triple<String, String, String>>()
+        val main: suspend (String, String, String) -> Unit = { text, id, via -> sent += Triple(id, text, via) }
+        val agent: suspend (SessionKey, String, String, String) -> Unit = { _, _, _, _ -> error("Wrong destination") }
         val target = SessionKey("machine", "main-session")
-        assertTrue(deliverQueuedShare(file, false, "Shared content", { error("Offline must not resolve main") },
+        assertTrue(deliverQueuedShare(file, false, "Shared content", { _ -> error("Offline must not resolve main") },
             { _, _, _, _ -> error("Offline must not upload") }, main, agent))
         assertTrue(first.exists() && second.exists())
         try {
-            deliverQueuedShare(file, true, "Shared content", { target }, { _, attachment, _, _ ->
+            deliverQueuedShare(file, true, "Shared content", { via -> prepared += via; target }, { _, attachment, _, _ ->
                 uploads += attachment.name
                 if (attachment.name == second.name) throw IOException("Disconnected")
                 "/tmp/shared/first.txt"
@@ -44,7 +45,7 @@ class PlatformEntryTest {
         assertTrue(first.exists() && second.exists())
         val restored = JsonCodec.decodeFromString<QueuedShare>(file.readText())
         assertEquals("/tmp/shared/first.txt", restored.attachments.first().path)
-        assertFalse(deliverQueuedShare(file, true, "Shared content", { target }, { _, attachment, _, _ ->
+        assertFalse(deliverQueuedShare(file, true, "Shared content", { via -> prepared += via; target }, { _, attachment, _, _ ->
             uploads += attachment.name
             assertEquals("second attachment", attachment.readText())
             "/tmp/shared/second.txt"
@@ -56,9 +57,12 @@ class PlatformEntryTest {
 
         val textFile = File(temporary.newFolder(), "entry.json")
         writePlatformFile(textFile, JsonCodec.encodeToString(QueuedShare.serializer(), QueuedShare("offline-text", "", "你好", queued = true)))
-        assertFalse(deliverQueuedShare(textFile, false, "Shared content", { error("Main is resolved by core outbox later") },
+        assertFalse(deliverQueuedShare(textFile, false, "Shared content", { _ -> error("Main is resolved by core outbox later") },
             { _, _, _, _ -> error("No attachments") }, main, agent))
         assertEquals("offline-text", sent.last().first)
+        assertTrue(prepared.all { it == persona.core.contracts.api.MessageVia.Share })
+        assertEquals(2, prepared.size)
+        assertTrue(sent.all { it.third == persona.core.contracts.api.MessageVia.Share })
     }
 
     @Test fun mainConversationUploadsGoToTheShareOwnersHub() = runTest {
@@ -69,9 +73,13 @@ class PlatformEntryTest {
         writePlatformFile(file, JsonCodec.encodeToString(QueuedShare.serializer(), QueuedShare("main-photo", "", "",
             listOf(SharedAttachment("photo.bin", "photo.jpg")), queued = true)))
         val hubs = mutableListOf<String>()
-        assertFalse(deliverQueuedShare(file, true, "Shared content", { SessionKey("machine", "main-session") },
+        assertFalse(deliverQueuedShare(file, true, "Shared content", { via ->
+            assertEquals(persona.core.contracts.api.MessageVia.Share, via)
+            SessionKey("machine", "main-session")
+        },
             { machine, _, _, main -> hubs += shareUploadApi(main, machine, "owner") { "primary" }; "/tmp/shared/photo.jpg" },
-            { _, _ -> }, { _, _, _ -> error("Wrong destination") }))
+            { _, _, via -> assertEquals(persona.core.contracts.api.MessageVia.Share, via) },
+            { _, _, _, _ -> error("Wrong destination") }))
         assertEquals(listOf("owner"), hubs)
         assertEquals("primary", shareUploadApi(false, "machine", "owner") { "primary" })
     }
@@ -91,7 +99,7 @@ class PlatformEntryTest {
         val fresh = staged("fresh", false, 60_000)
         val waiting = staged("waiting", true, 2 * day)
         for (file in listOf(expired, fresh, waiting)) assertEquals(file === waiting, deliverQueuedShare(file, false, "Shared content",
-            { error("Offline") }, { _, _, _, _ -> error("Offline") }, { _, _ -> error("Offline") }, { _, _, _ -> error("Offline") }))
+            { _ -> error("Offline") }, { _, _, _, _ -> error("Offline") }, { _, _, _ -> error("Offline") }, { _, _, _, _ -> error("Offline") }))
         assertFalse(expired.parentFile!!.exists())
         assertTrue(File(fresh.parentFile, "copy.bin").exists())
         assertTrue(File(waiting.parentFile, "copy.bin").exists())

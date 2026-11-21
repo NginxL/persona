@@ -34,14 +34,16 @@ class PhoneToolRegistryTest {
         var executions = 0
         val registry = PhoneToolRegistry({ sources }, { online }, { foreground }, { _, _ -> permission },
             { error("Reads must not ask for confirmation") }, { _, _ -> executions++; PhoneToolResult.text("ok") })
-        assertEquals(18, registry.enabledSpecs().size)
+        assertEquals(19, registry.enabledSpecs().size)
         assertFalse(registry.all.any { it.name.startsWith("phone_reminders_") || it.name == "phone_health_write_sample" })
         assertTrue(registry.all.any { it.name == "phone_health_summary" })
         assertTrue(registry.all.any { it.name == "phone_workouts_recent" })
         assertTrue(registry.all.any { it.name == "phone_workout_detail" })
         assertTrue(registry.all.all { it.inputSchema["type"]?.jsonPrimitive?.content == "object" })
         foreground = false
-        assertFalse(registry.enabledSpecs().any { it.name == "phone_clipboard_get" || it.name == "phone_location_current" })
+        assertFalse(registry.enabledSpecs().any {
+            it.name == "phone_clipboard_get" || it.name == "phone_location_current" || it.name == "phone_call_start"
+        })
         val background = registry.call(PhoneToolCall("background", "phone_clipboard_get", buildJsonObject {}))
         assertTrue(background.isError)
         assertTrue(text(background).contains("open on screen"))
@@ -70,6 +72,65 @@ class PhoneToolRegistryTest {
         // The same call delivered twice runs once.
         assertFalse(registry.call(PhoneToolCall("valid", "phone_device_info", buildJsonObject {})).isError)
         assertEquals(2, executions)
+    }
+
+    @Test fun callsAreOptInConfirmedAndForegroundOnly() = runTest {
+        val definition = requireNotNull(PhoneToolCatalog.all.singleOrNull { it.spec.name == "phone_call_start" }) {
+            "Android must register phone_call_start"
+        }
+        assertEquals("calls", definition.source.key)
+        assertTrue(definition.foregroundOnly)
+        assertTrue("phone_call_start" in PhoneToolCatalog.confirmedWriteNames)
+        assertNotNull(definition.confirmation)
+        assertFalse(definition.confirmationNeedsPreparation)
+
+        var sourceEnabled = true
+        var foreground = true
+        var decision = PhoneConfirmation.Denied
+        var confirmations = 0
+        var executions = 0
+        val registry = PhoneToolRegistry(
+            { if (sourceEnabled) setOf(definition.source) else emptySet() }, { true }, { foreground }, { _, _ -> true },
+            { render ->
+                val card = render(res)
+                assertTrue(card, card.contains("Sam") && card.contains("+15550100199"))
+                confirmations++
+                decision
+            },
+            { name, _ ->
+                assertEquals("phone_call_start", name)
+                executions++
+                PhoneToolResult.text("handed off")
+            })
+        val args = buildJsonObject {
+            put("number", "+1 (555) 010-0199"); put("kind", "phone"); put("name", "Sam")
+        }
+        fun call(id: String) = PhoneToolCall(id, "phone_call_start", args)
+
+        assertEquals(listOf("phone_call_start"), registry.enabledSpecs().map { it.name })
+        sourceEnabled = false
+        assertTrue(registry.enabledSpecs().isEmpty())
+        assertTrue(registry.call(call("source-off")).isError)
+        assertEquals(0, confirmations)
+        assertEquals(0, executions)
+
+        sourceEnabled = true
+        foreground = false
+        assertTrue(registry.enabledSpecs().isEmpty())
+        val background = registry.call(call("background"))
+        assertTrue(background.isError)
+        assertTrue(text(background).contains("open on screen"))
+        assertEquals(0, confirmations)
+        assertEquals(0, executions)
+
+        foreground = true
+        assertEquals(PhoneToolText.DECLINED, text(registry.call(call("denied"))))
+        assertEquals(1, confirmations)
+        assertEquals(0, executions)
+        decision = PhoneConfirmation.Allowed
+        assertFalse(registry.call(call("allowed")).isError)
+        assertEquals(2, confirmations)
+        assertEquals(1, executions)
     }
 
     @Test fun calendarWritesRequireOneLocalDecisionAndRecheckStateAfterApproval() = runTest {

@@ -14,6 +14,8 @@ data class PermissionSummary(val text: CoreText, val description: String? = null
 
 /** Keep hub summaries intact and prefer useful tool fields over raw input. */
 fun Interaction.permissionSummary(): PermissionSummary {
+    // Android knows this card: use its own safe headline, not a compatibility summary or any raw input.
+    if (isSecretHandoff) return PermissionSummary(CoreText.of(Key.HeadlineSecretHandoff))
     summary?.takeIf(String::isNotBlank)?.let { return PermissionSummary(CoreText.plain(it)) }
     val input = toolInput as? JsonObject
     fun field(key: String) = (input?.get(key) as? JsonPrimitive)?.takeIf { it.isString }

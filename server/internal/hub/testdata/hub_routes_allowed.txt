@@ -54,6 +54,11 @@ GET /api/v1/machines/{mid}/file
 GET /api/v1/machines/{mid}/file/convert
 GET /api/v1/machines/{mid}/file/download
 GET /api/v1/machines/{mid}/file/thumb
+GET /api/v1/machines/{mid}/files/download
+GET /api/v1/machines/{mid}/files/list
+GET /api/v1/machines/{mid}/files/preview
+GET /api/v1/machines/{mid}/files/roots
+GET /api/v1/machines/{mid}/files/tail
 GET /api/v1/machines/{mid}/fs
 GET /api/v1/machines/{mid}/fs/find
 GET /api/v1/machines/{mid}/git/blob
@@ -65,13 +70,18 @@ GET /api/v1/machines/{mid}/git/review
 GET /api/v1/machines/{mid}/git/show
 GET /api/v1/machines/{mid}/git/status
 GET /api/v1/machines/{mid}/grok-settings
+GET /api/v1/machines/{mid}/network
 GET /api/v1/machines/{mid}/omp-settings
 GET /api/v1/machines/{mid}/panes
+GET /api/v1/machines/{mid}/ports
 GET /api/v1/machines/{mid}/ports/{port}
 GET /api/v1/machines/{mid}/ports/{port}/connect
 GET /api/v1/machines/{mid}/preview/connect
 GET /api/v1/machines/{mid}/preview/servers
+GET /api/v1/machines/{mid}/processes
 GET /api/v1/machines/{mid}/screen/video/connect
+GET /api/v1/machines/{mid}/services
+GET /api/v1/machines/{mid}/services/logs
 GET /api/v1/machines/{mid}/stat
 GET /api/v1/managers
 GET /api/v1/mutes
@@ -80,6 +90,7 @@ GET /api/v1/personas
 GET /api/v1/personas/{id}/{file...}
 GET /api/v1/pins
 GET /api/v1/sessions
+GET /api/v1/sessions/{mid}/{sid}/agent-messages
 GET /api/v1/sessions/{mid}/{sid}/info
 GET /api/v1/sessions/{mid}/{sid}/items
 GET /api/v1/sessions/{mid}/{sid}/items/{iid}/full
@@ -159,6 +170,8 @@ POST /api/v1/machines/{mid}/panes/git
 POST /api/v1/machines/{mid}/panes/split
 POST /api/v1/machines/{mid}/ports/{port}/open
 POST /api/v1/machines/{mid}/preview/start
+POST /api/v1/machines/{mid}/processes/{pid}/kill
+POST /api/v1/machines/{mid}/services/action
 POST /api/v1/machines/{mid}/spaces/{wid}/rename
 POST /api/v1/machines/{mid}/tabs/close
 POST /api/v1/machines/{mid}/tabs/rename
@@ -178,6 +191,7 @@ POST /api/v1/managers/{id}/sources
 POST /api/v1/notify
 POST /api/v1/phone/runtime-cli
 POST /api/v1/sessions
+POST /api/v1/sessions/{mid}/{sid}/agent-messages
 POST /api/v1/sessions/{mid}/{sid}/attach
 POST /api/v1/sessions/{mid}/{sid}/close
 POST /api/v1/sessions/{mid}/{sid}/fork
@@ -209,17 +223,22 @@ PUT /api/v1/machines/{mid}/grok-settings
 PUT /api/v1/machines/{mid}/omp-settings
 PUT /api/v1/mutes
 PUT /api/v1/pins
-PUT /api/v1/push/ln-mode # ln mode switch (lnmode.go)
+PUT /api/v1/push/ln-mode # push grading switch, legacy alias (push_grading.go)
+PUT /api/v1/push/grading # push grading switch, neutral alias of ln-mode (push_grading.go)
 
 # Phone write delivery receipts (full credentials only).
 GET /api/v1/phone/write-queue
 POST /api/v1/phone/write-queue/{id}/cancel
 
+# The primary device phone calls go to first: the hub's phone transport and wake target, full credentials only (phone_primary.go).
+PUT /api/v1/phone/primary
+
 # Web Push to browsers (#7459): push delivery, the hub's own (hub/webpush_routes.go).
 DELETE /api/v1/push/web/{device}
-GET /api/v1/push/intercepts # ln mode held pushes, read-only (lnmode.go)
-GET /api/v1/push/ln-mode # ln mode switch (lnmode.go)
-GET /api/v1/push/stats/daily # push grading delivered/held counts per day, read-only (lnmode.go)
+GET /api/v1/push/intercepts # held pushes, read-only (push_grading.go)
+GET /api/v1/push/ln-mode # push grading switch, legacy alias (push_grading.go)
+GET /api/v1/push/grading # push grading switch, neutral alias of ln-mode (push_grading.go)
+GET /api/v1/push/stats/daily # push grading delivered/held counts per day, read-only (push_grading.go)
 GET /api/v1/push/web
 GET /api/v1/push/web/{device}
 POST /api/v1/push/web/{device}/test

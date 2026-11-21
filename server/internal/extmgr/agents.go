@@ -57,7 +57,7 @@ func (h *Manager) agentRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/v1/agents/sessions", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if sessionlist.Enabled(q) {
-			opts, err := sessionlist.Parse(q)
+			opts, err := sessionlist.ParseProviderSets(q)
 			if err != nil {
 				agentsErr(w, err)
 				return

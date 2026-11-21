@@ -77,58 +77,5 @@
       "kb/recording_title_input.md",
       "kb/topic_summary.md"
     ]
-  },
-  "mcp/agents": {
-    "count": 11,
-    "files": [
-      "mcp/agents/agent_start.md",
-      "mcp/agents/ask_escalate.md",
-      "mcp/agents/direction_name.md",
-      "mcp/agents/interaction_answer.md",
-      "mcp/agents/task_plan.md",
-      "mcp/agents/task_plan_withdraw.md",
-      "mcp/agents/task_retry.md",
-      "mcp/agents/task_review.md",
-      "mcp/agents/task_scope.md",
-      "mcp/agents/task_start_keys.md",
-      "mcp/agents/task_start_screen.md"
-    ]
-  },
-  "mcp/assistant": {
-    "count": 3,
-    "files": [
-      "mcp/assistant/conversation_archive.md",
-      "mcp/assistant/conversation_rename.md",
-      "mcp/assistant/persona_settings.md"
-    ]
-  },
-  "mcp/imessage": {
-    "count": 1,
-    "files": [
-      "mcp/imessage/imessage_read.md"
-    ]
-  },
-  "mcp/places": {
-    "count": 1,
-    "files": [
-      "mcp/places/save_place.md"
-    ]
-  },
-  "mcp/schedule": {
-    "count": 1,
-    "files": [
-      "mcp/schedule/schedule_routine.md"
-    ]
-  },
-  "mcp/voice": {
-    "count": 6,
-    "files": [
-      "mcp/voice/ask_persona.md",
-      "mcp/voice/delegate_task.md",
-      "mcp/voice/list_agents.md",
-      "mcp/voice/meeting_delegate_task.md",
-      "mcp/voice/search_knowledge.md",
-      "mcp/voice/send_to_agent.md"
-    ]
   }
 }

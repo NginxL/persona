@@ -1,4 +1,8 @@
 {
+  "skip_next_changed": "下次执行时间已变化。请刷新后重试。",
+  "skip_next_forbidden": "只有所有者可以跳过一次定时执行。",
+  "skip_next_invalid": "请输入有效的执行时间。",
+  "skip_next_owner": "你已跳过这次执行",
   "execution_context_unavailable": "暂时无法核对任务对话的执行环境。请重新连接其 Agent 后重试。",
   "followup": "定时跟进",
   "morning": "早报",
@@ -67,5 +71,6 @@
   "todo_wait": "继续等",
   "todo_wait_cost": "可能再过一个定时窗口，任务仍没有推进。",
   "todo_change_result": "请督办在现有授权范围内提出另一种做法。",
-  "todo_wait_result": "保留已经确认的做法，等下一次定时检查。"
+  "todo_wait_result": "保留已经确认的做法，等下一次定时检查。",
+  "execution_antigravity_unavailable": "{machine} 上的 Antigravity 已断开连接或不可用。请在该电脑上恢复 Antigravity，然后重新运行此任务以继续现有对话。"
 }

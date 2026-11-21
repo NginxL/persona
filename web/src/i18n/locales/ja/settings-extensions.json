@@ -151,5 +151,15 @@
   "rule_remove": "削除",
   "rule_remove_title": "このルールを削除しますか？",
   "rule_remove_body": "次に{machine}の{launcher}が必要とするとき、もう一度承認します。",
-  "rule_removed": "ルールを削除しました"
+  "rule_removed": "ルールを削除しました",
+  "entry_untitled": "項目 {count}",
+  "entry_save_before_secret": "この項目を保存してからシークレットを設定してください。",
+  "entry_secret": "シークレット",
+  "entry_remove": "{entry}を削除",
+  "entry_add": "項目を追加",
+  "entry_editor_hint": "各項目には個別のシークレットがあり、別々に保存され、保存後は再表示されません。",
+  "entry_rebind_hint": "変更したアドレスを保存すると、その項目のシークレットは消去されます。",
+  "entry_remove_title": "「{entry}」を削除しますか？",
+  "entry_remove_body": "保存すると、この項目と保存済みのシークレットが削除されます。",
+  "entry_remove_confirm": "項目を削除"
 }

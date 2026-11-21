@@ -31,7 +31,7 @@ func taskResumeParams(t Task, text string, ex TaskExecution) map[string]any {
 func taskStartParams(t Task, text string, ex TaskExecution) startParams {
 	return startParams{Text: text, Source: taskMessageSource(t), PermissionMode: t.PermissionMode,
 		Purpose: "task." + t.ID, Space: t.Space, Origin: OriginTask, OriginRef: t.ID, MachineID: ex.MachineID, Cwd: ex.Cwd,
-		TaskExecution: true, LegacyTaskExecution: ex.LegacyCompatible, TaskModel: &ModelBinding{Provider: launcherProvider(ex.Launcher), Model: ex.Model, Effort: ex.Effort}}
+		TaskExecution: true, LegacyTaskExecution: ex.LegacyCompatible, TaskModel: &ModelBinding{Provider: launcherProvider(ex.Launcher), Model: ex.Model, Effort: ex.Effort, PermissionMode: ex.PermissionMode}}
 }
 
 func (s *Service) sourceTaskExecution(ctx context.Context, t Task, params map[string]any) *TaskExecution {

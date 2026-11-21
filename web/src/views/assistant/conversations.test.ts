@@ -88,6 +88,16 @@ describe("arrange", () => {
     expect(arrange(list, undefined, now).main).toBeUndefined();
   });
 
+  it("uses a saved order without moving the main chat or hiding new and archived rows", () => {
+    const list = [conv("main", { updated_at: at(2) }), conv("a", { updated_at: at(2) }), conv("b", { updated_at: at(1) }), conv("new", { updated_at: at(2, 10) }), conv("old", { archived: true })];
+    const a = arrange(list, "main", now, ["b", "a", "not-loaded", "old"]);
+    expect(a.main?.session_id).toBe("main");
+    expect(a.days).toHaveLength(1);
+    expect(a.days[0].title).toBe("");
+    expect(a.days[0].items.map((s) => s.session_id)).toEqual(["b", "a", "new"]);
+    expect(a.archived.map((s) => s.session_id)).toEqual(["old"]);
+  });
+
   it("merges what was fetched with the store and the live sessions", () => {
     const fetched = [conv("a", { archived: true, title: "旧标题" }), conv("b")];
     const listed: Session[] = [conv("b", { title: "新的 b" }), conv("n", { title: "刚开的" })];

@@ -17,7 +17,7 @@ import (
 )
 
 // A push posts to APNs from its own goroutine and logs when APNs answers (push_send.go); Pusher.sends counts the post
-// until it has logged, so whoever closes what it posts to waits for it first, as lnHub's cleanup does before closing
+// until it has logged, so whoever closes what it posts to waits for it first, as gradingHub's cleanup does before closing
 // its fake APNs. Without that, a post still on its way logged to a test that had completed: a panic under -race
 // (review of #8287, TestQuietCardPushHonoursTheManagersLevel).
 func TestPusherSendsCountsAPostUntilItHasLogged(t *testing.T) {
@@ -37,7 +37,7 @@ func TestPusherSendsCountsAPostUntilItHasLogged(t *testing.T) {
 		defer mu.Unlock()
 		logged = append(logged, fmt.Sprintf(format, args...))
 	})
-	p.store = newLnStore()
+	p.store = newGradingStore()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	p.direct = apns.NewWithKey(apnsConfig{KeyID: "K", TeamID: "T", Topic: "app.example"}, key)
 	p.direct.Base = srv.URL

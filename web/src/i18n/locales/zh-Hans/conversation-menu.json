@@ -23,5 +23,6 @@
   "make_leader_confirm": "确认设为常驻",
   "make_leader_confirm_detail": "这个对话会移到常驻区，不再出现在「最近」。",
   "end_leader_confirm": "确认取消常驻",
-  "end_leader_confirm_detail": "对话会回到「最近」；还在办的任务交还主对话督办，不会关闭或删除。"
+  "end_leader_confirm_detail": "对话会回到「最近」；还在办的任务交还主对话督办，不会关闭或删除。",
+  "arrange_chats": "整理对话"
 }

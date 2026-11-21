@@ -41,6 +41,18 @@ var Redistributable = map[string]string{
         self.assertEqual(len(problems), 1)
         self.assertIn("copied-skill", problems[0])
 
+    def test_antigravity_runtime_agent_is_not_a_bundled_skill(self):
+        source = (Path(__file__).resolve().parents[2] / "server" / "internal" / "node" / "modelrun.go").read_text()
+        body = source.split('return "---\\n" +', 1)[1].split("body + \"\\n\"", 1)[0]
+        # The runtime definition is generated from string literals in Go, not a file the build embeds as a skill.
+        agent = "\n".join(line.strip().split('" +', 1)[0].strip().rstrip('"').lstrip('"')
+                          for line in body.splitlines() if '"' in line)
+        agent = agent.replace("name:", "name: persona-model-run", 1).replace("\\n", "\n").encode()
+        self.assertIn(b"name: persona-model-run", agent)
+        self.assertIn(b"mainAgent: true", agent)
+        self.assertEqual(cbs.check(skill("persona-office") + agent, {"persona-office"}), [])
+        self.assertEqual(len(cbs.check(skill("copied-skill") + agent, {"persona-office"})), 1)
+
     def test_runtime_memory_frontmatter_is_not_a_bundled_skill(self):
         note = (b"---\ntitle: User preferences and corrections\n"
                 b"description: Background summary of stable user preferences and corrections\n"

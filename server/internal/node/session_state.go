@@ -31,6 +31,8 @@ type stateFile struct {
 }
 
 type sessionState struct {
+	SegmentRetired          bool            `json:"segment_retired,omitempty"`
+	SegmentOperation        string          `json:"segment_operation,omitempty"`
 	TaskInstructions        string          `json:"task_instructions,omitempty"`
 	TaskInstructionFile     string          `json:"task_instruction_file,omitempty"`
 	TaskInstructionChannel  string          `json:"task_instruction_channel,omitempty"`
@@ -106,6 +108,12 @@ type sessionState struct {
 	// PendingHandoff: the handoff of a switch to this session whose first message a dialog held back (engine_switch.go
 	// startEngine): put in front of the next message sent to the session, then cleared (send.go).
 	PendingHandoff *pendingHandoff `json:"pending_handoff,omitempty"`
+	// EngineRuntime: the engine runtime (Paseo, Cindy) whose new start wrote this record (recordEngineStart). The
+	// runtime keeps the Agent and none of its resumes writes the record again, so Cwd is where the Agent started; a
+	// terminal start or resume writes a whole new record without it, and a launcher switch carries the switch's. An
+	// extension's resume of a conversation its computer does not list passes on such a record alone, with no transcript
+	// (resumeOutsideHealth, #10941).
+	EngineRuntime string `json:"engine_runtime,omitempty"`
 }
 
 func newState() *stateFile { return &stateFile{Sessions: map[string]sessionState{}} }
@@ -253,9 +261,10 @@ func (s *stateFile) setPendingSwitch(id string, ps *proto.PendingSwitch) bool {
 }
 
 // restoreLaunch puts back what a start that failed to carry out a launcher switch wrote over (start writes a whole new
-// record before the agent is up): the launcher, model, directory, start time and plan mode of prev, the record as it
-// was, with the rest as it is now (an ultracode observation made since stays), and no pending switch: a failed switch
-// is dropped (launcher_switch.go). launcher is the one to put back when there was no record before (the start made one).
+// record before the agent is up): the launcher, model, directory (and whose start it is), start time and plan mode of
+// prev, the record as it was, with the rest as it is now (an ultracode observation made since stays), and no pending
+// switch: a failed switch is dropped (launcher_switch.go). launcher is the one to put back when there was no record
+// before (the start made one).
 func (s *stateFile) restoreLaunch(id string, prev sessionState, had bool, launcher string) {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
@@ -267,7 +276,7 @@ func (s *stateFile) restoreLaunch(id string, prev sessionState, had bool, launch
 	}
 	if had {
 		v.Launcher, v.Model, v.ModelFingerprint, v.ModelEffort = prev.Launcher, prev.Model, prev.ModelFingerprint, prev.ModelEffort
-		v.Cwd, v.StartedAt, v.PlanThen = prev.Cwd, prev.StartedAt, prev.PlanThen
+		v.Cwd, v.StartedAt, v.PlanThen, v.EngineRuntime = prev.Cwd, prev.StartedAt, prev.PlanThen, prev.EngineRuntime
 	} else {
 		v.Launcher, v.Model, v.ModelFingerprint = launcher, "", ""
 	}
@@ -281,10 +290,10 @@ func (s *stateFile) restoreLaunch(id string, prev sessionState, had bool, launch
 }
 
 // adoptSwitch takes v, what a launcher switch carried out on another Node wrote of session id (switch_share.go), and
-// writes it through this Node's hub: the fields the switch owns (launcher, model, directory, start time, plan mode,
-// pane, pending switch, the conversation's earlier stretches and a handoff waiting for the next message) over this
-// Node's record, the rest of it as this Node has
-// it (an ultracode observation the new claude's hooks made on this connection); v whole when there is no record.
+// writes it through this Node's hub: the fields the switch owns (launcher, model, directory and the engine runtime whose
+// start it is, start time, plan mode, pane, pending switch, the conversation's earlier stretches and a handoff waiting
+// for the next message) over this Node's record, the rest of it as this Node has it (an ultracode observation the new
+// claude's hooks made on this connection); v whole when there is no record.
 func (s *stateFile) adoptSwitch(id string, v sessionState) {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
@@ -293,6 +302,7 @@ func (s *stateFile) adoptSwitch(id string, v sessionState) {
 		cur.Launcher, cur.Model, cur.ModelFingerprint, cur.ModelEffort = v.Launcher, v.Model, v.ModelFingerprint, v.ModelEffort
 		cur.Cwd, cur.StartedAt, cur.PlanThen, cur.Pane, cur.PendingSwitch = v.Cwd, v.StartedAt, v.PlanThen, v.Pane, v.PendingSwitch
 		cur.EngineHistory, cur.PendingHandoff = v.EngineHistory, v.PendingHandoff // a switch to another engine (engine_switch.go)
+		cur.EngineRuntime = v.EngineRuntime
 		v = cur
 	}
 	s.Sessions[id] = v
@@ -410,6 +420,10 @@ func (s *stateFile) put(id string, v sessionState) bool {
 	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	if old, ok := s.Sessions[id]; ok {
+		v.SegmentRetired = old.SegmentRetired
+		if old.SegmentOperation != "" {
+			v.SegmentOperation = old.SegmentOperation
+		}
 		// Owned by state.update: a send's earlier copy must not erase a user's newer arrival.
 		v.IdleCompaction = old.IdleCompaction
 		if old.CreationID != "" {

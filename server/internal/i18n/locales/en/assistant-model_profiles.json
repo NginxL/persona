@@ -25,8 +25,12 @@
   "err_profiles": "At most {max} model profiles are allowed.",
   "err_active": "Profile {name} is in use. Switch to another profile before deleting it.",
   "err_role": "Full access is required to change model profiles.",
+  "err_active_profile_missing": "the model profile in use ({profile}) no longer exists: switch to another with model_profile_switch, or leave tier out",
+  "err_no_active_profile": "no model profile is in use: switch to one with model_profile_switch, or leave tier out",
+  "err_tier_not_found": "the model profile in use ({profile}) has no tier {tier}; its tiers: {tiers}",
   "err_tier_model": "Tier {tier}: {model} is not a model ID. Start with a letter or digit, then use only letters, digits and . _ - / : @ [ ].",
   "err_tier_description": "The description of tier {tier} must be at most {max} characters on one line.",
   "tier_strong": "The main chat's model when this profile was made: design, review and hard problems.",
-  "tier_standard": "The New Agent model when this profile was made: everyday coding."
+  "tier_standard": "The New Agent model when this profile was made: everyday coding.",
+  "err_permission_mode": "Invalid permission mode {mode} in {where}. Modes: {modes}."
 }

@@ -148,6 +148,7 @@ test('projects server lifecycle fields into the six native states with SOP prior
   assert.equal(state({ done_at: '2026-11-11T09:00:00Z' }, [session('s1', 'working')]), 'done');
   assert.equal(state({ ask: { verdict: 'choose one', outcome: 'decide', asked_at: '2026-11-11T09:00:00Z' } }), 'needs_you');
   assert.equal(state({ supervision: { state: 'needs_user' } }), 'needs_you');
+  assert.equal(state({ supervision: { state: 'user_check' }, delivery: { state: 'live' } }), 'needs_you');
   assert.equal(state({}, [session('s1', 'needs_you')] ), 'needs_you');
   assert.equal(state({ ask: { verdict: 'verify result', outcome: 'done', asked_at: '2026-11-11T09:00:00Z' } }), 'checking');
   assert.equal(state({ supervision: { state: 'pending_review' } }), 'checking');

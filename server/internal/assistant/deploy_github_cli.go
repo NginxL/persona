@@ -18,6 +18,27 @@ import (
 	"time"
 )
 
+// hasGitHubCLI positively identifies gh before trusting it with an authenticated request.
+// The probe is deliberately uncached so replacing PATH or the executable cannot leave a stale identity behind.
+func hasGitHubCLI(ctx context.Context) (bool, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(probeCtx, "gh", "--version")
+	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1", "GH_DEBUG=", "NO_COLOR=1")
+	cmd.WaitDelay = time.Second
+	stdout, stderr := githubCLIBuffer{limit: 4096}, githubCLIBuffer{limit: 4096}
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	runErr := cmd.Run()
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if runErr != nil || stdout.exceeded {
+		return false, nil
+	}
+	// Official releases print the project URL. A matching executable name or version-looking text alone is insufficient.
+	return strings.Contains(stdout.String(), "github.com/cli/cli"), nil
+}
+
 // gh owns its credential lookup and authenticated request. Never export its token or retry anonymously.
 func githubCLIGet(ctx context.Context, path string, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -41,6 +62,10 @@ func githubCLIGet(ctx context.Context, path string, out any) error {
 	resp, err := githubCLIResponse(stdout.Bytes())
 	if err != nil {
 		if runErr != nil {
+			if isGitHubCLIUnconfigured(runErr, stderr.String()) {
+				return fmt.Errorf("authenticated GitHub CLI unavailable (no anonymous fallback) (%w): %s; %s",
+					errGitHubUnconfigured, githubDiagnostic(runErr.Error()), githubDiagnostic(stderr.String()))
+			}
 			return fmt.Errorf("authenticated GitHub CLI unavailable (no anonymous fallback): %s; %s",
 				githubDiagnostic(runErr.Error()), githubDiagnostic(stderr.String()))
 		}
@@ -101,4 +126,45 @@ func (b *githubCLIBuffer) Write(p []byte) (int, error) {
 	}
 	_, _ = b.Buffer.Write(p)
 	return n, nil
+}
+
+// isGitHubCLIUnconfigured reports whether a gh execution failure without an HTTP response was positively caused by
+// missing/unauthenticated GitHub CLI configuration rather than a transient network, DNS, TLS, or proxy error.
+func isGitHubCLIUnconfigured(runErr error, stderr string) bool {
+	if errors.Is(runErr, exec.ErrNotFound) {
+		return true
+	}
+	lower := strings.ToLower(stderr)
+	for _, networkErr := range []string{
+		"proxyconnect",
+		"proxy authentication",
+		"407 proxy",
+		"http 407",
+		"dial tcp",
+		"no such host",
+		"tls:",
+		"x509:",
+		"connection refused",
+		"i/o timeout",
+	} {
+		if strings.Contains(lower, networkErr) {
+			return false
+		}
+	}
+	for _, needle := range []string{
+		"gh auth login",
+		"not logged into",
+		"no github authentication",
+		"to authenticate, please run",
+		"no oauth token",
+		"failed to log in",
+		"populate the gh_token",
+		"gh_token environment variable",
+		"github_token environment variable",
+	} {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
 }

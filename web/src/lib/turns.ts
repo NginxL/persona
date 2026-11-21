@@ -45,7 +45,7 @@ export interface UserMessage {
   source?: MessageSource;
   /** The previous visible message has the same source and no intervening reply or work. */
   continuedSource?: boolean;
-  /** Original injected input blocks, before display parsing or shortening. */
+  /** Original input blocks, before display parsing or shortening. */
   rawInput?: Item[];
   /** A scheduled task's or follow-up's input while background rounds fold (docs/assistant/assistant.md "Background
    *  rounds"): only its one line is shown, never the prompt (`injected.detail`, `rawInput`). */
@@ -304,6 +304,8 @@ export function segments(items: Item[], results?: ReadonlyMap<string, Item>): Se
         cur = open(`seg:${it.id}`);
         cur.user = { id: it.id, text: "", images: [], queued: it.queued, ts: it.ts, contexts: [], from: it.from || undefined, source: sourceOf(it, null), rawInput: [it] };
         cur.start = it.ts;
+      } else {
+        cur.user.rawInput!.push(it);
       }
       lastUserEntry = entry;
       cur.user!.client_msg_id ??= it.client_msg_id || undefined;

@@ -1,0 +1,5 @@
+{
+  "invalid": "決定を読み取れません: {reason}",
+  "unavailable": "決定サービスを利用できません: {reason}",
+  "too_old": "このコンピューターの personad は古く、決定リクエストに対応していません"
+}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -55,7 +56,7 @@ func taskHandoffTestStart(t *testing.T, s *Service, f *fakeHub, tool string) str
 	t.Helper()
 	args := json.RawMessage(`{"machine":"box","cwd":"/code/app","prompt":"Inspect the regression"}`)
 	if tool == "task_plan" {
-		args = json.RawMessage(`{"tasks":[{"title":"Inspect","machine":"box","cwd":"/code/app","prompt":"Inspect the regression","permission":"bypassPermissions","user_requested":true}]}`)
+		args = json.RawMessage(`{"tasks":[{"title":"Inspect","machine":"box","cwd":"/code/app","prompt":"Inspect the regression","role":"worker","permission":"bypassPermissions","user_requested":true}]}`)
 	}
 	return taskHandoffTestCall(t, s, f, tool, args)
 }
@@ -93,12 +94,28 @@ func assertScopedHandoff(t *testing.T, prompt string) {
 	}
 }
 
+// assertTerminalOwnTools: the terminal entry says it runs the Agent's own tools, with their arguments, and is not a
+// general entry (#12136).
+func assertTerminalOwnTools(t *testing.T, prompt string) {
+	t.Helper()
+	for _, want := range []string{"The same entry runs this Agent's own Persona tools", "`tool <name>`", "`todo_decisions` with `{}`",
+		"`todo_decision_add` with `{\"question\"", "`report_to_supervisor` with `{\"kind\"", "not a general Persona tool entry",
+		"refuses tools that are not this Agent's own"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the terminal entry lacks %q: %s", want, prompt)
+		}
+	}
+}
+
 func TestTaskHandoffCodexProductionEntrypoints(t *testing.T) {
 	for _, tool := range []string{"task_plan", "agent_start"} {
 		t.Run(tool, func(t *testing.T) {
 			s, f, h := taskHandoffTestFixture(t, "codex")
 			prompt := taskHandoffTestStart(t, s, f, tool)
-			for _, unsupported := range []string{"todo_decisions", "todo_repositories_get", "todo_repository_links_add", "personad tool task_spawn"} {
+			// The MCP names and repository guidance are not Codex's, nor a bare personad on its PATH, nor a leader's
+			// task_plan / task_review for an Agent that does not lead its task.
+			for _, unsupported := range []string{"use `task_spawn`", "todo_repositories_get", "todo_repository_links_add", "personad tool",
+				"`tool task_plan`", "`tool task_review`"} {
 				if strings.Contains(prompt, unsupported) {
 					t.Errorf("Codex was told to call %q: %s", unsupported, prompt)
 				}
@@ -106,6 +123,7 @@ func TestTaskHandoffCodexProductionEntrypoints(t *testing.T) {
 			if !strings.Contains(prompt, h.info["box"].Executable) || !strings.Contains(prompt, "tool task_spawn") {
 				t.Errorf("assignment has no verified executable and scoped arguments: %s", prompt)
 			}
+			assertTerminalOwnTools(t, prompt)
 			assertScopedHandoff(t, prompt)
 		})
 	}
@@ -122,7 +140,7 @@ func TestTaskHandoffClaudeKeepsMCPWithoutMetadata(t *testing.T) {
 					t.Errorf("Claude lost %q: %s", supported, prompt)
 				}
 			}
-			if len(h.infoCalls) != 0 || taskHandoffTestExecutable(t, prompt) != "" {
+			if len(h.infoCalls) != 0 || taskHandoffTestExecutable(t, prompt) != "" || strings.Contains(prompt, "The same entry runs") {
 				t.Fatal("MCP handoff unnecessarily queried or advertised a terminal executable")
 			}
 			assertScopedHandoff(t, prompt)
@@ -135,10 +153,11 @@ func TestTaskHandoffOtherTerminalFamilies(t *testing.T) {
 		t.Run(agent, func(t *testing.T) {
 			s, f, h := taskHandoffTestFixture(t, agent)
 			prompt := taskHandoffTestStart(t, s, f, "agent_start")
-			if strings.Contains(prompt, "todo_decisions") || strings.Contains(prompt, "todo_repositories_get") ||
+			if strings.Contains(prompt, "use `task_spawn`") || strings.Contains(prompt, "todo_repositories_get") ||
 				strings.Contains(prompt, "todo_repository_links_add") || taskHandoffTestExecutable(t, prompt) != h.info["box"].Executable {
 				t.Fatalf("unsupported instructions for %s: %s", agent, prompt)
 			}
+			assertTerminalOwnTools(t, prompt)
 			assertScopedHandoff(t, prompt)
 		})
 	}
@@ -231,13 +250,13 @@ func TestTaskHandoffUsesFinalDetourFamilyAndMachine(t *testing.T) {
 			s.healthRound(context.Background(), true)
 			args := json.RawMessage(`{"machine":"l4","cwd":"/home/me/code/app","prompt":"Inspect the regression"}`)
 			if tool == "task_plan" {
-				args = json.RawMessage(`{"tasks":[{"title":"Inspect","machine":"l4","cwd":"/home/me/code/app","prompt":"Inspect the regression","machine_policy":"flexible","user_requested":true}]}`)
+				args = json.RawMessage(`{"tasks":[{"title":"Inspect","machine":"l4","cwd":"/home/me/code/app","prompt":"Inspect the regression","role":"worker","machine_policy":"flexible","user_requested":true}]}`)
 			}
 			prompt := taskHandoffTestCall(t, s, f, tool, args)
 			if machines := taskStartMachines(f); len(machines) != 1 || machines[0] != "server" {
 				t.Fatalf("fixture did not detour to server: %v", machines)
 			}
-			if strings.Contains(prompt, "todo_decisions") || taskHandoffTestExecutable(t, prompt) != h.info["server"].Executable ||
+			if strings.Contains(prompt, "todo_repositories_get") || taskHandoffTestExecutable(t, prompt) != h.info["server"].Executable ||
 				len(h.infoCalls) != 1 || h.infoCalls[0] != "server" {
 				t.Fatalf("footer did not follow the actual Codex machine: %s; info calls %v", prompt, h.infoCalls)
 			}
@@ -255,13 +274,13 @@ func TestTaskHandoffDefaultFallbackUsesFittedAlias(t *testing.T) {
 			s.hub = h
 			args := json.RawMessage(`{"machine":"l4","cwd":"/home/me/code","prompt":"Inspect the regression"}`)
 			if tool == "task_plan" {
-				args = json.RawMessage(`{"tasks":[{"title":"Inspect","machine":"l4","cwd":"/home/me/code","prompt":"Inspect the regression","user_requested":true}]}`)
+				args = json.RawMessage(`{"tasks":[{"title":"Inspect","machine":"l4","cwd":"/home/me/code","prompt":"Inspect the regression","role":"worker","user_requested":true}]}`)
 			}
 			prompt := taskHandoffTestCall(t, s, f, tool, args)
 			if st := startsOf(f)[0]; st["launcher"] != "code-alias" || st["model"] != nil {
 				t.Fatalf("fixture did not replace the absent default: %+v", st)
 			}
-			if strings.Contains(prompt, "todo_decisions") || taskHandoffTestExecutable(t, prompt) != "/fitted/node" {
+			if strings.Contains(prompt, "todo_repositories_get") || taskHandoffTestExecutable(t, prompt) != "/fitted/node" {
 				t.Fatalf("footer guessed a family from the old default or alias name: %s", prompt)
 			}
 		})
@@ -309,7 +328,7 @@ func TestTaskHandoffPaseoKeepsBridgedMCP(t *testing.T) {
 			s.hub = h
 			args := json.RawMessage(`{"machine":"pbox","cwd":"/home/me/code","prompt":"Inspect the regression"}`)
 			if tool == "task_plan" {
-				args = json.RawMessage(`{"tasks":[{"title":"Inspect","machine":"pbox","cwd":"/home/me/code","prompt":"Inspect the regression","user_requested":true}]}`)
+				args = json.RawMessage(`{"tasks":[{"title":"Inspect","machine":"pbox","cwd":"/home/me/code","prompt":"Inspect the regression","role":"worker","user_requested":true}]}`)
 			}
 			prompt := taskHandoffTestCall(t, s, f, tool, args)
 			if startsOf(f)[0]["launcher"] != "codex-cpa" {
@@ -353,7 +372,7 @@ func TestTaskHandoffTerminalSourceProvenance(t *testing.T) {
 			// Managed entries alone are not a successful shell inventory; retain a real shell entry too.
 			f.launcherList = append(f.launcherList, proto.Launcher{Name: "claude", Source: "zshrc"})
 			prompt := taskHandoffTestStart(t, s, f, "agent_start")
-			if taskHandoffTestExecutable(t, prompt) != h.info["box"].Executable || strings.Contains(prompt, "todo_decisions") {
+			if taskHandoffTestExecutable(t, prompt) != h.info["box"].Executable || strings.Contains(prompt, "todo_repositories_get") {
 				t.Fatalf("known terminal provenance lost its scoped CLI: %s", prompt)
 			}
 		})
@@ -406,5 +425,62 @@ func TestGoldenTaskHandoffCallerLanguages(t *testing.T) {
 				golden(t, "task_handoff."+tool+"."+locale, prompt)
 			})
 		}
+	}
+}
+
+func taskLeaderTestStart(t *testing.T, s *Service, f *fakeHub) string {
+	t.Helper()
+	return taskHandoffTestCall(t, s, f, "task_plan", json.RawMessage(`{"tasks":[{"title":"Inspect","machine":"box","cwd":"/code/app","prompt":"Inspect the regression","permission":"bypassPermissions","role":"leader","user_requested":true}]}`))
+}
+
+// A task leader's note follows the entry its handoff note verified (#12136): a leader whose entry is the terminal one
+// (Codex, no Persona MCP) is told to run task_plan and task_review through it, beside the MCP names; a leader with the
+// Persona MCP gets the note it always got. Both in each caller language.
+func TestGoldenTaskLeaderEntries(t *testing.T) {
+	for _, entry := range []string{"terminal", "mcp"} {
+		for _, locale := range []string{"en", "zh-Hans", "ja"} {
+			t.Run(entry+"/"+locale, func(t *testing.T) {
+				agent := "codex"
+				if entry == "mcp" {
+					agent = "claude"
+				}
+				s, f, h := taskHandoffTestFixture(t, agent)
+				f.hello.Locale = locale
+				prompt := taskLeaderTestStart(t, s, f)
+				if !strings.Contains(prompt, "you are the leader of this task") {
+					t.Fatalf("not started as a leader: %s", prompt)
+				}
+				terminal := taskHandoffTestExecutable(t, prompt) == h.info["box"].Executable
+				if terminal != (entry == "terminal") || strings.Contains(prompt, "use `task_spawn`") == terminal {
+					t.Fatalf("%s leader got the other entry: %s", entry, prompt)
+				}
+				golden(t, "task_leader."+entry+"."+locale, prompt)
+			})
+		}
+	}
+}
+
+// A leader whose terminal entry could not be verified (or that has the MCP tools) is never pointed at a terminal entry
+// its handoff note does not name: its note is the one an MCP leader gets, byte for byte.
+func TestTaskLeaderWithoutTerminalEntryKeepsItsNote(t *testing.T) {
+	for _, state := range []string{"metadata-failed", "relative", "mcp"} {
+		t.Run(state, func(t *testing.T) {
+			agent := "codex"
+			if state == "mcp" {
+				agent = "claude"
+			}
+			s, f, h := taskHandoffTestFixture(t, agent)
+			switch state {
+			case "metadata-failed":
+				h.infoErr = errors.New("node unavailable")
+			case "relative":
+				h.info["box"] = proto.NodeInfo{Executable: "personad"}
+			}
+			prompt := taskLeaderTestStart(t, s, f)
+			if !strings.Contains(prompt, prompts.RenderTaskLeader(prompts.TaskLeader{})) || strings.Contains(prompt, "from this terminal") ||
+				strings.Contains(prompt, "`tool task_plan`") || strings.Contains(prompt, "`tool task_review`") {
+				t.Fatalf("a leader without a verified terminal entry was pointed at one: %s", prompt)
+			}
+		})
 	}
 }

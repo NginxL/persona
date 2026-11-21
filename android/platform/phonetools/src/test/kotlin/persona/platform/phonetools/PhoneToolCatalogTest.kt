@@ -77,15 +77,17 @@ class PhoneToolCatalogTest {
         assertEquals(PhoneToolCatalog.confirmedWriteNames, PhoneToolCatalog.all
             .filter { it.confirmation != null || it.confirmationNeedsPreparation }.map { it.spec.name }.toSet())
         assertEquals(setOf("phone_calendar_create_event", "phone_calendar_update_event", "phone_calendar_delete_event",
-            "phone_contacts_create", "phone_contacts_update"), PhoneToolCatalog.confirmedWriteNames)
+            "phone_contacts_create", "phone_contacts_update", "phone_call_start"), PhoneToolCatalog.confirmedWriteNames)
         // Updates and deletes show before → after, so their card is prepared in the suspend path; the others stay pure.
         assertEquals(setOf("phone_calendar_update_event", "phone_calendar_delete_event", "phone_contacts_update"),
             PhoneToolCatalog.all.filter { it.confirmationNeedsPreparation }.map { it.spec.name }.toSet())
         assertTrue(PhoneToolCatalog.all.filter { it.confirmationNeedsPreparation }.all { it.confirmation == null })
-        assertEquals(setOf("phone_location_current", "phone_clipboard_get", "phone_clipboard_set"),
+        assertEquals(setOf("phone_location_current", "phone_clipboard_get", "phone_clipboard_set", "phone_call_start"),
             PhoneToolCatalog.all.filter { it.foregroundOnly }.map { it.spec.name }.toSet())
         assertEquals(listOf("phone_photos_recent", "phone_photo_get"),
             PhoneToolCatalog.all.filter { it.source == PhoneSource.Photos }.map { it.spec.name })
+        assertEquals(listOf("phone_call_start"),
+            PhoneToolCatalog.all.filter { it.source.key == "calls" }.map { it.spec.name })
     }
 
     @Test fun argumentsAreReadLikeTheIosApp() {

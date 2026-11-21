@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// draw() imports Markdown afresh below. Evaluate its module graph once while collecting this file: under the complete
+// parallel suite a cold first import can exceed the unchanged five-second test deadline and leave later draws empty.
+beforeAll(async () => {
+  await import("./Markdown");
+});
 
 // What a click copies (atoms.copyText, which also says "Copied").
 const copied = vi.hoisted(() => vi.fn(async (_text: string) => true));

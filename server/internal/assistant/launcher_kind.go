@@ -43,7 +43,7 @@ func (e *launcherOtherKind) rpcError(l i18n.Lang) *rpc.Error {
 // as the node tells a conversation's kind.
 func assistantKind(agent string) string {
 	switch agent {
-	case "claude", "codex", "agy":
+	case "claude", "codex", "agy", "pi", "opencode", "omp", "dsh", "grok", "gemini", "qwen", "kimi", "droid", "cursor", "traex":
 		return agent
 	}
 	return ""
@@ -55,9 +55,16 @@ func assistantKind(agent string) string {
 func (s *Service) otherKindPick(ctx context.Context, machine, sid, launcher string) error {
 	c, known := s.session(ctx, machine, sid)
 	conv := assistantKind(c.Agent)
-	if !known || conv == "" {
+	if !known {
 		return nil
 	}
+	if conv == "" {
+		if c.SourceKind == proto.SourceRuntime {
+			return s.logicalAdapterPick(ctx, machine, c, launcher)
+		}
+		return nil
+	}
+	machine = s.logicalExecutionMachine(ctx, machine, sid)
 	var picked string
 	if proto.IsExternalLauncher(launcher) {
 		agent, err := s.externalLauncherAgent(ctx, machine, launcher)
@@ -68,8 +75,13 @@ func (s *Service) otherKindPick(ctx context.Context, machine, sid, launcher stri
 	} else {
 		picked = assistantKind(s.launcherAgent(ctx, machine, launcher))
 	}
-	if picked == "" || picked == conv {
-		return nil
+	if picked == "" {
+		// A runtime must attest its connection even when its display kind is
+		// unknown. Native aliases still retain the no-guessing behavior.
+		return s.logicalAdapterPick(ctx, machine, c, launcher)
+	}
+	if picked == conv {
+		return s.logicalAdapterPick(ctx, machine, c, launcher)
 	}
 	return &launcherOtherKind{conversationAgent: conv, launcher: launcher, launcherAgent: picked}
 }

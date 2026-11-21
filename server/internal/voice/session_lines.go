@@ -119,6 +119,12 @@ func (c *conversation) spokeAt(now time.Time) time.Time {
 // model's turns itself (turnsEnd): the rest of the answer stays in the same line (#5673). Without that the caption is
 // the only end the model's line has, and it still ends it. Protocol 1's frames are as they always were.
 func (c *conversation) userText(text string, replace, final bool, spoke time.Time) time.Time {
+	return c.userTextWithID("", text, replace, final, spoke)
+}
+
+// userTextWithID is userText with the upstream item's id when it has one (dictation); ordinary calls allocate their
+// own caption ids, as before.
+func (c *conversation) userTextWithID(upstreamID, text string, replace, final bool, spoke time.Time) time.Time {
 	if c.user == nil {
 		if strings.TrimSpace(text) == "" { // no words: no line (#5587)
 			return time.Time{}
@@ -131,7 +137,11 @@ func (c *conversation) userText(text string, replace, final bool, spoke time.Tim
 			c.closeAsst()
 		}
 		c.userSeq++
-		c.user = &line{id: fmt.Sprintf("u%d", c.userSeq), before: before}
+		id := upstreamID
+		if id == "" {
+			id = fmt.Sprintf("u%d", c.userSeq)
+		}
+		c.user = &line{id: id, before: before}
 	}
 	if replace {
 		c.user.text = text

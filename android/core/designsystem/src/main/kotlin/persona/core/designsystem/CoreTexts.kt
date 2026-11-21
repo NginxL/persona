@@ -234,8 +234,10 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.EngineHerdrApp -> R.string.designsystem_core_engine_herdr_app
     CoreText.Key.EngineOrca -> R.string.designsystem_core_engine_orca
     CoreText.Key.EngineTern -> R.string.designsystem_core_engine_tern
+    CoreText.Key.EngineRex -> R.string.designsystem_core_engine_rex
     CoreText.Key.EnginePaseo -> R.string.designsystem_core_engine_paseo
     CoreText.Key.EngineCindy -> R.string.designsystem_core_engine_cindy
+    CoreText.Key.EngineT3Code -> R.string.designsystem_core_engine_t3code
     CoreText.Key.EngineNone -> R.string.designsystem_core_engine_none
     CoreText.Key.EngineNoneDetail -> R.string.designsystem_core_engine_none_detail
     CoreText.Key.EngineOffline -> R.string.designsystem_core_engine_offline
@@ -414,6 +416,7 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.HeadlineAgentPermission -> R.string.designsystem_core_headline_agent_permission
     CoreText.Key.HeadlineAgentPermissionDetail -> R.string.designsystem_core_headline_agent_permission_detail
     CoreText.Key.HeadlineSecretRun -> R.string.designsystem_core_headline_secret_run
+    CoreText.Key.HeadlineSecretHandoff -> R.string.designsystem_core_headline_secret_handoff
     CoreText.Key.HeadlineScreen -> R.string.designsystem_core_headline_screen
     CoreText.Key.HeadlineNeedsYou -> R.string.designsystem_core_headline_needs_you
     CoreText.Key.AskQuestion -> R.string.designsystem_core_ask_question

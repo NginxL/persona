@@ -1,4 +1,4 @@
-List the folders the user's inbox items are filed under: each `/`-separated path (`work/alerts/engine`, every segment a level) with its item count and open count, and whether automatic filing by the triage model is on. Give `folder` to also list the items filed in that folder and below, or `unfiled: true` for the items in no folder; each line has the item's id (what inbox_move takes), source, title, sender and whether it is done. Call it before inbox_move, to reuse a folder in use rather than open a near-duplicate.
+List the folders the user's inbox items are filed under: each `/`-separated path (`work/alerts/engine`, every segment a level) with its item count and open count, and whether automatic filing by the triage model is on. Give `folder` to also list the items filed in that folder and below, or `unfiled: true` for the items in no folder; each line has the item's id (what inbox_move takes), source, title, sender and whether it is done. Call it before inbox_move, to reuse a folder in use rather than open a near-duplicate.{{template "shared/mcp_language" .}}
 
 ```json
 {

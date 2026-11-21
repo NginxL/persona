@@ -28,6 +28,9 @@ export class ExtensionStorage {
   claim(params: wire.StorageClaimParams): Promise<wire.StorageClaimResult> {
     return this.hub.call("storage.queue.claim", params);
   }
+  renew(params: wire.StorageRenewParams): Promise<wire.StorageJobResult> {
+    return this.hub.call("storage.queue.renew", params);
+  }
   ack(params: wire.StorageSettleParams): Promise<wire.StorageJobResult> {
     return this.hub.call("storage.queue.ack", params);
   }

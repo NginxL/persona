@@ -24,5 +24,5 @@ export default function persona(omp) {
       if (envValue('PERSONA_OMP_DEBUG')) console.error(m)
     },
   })
-  h.register(omp, globalThis.__personaOmpAskUser ? { Type } : undefined)
+  h.register(omp, { Type: globalThis.__personaOmpAskUser ? Type : undefined, A2AType: Type })
 }

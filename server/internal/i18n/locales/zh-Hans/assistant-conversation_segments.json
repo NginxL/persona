@@ -1,0 +1,13 @@
+{
+  "busy": "对话正在忙，请等当前工作结束后重试。",
+  "private_segment": "请通过所属对话打开这条消息。",
+  "unavailable": "此对话暂时不可用。",
+  "message_id_required": "消息需要标识后才能排队。",
+  "retired": "此会话已不再运行该对话。",
+  "missing_generation": "对话历史尚未就绪。",
+  "unknown_engine": "无法识别此引擎，请刷新启动器列表后重试。",
+  "disabled": "切换引擎已暂停。",
+  "unsupported_policy": "此引擎无法应用对话的督办指令。",
+  "in_doubt": "正在核对执行结果，请勿重复发送。",
+  "explicit_switch_required": "请在此对话的模型面板中确认切换连接，再用其他引擎继续。"
+}

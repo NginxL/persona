@@ -517,20 +517,21 @@ func TestRuntimeSendRefusedWithoutTheCap(t *testing.T) {
 // runtime's own, never a subagent's. Rows of a runtime that did not declare it say false, not nothing.
 func TestRuntimeModesCapability(t *testing.T) {
 	for _, c := range []struct {
-		declared bool
-		rt, id   string
-		agent    string
-		want     bool
+		declared        bool
+		rt, rtAgent, id string
+		agent           string
+		want            bool
 	}{
-		{true, "orca", "session-1", "claude", true},
-		{true, "agy", "session-1", "agy", true},
-		{true, "paseo", "session-1", "codex", false},
-		{true, "paseo", "session-1", "claude", true},
-		{true, "paseo", "session-1", "paseo", false}, // Paseo's catch-all (opencode, grok, ...): its modes refuses them
-		{true, "orca", "session-1" + subagentSep + "a1", "claude", false},
-		{false, "dsh", "session-1", "dsh", false},
+		{true, "orca", "", "session-1", "claude", true},
+		{true, "agy", "agy", "session-1", "agy", true},
+		{true, "opencode-4242", "opencode", "session-1", "opencode", true},
+		{true, "paseo", "", "session-1", "codex", false},
+		{true, "paseo", "", "session-1", "claude", true},
+		{true, "paseo", "paseo", "session-1", "paseo", false}, // Paseo's catch-all (opencode, grok, ...): its modes refuses them
+		{true, "orca", "", "session-1" + subagentSep + "a1", "claude", false},
+		{false, "dsh", "dsh", "session-1", "dsh", false},
 	} {
-		if got := runtimeModes(c.declared, c.rt, proto.Session{SessionID: c.id, Agent: c.agent}); got != c.want {
+		if got := runtimeModes(c.declared, c.rt, c.rtAgent, proto.Session{SessionID: c.id, Agent: c.agent}); got != c.want {
 			t.Errorf("%+v: modes %v", c, got)
 		}
 	}

@@ -22,6 +22,7 @@ internal data class SlashCommand(val title: String, val word: String, val detail
     val permissions: Boolean get() = word == PERMISSIONS
     /** /loop: picking it types `/loop ` to go on writing, a line under it saying what it will do (web `loopHint`). */
     val loop: Boolean get() = word == LOOP
+    val workflows: Boolean get() = word == WORKFLOWS
 
     companion object {
         /** Claude Code's own commands keep their words in every language; the others are Persona's, in the app's language. */
@@ -51,6 +52,7 @@ internal data class SlashCommand(val title: String, val word: String, val detail
         const val MODEL = "/model"
         const val LOOP = "/loop"
         const val PERMISSIONS = "/permissions"
+        const val WORKFLOWS = "/workflows"
         /** What picking /loop puts in the box: the word, the interval and the task to follow. */
         const val LOOP_TEXT = "$LOOP "
         fun modelCommand(resources: Resources) = resources.getString(R.string.chat_slash_model_detail).let { SlashCommand(it, MODEL, it, MODEL) }
@@ -58,6 +60,10 @@ internal data class SlashCommand(val title: String, val word: String, val detail
             resources.getString(R.string.chat_slash_permissions_detail).let { SlashCommand(it, PERMISSIONS, it, PERMISSIONS) }
         /** `/permissions` alone in the box (typed out and sent): it opens the menu too (the web's `isPermissionsCommand`). */
         fun isPermissions(draft: String): Boolean = draft.trim().equals(PERMISSIONS, ignoreCase = true)
+        fun isWorkflows(draft: String): Boolean = draft.trim().equals(WORKFLOWS, ignoreCase = true)
+        fun workflowsCommand(resources: Resources) = resources.getString(R.string.chat_background_title).let {
+            SlashCommand(it, WORKFLOWS, resources.getString(R.string.chat_background_slash_detail), WORKFLOWS)
+        }
         fun loopCommand(resources: Resources) = resources.getString(R.string.chat_slash_loop_detail).let { SlashCommand(it, LOOP, it, LOOP_TEXT) }
 
         /**
@@ -66,10 +72,11 @@ internal data class SlashCommand(val title: String, val word: String, val detail
          * [permissions] Persona's /permissions where the chat has a permission mode picker.
          */
         fun matching(draft: String, clear: Boolean, resources: Resources, model: Boolean = false, loop: Boolean = false,
-                     permissions: Boolean = false): List<SlashCommand> {
+                     permissions: Boolean = false, workflows: Boolean = false): List<SlashCommand> {
             if (!draft.startsWith("/") || draft.any { it == ' ' || it == '\n' }) return emptyList()
             val list = all(resources) + listOfNotNull(modelCommand(resources).takeIf { model }, permissionsCommand(resources).takeIf { permissions },
-                loopCommand(resources).takeIf { loop }, clearCommand(resources).takeIf { clear })
+                loopCommand(resources).takeIf { loop }, clearCommand(resources).takeIf { clear },
+                workflowsCommand(resources).takeIf { workflows })
             return list.filter { it.word.startsWith(draft, ignoreCase = true) }
         }
 
@@ -79,10 +86,10 @@ internal data class SlashCommand(val title: String, val word: String, val detail
          * [keepExact] keeps the built-in row when a saved prompt also matches the draft.
          */
         fun suggestions(draft: String, clear: Boolean, resources: Resources, model: Boolean = false, loop: Boolean = false,
-                        permissions: Boolean = false, keepExact: Boolean = false): List<SlashCommand> =
-            matching(draft, clear, resources, model, loop, permissions).takeUnless {
+                        permissions: Boolean = false, keepExact: Boolean = false, workflows: Boolean = false): List<SlashCommand> =
+            matching(draft, clear, resources, model, loop, permissions, workflows).takeUnless {
                 !keepExact && it.singleOrNull()?.let { only ->
-                    !only.clear && !only.model && !only.permissions && only.word.equals(draft, ignoreCase = true)
+                    !only.clear && !only.model && !only.permissions && !only.workflows && only.word.equals(draft, ignoreCase = true)
                 } == true
             }.orEmpty()
 

@@ -49,7 +49,7 @@ nonisolated enum LauncherChoices {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return launchers }
         return launchers.filter {
-            $0.name.localizedCaseInsensitiveContains(q) || ($0.displayName ?? "").localizedCaseInsensitiveContains(q)
+            $0.name.localizedCaseInsensitiveContains(q) || $0.title.localizedCaseInsensitiveContains(q)
                 || ($0.model ?? "").localizedCaseInsensitiveContains(q)
         }
     }

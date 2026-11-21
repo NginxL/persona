@@ -104,9 +104,12 @@ A daemon is not necessarily trustworthy, e.g. a multi-tenant platform, or someth
 | --- | --- |
 | List, push and page through **its own** sessions | See or claim other sessions. When the node does not know who owns a session it asks every runtime; ids without this daemon's prefix are answered on the node side and never reach the daemon |
 | Answer send message, interrupt, rename, close, start (as declared in `caps`) | Declare other capabilities: only start / send / interrupt / rename / close / execution / history are allowed (`history`: its `sessions.history` is forwarded with the window as it is, and its rows come back with ids prefixed `<id>.` as listed rows do; `docs/protocol/protocol.md` "Session history"). `caps.assistant` is removed, so a daemon cannot run Persona's assistant (`docs/integrations/runtimes.md` ("Assistant")); new capabilities added to the protocol later must also be allowed individually in `daemonCaps` |
-| Ask the phone (questions, plans, permissions); the card shows the name from the config | Use `mcp.*` (phone tools, Persona tools): `mcp.tools` returns an empty list, `mcp.call` returns `unsupported` |
+| Ask the phone (questions, plans, permissions); the card shows the name from the config. An entry with `"a2a": true` can use [A2A tools](a2a.md) for its own listed sessions | Use phone tools, connector tools, or the assistant's tools |
 | | Claim a local terminal pane through `pane_id`, or start a command in the local terminal engine through `resume_argv`: both fields are dropped, and `features` does not tell it `resume_argv` exists |
 | | Reply `code: handover` to a send so the node hands the message to another runtime: the node turns it into `not_running` and sends nothing; `features` does not tell it `handover` exists either |
+
+With A2A enabled, the daemon's own listed sessions can discover and send tasks
+to eligible sessions across the Manager's enrolled computers.
 
 ## SDK
 
@@ -137,7 +140,7 @@ Daemons not written in JS implement the "Spec" section above themselves: one Web
   - config validation, and no token in error messages;
   - names come from the config, session ids and `space_id` get the prefix, dangerous fields are dropped, only the specified capabilities are allowed;
   - pushes and questions carry the hub's ids;
-  - unknown session ids are not sent to the daemon, `mcp.*` is rejected;
+  - unknown session ids are bound to their owning runtime, with A2A tools scoped to enrolled daemons and their listed sessions;
   - reserved ids, checked in both directions;
   - no connection on a wrong token or a missing subprotocol, connects after switching to a token file;
   - config changes take effect without a restart;
@@ -157,5 +160,5 @@ Once a new daemon is connected, write its own end-to-end test based on `e2e/daem
 ## Limits
 
 - Only WebSocket is supported, not raw TCP or HTTP over a unix socket; add them if needed. WebSocket already works over `wss://` and through reverse proxies that forward Upgrade.
-- A daemon cannot be an assistant backend (`caps.assistant`) and has no `mcp.*`: the DSH plugin running as a daemon has no phone tools. Allow them individually once there is a real use case, with the trust boundary written down.
+- The assistant backend (`caps.assistant`) runs through a local runtime. A daemon's tool calls require explicit A2A enrollment and use its runtime session identity.
 - For sessions a daemon lists as `offline`, the node does not resume them in the local terminal on its behalf (no `resume_argv`).

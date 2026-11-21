@@ -15,9 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
-	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 func (s *Service) launcherRoutes() {
@@ -293,61 +291,34 @@ func (s *Service) launcherRoutes() {
 	})
 	// "Test": one real request through the launcher on a machine (default: the assistant's).
 	s.handle("POST /api/v1/launchers/{name}/check", func(w http.ResponseWriter, r *http.Request) {
-		if proto.IsExternalLauncher(r.PathValue("name")) {
+		name := r.PathValue("name")
+		if proto.IsExternalLauncher(name) {
 			apierr.Write(w, http.StatusBadRequest, i18n.Err("external-adapter.scope_required"))
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 100*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), launcherCheckTimeout)
 		defer cancel()
+		provider := ModelProvider{ID: launcherProvider(name), Kind: "launcher"}
 		for _, l := range s.storedLaunchers(ctx) {
-			if l.Name == r.PathValue("name") && l.Kind == "api" {
-				started := time.Now()
-				config, err := s.apiConfig(ctx, ModelBinding{Provider: launcherProvider(l.Name), Model: l.Model})
-				answer := ""
-				if err == nil {
-					answer, err = s.aiClient(config).Complete(ctx, "", prompts.RenderLauncherCheck(), 128)
-				}
-				result := proto.LauncherCheck{Agent: "api", Model: config.Model, Answer: textfmt.Clip(textfmt.OneLine(answer), 200), OK: err == nil,
-					Millis: int(time.Since(started).Milliseconds())}
-				if err != nil {
-					message := err.Error()
-					if explanation := directCallFailureExplanation(s.requestCtxLang(ctx), err); explanation != "" {
-						message = explanation + ": " + message
-					}
-					result.Error = textfmt.Clip(textfmt.OneLine(message), 400)
-				}
-				apierr.WriteJSON(w, map[string]any{"check": result})
-				return
+			if l.Name == name && l.Kind == "api" {
+				provider.Kind, provider.Model = "api", l.Model
+				break
 			}
 		}
-		machine := r.URL.Query().Get("machine") // the id the app knows
-		if _, ok := s.device(ctx, machine); !ok {
-			machine = s.settings(ctx).MachineID
-		}
-		if _, ok := s.device(ctx, machine); !ok {
-			apierr.Write(w, http.StatusBadRequest, errors.New("no machine to test on"))
+		machine, res, err := s.checkModelProvider(ctx, provider, r.URL.Query().Get("machine"), r.URL.Query().Get("purpose"))
+		if err != nil {
+			if errors.Is(err, errNoLauncherCheckMachine) {
+				apierr.Write(w, http.StatusBadRequest, err)
+			} else {
+				apierr.Call(w, err)
+			}
 			return
 		}
-		if err := s.launcherScopeErr(ctx, machine, r.PathValue("name")); err != nil { // out of that computer's scope
-			apierr.Call(w, err)
-			return
+		out := map[string]any{"check": res}
+		if machine != "" {
+			out["machine"] = machine
 		}
-		observed, _ := s.launcherHealth(ctx, machine, r.PathValue("name"))
-		var res proto.LauncherCheck
-		params := map[string]any{"name": r.PathValue("name")}
-		if r.URL.Query().Get("purpose") == "assistant" {
-			params["purpose"] = "assistant"
-		}
-		if err := s.call(ctx, machine, assistantwire.DeviceLaunchersCheck, params, &res); err != nil {
-			apierr.Call(w, err)
-			return
-		}
-		// A node from before the cleanup still answers with the terminal's escapes and startup noise in it.
-		cleanCheck(&res)
-		if res.OK {
-			s.recordTestPassed(ctx, machine, r.PathValue("name"), res, observed)
-		}
-		apierr.WriteJSON(w, map[string]any{"machine": machine, "check": res})
+		apierr.WriteJSON(w, out)
 	})
 	// What still names a launcher as its own (Model configuration's purposes, extensions' too, scheduled tasks, model
 	// profiles and their tiers), in words, for the hide confirmation (#4661): hiding an rc-file launcher only takes it
@@ -460,11 +431,17 @@ func (s *Service) pickerTiers(ctx context.Context, machine string, launchers []C
 // hiddenUsable: machine has hidden launcher name (launchersHere, which a start goes by) and its latest check did not
 // fail, as withHealth holds the visible ones.
 func (s *Service) hiddenUsable(ctx context.Context, machine, name string) bool {
+	_, _, usable := s.hiddenLauncherInventory(ctx, machine, name)
+	return usable
+}
+
+// hiddenLauncherInventory retains the explicit-hidden read so candidate metadata can come from the same RPC.
+func (s *Service) hiddenLauncherInventory(ctx context.Context, machine, name string) (list []proto.Launcher, known, usable bool) {
 	if _, bad := s.launcherUnusable(ctx, machine, name); bad {
-		return false
+		return nil, false, false
 	}
-	list, known := s.launchersHere(withUnhidden(ctx, name), machine)
-	return known && slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == name })
+	list, known = s.launchersHere(withUnhidden(ctx, name), machine)
+	return list, known, known && slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == name })
 }
 
 // machineLauncherRoutes are "New Agent"'s pickers on one machine: its launchers with the agent each starts
@@ -483,24 +460,32 @@ func (s *Service) machineLauncherRoutes() {
 		// New Agent lists what a start in its host can run (?host=, else the computer's default): where that is an
 		// engine that runs only its own launchers (Paseo), its providers alone (#8140). The main chat's menu lists the
 		// computer's own launchers: the assistant runs them on its command line, whatever the engine.
+		purpose := r.URL.Query().Get("purpose")
 		host := ""
-		if purpose := r.URL.Query().Get("purpose"); purpose == "" || purpose == "agent.new" {
+		if purpose == "" || purpose == "agent.new" {
 			host = agentStartHost(d, r.URL.Query().Get("host"))
 		}
 		var list []ConfiguredLauncher
 		var err error
-		if d.ExternalInventory && r.URL.Query().Get("purpose") == "assistant" {
-			list, err = s.externalPickerLaunchers(ctx, d, r.URL.Query().Get("refresh") == "1")
-		} else {
-			list, err = s.pickerLaunchersOn(ctx, mid, host)
-		}
 		var unavailable []unavailableLauncher
-		if purpose := r.URL.Query().Get("purpose"); err == nil && (purpose == "assistant" || purpose == "task") {
-			all := list
-			if list, err = s.assistantLaunchersOf(ctx, mid, all); err == nil {
-				unavailable = s.mainChatUnavailable(ctx, mid, all, list, s.requestLang(r)) // and what it can't run, with why (#5033)
+		var all []ConfiguredLauncher
+		switch purpose {
+		case "assistant", purposeSupervise:
+			if !d.ExternalInventory {
+				// Leave a short window for own-service checks even when the shell uses its full sync timeout.
+				ctx = context.WithValue(ctx, pickerDiscoveryDeadline{}, time.Now().Add(launcherSyncTimeout+time.Second))
 			}
-		} else if err == nil {
+			all, list, unavailable, err = s.assistantPickerLaunchers(ctx, d, r.URL.Query().Get("refresh") == "1", s.requestLang(r))
+		case "task":
+			all, err = s.pickerLaunchersOn(ctx, mid, "")
+			if err == nil {
+				list, err = s.assistantLaunchersOf(ctx, mid, all)
+				if err == nil {
+					unavailable = s.mainChatUnavailable(ctx, mid, all, list, s.requestLang(r))
+				}
+			}
+		default:
+			list, err = s.pickerLaunchersOn(ctx, mid, host)
 			list = slices.DeleteFunc(list, func(l ConfiguredLauncher) bool {
 				return proto.IsExternalLauncher(l.Name) || l.Source == proto.ExternalLauncherSource
 			})
@@ -509,9 +494,12 @@ func (s *Service) machineLauncherRoutes() {
 			apierr.Call(w, err)
 			return
 		}
+		if purpose == purposeSupervise {
+			list, unavailable = s.supervisionPickerLaunchers(list, unavailable, s.requestLang(r))
+		}
 		// A launcher whose latest check failed is left out of the pickers and of the presets that name it; the launcher
 		// the configuration runs with no pick stays, with its record, so the form can still say why this start may fail.
-		def := s.pickerDefault(ctx, r)
+		def := s.pickerDefault(ctx, r, all)
 		keep, _ := def["provider"].(string)
 		shown := s.withHealth(ctx, mid, list, keep)
 		// A Persona-managed provider shows its display name over its ID (launcher_auto_name), and a runtime's provider the
@@ -532,7 +520,7 @@ func (s *Service) machineLauncherRoutes() {
 		if unavailable != nil {
 			out["unavailable"] = unavailable
 		}
-		if purpose := r.URL.Query().Get("purpose"); purpose == "" || purpose == "agent.new" {
+		if purpose == "" || purpose == "agent.new" {
 			usable := make([]ConfiguredLauncher, 0, len(shown))
 			for _, l := range shown {
 				usable = append(usable, l.ConfiguredLauncher)

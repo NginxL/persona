@@ -25,7 +25,7 @@ export function agentGrouping(value: string | null): AgentGrouping {
 }
 
 // the host kinds a pane ref may be prefixed with (keep in step with Kinds in server/internal/host/host.go); herdr's ids go bare and may hold a colon
-const HOST_KINDS = ["orca", "herdr-core", "tern", "botmux"];
+const HOST_KINDS = ["orca", "herdr-core", "tern", "rex", "botmux"];
 
 /** The host tool a pane belongs to, from its ref (`botmux:…`, `orca:…`, `tern:…`; anything else is herdr's); "" for none. */
 export function paneHost(pane: string | undefined): string {
@@ -40,13 +40,13 @@ export function sessionHost(s: Session): string {
 }
 
 /** Where an agent was opened (#2526): "feishu" for a botmux session (a Feishu group's topic), "terminal" for a pane of a
- *  terminal engine (herdr, the Herdr App's, Orca's and Tern's terminals), "desktop" for a desktop app's own chat (a
+ *  terminal engine (herdr, the Herdr App's, Orca's, Tern's and Rex's terminals), "desktop" for a desktop app's own chat (a
  *  Codex App thread, an Orca native chat, a Paseo agent); undefined for the rest (other runtimes, history no host
  *  lists), which carry no mark. */
 export type SessionSource = "feishu" | "terminal" | "desktop";
 
 export function sessionSource(s: Session): SessionSource | undefined {
-  if (s.space_kind === "codex_app" || s.host === "paseo" || s.host === "cindy" || (s.source_kind === "runtime" && s.source_instance_id === "orca")) return "desktop";
+  if (s.space_kind === "codex_app" || s.host === "paseo" || s.host === "cindy" || s.host === "t3code" || (s.source_kind === "runtime" && s.source_instance_id === "orca")) return "desktop";
   const host = sessionHost(s);
   if (host === "botmux") return "feishu";
   return host ? "terminal" : undefined;
@@ -173,7 +173,7 @@ function byDate(a: Session, b: Session): number {
 // finished (#9751) → waiting → muted → seen; needs you always wins,
 // even when a session or its project is muted. "By status" is the only grouping built here ("By machine" is
 // lib/herdr-tree.ts); the argument stays for the callers that name it.
-export function buildAgentGroups(all: Session[], machines: Machine[], _grouping: "state", mutes: AgentMutes = { spaces: [], sessions: [] }): AgentGroup[] {
+export function buildAgentGroups(all: Session[], machines: Machine[], _grouping: "state", mutes: AgentMutes = { spaces: [], sessions: [] }, compareSessions: (a: Session, b: Session) => number = byDate): AgentGroup[] {
   const { live } = splitAgentSessions(all, machines);
   const groups: AgentGroup[] = [
     { key: "state:needs", name: stateName("needs_you"), state: "needs_you", sessions: [] },
@@ -194,5 +194,5 @@ export function buildAgentGroups(all: Session[], machines: Machine[], _grouping:
       : justFinished(s, mutes) ? 5 : 8;
     groups[index].sessions.push(s);
   }
-  return groups.filter((g) => g.sessions.length).map((g) => ({ ...g, sessions: g.sessions.sort(byDate) }));
+  return groups.filter((g) => g.sessions.length).map((g) => ({ ...g, sessions: g.sessions.sort(compareSessions) }));
 }

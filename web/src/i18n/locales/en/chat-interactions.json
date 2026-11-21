@@ -46,6 +46,8 @@
   "edited_pending": "Edited; Allow sends your version.",
   "always_allow": "Always allow",
   "allow": "Allow",
+  "owner_reply": "Reply “{phrase}”",
+  "owner_reply_unavailable": "This exact approval reply is no longer available",
   "have_question": "Have a question",
   "field_command": "Command",
   "field_file": "File",

@@ -1,16 +1,12 @@
 package persona.feature.chat
 
 import android.content.res.Resources
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,13 +18,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.delay
@@ -43,7 +35,6 @@ import persona.core.designsystem.JButtonSize
 import persona.core.designsystem.JCard
 import persona.core.designsystem.JDialog
 import persona.core.designsystem.JIcon
-import persona.core.designsystem.JSheet
 import persona.core.designsystem.LocalizedFormats
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
@@ -53,17 +44,17 @@ import java.time.Instant
 import java.time.ZoneId
 
 /**
- * A loop and background work in an Agent's chat (#4339 C8, iOS `ActivityChips`, `ActivitySheet`, `LoopStrip` and
- * `BackgroundTasksStrip`): on Glass a pill at the end of the header's second row opens a sheet that stops the loop and
- * opens a task's output. Brief and Board keep their chips above the composer, which open the status sheet.
+ * The Agent's activity entry (#4339 C8). On Glass the pill opens Background Tasks and carries the loop's next wake.
+ * Brief and Board have the same destination in the chat menu.
  */
 internal object ChatActivity {
     /** Glass shows them in the header of an Agent's chat; the other styles and Persona's conversations do not. */
     fun inHeader(style: AppStyle, topBar: Boolean, render: ChatRenderStyle): Boolean =
         style == AppStyle.Glass && topBar && render != ChatRenderStyle.Assistant
 
-    /** Whether there is anything for the pill: a loop, or background tasks (workflows are listed on their own). */
-    fun shown(session: Session?): Boolean = session != null && (session.loop != null || session.backgroundTasks.isNotEmpty())
+    /** A loop or running work earns an activity pill. The menu also serves empty and completed-only lists. */
+    fun shown(session: Session?, now: Instant = Instant.now()): Boolean =
+        session != null && (session.loop != null || backgroundRunningCount(session, now) > 0)
 
     /**
      * What Stop Loop sends (iOS `AppModel.stopLoop`, the same words): nothing outside the agent can cancel its
@@ -120,13 +111,6 @@ internal object ChatActivity {
         return res.getString(R.string.chat_activity_tap_to_view, parts.joinToString(res.getString(R.string.chat_activity_list_separator)))
     }
 
-    /** The sheet's title (iOS `ActivitySheet`): Loop, Background Task, or both. */
-    fun title(res: Resources, loop: Boolean, background: Boolean): String = res.getString(when {
-        loop && !background -> R.string.chat_activity_title_loop
-        !loop -> R.string.chat_activity_title_background
-        else -> R.string.chat_activity_title_both
-    })
-
     /** "4 minutes left" / "1 h 5 min left" / "2 hours left" (iOS `LoopStrip.until`). */
     fun until(res: Resources, date: Instant, now: Instant): String {
         val m = maxOf(1L, Math.ceil(Duration.between(now, date).toMillis() / 60_000.0).toLong()).toInt()
@@ -134,16 +118,6 @@ internal object ChatActivity {
             m < 60 -> res.getQuantityString(R.plurals.chat_activity_minutes_left, m, m)
             m % 60 > 0 -> res.getString(R.string.chat_activity_hours_minutes_left, m / 60, m % 60)
             else -> res.getQuantityString(R.plurals.chat_activity_hours_left, m / 60, m / 60)
-        }
-    }
-
-    /** How long a task has run: "42 s", "3m 5s", "1h 12m" (iOS `BackgroundTasksStrip.elapsed`). */
-    fun elapsed(res: Resources, start: Instant, now: Instant): String {
-        val s = maxOf(0L, Duration.between(start, now).seconds).toInt()
-        return when {
-            s < 60 -> res.getString(R.string.chat_activity_seconds, s)
-            s < 3600 -> res.getString(R.string.chat_activity_minutes_seconds, s / 60, s % 60)
-            else -> res.getString(R.string.chat_activity_hours_minutes, s / 3600, s % 3600 / 60)
         }
     }
 
@@ -170,7 +144,7 @@ internal fun ChatActivityPill(session: Session, onOpen: () -> Unit) {
     val res = LocalResources.current
     val now = ticking(30_000)
     val loop = session.loop
-    val background = session.backgroundTasks.size
+    val background = backgroundRunningCount(session, now)
     JActivityPill(loop?.let { ChatActivity.shortLabel(res, it, now) }, background,
         ChatActivity.spoken(res, loop, background, now), onOpen)
 }
@@ -182,30 +156,9 @@ internal fun ChatActivityRow(pill: @Composable () -> Unit) {
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) { pill() }
 }
 
-/**
- * The pill opened (iOS `ActivitySheet`): the loop with Stop Loop, which asks first and then sends the agent
- * [ChatActivity.STOP_LOOP] ([onStop]; null: this chat can't send), and every background task, a tap on one with an
- * output file opening it ([onOpenOutput]; null: files can't open here).
- */
-@Composable
-internal fun ChatActivitySheet(
-    session: Session, onStop: (() -> Unit)?, onOpenOutput: ((String) -> Unit)?, onDismiss: () -> Unit,
-) {
-    val res = LocalResources.current
-    val loop = session.loop
-    val tasks = session.backgroundTasks
-    JSheet(onDismiss = onDismiss, title = ChatActivity.title(res, loop != null, tasks.isNotEmpty()), scrollable = true) {
-        Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
-            if (loop != null) LoopStrip(loop, onStop)
-            if (tasks.isNotEmpty()) BackgroundStrip(tasks, onOpenOutput)
-        }
-        Spacer(Modifier.height(Tokens.Space.l))
-    }
-}
-
 /** The loop driving the agent (iOS `LoopStrip`, open): what it repeats, how often, when it wakes next, and Stop Loop. */
 @Composable
-private fun LoopStrip(loop: LoopInfo, onStop: (() -> Unit)?) {
+internal fun BackgroundLoopStrip(loop: LoopInfo, onStop: (() -> Unit)?) {
     val res = LocalResources.current
     val palette = PersonaTheme.palette
     var open by rememberSaveable { mutableStateOf(true) }
@@ -246,60 +199,4 @@ private fun LoopStrip(loop: LoopInfo, onStop: (() -> Unit)?) {
     if (confirming) JDialog(onDismiss = { confirming = false }, title = stringResource(R.string.chat_activity_stop_title),
         text = stringResource(R.string.chat_activity_stop_text),
         confirm = stringResource(R.string.chat_activity_stop) to { confirming = false; onStop?.invoke() }, destructive = true)
-}
-
-/** Every background task (iOS `BackgroundTasksStrip`, open): what it runs, for how long, and its output when it has one. */
-@Composable
-private fun BackgroundStrip(tasks: List<BackgroundTask>, onOpenOutput: ((String) -> Unit)?) {
-    val res = LocalResources.current
-    val palette = PersonaTheme.palette
-    var open by rememberSaveable { mutableStateOf(true) }
-    val count = pluralStringResource(R.plurals.chat_activity_background_count, tasks.size, tasks.size)
-    JCard(padding = Tokens.Space.flush) {
-        Column(Modifier.padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.m), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            val state = stringResource(if (open) R.string.chat_activity_collapse else R.string.chat_activity_expand)
-            Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { open = !open }.semantics { contentDescription = "$count, $state" },
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                JIcon(PersonaIcons.backgroundTask, null, size = Tokens.Size.markS, tint = palette.working.dot)
-                Text(count, style = PersonaTheme.type.caption.copy(fontWeight = FontWeight.SemiBold), color = palette.ink, maxLines = 1)
-                if (!open) Text(ChatActivity.taskTitle(res, tasks.first()), Modifier.weight(1f, fill = false), style = PersonaTheme.type.caption,
-                    color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.weight(1f))
-                JIcon(if (open) PersonaIcons.collapse else PersonaIcons.expand, null, size = Tokens.Size.markS, tint = palette.ink2)
-            }
-            if (open) {
-                val now = ticking(1_000)
-                tasks.forEach { task -> TaskRow(task, now, onOpenOutput) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TaskRow(task: BackgroundTask, now: Instant, onOpenOutput: ((String) -> Unit)?) {
-    val res = LocalResources.current
-    val palette = PersonaTheme.palette
-    val title = ChatActivity.taskTitle(res, task)
-    val output = task.outputFile?.takeIf(String::isNotBlank)?.takeIf { onOpenOutput != null }
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(PersonaTheme.shapes.card)).background(palette.sunken)
-            .then(if (output != null) Modifier.clickable(role = Role.Button, onClickLabel = stringResource(R.string.chat_activity_view_output)) { onOpenOutput?.invoke(output) } else Modifier)
-            .padding(Tokens.Space.m),
-        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m),
-    ) {
-        JIcon(if (task.kind == "agent") PersonaIcons.backgroundTask else PersonaIcons.terminal, null, size = Tokens.Size.markS, tint = palette.ink2)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-            Text(title, style = PersonaTheme.type.callout.copy(fontWeight = FontWeight.Medium), color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            task.command?.takeIf { it.isNotBlank() && it != title }?.let {
-                Text(it, style = PersonaTheme.type.codeSmall, color = palette.ink2, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-            task.startedAt?.let { runCatching { Instant.parse(it) }.getOrNull() }?.let { start ->
-                Text(ChatActivity.elapsed(res, start, now), style = PersonaTheme.type.micro, color = palette.ink2, maxLines = 1)
-            }
-            if (output != null) Text(stringResource(R.string.chat_activity_view_output),
-                style = PersonaTheme.type.micro.copy(fontWeight = FontWeight.SemiBold), color = palette.accent, maxLines = 1)
-        }
-    }
 }

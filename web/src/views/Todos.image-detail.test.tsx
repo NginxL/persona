@@ -105,10 +105,13 @@ describe("persisted to-do images", () => {
     const opener = thumbnail()!.closest("button");
     expect(opener, "enlarge control").toBeTruthy();
     await click(opener!);
-    const viewer = [...document.querySelectorAll<HTMLElement>("[role=dialog]")].at(-1);
-    expect(viewer, "large image viewer").toBeTruthy();
-    expect(viewer!.querySelector('img[src="blob:persisted-todo-image"]')).toBeTruthy();
-    expect(button(t("chat-imageviewer.download"), viewer!), "viewer download action").toBeTruthy();
+    await act(async () => { await vi.dynamicImportSettled(); });
+    await vi.waitFor(() => {
+      const viewer = [...document.querySelectorAll<HTMLElement>("[role=dialog]")].at(-1);
+      expect(viewer, "large image viewer").toBeTruthy();
+      expect(viewer!.querySelector('img[src="blob:persisted-todo-image"]')).toBeTruthy();
+      expect(button(t("chat-imageviewer.download"), viewer!), "viewer download action").toBeTruthy();
+    });
   });
 });
 

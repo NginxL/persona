@@ -53,7 +53,7 @@ export type Panel =
   | { kind: "agent"; mid: string; sid: string }
   /** A lead's Team (#5180, lib/team.ts): its workers' strip and the conversation of `worker` (else the one lib/team.ts
    *  shownWorker picks). `sid` is the lead's: the panel stays while the page shows the lead. */
-  | { kind: "team"; mid: string; sid: string; worker?: string }
+  | { kind: "team"; mid: string; sid: string; worker?: string; at?: string }
   /** A session's side sessions (#7944, lib/side-panel.ts): the Team panel's strip of them and the conversation of `side`
    *  (else the one lib/side-panel.ts shownSide picks), landed at `at` (a search hit's message). `sid` is the parent's: the
    *  panel stays while the page shows the parent. */

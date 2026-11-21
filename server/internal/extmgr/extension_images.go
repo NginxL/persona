@@ -157,6 +157,9 @@ func eachPicture(v *extension.View, items []extension.UIElem, f func(ref string,
 		if s := e.Src; s != nil && s.Ref != "" {
 			f(s.Ref, func(p string) { s.Path = p })
 		}
+		if s := e.Poster; s != nil && s.Ref != "" {
+			f(s.Ref, func(p string) { s.Path = p })
+		}
 		if t := e.Thumbnail; t != nil && t.Ref != "" {
 			f(t.Ref, func(p string) { t.Path = p })
 		}

@@ -228,8 +228,10 @@
     <string name="designsystem_core_engine_herdr_app">桌面 App 里开的终端</string>
     <string name="designsystem_core_engine_orca">Orca 里的终端</string>
     <string name="designsystem_core_engine_tern">Tern 里的终端</string>
+    <string name="designsystem_core_engine_rex">Rex 里的终端</string>
     <string name="designsystem_core_engine_paseo">Paseo 里的 Agent</string>
     <string name="designsystem_core_engine_cindy">Cindy 里的 Agent</string>
+    <string name="designsystem_core_engine_t3code">T3 Code 里的 Agent</string>
     <string name="designsystem_core_engine_none">没有终端引擎</string>
     <string name="designsystem_core_engine_none_detail">只显示桌面 App 的会话</string>
     <string name="designsystem_core_engine_offline">离线，暂无检测信息</string>
@@ -412,6 +414,7 @@
     <string name="designsystem_core_headline_agent_permission">%1$s 请求使用 %2$s</string>
     <string name="designsystem_core_headline_agent_permission_detail">%1$s 请求使用 %2$s：%3$s</string>
     <string name="designsystem_core_headline_secret_run">用你的密码在 %1$s 上运行</string>
+    <string name="designsystem_core_headline_secret_handoff">把密钥交给 Agent？</string>
     <string name="designsystem_core_headline_screen">终端等你处理</string>
     <string name="designsystem_core_headline_needs_you">需要你</string>
     <string name="designsystem_core_ask_question">在问你</string>

@@ -73,7 +73,7 @@ type extensionExecutor interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-// PutExtensionPlan changes all records atomically, without deleting or rewriting any existing secrets.
+// PutExtensionPlan changes all records and their requested secret deletions atomically.
 func (d *DB) PutExtensionPlan(ctx context.Context, records []extension.Record) error {
 	ordered := slices.Clone(records)
 	slices.SortFunc(ordered, func(a, b extension.Record) int { return strings.Compare(a.StorageKey(), b.StorageKey()) })
@@ -89,6 +89,13 @@ func (d *DB) PutExtensionPlan(ctx context.Context, records []extension.Record) e
 	for _, record := range ordered {
 		if err = putExtension(ctx, tx, record); err != nil {
 			return err
+		}
+		names := slices.Clone(record.DeleteSecrets)
+		slices.Sort(names)
+		for _, name := range names {
+			if _, err = tx.Exec(ctx, `DELETE FROM plugin_secrets WHERE plugin = $1 AND name = $2`, record.StorageKey(), name); err != nil {
+				return err
+			}
 		}
 	}
 	return extensionCommitResult(tx.Commit(ctx))
@@ -110,7 +117,22 @@ func extensionCommitResult(err error) error {
 func putExtension(ctx context.Context, executor extensionExecutor, r extension.Record) error {
 	if r.ExpectedID != "" {
 		var id, version string
-		if err := executor.QueryRow(ctx, `SELECT COALESCE(NULLIF(public_id, ''), id), version FROM plugins WHERE id = $1 FOR UPDATE`, r.StorageKey()).Scan(&id, &version); err != nil {
+		var err error
+		if r.ExpectedConfig != nil {
+			expected := r.ExpectedConfig
+			if len(expected) == 0 {
+				expected = json.RawMessage(`{}`)
+			}
+			var same bool
+			err = executor.QueryRow(ctx, `SELECT COALESCE(NULLIF(public_id, ''), id), version,
+				COALESCE(config, '{}'::jsonb) = $2::jsonb FROM plugins WHERE id = $1 FOR UPDATE`, r.StorageKey(), []byte(expected)).Scan(&id, &version, &same)
+			if err == nil && !same {
+				return extension.ErrSettingsMoved
+			}
+		} else {
+			err = executor.QueryRow(ctx, `SELECT COALESCE(NULLIF(public_id, ''), id), version FROM plugins WHERE id = $1 FOR UPDATE`, r.StorageKey()).Scan(&id, &version)
+		}
+		if err != nil {
 			return err
 		}
 		if id != r.ExpectedID || version != r.ExpectedVersion {

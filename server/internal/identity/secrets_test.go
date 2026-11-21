@@ -1,6 +1,9 @@
 package identity
 
-import "testing"
+import (
+	"path"
+	"testing"
+)
 
 // DataSecretName is the one classification the path guard, the agent sandbox's lists and `hub doctor` share: known
 // credential names by their start (backups included), or any base name ending in a key or credential suffix. It takes
@@ -30,6 +33,27 @@ func TestDataSecretName(t *testing.T) {
 	for _, name := range readable {
 		if DataSecretName(name) {
 			t.Errorf("%q: want an ordinary name", name)
+		}
+	}
+}
+
+func TestDataCredentialGlobs(t *testing.T) {
+	for _, name := range []string{
+		"secret.key", ".key", "secret.key.bak", "secret.key.", "handles.key~", "handles.key~1", "hub.key-old",
+		"apns.p8", "private.pem", "certificate.crt", "edge.token", "edge.secret", "edge.password",
+		"hub.json", "secret.keypad", "secret.key/other", "key", "notes.md", "edge.tokens",
+	} {
+		want := credentialExt.MatchString(name)
+		got := false
+		for _, glob := range DataCredentialGlobs() {
+			matched, err := path.Match(glob, name)
+			if err != nil {
+				t.Fatalf("invalid generated glob %q: %v", glob, err)
+			}
+			got = got || matched
+		}
+		if got != want {
+			t.Errorf("%q: glob match=%v, credential pattern match=%v", name, got, want)
 		}
 	}
 }

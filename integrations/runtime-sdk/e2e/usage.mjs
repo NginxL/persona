@@ -30,6 +30,26 @@ try {
   assert.equal(params.full, undefined)
   assert.deepEqual(params.buckets, [{ minute: Math.floor(Date.parse(p.ts) / 60000) * 60, model: 'toy-model', agent: 'grok', in: 20, out: 40, cache_read: 60, cache_write: 80, req: 2 }])
   console.log('PASS runtime usage: real SDK/node transport, owned agent attribution, dedupe, file-agent exclusion and foreign-session refusal')
+
+  assert.equal(rt.nodeHas('usage_windows'), true)
+  const account = { provider: 'agy', name: 'Antigravity', sampled_at: new Date().toISOString(), windows: [
+    { label: '5h', window_minutes: 300, used_percent: 25, resets_at: new Date(Date.now() + 5 * 3600_000).toISOString() },
+  ] }
+  assert.equal(rt.usageWindows(account), true)
+  const snapshot = await until('runtime usage window snapshot', async () => {
+    const answer = await node.call('usage.windows')
+    return answer.accounts?.some(a => a.source_key === 'runtime:usage-toy') ? answer : undefined
+  })
+  const stored = snapshot.accounts.find(a => a.source_key === 'runtime:usage-toy')
+  assert.equal(stored.provider, 'agy')
+  assert.equal(stored.name, 'Antigravity')
+  assert.deepEqual(stored.windows, account.windows)
+  rt.usageWindows({ ...account, windows: [] })
+  await until('empty runtime usage window snapshot', async () => {
+    const answer = await node.call('usage.windows')
+    return !answer.accounts?.some(a => a.source_key === 'runtime:usage-toy') || undefined
+  })
+  console.log('PASS runtime usage windows: real SDK/node transport, local snapshot and explicit clear')
 } finally {
   rt.stop()
   await node.stopAndWait()
@@ -49,6 +69,7 @@ try {
   remoteNode = await startNode({ personad: process.env.PERSONAD, home })
   await until('namespaced daemon session', () => remoteNode.sessions().some(s => s.session_id === 'remote.own'))
   assert.equal(daemon.nodeHas('usage'), true)
+  assert.equal(daemon.nodeHas('usage_windows'), false, 'daemon accounts are not attributed to the local machine')
   const p = { session_id: 'own', ts: new Date().toISOString(), model: 'toy-model', request_id: 'r1', output: 12 }
   daemon.usage(p)
   daemon.usage(p)

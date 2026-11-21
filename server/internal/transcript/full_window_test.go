@@ -1,11 +1,14 @@
 package transcript
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // windowedClaude writes a Claude transcript of 4,000 lines whose first one is a long question (cut on pages, so Full
@@ -49,7 +52,12 @@ func TestFullOfUnknownIDLoadsNothing(t *testing.T) {
 	f, _ := windowedClaude(t, 0)
 	base, items := f.base, len(f.items)
 	for _, id := range []string{"nope#0", "nope", "nope-3#1", "fold:a1#0", `odd"id#0`, "line999999#0", "line5#0", "line1#0", ""} {
-		if _, err := f.Full(id); err == nil || err.Error() != "no item "+id {
+		_, err := f.Full(id)
+		if proto.PositionalItemID(id) {
+			if !errors.Is(err, ErrSourceChanged) {
+				t.Fatalf("Full(%q): %v", id, err)
+			}
+		} else if err == nil || err.Error() != "no item "+id {
 			t.Fatalf("Full(%q): %v", id, err)
 		}
 		if f.base != base || len(f.items) != items {
@@ -77,7 +85,7 @@ func TestFullOfStaleIDOfLineWithCodexShapedInputLoadsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	base, items := g.base, len(g.items)
-	if _, err := g.Full("line5#0"); err == nil || err.Error() != "no item line5#0" {
+	if _, err := g.Full("line5#0"); !errors.Is(err, ErrSourceChanged) {
 		t.Fatalf("Full(line5#0): %v", err)
 	}
 	if g.base != base || len(g.items) != items {
@@ -88,6 +96,17 @@ func TestFullOfStaleIDOfLineWithCodexShapedInputLoadsNothing(t *testing.T) {
 	}
 	if got, err := g.Full("a5#0"); err != nil || got.Text != "answer 5" || got.Seq != 6 {
 		t.Fatalf("Full(a5#0) of the line after it: %+v, %v", got, err)
+	}
+}
+
+func TestFullOfOlderPositionalItemReportsOpenFailure(t *testing.T) {
+	defer func(w int64) { windowBytes = w }(windowBytes)
+	f, _ := windowedClaude(t, 5)
+	if err := os.Remove(f.Path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Full("line5#0"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Full treated an unreadable window as absent: %v", err)
 	}
 }
 

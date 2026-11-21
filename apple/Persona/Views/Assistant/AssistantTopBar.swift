@@ -165,7 +165,7 @@ struct AssistantTopBar: View {
         .padding(.horizontal, Theme.Space.l)
         .padding(.top, Theme.Space.xxs)
         .frame(height: Self.height, alignment: .top)
-        .barScreenshotBanner()
+        .barScreenshotBanner(name: ownName)
         .background(alignment: .top) { BarFog(solid: Self.fogSolid, fade: Self.fade) }
     }
     #endif
@@ -267,7 +267,7 @@ struct AssistantTopBar: View {
         .padding(.horizontal, Theme.Space.l)
         .padding(.top, Theme.Space.xxs)
         .frame(height: Self.height, alignment: .top)
-        .barScreenshotBanner()
+        .barScreenshotBanner(name: ownName)
         .background(alignment: .top) { BarFog(solid: Self.fogSolid, fade: Self.fade) }
         .connectionDetails($showLink)
         .modifier(ShellBarAtRest(page: 0)) // ShellMovingBar stands in while the strip slides
@@ -318,7 +318,7 @@ struct AssistantTopBar: View {
         #endif
         .padding(.top, Self.topInset)
         .frame(height: Self.height, alignment: .top)
-        .barScreenshotBanner()
+        .barScreenshotBanner(name: ownName)
         .background(alignment: .top) {
             // Solid down to the bar's bottom edge, fading out below it (fading under the pill let the messages show
             // through the name).
@@ -473,10 +473,7 @@ struct AssistantTopBar: View {
     /// Whose page it is: the current assistant's name, as the sidebar's head says it (with one assistant too, #9973;
     /// the face stays the persona's, picked in Appearance); another assistant's conversation opened from elsewhere
     /// names its own.
-    private var ownName: String {
-        if let key, let other = model.otherAssistant(of: key) { return other.name }
-        return model.assistantManager?.name ?? AssistantSidebar.assistantName(model)
-    }
+    private var ownName: String { model.assistantTitleName(in: key) }
 
     /// The conversation's launcher (the next message uses it) or, on the new-conversation page, the default one.
     /// The model picked for the next message here, nil: the launcher's default.
@@ -560,16 +557,7 @@ struct AssistantTopBar: View {
     private var cwd: String { AssistantCopyText.cwd(key, in: model) }
 
     @ViewBuilder private func menuItems(_ link: ConnectionStatus.Phase) -> some View {
-        if model.isMultiHub, let current = model.hub?.group {
-            // Several groups of hubs: each has its own Persona (docs/protocol/multi-hub.md「Terminology」); pick whose.
-            Section("hub") {
-                Picker("hub", selection: Binding(get: { current }, set: { model.selectHub($0) })) {
-                    ForEach(model.groupIDs, id: \.self) { g in
-                        Label(model.groupName(g), systemImage: Theme.Icon.hubGroup).tag(g)
-                    }
-                }
-            }
-        }
+        // Only this conversation's things: the hub is picked in the sidebar's assistant switcher, with its assistants (#12594).
         Section(menuTitle) {
             // The Agent SDK could not run here (#2455): it says so, and why.
             if session?.runtimeFallback?.isEmpty == false,
@@ -772,11 +760,11 @@ extension AppModel {
 /// below the safe area's top, then fading out over `fade`, and across the whole width. On iPhone Duo's outer screen
 /// the status bar stands at the side: a fog only as wide as the page stopped beside it, a hard edge (#283).
 private extension View {
-    /// What a screenshot shows of the bar (#9508): the assistant's avatar and name, and Persona's repository at the
-    /// right (#10172), in its row of buttons, down to where the fog starts to fade (the fog under both carries on
+    /// What a screenshot shows of the bar (#9508): the assistant's avatar and `name` (the bar's own for whose page it
+    /// is, #12243), and Persona's repository at the right (#10172), in its row of buttons, down to where the fog starts to fade (the fog under both carries on
     /// below). Under the bar the page's color with the fog's own over it, so at rest the bar looks as it did; under the
     /// banner the page's color alone.
-    func barScreenshotBanner() -> some View {
+    func barScreenshotBanner(name: String) -> some View {
         screenshotBanner(solid: AssistantTopBar.fogSolid, fade: Theme.Space.m) {
             ZStack {
                 Theme.pageBackground
@@ -786,7 +774,7 @@ private extension View {
         } bannerBackdrop: {
             Theme.pageBackground
         } banner: {
-            ScreenshotBannerContent(row: (AssistantTopBar.topInset, Theme.Size.tapTarget))
+            ScreenshotBannerContent(row: (AssistantTopBar.topInset, Theme.Size.tapTarget), name: name)
         }
     }
 }

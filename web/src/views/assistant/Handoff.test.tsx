@@ -134,12 +134,28 @@ describe("hand-off cards", () => {
     getFeedState().plans[plan.id] = plan;
     await show({ id: "plan-event", conversation, at, kind: "plan", ref: plan.id }, [linked("broken-task", "Broken task", [], { start_error: "launcher missing", done_at: at })], []);
     const [broken, removed] = cards();
+    act(() => broken!.click());
+    expect(getPanel()).toEqual({ kind: "task", todo: "broken-task" });
     // a raw error that names no known cause says to open the task, where it is (#8237)
     expect(broken!.textContent).toContain(t("assistant-tasks.start_failed_details"));
     expect(broken!.textContent).not.toContain("launcher missing");
     expect(removed!.tagName).toBe("DIV");
     expect(removed!.textContent).toContain("Removed task");
     expect(removed!.textContent).toContain(t("assistant-tasks.handoff_gone"));
+  });
+
+  it("shows a failed continuation without making its previous to-do the destination", async () => {
+    const plan: TaskPlan = { id: "plan-failed", conversation, state: "started", created_at: at, tasks: [
+      { title: "Carry on the task", prompt: "a", cwd: "/example", machine: "example-computer", continues: "previous-task", error: "continues: cannot stop agent example-computer/session on to-do previous-task: exit status 1" },
+    ] };
+    getFeedState().plans[plan.id] = plan;
+    await show({ id: "plan-event", conversation, at, kind: "plan", ref: plan.id }, [linked("previous-task", "Previous task", [agent])], [agent]);
+    const [card] = cards();
+    expect(card!.tagName).toBe("DIV");
+    expect(card!.querySelector('[data-handoff-wake="continuation"]')).not.toBeNull();
+    expect(card!.querySelector("[data-handoff-failure]")?.textContent).toBe(t("assistant-tasks.start_failed_short"));
+    act(() => card!.click());
+    expect(getPanel()).toBeNull();
   });
 
   describe("a to-do continued by later plans (#11854)", () => {
@@ -170,6 +186,7 @@ describe("hand-off cards", () => {
       expect(ids()).toEqual([`example-computer/third-agent`]);
       const [card] = cards();
       expect(card!.textContent).toContain("Third Agent");
+      expect(card!.querySelector('[data-handoff-wake="continuation"]')).not.toBeNull();
       expect(card!.querySelector('[data-handoff-state="working"]')).not.toBeNull();
       act(() => card!.click());
       expect(getPanel()).toEqual({ kind: "agent", mid: "example-computer", sid: "third-agent" });
@@ -183,6 +200,7 @@ describe("hand-off cards", () => {
       act(() => root.render(<StrictMode><div data-chat-scroll><FeedLineView item={a} simplified /></div></StrictMode>));
       await settle();
       expect(ids()).toEqual([`example-computer/first-agent`]);
+      expect(cards()[0]!.querySelector('[data-handoff-wake="created"]')).not.toBeNull();
     });
 
     it("before the newest plan's Agent is linked its card says starting, never an older Agent", async () => {

@@ -269,7 +269,7 @@ internal object PhoneToolText {
      */
     fun grantHint(source: PhoneSource?): String {
         val system = source?.let(::systemSetting)
-        // Sources that need no permission (clipboard, device) have a switch but no Allow button.
+        // Sources that need no permission (clipboard, device, calls) have a switch but no Allow button.
         val zh = "请在安卓手机上打开 $APP_PATH_ZH" +  // i18n-ignore: tool result for the model
             when {
                 source == null -> "，点对应数据的「授权」"  // i18n-ignore: tool result for the model
@@ -297,7 +297,7 @@ internal object PhoneToolText {
             "turn notifications on in Android Settings › Apps › Persona › Notifications"
         PhoneSource.Health -> "Health Connect › 应用权限 › Persona 里允许读取" to  // i18n-ignore: tool result for the model
             "allow reading in Health Connect › App permissions › Persona"
-        PhoneSource.Clipboard, PhoneSource.Device -> null
+        PhoneSource.Clipboard, PhoneSource.Device, PhoneSource.Calls -> null
     }
 
     /** The SDK level the photos permission name depends on; replaceable in tests. */

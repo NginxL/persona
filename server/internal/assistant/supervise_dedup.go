@@ -82,8 +82,23 @@ func digestFingerprint(e prompts.SuperviseEntry, g superviseSignal) (string, str
 // words stay the same.
 func keyIsNews(kind string) bool {
 	switch kind {
-	case sigParkedDue, sigParkDecided, sigInbox, sigOwnerCannot, sigRecheck, sigUndecidable, sigFailed, sigStarted, sigAllStopped, sigDecisionReply, sigHandoffResult, sigEstimateDue,
+	case sigParkedDue, sigParkDecided, sigInbox, sigOwnerCannot, sigRecheck, sigUndecidable, sigFailed, sigStarted, sigAllStopped, sigDecisionReply, sigHandoffResult, sigEstimateDue, sigOverdue, sigTimedOut,
 		sigCheck: // a check's run, or the owner's answer to its decision: an Agent that only runs tools says the same all along
+		return true
+	}
+	return false
+}
+
+// keptUntilChange: a routine signal whose fingerprint (the agent's last words, its cards, its report, its step) is the
+// whole of what the supervisor needs to know about it. The same fingerprint is not told again while the task is open
+// (#11614): before, it woke the supervisor again every superviseDedupWindow although nothing had changed. A new turn
+// with other words, a new card or a new report changes the fingerprint and is told as before. Signals that wait on a
+// decision keep the short window or their own news key (keyIsNews).
+func keptUntilChange(g superviseSignal) bool {
+	switch g.Kind {
+	case sigReport:
+		return g.Report != upReportQuestion && g.Report != upReportBlocked
+	case sigIdle, sigUnjudged, sigStalled, sigNoProgress, sigReview, sigOrphaned, sigInterrupted, sigOverdue, sigTimedOut:
 		return true
 	}
 	return false
@@ -144,7 +159,7 @@ func (s *Service) reserveSupervisionDelivery(ctx context.Context, entries []prom
 			pending = append(pending, id)
 		}
 		fingerprint := superviseFingerprint{Hash: hash, At: now.UTC(), Permanent: signals[i].Kind == sigPRConflict || signals[i].Kind == sigDraftPR}
-		if signals[i].Kind == sigAllStopped {
+		if signals[i].Kind == sigAllStopped || keptUntilChange(signals[i]) {
 			fingerprint.Todo = signals[i].Todo
 		}
 		if g := signals[i]; g.externalPRReview() || g.Kind == sigInbox && g.Inbox != nil && g.Inbox.ToAgent == "unhandled" {

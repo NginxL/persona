@@ -3,8 +3,12 @@ import SwiftUI
 extension UnavailableLauncher {
     /// What the pickers show, as `Launcher.title`: its own name, else its startup name (the web's `providerTitle`).
     var title: String {
-        guard let d = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty else { return name }
-        return d
+        let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = trimmed?.isEmpty == false ? trimmed : nil
+        if kind != "api", let cli = Launcher.traeCLITitle(name: name, source: nil, agent: agent, baseURL: nil, displayName: label) {
+            return cli
+        }
+        return label ?? name
     }
 
     /// What New Agent's launcher list shows off after the launchers (#8109): the hub's `unavailable` for the computer
@@ -15,7 +19,7 @@ extension UnavailableLauncher {
         let q = query.trimmingCharacters(in: .whitespaces)
         return unavailable.filter { u in
             guard seen.insert(u.name).inserted else { return false }
-            return q.isEmpty || u.name.localizedCaseInsensitiveContains(q) || (u.displayName ?? "").localizedCaseInsensitiveContains(q)
+            return q.isEmpty || u.name.localizedCaseInsensitiveContains(q) || u.title.localizedCaseInsensitiveContains(q)
         }
     }
 }

@@ -392,7 +392,7 @@ export class AgyAcpClient extends EventEmitter {
     const extraDirsKey = JSON.stringify(extraDirs)
     const mcpKey = JSON.stringify(mcpServers)
     const loaded = this.loadedSessions.get(sessionId)
-    if (loaded && (mcpServers.length === 0 || loaded.mcpKey === mcpKey) && loaded.extraDirsKey === extraDirsKey) {
+    if (loaded && (mcpServers.length > 0 || loaded.mcpKey) && (mcpServers.length === 0 || loaded.mcpKey === mcpKey) && loaded.extraDirsKey === extraDirsKey) {
       return
     }
     const params = {

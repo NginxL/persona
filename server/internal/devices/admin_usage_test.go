@@ -275,6 +275,59 @@ func TestAdminUsageSourceTestIsOneReadOnlyRead(t *testing.T) {
 	}
 }
 
+// relay_key (#12311): a relay read with an ordinary API key. Like relay it needs its key and is called "Relay" when
+// unnamed; its test says when the relay shares no account quota with the key, rather than a bare zero.
+func TestAdminUsageRelayKeySource(t *testing.T) {
+	h, c := usageTestDevices(t, `{"token":"t"}`)
+	shared := true
+	gate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+usageTestKey || r.URL.Path != "/me/usage" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if !shared {
+			fmt.Fprint(w, `{"account_quota_shared":false,"accounts":[]}`)
+			return
+		}
+		at := time.Now().UTC().Format(time.RFC3339)
+		fmt.Fprintf(w, `{"account_quota_shared":true,"accounts":[{"account_id":"a","provider":"codex","plan":"pro","windows":[{"kind":"weekly","used_ratio":0.04,"checked_at":%q}]},{"account_id":"b","provider":"deepseek","windows":[{"kind":"balance_cny","remaining":52,"checked_at":%[1]q}]}]}`, at)
+	}))
+	t.Cleanup(gate.Close)
+
+	if status, out, _ := c.do("POST", "/api/v1/admin/usage-sources", `{"type":"relay_key","url":"`+gate.URL+`"}`); status != 400 || out["code"] != "key_required" {
+		t.Fatalf("no key: %d %v", status, out)
+	}
+	_, out, _ := c.do("POST", "/api/v1/admin/usage-sources/test", `{"type":"relay_key","url":"`+gate.URL+`/v1","key":"`+usageTestKey+`"}`)
+	if out["ok"] != true || out["accounts"] != float64(1) || out["windows"] != float64(1) || out["listed"] != float64(2) || out["quota_hidden"] != nil {
+		t.Fatalf("test: %v", out)
+	}
+	shared = false
+	if _, out, _ = c.do("POST", "/api/v1/admin/usage-sources/test", `{"type":"relay_key","url":"`+gate.URL+`","key":"`+usageTestKey+`"}`); out["ok"] != true || out["quota_hidden"] != true || out["accounts"] != float64(0) {
+		t.Fatalf("not shared: %v", out)
+	}
+	// the management API is not what this type reads: a relay key is turned away there
+	if _, out, _ = c.do("POST", "/api/v1/admin/usage-sources/test", `{"type":"relay","url":"`+gate.URL+`","key":"`+usageTestKey+`"}`); out["ok"] != false || out["code"] != usagesource.CodeUnauthorized {
+		t.Fatalf("relay with a key: %v", out)
+	}
+
+	status, out, w := c.do("POST", "/api/v1/admin/usage-sources", `{"type":"relay_key","url":"`+gate.URL+`/v1","key":"`+usageTestKey+`"}`)
+	src, _ := out["source"].(map[string]any)
+	if status != 200 || src["name"] != "Relay" || src["type"] != "relay_key" || src["url"] != gate.URL+"/v1" || src["has_key"] != true {
+		t.Fatalf("add: %d %v", status, out)
+	}
+	if strings.Contains(w.Body.String(), usageTestKey) {
+		t.Error("key in the answer")
+	}
+	if e := usageFile(t, h)["sources"].([]any)[0].(map[string]any); e["type"] != "relay_key" || e["key"] != usageTestKey {
+		t.Fatalf("manager.json: %v", e)
+	}
+	// another type is another reading of the address: the key is typed again
+	id := src["id"].(string)
+	if status, out, _ = c.do("PUT", "/api/v1/admin/usage-sources/"+id, `{"type":"relay"}`); status != 400 || out["code"] != "key_required" {
+		t.Fatalf("type change keeps no key: %d %v", status, out)
+	}
+}
+
 func TestAdminUsageSourceTestKeySelection(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

@@ -47,6 +47,24 @@ class HttpModelConfiguration internal constructor(
         if (failure.status == 404) null else throw failure
     }
 
+    override suspend fun profiles(): ModelProfilesView? = try {
+        JsonCodec.decodeFromString(call(profilePath(), "GET"))
+    } catch (failure: HubFailure) {
+        if (failure.status == 404) null else throw failure
+    }
+
+    override suspend fun applyProfile(id: String): ModelProfilesView =
+        JsonCodec.decodeFromString(call(profilePath(id, "apply"), "POST", emptyBody = true))
+
+    override suspend fun rollbackProfile(): ModelProfilesView =
+        JsonCodec.decodeFromString(call(profilePath("rollback"), "POST", emptyBody = true))
+
+    override suspend fun saveProfile(id: String, input: ModelProfileSaveInput): ModelProfileSave = try {
+        ModelProfileSave.Saved(JsonCodec.decodeFromString(call(profilePath(id), "PUT", input.toJson())))
+    } catch (failure: HubFailure) {
+        if (failure.status == 409) ModelProfileSave.Conflict else throw failure
+    }
+
     /** A hub without model configuration answers 404 from its router, without the JSON error of a missing purpose. */
     private fun missing(failure: HubFailure): Exception = when {
         failure.status != 404 -> failure
@@ -54,8 +72,8 @@ class HttpModelConfiguration internal constructor(
         else -> ModelPurposeNotFound(failure.message)
     }
 
-    private suspend fun call(path: String, method: String, body: JsonObject? = null, timeout: Long? = null): String =
-        request(path, method, body?.toString()?.toRequestBody(json), timeout).use {
+    private suspend fun call(path: String, method: String, body: JsonObject? = null, timeout: Long? = null, emptyBody: Boolean = false): String =
+        request(path, method, body?.toString()?.toRequestBody(json) ?: if (emptyBody) ByteArray(0).toRequestBody(null) else null, timeout).use {
             if (!it.isSuccessful) throw HubFailure.from(it)
             it.body?.string().orEmpty()
         }
@@ -63,6 +81,11 @@ class HttpModelConfiguration internal constructor(
     private fun path(vararg purpose: String) = HttpUrl.Builder().scheme("https").host("example.com")
         .addPathSegments("api/v1/model-config").apply {
             purpose.forEach { addPathSegment("purposes").addPathSegment(it) }
+        }.build().encodedPath
+
+    private fun profilePath(vararg segments: String) = HttpUrl.Builder().scheme("https").host("example.com")
+        .addPathSegments("api/v1/model-profiles").apply {
+            segments.forEach { addPathSegment(it) }
         }.build().encodedPath
 
     private companion object {

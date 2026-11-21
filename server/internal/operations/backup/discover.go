@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nwverse/persona/server/internal/identity"
@@ -97,6 +98,84 @@ func Discover(opts Options) (Target, Target, error) {
 		return Target{}, Target{}, errors.New("the hub and built-in manager must have separate databases; a legacy shared database is not a whole-install backup")
 	}
 	return hub, manager, nil
+}
+
+// DiscoverDevelopment resolves the hub and built-in manager databases a
+// development snapshot dumps, with the same rules as webdev.py's inventory:
+// the manager's tables stay in the hub database until its
+// moved_to_own_database is recorded, and once moved, a named database on the
+// hub's server takes precedence over the saved URL. shared reports that the
+// manager has no database of its own, so only the hub target needs its writers
+// verified. A whole-install backup keeps Discover's stricter separate-database
+// rule.
+func DiscoverDevelopment(opts Options) (hub, manager Target, shared bool, err error) {
+	home, err := filepath.Abs(opts.Home)
+	if err != nil {
+		return Target{}, Target{}, false, fmt.Errorf("resolve home: %w", err)
+	}
+	var hf hubFile
+	hubErr := readJSONConfig(filepath.Join(home, "hub.json"), &hf)
+	if errors.Is(hubErr, os.ErrNotExist) && opts.BundleHome != "" {
+		hubErr = readJSONConfig(filepath.Join(opts.BundleHome, "runtime", "hub.json"), &hf)
+	}
+	if hubErr != nil && !errors.Is(hubErr, os.ErrNotExist) {
+		return Target{}, Target{}, false, fmt.Errorf("read hub.json: %w", hubErr)
+	}
+	if errors.Is(hubErr, os.ErrNotExist) && opts.DatabaseURL == "" && identity.Getenv("PERSONA_DATABASE_URL") == "" {
+		return Target{}, Target{}, false, errors.New("hub.json is missing from both the runtime and bundle; provide --database-url")
+	}
+	hubURL := opts.DatabaseURL
+	if hubURL == "" {
+		hubURL = identity.Getenv("PERSONA_DATABASE_URL")
+	}
+	if hubURL == "" {
+		hubURL = hf.DatabaseURL
+	}
+	hub, err = makeTarget("hub", hubURL, opts.HubDockerContainer, "persona-postgres")
+	if err != nil {
+		return Target{}, Target{}, false, err
+	}
+	// OwnDatabase.Moved is not decoded by encoding/json (the manager keeps it
+	// as moved_to_own_database.at), so read it here too.
+	var own struct {
+		managerconf.OwnDatabase
+		MovedDatabase struct {
+			At time.Time `json:"at"`
+		} `json:"moved_to_own_database"`
+	}
+	managerErr := readJSONConfig(managerconf.DefaultFile(home), &own)
+	if errors.Is(managerErr, os.ErrNotExist) && opts.BundleHome != "" {
+		managerErr = readJSONConfig(filepath.Join(opts.BundleHome, "runtime", "managers", "assistant", "manager.json"), &own)
+	}
+	if managerErr != nil && !errors.Is(managerErr, os.ErrNotExist) {
+		return Target{}, Target{}, false, fmt.Errorf("read the built-in manager configuration: %w", managerErr)
+	}
+	// The manager's live tables are the hub's until they were moved.
+	if own.MovedDatabase.At.IsZero() {
+		return hub, Target{}, true, nil
+	}
+	managerURL := opts.ManagerDatabaseURL
+	if managerURL == "" {
+		if own.Name != "" {
+			managerURL, err = withDatabase(hub.URL, own.Name)
+			if err != nil {
+				return Target{}, Target{}, false, errors.New("derive the built-in manager database: invalid hub database URL")
+			}
+		} else {
+			managerURL = own.URL
+		}
+	}
+	if managerURL == "" {
+		return hub, Target{}, true, nil
+	}
+	manager, err = makeTarget("manager", managerURL, opts.ManagerDockerContainer, own.Container)
+	if err != nil {
+		return Target{}, Target{}, false, err
+	}
+	if sameDatabase(hub, manager) {
+		return hub, Target{}, true, nil
+	}
+	return hub, manager, false, nil
 }
 
 func readJSONConfig(name string, output any) error {

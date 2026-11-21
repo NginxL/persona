@@ -114,10 +114,12 @@ nonisolated struct ExtensionSurfaceClient: Sendable {
             async let widgets = widgetCatalog(enabled: features.contains("extension_widgets"))
             async let shortcuts = shortcutCatalog(enabled: features.contains("extension_shortcuts"))
             let (w, s) = try await (widgets, shortcuts)
+            // Answers that arrive after the app went to the background are dropped, not written (#11360).
+            try Task.checkCancellation()
             try store.catalog(group: group, expected: expected, widgets: w.widgets, shortcuts: s.shortcuts)
             return features
         } catch {
-            if let error = error as? ExtensionSurfaceHTTPError, [401, 403].contains(error.status) {
+            if !Task.isCancelled, let error = error as? ExtensionSurfaceHTTPError, [401, 403].contains(error.status) {
                 try? store.revoke(group, generation: expected.generation)
             }
             throw error

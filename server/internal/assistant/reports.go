@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -161,7 +162,11 @@ func stageOf(text string) (stage, pr string) {
 // advanceTaskReply handles progress and final answers identically, including the running-hub deploy check.
 func (s *Service) advanceTaskReply(ctx context.Context, t Todo, machine, session, text string) bool {
 	if urls := taskRepositoryReportLinks(text); len(urls) > 0 {
-		if err := s.importReportedLinks(ctx, t.ID, urls, "pull_request"); err != nil {
+		roleByURL := map[string]string{}
+		for raw := range referenceReportLinks(text, urls) {
+			roleByURL[raw] = repository.LinkRoleReference
+		}
+		if err := s.importReportedLinks(ctx, t.ID, urls, "pull_request", roleByURL); err != nil {
 			s.logf("task %s: repository links not saved: %v", t.ID, err)
 		}
 	}
@@ -290,6 +295,12 @@ func (s *Service) forgetTaskPR(ctx context.Context, id, pr, replacement string) 
 		return fmt.Errorf("task %s: stages could not be read", id)
 	}
 	cur := b.stages[id]
+	if replacement == "" {
+		if err := s.forgetReportedPRLinks(ctx, id); err != nil {
+			b.mu.Unlock()
+			return err
+		}
+	}
 	removed := cur.PR == pr
 	history := slices.DeleteFunc(slices.Clone(cur.PRs), func(p string) bool { return p == pr })
 	changed := removed || len(history) != len(cur.PRs)
@@ -343,6 +354,39 @@ func (s *Service) forgetTaskPR(ctx context.Context, id, pr, replacement string) 
 	return nil
 }
 
+// forgetReportedPRLinks removes the pull-request links imported from the task's reports, while preserving issue links
+// and every other kind of evidence. Revision-checked writes fail closed if the catalog changed meanwhile.
+func (s *Service) forgetReportedPRLinks(ctx context.Context, id string) error {
+	st, ok := s.store().(todoRepositoryStore)
+	if !ok {
+		return nil
+	}
+	set, err := st.TodoRepositories(ctx, id)
+	if err != nil {
+		return fmt.Errorf("task %s: read repository links to remove a non-PR: %w", id, err)
+	}
+	for _, row := range set.Repositories {
+		kept := make([]repository.LinkInput, 0, len(row.Links))
+		changed := false
+		for _, link := range row.Links {
+			if link.Kind == "pull_request" {
+				changed = true
+				continue
+			}
+			kept = append(kept, repository.LinkInput{URL: link.CanonicalURL, Kind: link.Kind, Number: link.Number, Title: link.Title})
+		}
+		if !changed {
+			continue
+		}
+		revision := set.Revision
+		if _, err := st.SetTodoRepositoryLinks(ctx, id, row.RepoID, repository.LinksInput{ExpectedRevision: &revision, Links: kept}); err != nil {
+			return fmt.Errorf("task %s: remove non-PR repository links: %w", id, err)
+		}
+		set.Revision++
+	}
+	return nil
+}
+
 // taskReport notes a change of task t for the next card. ix: what it asks (needs).
 func (s *Service) taskReport(t Todo, state, machine string, session [2]string, text string, ix *proto.Interaction) {
 	if t.Origin == "" || s.isLeaderRef(t.Origin) { // a task leader's worker is no task of the owner's chat (task_leader.go)
@@ -384,7 +428,7 @@ func (s *Service) setTaskStage(ctx context.Context, id, stage, pr string) {
 
 func (s *Service) setTaskStageKind(ctx context.Context, id, stage, pr, kind string, verified bool) {
 	if pr != "" {
-		if err := s.importReportedLinks(ctx, id, []string{pr}, ""); err != nil {
+		if err := s.importReportedLinks(ctx, id, []string{pr}, "", nil); err != nil {
 			s.logf("task %s: repository link not saved: %v", id, err)
 		}
 	}

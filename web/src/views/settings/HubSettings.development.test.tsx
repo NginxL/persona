@@ -20,9 +20,15 @@ vi.mock("../../lib/hub-update", async (original) => ({
     status = { ...status, state: "applying_backup", auto: false };
     return status;
   },
-  setHubUpdateSettings: async (input: { source?: "release" | "beta" | "web-dev" }) => {
+  setHubUpdateSettings: async (input: { source?: "release" | "beta" | "web-dev"; development_backup_directory?: string }) => {
     saved.push(input);
     status = { ...status, ...input, auto: false };
+    if (input.development_backup_directory !== undefined || (input as { development_backup_retain?: number }).development_backup_retain !== undefined) {
+      status = { ...status, development: { ...status.development!,
+        backup_directory: input.development_backup_directory === undefined ? status.development!.backup_directory
+          : input.development_backup_directory || status.development!.backup_default_directory,
+        backup_retain: (input as { development_backup_retain?: number }).development_backup_retain ?? status.development!.backup_retain } };
+    }
     return status;
   },
 }));
@@ -45,7 +51,9 @@ async function mount(state = "available") {
   status = {
     version: "web-dev-old", build: 202611130000, channel: "release", source: "web-dev", can_update: true,
     state, busy: [], auto: false, auto_notice: false, confirmed: true, auto_update_nodes: false,
-    development: { configured: true, branch: "main", current_commit: "a".repeat(40), current_updated_at: "2026-11-13T10:00:00Z" },
+    development: { configured: true, branch: "main", current_commit: "a".repeat(40), current_updated_at: "2026-11-13T10:00:00Z",
+      backup_directory: "/var/snapshots", backup_default_directory: "/home/persona/.persona/update/development-backups",
+      backup_retain: 3, builtin_quiesce: true },
     latest: { version: "web-dev-new", build: 202611130001, newer: true, bad: false, commit: "b".repeat(40), branch: "main",
       updated_at: "2026-11-14T10:00:00Z",
       backup_id: state === "applying_backup" ? "snapshot-fixture" : undefined },
@@ -137,4 +145,44 @@ it.each(["building", "backing_up", "applying_backup"])("keeps channel and duplic
     expect(version.value).toBe("snapshot-fixture");
     expect(version.options[0].textContent).not.toContain("b".repeat(12));
   }
+});
+
+it("saves a declarative backup folder and retention, and resets to the recommended folder", async () => {
+  await mount();
+  const group = host.querySelector('[data-settings-group="hub-dev-backup"]')!;
+  expect(group.textContent).toContain("Development backup");
+  expect(group.textContent).toContain("The hub pauses its own writers");
+  const folder = group.querySelector('input[aria-label="Backup folder"]') as HTMLInputElement;
+  const retain = group.querySelector('select[aria-label="Snapshots to keep"]') as HTMLSelectElement;
+  expect(folder.placeholder).toBe("/home/persona/.persona/update/development-backups");
+  expect(folder.value).toBe("/var/snapshots");
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => {
+    setValue.call(folder, "/srv/persona-snapshots");
+    folder.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => { retain.value = "10"; retain.dispatchEvent(new Event("change", { bubbles: true })); });
+  const save = () => [...group.querySelectorAll("button")].find((b) => b.textContent === "Save")!;
+  await act(async () => save().click());
+  expect(saved).toContainEqual({ development_backup_directory: "/srv/persona-snapshots", development_backup_retain: 10 });
+  await act(async () => [...group.querySelectorAll("button")].find((b) => b.textContent === "Use recommended")!.click());
+  expect((group.querySelector('input[aria-label="Backup folder"]') as HTMLInputElement).value).toBe("");
+  await act(async () => save().click());
+  expect(saved).toContainEqual({ development_backup_directory: "", development_backup_retain: 10 });
+});
+
+it("reloads the snapshot list after the folder changes", async () => {
+  await mount();
+  expect(backupReads).toBe(1);
+  const group = host.querySelector('[data-settings-group="hub-dev-backup"]')!;
+  const folder = group.querySelector('input[aria-label="Backup folder"]') as HTMLInputElement;
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => {
+    setValue.call(folder, "/srv/persona-snapshots");
+    folder.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const save = [...group.querySelectorAll("button")].find((b) => b.textContent === "Save")!;
+  await act(async () => save.click());
+  // A snapshot listed from the old folder cannot be found in the new one.
+  expect(backupReads).toBe(2);
 });

@@ -4,6 +4,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import startup from "./i18n/startup-namespaces.json";
 
+// This test proves that the lazy route resolves to its real component, not how long a cold import takes under the
+// complete parallel suite. Evaluate it while this file is collected; the test still uses the same dynamic import.
+await import("./views/RequestPage");
+
 const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 
 describe("the script-request route", () => {

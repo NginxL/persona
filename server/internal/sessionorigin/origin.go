@@ -11,7 +11,7 @@ import (
 // sessionSource rule. SourceKind describes transport, not pane/host origin.
 // Desktop markers take precedence even when a row also carries a terminal pane.
 func Of(s proto.Session) string {
-	if s.SpaceKind == "codex_app" || s.Host == "paseo" || s.Host == "cindy" || (s.SourceKind == "runtime" && s.SourceInstanceID == "orca") {
+	if s.SpaceKind == "codex_app" || s.Host == "paseo" || s.Host == "cindy" || s.Host == "t3code" || (s.SourceKind == "runtime" && s.SourceInstanceID == "orca") {
 		return "desktop"
 	}
 	if s.PaneID == "" {

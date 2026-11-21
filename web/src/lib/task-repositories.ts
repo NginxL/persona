@@ -25,8 +25,9 @@ export type RepositorySourceSnapshot = {
   identity: RepositoryIdentity; clone_url: string; transport_origin: "catalog" | "canonical_default" | "provider"; catalog_revision: number;
   provider_name?: string;
 };
-export type RepositoryLinkInput = { url: string; kind?: never; number?: never; title?: string } | { kind: "issue" | "pull_request"; number: string; url?: never; title?: string };
-export type TaskRepositoryLink = { kind: "issue" | "pull_request"; number: string; canonical_url: string; title?: string };
+export type RepositoryLinkRole = "delivery" | "reference";
+export type RepositoryLinkInput = { url: string; kind?: never; number?: never; title?: string; role?: RepositoryLinkRole } | { kind: "issue" | "pull_request"; number: string; url?: never; title?: string; role?: RepositoryLinkRole };
+export type TaskRepositoryLink = { kind: "issue" | "pull_request"; number: string; canonical_url: string; title?: string; role?: RepositoryLinkRole };
 export type TaskRepositoryInput = { repo_id: string; directory_alias?: string; requested_ref?: RequestedRef; links?: RepositoryLinkInput[] };
 export type TaskRepository = Omit<TaskRepositoryInput, "links" | "requested_ref"> & {
   requested_ref: RequestedRef; source_snapshot: RepositorySourceSnapshot; links: TaskRepositoryLink[];

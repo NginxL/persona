@@ -1,0 +1,1 @@
+The user's primary device{{if .Primary}} ({{.Primary}}){{end}} is not connected and did not wake up in the background, and no other device of theirs can take this call: ask them to open the Persona app on it, then retry.

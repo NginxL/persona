@@ -8,8 +8,10 @@
   "waits_on_computer": "Sent. The Agent will read it after the question on the computer is answered",
   "held_on_computer": "Waiting for approval on the computer. This Claude session runs in bypass permissions mode, so it holds Persona's messages until you allow them there. Once allowed, it shows here by itself",
   "peer_unconfirmed": "Handed to this Claude session, but it hasn't taken it yet. It may be waiting for approval on the computer. Look there before sending it again",
+  "peer_unconfirmed_old_plugin": "This Claude session hasn't taken it. It runs an older Persona plugin, so while it works your message goes through its message inbox, which can drop it. Look on the computer before sending again. Reopen the session there once and your messages will go in as your own input",
   "still_held": "Still waiting for approval on the computer",
   "still_unknown": "Not in the chat yet. Look on the computer before sending it again",
   "relayed_busy": "Sent through the Agent's message inbox while it was busy: it may not take this as your approval. If it needs your go-ahead, send it again once the Agent is waiting for you",
-  "relayed_plugin": "Sent through the Agent's message inbox, not as your own input: it may not take this as your approval"
+  "relayed_plugin": "Sent through the Agent's message inbox, not as your own input: it may not take this as your approval",
+  "relayed_old_plugin": "Sent through the session's message inbox: it runs an older Persona plugin, so while it works your message can't go in as your own input, and it may not take it as your approval. Reopen the session on the computer once to fix this"
 }

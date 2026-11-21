@@ -9,6 +9,7 @@
     <string name="designsystem_modelpanel_favorites_empty">还没有收藏。点模型的星标，把它存到这里。</string>
     <string name="designsystem_modelpanel_no_match">没有匹配的模型</string>
     <string name="designsystem_modelpanel_loading">正在读取模型…</string>
+    <string name="designsystem_modelpanel_empty">没有可用的模型</string>
     <string name="designsystem_modelpanel_retry">重试</string>
     <string name="designsystem_modelpanel_save_favorite">存为收藏</string>
     <string name="designsystem_modelpanel_remove_favorite">取消收藏</string>

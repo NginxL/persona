@@ -372,7 +372,8 @@ internal suspend fun <T> sendSharedContent(
 ) {
     val paths = attachments.map { upload(it) }
     beforeSend()
-    sender.send(target, formatSharedContent(title, text, paths, note, asContext, untitled), id)
+    sender.send(target, formatSharedContent(title, text, paths, note, asContext, untitled), id,
+        null, null, null, persona.core.contracts.api.MessageVia.Share)
 }
 
 /** [untitled] is the context card's title when the share has none, in the app's language (`app_share_content`). */

@@ -33,7 +33,7 @@ export const MAX_HUBS = 20;
 export const MAX_REMOVED = 50;
 
 // The first segments of the page's own routes (lib/router.ts) and the hub's own paths.
-const PAGE_SEGMENTS = new Set(["s", "t", "j", "a", "overview", "history", "assistant", "inbox", "messages", "routines", "kb", "machines", "terminal", "agents", "settings", "todos", "extension", "plugin", "workspace-board", "screen", "api", "admin", "assets"]);
+const PAGE_SEGMENTS = new Set(["s", "t", "j", "a", "overview", "history", "assistant", "inbox", "messages", "starred", "routines", "kb", "machines", "terminal", "agents", "settings", "todos", "extension", "plugin", "workspace-board", "screen", "api", "admin", "assets"]);
 
 /** This page's hub: its origin and the sub-path it is served under. */
 export const here = () => (typeof location === "undefined" ? "" : location.origin + BASE);

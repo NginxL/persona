@@ -42,7 +42,12 @@ func (h *Hub) startPhoneWrites(ctx context.Context) error {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		for {
-			h.deliverPhoneWrites(ctx)
+			// A snapshot pauses the hub's writers; what is due is delivered
+			// after resume (quiesce.go).
+			if h.quiesce.begin() {
+				h.deliverPhoneWrites(ctx)
+				h.quiesce.end()
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -159,7 +164,7 @@ func (h *Hub) deliverPhoneWrites(ctx context.Context) {
 		var next *db.PhoneWrite
 		var phone *client
 		for i := range writes {
-			if phone = h.phoneClient(writes[i].Tool); phone != nil {
+			if phone = h.queuedWriteClient(writes[i].Tool); phone != nil { // the primary device only, when it offers the tool
 				next = &writes[i]
 				break
 			}

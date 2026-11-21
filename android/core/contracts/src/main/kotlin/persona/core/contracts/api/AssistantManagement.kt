@@ -36,6 +36,11 @@ interface AssistantManagement {
      * there, with why (`GET /api/v1/machines/{id}/launchers?purpose=assistant`): the model panel's providers (#5033, #5055).
      */
     suspend fun assistantLauncherList(machineId: String): AssistantLaunchers = AssistantLaunchers(assistantLaunchers(machineId))
+    /** [refresh] asks the hub to refresh launcher discovery. Older transports retain their normal read. */
+    suspend fun assistantLauncherList(machineId: String, refresh: Boolean): AssistantLaunchers = assistantLauncherList(machineId)
+    /** Main-only default over the ordinary Assistant catalog; old transports retain shared defaults. */
+    suspend fun mainAssistantLauncherList(machineId: String, refresh: Boolean = false): AssistantLaunchers =
+        assistantLauncherList(machineId, refresh)
     /**
      * Keeps [pick] as what the conversation's next messages run on (`PUT /api/v1/assistant/conversations/{id}/model`,
      * feature `assistant_model_pick`); answers the pick the hub kept. A refusal throws the hub's failure with its words

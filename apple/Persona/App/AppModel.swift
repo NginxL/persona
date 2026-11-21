@@ -43,9 +43,13 @@ final class AppModel {
     let portPresence = PortPresence()
     /// The hub-level group's socket (its state for the pages about the hub); every group has its own (`links`).
     var live: LiveConnection { hub?.live ?? idleLive }
+    /// What each group's addresses came to when last tried (#11390): Connection Details' lines.
+    let addressBoard = HubAddressBoard()
     @ObservationIgnored private let idleLive = LiveConnection()
     /// What the titles say about the links (Waiting for Network / Connecting… / Updating…).
     let connection: ConnectionStatus
+    /// Starts of SSH → Persona Link switches made here, kept across machine-page remounts until the hub list catches up.
+    let linkSwitches = MachineLinkSwitchStore()
     /// The machines. A heartbeat, a list that differs only in `lastSeen` (on every push of a busy hub), is stored
     /// without telling who read `machines`: a body that reads them for anything else ran again on every push (the
     /// Agents list, #1495; every row through its menu, #10231). What shows `lastSeen` reads `lastSeen(_:)`.
@@ -62,6 +66,7 @@ final class AppModel {
                 withMutation(keyPath: \.machines) { machineStore = newValue }
             }
             machinesNow = machineStore
+            linkSwitches.reconcile(machineStore)
             let choices = machineStore.map(MachineChoice.init)
             if choices != machineChoices { machineChoices = choices }
             saveSnapshot()
@@ -444,6 +449,11 @@ final class AppModel {
     /// Unit tests: the app's voice call (`VoiceCalls.shared` otherwise), whose call to Persona keeps its group's tunnels
     /// open in the background (`callTunnelGroup`).
     @ObservationIgnored var voiceCallsForTests: VoiceCalls?
+    /// Unit tests: what the route's health probes answer (`HubRoute.healthCheck` otherwise), for the route picker, a
+    /// tunnel group's direct check and its restore race (#11390).
+    @ObservationIgnored var routeCheckForTests: HubRoute.Check?
+    /// Unit tests: what the address lines tell Developing Persona's tally, as if the switch were on (#11390).
+    @ObservationIgnored var tallyForTests: ((DevProbe.Link) -> Void)?
     /// Unit tests: no machines, agents or cards, whatever `init` restored. A simulator paired by an earlier run keeps
     /// its last snapshot, and a test of everything the model holds (the watch summary) would count those too (#1638).
     func forgetRestoredForTests() {
@@ -481,7 +491,7 @@ final class AppModel {
         didSet {
             // A side session lives in its parent's chat (#7944): a notification, a Needs You card or a link that names one
             // opens the parent with it shown (ChatView takes `sideLanding`).
-            if let k = openChat, let parent = sideFold.home[k] {
+            if let k = openChat, !openingExactStar(k), let parent = sideFold.home[k] {
                 sideLanding = SideLanding(parent: parent, side: sideFold.chat[k] ?? k)
                 openChat = parent
             }
@@ -522,6 +532,14 @@ final class AppModel {
     var latestAnswerFor: SessionKey?
     /// A hub link's message to land on once its chat shows (HubPageRouting, #2696); taken by that chat.
     var messageJump: MessageJump?
+
+    private func openingExactStar(_ key: SessionKey) -> Bool {
+        #if os(iOS)
+        messageJump?.key == key && messageJump?.starred != nil
+        #else
+        false
+        #endif
+    }
     /// An Inbox item a link asked to open (`HubPage.inboxItem`): the Inbox pushes it and clears this.
     var inboxToOpen: InboxOpenRequest?
     /// A to-do, knowledge entry or computer a link opened where no screen handles links itself (`HubLinkSheet`), over
@@ -747,6 +765,7 @@ final class AppModel {
     nonisolated struct AssistantLauncherScope: Hashable {
         var machine: MachineRef
         var manager: String?
+        var main: Bool = false
     }
     /// Only the assistant settings that decide whose launcher catalog and effective default the picker shows. Volatile
     /// conversation and preference fields are deliberately not part of this signature.
@@ -964,6 +983,7 @@ final class AppModel {
         for gone in links where !out.contains(where: { $0 === gone }) { gone.live.disconnect() }
         links = out
         for link in links where !link.isDemo { link.live.route = routePicker(link.group) }
+        arrangeAddresses()
         if link(hubGroup) == nil, let first = links.first { hubGroup = first.group }
         applyPersonaPalette()
         relabelMachines()
@@ -978,7 +998,11 @@ final class AppModel {
         link.live.onEvent = { [weak self] ev in self?.handle(ev.stamped(group), group: group) }
         link.live.prepareEvent = { Self.prepare($0) }
         link.live.onConnected = { [weak self] in self?.didConnect(group) }
-        link.live.onChange = { [weak self] in self?.connection.update() }
+        link.live.onChange = { [weak self] in
+            self?.connection.update()
+            self?.socketChanged(group)
+        }
+        link.live.onAttempt = { [weak self] config, outcome, since in self?.socketTried(group, config, outcome, since: since) }
         link.live.credential = { [weak self] config in DeviceCredentialTrade.current(config, traded: self?.tradedTokens ?? [:]) }
         #if DEBUG
         if let hooks = linkHooksForTests {
@@ -1123,6 +1147,9 @@ final class AppModel {
         if links.count == 1 { hubGroup = group }
         guard let link = link(group) else { return }
         link.live.disconnect()
+        #if os(iOS)
+        if group == hub?.group { refreshStarred(reset: true) }
+        #endif
         link.live.connect(registry.primary(group)?.config ?? new)
         pushWatchConfigs()
         PushRegistrar.shared.registerIfPossible()
@@ -1218,6 +1245,7 @@ final class AppModel {
         forgetSeen()
         updateHeldRetryReceipts { _ in [] }
         LarkChatOutbox.forget()
+        TodoOutbox.forgetHubs(nil)
         // No hub left to answer: the open questions are denied, their results have nowhere to go.
         phoneConfirmations.denyAll()
         toolResults.forget(groups: Set(links.map(\.group)))
@@ -1241,6 +1269,9 @@ final class AppModel {
         for g in Set(registry.groups).union(PushCrypto.allKeys().map(\.group)) { PushCrypto.removeKey(group: g) }
         links = []
         registry = HubRegistry()
+        #if os(iOS)
+        refreshStarred(reset: true)
+        #endif
         // A later pairing's first snapshot must invalidate even when it has the same assistant scope.
         lastAssistantLauncherSignature = nil
         lastAssistantLauncherInvalidation = nil
@@ -1884,7 +1915,7 @@ final class AppModel {
         provisionalChat = nil
         // A side session lives in its parent's chat (#7944): its parent opens with the side shown over it, not with a
         // child's card revealed (`openChat` turns it into the parent and `sideLanding`).
-        if reveal == nil, sideFold.home[key] == nil, let home = localChildHome(key), home.key != key {
+        if reveal == nil, !openingExactStar(key), sideFold.home[key] == nil, let home = localChildHome(key), home.key != key {
             moveDraft(from: key, to: home.key)
             open(home.key, latestAnswer: latestAnswer, reveal: home.childID)
             return
@@ -1913,6 +1944,31 @@ final class AppModel {
             // (#8748): fetch that one row now, not only once the chat subscribes on a paged hub.
             if sessionIndex[key] == nil { Task { await refreshSessionDetail(key) } }
         }
+    }
+
+    /// An Agent opened from inside a page (a Brief card, Knowledge, a to-do, a meeting, a card in a conversation): a
+    /// drill-down (#9971, #12006). `push` puts the chat on top of that page, with Back to it, and the sidebar's selection
+    /// stays: the conversation's path (`pushInboxChat`), or a page's own destination (`pushedAgentChat`). A folded child
+    /// opens as its parent with its card shown, as `open` does. With no `push` (the Agents tab's own list, the Mac, the
+    /// sidebar, a sheet), another hub's Agent or a Persona conversation, it opens as `open` does.
+    func openInPage(_ key: SessionKey, push: ((SessionKey) -> Void)?) {
+        guard let push, key.group == (hub?.group ?? ""), session(key)?.assistant != true, key != assistantMain else {
+            open(key)
+            return
+        }
+        provisionalChat = nil
+        var target = key
+        if sideFold.home[key] == nil, let home = localChildHome(key), home.key != key, let child = home.childID {
+            moveDraft(from: key, to: home.key)
+            target = home.key
+            revealToken += 1
+            revealChild = ChildReveal(sessionID: child, token: revealToken)
+        } else {
+            revealChild = nil
+        }
+        clearMissingSessionDetail(target)
+        push(target)
+        if sessionIndex[target] == nil { Task { await refreshSessionDetail(target) } }
     }
 
     func interactions(for key: SessionKey) -> [Interaction] {
@@ -2666,6 +2722,9 @@ final class AppModel {
         // connection's snapshot (machines, sessions, pending interactions) is whole: nothing to fetch again, no Updating….
         let plan = ReconnectPlan(resumed: link.live.resumed)
         if group == hub?.group {
+            #if os(iOS)
+            refreshStarred()
+            #endif
             // The hub's version and whether an update is out or under way (an older hub has no such page: nil).
             Task { hubUpdate = try? await api?.hubUpdate() }
             if plan.refetch {
@@ -3139,6 +3198,10 @@ final class AppModel {
         case .savedPrompts(let manager):
             // another device changed the list: only the shown assistant's is read again (#9436)
             if isHub, SavedPromptStore.concerns(eventManager: manager, shownManager: api?.shownManager) { SavedPromptStore.shared.reload() }
+        case .starredMessages(let manager):
+            #if os(iOS)
+            if isHub { StarredStore.shared.invalidate(manager: manager) }
+            #endif
         case .personas:
             // The new tier's package is downloaded whole before the face changes. The list changed
             // just now: a refresh already under way may have asked before, so it is read again after that one (#2405).
@@ -3303,6 +3366,7 @@ final class AppModel {
         case .inbox: "inbox"
         case .todos: "todos"
         case .savedPrompts: "assistant_saved_prompts"
+        case .starredMessages: "assistant_starred"
         case .personas: "personas"
         case .look: "look"
         case .managers: "managers"
@@ -3403,6 +3467,9 @@ final class AppModel {
         // To the hub of the interaction's own group (docs/protocol/multi-hub.md「Connections and routing」).
         // A stopped Agent's work card still takes the answers that send it nothing: put off, or dismissed (#6839).
         guard canAnswer(ix) || ix.isLocalResolution(r), let api = api(ix.group) else { return }
+        if let phrase = r.ownerApprovalPhrase {
+            guard ix.ownerApprovalPhrase == phrase else { return }
+        }
         let handoff = ix.isSecretHandoff && r.allow == true
         if handoff && !handoffCard {
             toast = Toast(String(localized: "Approve it on its card in the chat."), style: .error)
@@ -3412,7 +3479,7 @@ final class AppModel {
         guard connection.networkUp else { notDone(); return }
         // A question's card stays where it is, greyed and marked "Sending…", until the hub has the answer: its picks and
         // text stay for a retry (#6279). Every other card goes at once and comes back if its answer fails.
-        let keepsCard = ix.kind == .question
+        let keepsCard = ix.kind == .question || r.ownerApprovalPhrase != nil
         guard let op = answerAttempts.begin(ix.uid, r) else { return } // its answer is on the way: a second tap sends nothing
         if !keepsCard {
             interactions[ix.uid] = nil
@@ -3430,6 +3497,15 @@ final class AppModel {
             endedInteractionIDs.insert(ix.uid)
         }
         do {
+            if let phrase = r.ownerApprovalPhrase {
+                _ = try await OpRetry.untilDelivered { () async throws -> Bool in
+                    try await api.replyOwnerApproval(ix, phrase: phrase, opID: op)
+                    return true
+                }
+                over()
+                Haptics.success()
+                return
+            }
             let res = try await OpRetry.untilDelivered { try await api.resolve(ix.id, r, opID: op, handoffCard: handoff) }
             if res.already == true, let existing = res.resolution, existing.answeredBy == AssistantAnswer.assistant, ix.kind == .question {
                 // The assistant answered first: its answer shows in the chat, where the user may change it.
@@ -4348,18 +4424,26 @@ final class AppModel {
     /// The main chat's picker data (`GET …/launchers?purpose=assistant`, #5033): the launchers that can run the
     /// assistant on this machine, the effective Main chat default (`default`, what the next message runs with no pick),
     /// and the ones that can't with why. Cached until Model Settings change or a `refresh`.
-    func assistantLaunchers(_ machine: MachineRef, refresh: Bool = false, using catalogAPI: APIClient? = nil) async throws -> APIClient.LaunchersResponse {
+    func assistantLaunchers(_ machine: MachineRef, refresh: Bool = false, using catalogAPI: APIClient? = nil, main: Bool = false) async throws -> APIClient.LaunchersResponse {
         guard let client = (catalogAPI ?? api(machine.group))?.currentAssistantSettings() else {
             return APIClient.LaunchersResponse(launchers: [], default: nil, unavailable: nil)
         }
-        let scope = AssistantLauncherScope(machine: machine, manager: client.managerID)
+        let scope = AssistantLauncherScope(machine: machine, manager: client.managerID, main: main)
         if !refresh, let cached = assistantLauncherCache[scope] { return cached }
         let revision = assistantLauncherRequestRevision
         assistantLauncherReadID += 1
         let read = assistantLauncherReadID
         if assistantLauncherReads[scope] == nil && assistantLauncherReads.count >= 64 { assistantLauncherReads.removeAll() }
         assistantLauncherReads[scope] = read
-        let r = try await client.launcherList(machine: machine.id, purpose: "assistant")
+        var r = try await client.launcherList(machine: machine.id, purpose: "assistant")
+        if main {
+            do {
+                let own = try await client.mainAssistantLaunchers(machine: machine.id)
+                r = AssistantModelChoice.mainCatalog(shared: r, own: own)
+            } catch let error as APIError where error.status == 404 {
+                // Older hubs have only the shared default; other failures keep the last good main binding.
+            }
+        }
         guard revision == assistantLauncherRequestRevision, assistantLauncherReads[scope] == read else { return r }
         if assistantLauncherCache[scope] == nil && assistantLauncherCache.count >= 64 { assistantLauncherCache.removeAll() }
         assistantLauncherCache[scope] = r
@@ -4420,9 +4504,9 @@ final class AppModel {
 
     /// The main chat picker data already read for `machine` (nil: nothing cached yet; `assistantLaunchers(_:)` reads it).
     /// The composer title reads this so it shows the effective Main chat model, not only the running process's last one.
-    func cachedAssistantLaunchers(_ machine: MachineRef) -> APIClient.LaunchersResponse? {
+    func cachedAssistantLaunchers(_ machine: MachineRef, main: Bool = false) -> APIClient.LaunchersResponse? {
         let manager = api(machine.group)?.currentAssistantSettings().managerID
-        return assistantLauncherCache[AssistantLauncherScope(machine: machine, manager: manager)]
+        return assistantLauncherCache[AssistantLauncherScope(machine: machine, manager: manager, main: main)]
     }
 
 
@@ -4686,6 +4770,7 @@ final class AppModel {
         heldAttachments = heldAttachments.filter { !gone.contains($0.key.group) }
         healthReports = healthReports.filter { !gone.contains($0.key) }
         TodosV1.shared.forget(gone)
+        TodoOutbox.forgetHubs(gone) // the To-dos list's writes on those hubs: never sent, and off the disk
         if let k = openChat, gone.contains(k.group) { openChat = nil }
         if let k = assistantCurrent, gone.contains(k.group) { assistantCurrent = nil }
         for g in gone {
@@ -4724,6 +4809,9 @@ final class AppModel {
         TodoStore.shared.reload()
         SavedPromptStore.shared.forget()
         SavedPromptStore.shared.reload()
+        #if os(iOS)
+        refreshStarred(reset: true)
+        #endif
         followScope()
         // The avatar is the new hub's from now, before its list is read below: a card tapped meanwhile goes to it.
         let avatarHub = api
@@ -4758,6 +4846,9 @@ final class AppModel {
         assistantConfigLoadFailed = false
         readiness.forget()
         relistAssistant()
+        #if os(iOS)
+        refreshStarred(reset: switched)
+        #endif
         if switched {
             if let a = assistantCurrent, let s = session(a), s.assistant, !s.isHealth, !assistantShows(s.manager) { assistantCurrent = assistantMain }
             assistantSwitches += 1

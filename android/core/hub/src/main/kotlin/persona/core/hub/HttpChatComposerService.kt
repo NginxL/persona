@@ -84,6 +84,7 @@ class HttpChatComposerService internal constructor(
             message.launcher?.let { put("launcher", it) }
             message.model?.let { put("model", it) }
             if (message.applySwitch) put("apply_switch", true)
+            message.via?.let { put("via", it) }
         }.toString().toRequestBody(jsonType)
         return try {
             request(api("sessions", message.session.machineId, message.session.sessionId, "messages"), body, message.headers).use { response ->

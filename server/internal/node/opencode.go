@@ -65,6 +65,18 @@ func (n *Node) mergeOpencodeRow(s *proto.Session) {
 	s.OutputTokens = r.OutputTokens
 	s.LastText, s.Model, s.UpdatedAt, s.Rev = r.LastText, r.Model, r.UpdatedAt, r.Rev
 	s.ContextTokens, s.ContextWindow = r.ContextTokens, r.ContextWindow
+	if r.PermissionMode != "" {
+		s.PermissionMode = r.PermissionMode
+	}
+	if r.Effort != "" {
+		s.Effort = r.Effort
+	}
+	if len(r.Efforts) > 0 {
+		s.Efforts = r.Efforts
+	}
+	if r.Launcher != "" && s.Launcher == "" {
+		s.Launcher = r.Launcher
+	}
 	if r.Status == proto.StatusBlocked {
 		s.Status = proto.StatusBlocked
 	}

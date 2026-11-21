@@ -110,7 +110,7 @@ fun Todo.supervisorReviewing(now: Long): Boolean {
 fun Todo.awaitsDecision(now: Long): Boolean {
     openAsk?.let { return !(isDone && it.outcome == "decide") }
     if (isDone) return false
-    return supervision?.state == "needs_user" || (supervision?.state == "pending_review" && !supervisorReviewing(now))
+    return supervision?.state == "user_check" || supervision?.state == "needs_user" || (supervision?.state == "pending_review" && !supervisorReviewing(now))
 }
 
 /** Nothing of the task runs or asks (the web's `awaitsReview` statuses). */

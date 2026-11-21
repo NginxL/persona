@@ -18,7 +18,7 @@ const KEY = "persona.sidebar-icons";
  * named color reads at 3:1 on the sidebar and its hover fill, light and dark (ui/theme-contrast.test.ts). History
  * belongs to Agents and is not one of the pages (SidebarParts.tsx useNavPages).
  */
-export const BUILTIN_PAGE_COLORS: Record<Exclude<(typeof NAV_PAGES)[number], "terminal">, UIColor> = {
+export const BUILTIN_PAGE_COLORS: Record<Exclude<(typeof NAV_PAGES)[number], "terminal" | "starred">, UIColor> = {
   home: "amber",
   inbox: "orange",
   health: "pink",

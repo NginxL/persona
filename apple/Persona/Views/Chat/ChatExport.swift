@@ -18,6 +18,7 @@ nonisolated struct ExportMessage: Identifiable, Equatable, Sendable {
     var text: String
     var time: Date?
     var images: [String] = []
+    var prefersLetterMark = false
 
     var isUser: Bool { role == .user }
 

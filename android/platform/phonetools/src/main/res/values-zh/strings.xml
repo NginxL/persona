@@ -16,6 +16,8 @@
     <string name="phonetools_source_device_detail">系统、电量、存储和网络</string>
     <string name="phonetools_source_notifications">通知</string>
     <string name="phonetools_source_notifications_detail">发送本地通知，查看 Persona 当前通知</string>
+    <string name="phonetools_source_calls">电话</string>
+    <string name="phonetools_source_calls_detail">确认后打开拨号器，不会自动拨打电话</string>
     <string name="phonetools_status_unavailable">不可用</string>
     <string name="phonetools_status_granted">已授权</string>
     <string name="phonetools_status_partial">部分授权</string>
@@ -45,6 +47,7 @@
     <string name="phonetools_deny">拒绝</string>
     <string name="phonetools_confirm_channel">手机操作确认</string>
     <string name="phonetools_confirm_notification">请确认手机操作</string>
+    <string name="phonetools_call_start">拨打 %1$s</string>
     <string name="phonetools_messages_channel">Claude 发来的通知</string>
     <string name="phonetools_calendar_new">新建日程「%1$s」</string>
     <string name="phonetools_calendar_all_day">%1$s（全天）</string>

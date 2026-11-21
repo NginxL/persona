@@ -436,14 +436,9 @@ func (s *Service) acceptTryFromBrief(ctx context.Context, id, askedAt string) (a
 	if err != nil {
 		return acceptResult{}, nil
 	}
-	a, err := s.acceptAskLocked(id)
-	if err != nil {
-		return acceptResult{}, err
-	}
-	if a == nil || !a.AskedAt.Equal(at) {
-		return acceptResult{}, nil
-	}
-	return s.acceptTry(ctx, id, "")
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	return s.acceptTryAsDismissalLocked(ctx, id, "", at, false)
 }
 
 // briefGrace is how long after the morning briefing's time the acceptance reminders wait when that briefing lists the tasks

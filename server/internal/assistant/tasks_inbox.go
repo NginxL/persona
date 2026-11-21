@@ -9,7 +9,12 @@ import (
 )
 
 func (s *Service) planInboxSource(ctx context.Context, machine, conversation string, t *PlanTask) error {
-	t.InboxItem = strings.TrimSpace(t.InboxItem)
+	source := strings.TrimSpace(t.InboxItem)
+	if source == "none" {
+		t.InboxItem, t.InboxHandoff = "", ""
+		return nil
+	}
+	t.InboxItem = source
 	if t.InboxItem == "" {
 		return nil
 	}

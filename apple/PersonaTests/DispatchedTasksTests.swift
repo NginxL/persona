@@ -141,12 +141,39 @@ struct DispatchedTasksTests {
         #expect(alone.first?.wake == "resumed")
     }
 
+    @Test func aPlanIdentifiesContinuationWithoutLinkingToThePreviousTodo() throws {
+        let continued = try JSON.decoder.decode(PlanTask.self, from: Data(#"{"title":"Carry on","prompt":"Work","machine":"computer","cwd":"/project","continues":"previous-task","error":"exit status 1"}"#.utf8))
+        let p = plan([continued, task("New", id: "new-task"), task("Empty", id: "")])
+        let entries = try #require(DispatchedTasks.entries(for: feed(.plan), plans: [p.id: p],
+                                                          titleOf: { _ in nil }, fallback: "Task"))
+        #expect(entries.map(\.wake) == ["continuation", nil, nil])
+        #expect(entries.map(\.detailTodoID) == [nil, "new-task", nil])
+    }
+
     @Test func decisionsAndDismissedPlansKeepTheirNormalCards() {
         for state in [TaskPlan.State.open, .dismissed, .unknown] {
             let p = plan([task("Proposed")], state: state)
             #expect(DispatchedTasks.entries(for: feed(.plan), plans: [p.id: p], titleOf: { _ in nil }, fallback: "Task") == nil)
         }
         #expect(DispatchedTasks.entries(for: feed(.message), plans: [:], titleOf: { _ in nil }, fallback: "Task") == nil)
+    }
+}
+
+@MainActor
+struct DispatchHandoffActivityTimeTests {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test(arguments: [5.0, 0, -10, -44.999])
+    func recentActivityReadsJustNow(offset: TimeInterval) {
+        #expect(DispatchHandoffCardBody.activityTime(now.addingTimeInterval(offset), now: now) == String(localized: "Just now"))
+    }
+
+    @Test(arguments: [45.0, 180, 7200])
+    func olderActivityKeepsTheShortRelativeTime(age: TimeInterval) {
+        let at = now.addingTimeInterval(-age)
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .short
+        #expect(DispatchHandoffCardBody.activityTime(at, now: now) == relative.localizedString(for: at, relativeTo: now))
     }
 }
 
@@ -187,8 +214,25 @@ struct DispatchHandoffFailureTests {
         #expect(W.plain("  ") == nil)
         #expect(W.rowLine("exit status 1") == W.details)
         #expect(W.rowLine("rpc: connection closed") == W.words(.connectionLost))
-        #expect(W.cardLine("rpc: connection closed") == String(localized: "Didn't start: \(W.words(.connectionLost)) [Tasks Store 38bbb7]"))
-        #expect(W.cardLine("exit status 1") == W.details)
+        #expect(W.cardLine("rpc: connection closed", canOpen: false) == String(localized: "Didn't start: \(W.words(.connectionLost)) [Tasks Store 38bbb7]"))
+        #expect(W.cardLine("exit status 1", canOpen: true) == W.details)
+        #expect(W.cardLine("exit status 1", canOpen: false) == String(localized: "Didn't start."))
+    }
+
+    @Test func aContinuationFailureKeepsTheReasonWithoutInternalIDs() {
+        typealias W = StartFailureWords
+        let stop = "continues: cannot stop agent timeout-computer/session on to-do prior-task:"
+        let confirm = "continues: cannot confirm agent example-computer/session stopped:"
+        let reasons = [
+            "Close the previous session, then try again.",
+            "请先关闭之前的会话，然后重试。", // i18n-ignore: synthetic hub text
+            "前の会話を閉じてからやり直してください。", // i18n-ignore: synthetic hub text
+        ]
+        for reason in reasons { #expect(W.plain("\(stop) \(reason)") == reason) }
+        #expect(W.plain("\(confirm) rpc: connection closed") == W.words(.connectionLost))
+        #expect(W.plain("\(confirm) its computer is unavailable") == W.words(.offline))
+        #expect(W.plain("\(stop) exit status 1") == nil)
+        #expect(W.plain("continues: unrecognized wrapper with 内部 ID") == nil) // i18n-ignore: synthetic hub text
     }
 
     @Test func theInterruptedLineSaysWhyWhenItCan() {

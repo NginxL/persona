@@ -12,7 +12,7 @@ import { t } from "../../i18n";
 
 /** The visible text and full-text control. `getText` shares that control's pending load and cached complete text. */
 export function useFullText(item: Item | undefined, mid: string | undefined, sid: string | undefined): { text: string; more: ReactNode; getText: () => Promise<string> } {
-  const key = item?.full_size ? JSON.stringify([mid, sid, item.id, item.text, item.full_size]) : "";
+  const key = item?.full_size ? JSON.stringify([mid, sid, item.id, item.text, item.full_size, item.source_fingerprint]) : "";
   const current = useRef(key);
   current.current = key;
   const pending = useRef<{ key: string; promise: Promise<string> } | null>(null);
@@ -28,13 +28,14 @@ export function useFullText(item: Item | undefined, mid: string | undefined, sid
     if (pending.current?.key === key) return pending.current.promise;
     setStatus({ key, state: "loading" });
     const promise = fullItem(mid, sid, item.id).then((it) => {
+      if (item.source_fingerprint && item.source_fingerprint !== it.source_fingerprint) throw new Error(t("chat-fulltext.failed"));
       const text = it.text ?? "";
       if (current.current === key) {
         setWhole({ key, text });
         setStatus({ key, state: "idle" });
       }
       return text;
-    }, (error: unknown) => {
+    }).catch((error: unknown) => {
       if (current.current === key) setStatus({ key, state: "failed" });
       throw error;
     }).finally(() => {

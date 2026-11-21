@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,18 +16,21 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// The effort a chat of the Codex App runs its next turn with, changed from the phone (#5575) as with the App's own
-// picker: the window that owns the chat is asked over the App's bus (codex_desktop.go) to update the thread's settings
-// for its next turn (thread-follower-update-thread-settings), so a running turn goes on as it was, and the App's picker
-// shows the new effort too. The change counts once the window's read-model-settings shows it.
+// The model and effort a chat of the Codex App runs its next turn with, changed from the phone (#5575) as with the
+// App's own picker: the window that owns the chat is asked over the App's bus (codex_desktop.go) to update the thread's
+// settings for its next turn (thread-follower-update-thread-settings), so a running turn goes on as it was, and the
+// App's picker shows the new model and effort too. The change counts once the window's read-model-settings shows it.
 //
 // The levels offered are what the chat's model takes on the App's own codex (model/list), as for a thread on an
 // app-server (codex_effort.go); the phone's choice is shown until a turn starts after it, whose record then tells.
 
-// codexAppPick is the effort the phone set for a chat of the Codex App's next turn, and when.
+// codexAppPick is the model and/or effort the phone set for a chat of the Codex App's next turn, and when.
 type codexAppPick struct {
-	effort string
-	at     time.Time
+	model     string
+	modelAt   time.Time
+	effort    string
+	hasEffort bool
+	effortAt  time.Time
 }
 
 // codexAppModelsTTL: the App's model list is asked again after this long, in the background (the rows meanwhile offer
@@ -42,25 +46,29 @@ var codexAppModelLists = struct {
 }{at: map[string]time.Time{}, got: map[string]map[string]codexModelEfforts{}, failed: map[string]string{}}
 
 // readCodexAppModels asks the codex the App bundles (codexAppCLI) for the models it lists for home, hidden ones too (a
-// chat may run one). A variable: tests answer their own.
+// chat may run one), falling back to <home>/models_cache.json when the CLI is unavailable or empty. A variable: tests
+// answer their own.
 var readCodexAppModels = func(ctx context.Context, home string) (map[string]codexModelEfforts, error) {
 	cli, err := codexAppCLI()
-	if err != nil {
-		return nil, err
+	if err == nil {
+		if s, startErr := startCodexStdio(ctx, cli, home, os.TempDir()); startErr == nil {
+			defer s.close()
+			if got, callErr := readCodexModels(ctx, s.call); callErr == nil && len(got) > 0 {
+				return got, nil
+			} else if callErr != nil {
+				err = callErr
+			}
+		} else {
+			err = startErr
+		}
 	}
-	s, err := startCodexStdio(ctx, cli, home, os.TempDir())
-	if err != nil {
-		return nil, err
+	if cached, ok := readCodexHomeModelEfforts(home); ok {
+		return cached, nil
 	}
-	defer s.close()
-	return readCodexModels(ctx, s.call)
+	return nil, err
 }
 
-// codexAppEfforts are the levels a chat of the Codex App running model may be set to: the model's on the App's codex,
-// else (a model it does not list, a list not read yet or that could not be read) Codex's whole list, as on an
-// app-server (codex_effort.go). Empty: the model takes no effort. The list is read in the background, never here: the
-// rows are listed again once it comes.
-func (n *Node) codexAppEfforts(home, model string) []string {
+func (n *Node) codexAppModelMeta(home, model string) (codexModelEfforts, bool) {
 	codexAppModelLists.Lock()
 	at, ok := codexAppModelLists.at[home]
 	models := codexAppModelLists.got[home]
@@ -91,74 +99,154 @@ func (n *Node) codexAppEfforts(home, model string) []string {
 			return nil, nil
 		})
 	}
-	if e, found := models[model]; model != "" && found {
+	if model == "" {
+		return codexModelEfforts{}, false
+	}
+	e, found := models[model]
+	return e, found
+}
+
+// codexAppEfforts are the levels a chat of the Codex App running model may be set to: the model's on the App's codex,
+// else (a model it does not list, a list not read yet or that could not be read) Codex's whole list, as on an
+// app-server (codex_effort.go). Empty: the model takes no effort. The list is read in the background, never here: the
+// rows are listed again once it comes.
+func (n *Node) codexAppEfforts(home, model string) []string {
+	if e, found := n.codexAppModelMeta(home, model); found {
 		return e.levels
 	}
 	return codexEffortLevels
 }
 
-// codexDesktopEffortRow lets the phone change the effort of a chat of the Codex App (setCodexDesktopEffort) as on a
-// thread of an app-server (codexEffortRow): the levels its model takes, which the apps take for effort alone (no
-// capabilities.modes: that would offer the permission mode too), and the effort its next turn runs with — the phone's
-// choice until a turn starts after it, else what the rollout's last turn ran with (m: its meta), else what the App's
-// database keeps for the chat (a chat whose history is there has no turn_context to read, #6501). The row's model
-// comes from the database too when nothing else said it.
+// codexDesktopEffortRow lets the phone change the model and effort of a chat of the Codex App (setCodexDesktopSettings)
+// as on a thread of an app-server (codexEffortRow): capabilities.model, the levels its model takes, which the apps take
+// for effort without capabilities.modes (that would offer the permission mode too), and the model / effort its next turn
+// runs with — the phone's choice until a turn starts after it, else what the rollout's last turn ran with (m: its meta),
+// else what the App's database keeps for the chat (#6501).
 func (n *Node) codexDesktopEffortRow(s *proto.Session, src codexSource, m quickMeta) {
+	if s.Capabilities != nil {
+		s.Capabilities.Model = proto.Bool(true)
+	}
 	app := codexAppThreads(src.home)[src.thread]
 	if s.Model == "" {
 		s.Model = app.Model
 	}
-	levels := n.codexAppEfforts(src.home, firstNonEmpty(s.Model, m.model))
+	p := n.codexAppPickOf(s.SessionID)
+	if p != nil && p.model != "" && p.modelAt.After(m.modelAt) {
+		s.Model = p.model
+	}
+	model := firstNonEmpty(s.Model, m.model)
+	levels := n.codexAppEfforts(src.home, model)
 	if len(levels) == 0 {
+		s.Efforts, s.Effort = nil, ""
 		return
 	}
-	s.Efforts, s.Effort = levels, firstNonEmpty(m.effort, app.Effort)
-	if p := n.codexAppPickOf(s.SessionID); p != nil && p.at.After(m.effortAt) {
-		s.Effort = p.effort
+	effort := firstNonEmpty(m.effort, app.Effort)
+	if p != nil && p.hasEffort && p.effortAt.After(m.effortAt) {
+		effort = p.effort
 	}
+	s.Efforts, s.Effort = levels, effort
 }
 
 func (n *Node) codexAppPickOf(id string) *codexAppPick {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.modes[id].App
+	if p := n.modes[id].App; p != nil {
+		cp := *p
+		return &cp
+	}
+	return nil
 }
 
-func (n *Node) setCodexAppPick(id, effort string) {
+func (n *Node) setCodexAppPick(id, model string, setModel bool, effort string, setEffort bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.modes == nil {
 		n.modes = map[string]sessionModes{}
 	}
+	now := time.Now()
 	m := n.modes[id]
-	m.App = &codexAppPick{effort: effort, at: time.Now()}
+	var next codexAppPick
+	if m.App != nil {
+		next = *m.App
+	}
+	if setModel {
+		next.model, next.modelAt = model, now
+	}
+	if setEffort {
+		next.effort, next.hasEffort, next.effortAt = effort, true, now
+	}
+	m.App = &next
 	n.modes[id] = m
 }
 
-// codexDesktopModes is session.modes for a chat of the Codex App: its effort only. The model and the permission mode
-// are the App's to change.
+// codexDesktopModes is session.modes for a chat of the Codex App: its model and effort. Permission modes remain the
+// App's to change.
 func (n *Node) codexDesktopModes(ctx context.Context, id string, src codexSource, model, mode, effort string) error {
-	switch {
-	case model != "":
-		return fmt.Errorf("Codex App 的对话不支持在手机上切换模型")
-	case mode != "":
-		return fmt.Errorf("Codex 的会话在手机上只能改思考强度，权限模式要在电脑上改")
-	case effort == "":
-		return nil
+	if mode != "" {
+		return fmt.Errorf("Codex 的会话在手机上只能改思考强度和模型，权限模式要在电脑上改")
 	}
-	return n.setCodexDesktopEffort(ctx, id, src, effort)
+	return n.setCodexDesktopSettings(ctx, id, src, model, effort)
 }
 
-// setCodexDesktopEffort sets the effort of the next turn of a chat of the Codex App, in the App window that owns it
-// (the App is asked to open it first, as for a message). It is set once the window reads it back; the running turn,
-// if any, goes on with its own.
 func (n *Node) setCodexDesktopEffort(ctx context.Context, id string, src codexSource, effort string) error {
-	levels := n.codexAppEfforts(src.home, n.metaOf(id).model)
-	if len(levels) == 0 {
-		return fmt.Errorf("这个会话的模型不支持设置思考强度")
+	return n.setCodexDesktopSettings(ctx, id, src, "", effort)
+}
+
+// setCodexDesktopSettings sets the model and/or effort of the next turn of a chat of the Codex App, in the App window
+// that owns it (the App is asked to open it first, as for a message). It is set once the window reads it back; the
+// running turn, if any, goes on with its own.
+func (n *Node) setCodexDesktopSettings(ctx context.Context, id string, src codexSource, model, effort string) error {
+	model, effort = strings.TrimSpace(model), strings.TrimSpace(effort)
+	if model == "" && effort == "" {
+		return nil
 	}
-	if !slices.Contains(levels, effort) {
-		return fmt.Errorf("这个会话的模型不支持思考强度 %s（可选：%s）", effort, strings.Join(levels, " / "))
+	if model != "" && !proto.ValidModelID(model) {
+		return fmt.Errorf("invalid model %q", model)
+	}
+	m := n.metaOf(id)
+	app := codexAppThreads(src.home)[src.thread]
+	prev := n.codexAppPickOf(id)
+	curModel := firstNonEmpty(m.model, app.Model)
+	if prev != nil && prev.model != "" && prev.modelAt.After(m.modelAt) {
+		curModel = prev.model
+	}
+	curEffort := firstNonEmpty(m.effort, app.Effort)
+	if prev != nil && prev.hasEffort && prev.effortAt.After(m.effortAt) {
+		curEffort = prev.effort
+	}
+	targetModel := cmp.Or(model, curModel)
+
+	sendEffort := effort
+	hasSendEffort := effort != ""
+	clearPickedEffort := false
+	if effort != "" {
+		levels := n.codexAppEfforts(src.home, targetModel)
+		if len(levels) == 0 {
+			return fmt.Errorf("这个会话的模型不支持设置思考强度")
+		}
+		if !slices.Contains(levels, effort) {
+			return fmt.Errorf("这个会话的模型不支持思考强度 %s（可选：%s）", effort, strings.Join(levels, " / "))
+		}
+	} else if meta, known := n.codexAppModelMeta(src.home, model); known {
+		if len(meta.levels) == 0 {
+			clearPickedEffort = true
+		} else if curEffort != "" && !slices.Contains(meta.levels, curEffort) {
+			sendEffort = reconcileCodexEffort(meta)
+			hasSendEffort = sendEffort != ""
+		}
+	}
+
+	ts := map[string]any{}
+	if model != "" {
+		ts["model"] = model
+	}
+	if hasSendEffort {
+		ts["effort"] = sendEffort
+	}
+
+	what := "思考强度"
+	if model != "" {
+		what = "模型"
 	}
 	ctx, cancel := context.WithTimeout(ctx, codexDesktopTimeout)
 	defer cancel()
@@ -171,29 +259,40 @@ func (n *Node) setCodexDesktopEffort(ctx context.Context, id string, src codexSo
 	if err != nil {
 		return err
 	}
-	f, err := c.request("thread-follower-update-thread-settings", map[string]any{"conversationId": src.thread, "threadSettings": map[string]any{"effort": effort}}, owner.HandledByClient)
+	f, err := c.request("thread-follower-update-thread-settings", map[string]any{"conversationId": src.thread, "threadSettings": ts}, owner.HandledByClient)
 	if err != nil {
 		if f.Type == "response" { // the window answered: it did not take it
-			return refusal("codex_refused", "思考强度没有改成：Codex App 回复「"+f.Error+"」", nil)
+			return refusal("codex_refused", what+"没有改成：Codex App 回复「"+f.Error+"」", nil)
 		}
-		return fmt.Errorf("思考强度可能没有改成：和电脑上的 Codex App 断开了（%v），会话里显示的是它现在的设置", err)
+		return fmt.Errorf("%s可能没有改成：和电脑上的 Codex App 断开了（%v），会话里显示的是它现在的设置", what, err)
 	}
 	var updated struct {
 		Applied bool `json:"applied"`
 	}
 	if json.Unmarshal(f.Result, &updated) != nil || !updated.Applied {
-		return refusal("codex_refused", "Codex App 没有接受这个思考强度", nil)
+		return refusal("codex_refused", "Codex App 没有接受这个"+what, nil)
 	}
 	f, err = c.request("thread-follower-read-model-settings", map[string]any{"conversationId": src.thread}, owner.HandledByClient)
 	var read struct {
 		Settings *struct {
+			Model           *string `json:"model"`
 			ReasoningEffort *string `json:"reasoningEffort"`
 		} `json:"settings"`
 	}
-	if err != nil || json.Unmarshal(f.Result, &read) != nil || read.Settings == nil || read.Settings.ReasoningEffort == nil || *read.Settings.ReasoningEffort != effort {
-		return fmt.Errorf("思考强度可能没有改成：Codex App 读回的设置不是 %s", effort)
+	if err != nil || json.Unmarshal(f.Result, &read) != nil || read.Settings == nil {
+		return fmt.Errorf("%s可能没有改成：Codex App 没有读回设置", what)
 	}
-	n.setCodexAppPick(id, effort)
+	if model != "" && (read.Settings.Model == nil || *read.Settings.Model != model) {
+		return fmt.Errorf("模型可能没有改成：Codex App 读回的模型不是 %s", model)
+	}
+	if hasSendEffort && (read.Settings.ReasoningEffort == nil || *read.Settings.ReasoningEffort != sendEffort) {
+		return fmt.Errorf("思考强度可能没有改成：Codex App 读回的设置不是 %s", sendEffort)
+	}
+	if clearPickedEffort {
+		n.setCodexAppPick(id, model, model != "", "", true)
+	} else {
+		n.setCodexAppPick(id, model, model != "", sendEffort, hasSendEffort)
+	}
 	n.notifyCodex()
 	return nil
 }

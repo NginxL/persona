@@ -13,10 +13,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import kotlinx.coroutines.launch
 import persona.core.contracts.GroupKeys
 import persona.core.contracts.Machine
+import persona.core.contracts.TraeCliDisplayName
 import persona.core.contracts.api.HubLauncher
 import persona.core.contracts.api.LauncherCheck
 import persona.core.contracts.api.LauncherImportResult
 import persona.core.contracts.api.ProviderSetup
+import persona.core.contracts.isTraeCliId
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
 
@@ -131,10 +133,10 @@ internal fun ProvidersPage(
             l.managed -> JAction(stringResource(R.string.settings_providers_delete), PhIcons.Trash, destructive = true) { deleting = l }
             l.hidden -> JAction(stringResource(R.string.settings_providers_restore), PhIcons.Eye) { scope.launch { model.setHidden(l, false) } }
             else -> JAction(stringResource(R.string.settings_providers_hide), PhIcons.Prohibit) { scope.launch { model.setHidden(l, true) } }
-        }), { menu = null }, title = l.name)
+        }), { menu = null }, title = l.settingsTitle)
     }
     deleting?.let { l ->
-        JDialog(onDismiss = { deleting = null }, title = stringResource(R.string.settings_providers_delete_title, l.name),
+        JDialog(onDismiss = { deleting = null }, title = stringResource(R.string.settings_providers_delete_title, l.settingsTitle),
             text = stringResource(R.string.settings_providers_delete_text), destructive = true,
             confirm = stringResource(R.string.settings_providers_delete) to { deleting = null; scope.launch { model.delete(l) }; Unit })
     }
@@ -156,10 +158,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.launcherRows(
 private fun LauncherRow(l: HubLauncher, machineName: (String) -> String, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val palette = PersonaTheme.palette
     val machines = l.machines.joinToString(stringResource(R.string.settings_providers_list_sep), transform = machineName)
-    JRow(selected = selected, onClick = onClick, onLongClick = onLongClick, onClickLabel = l.name) {
+    JRow(selected = selected, onClick = onClick, onLongClick = onLongClick, onClickLabel = l.settingsTitle) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-                Text(l.name, Modifier.weight(1f, fill = false), style = PersonaTheme.type.code, color = if (l.hidden) palette.ink3 else palette.ink,
+                Text(l.settingsTitle, Modifier.weight(1f, fill = false), style = PersonaTheme.type.code, color = if (l.hidden) palette.ink3 else palette.ink,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (l.managed) JTag("Persona", status = Status.Working)
                 if (l.isApi) JTag(stringResource(R.string.settings_providers_api_tag))
@@ -177,8 +179,9 @@ private fun LauncherRow(l: HubLauncher, machineName: (String) -> String, selecte
  */
 @Composable
 internal fun ProviderDetailPage(providers: ProviderSetup?, name: String, machines: List<Machine>, onBack: () -> Unit) {
+    val fallbackTitle = if (isTraeCliId(name)) TraeCliDisplayName else name
     if (providers == null) {
-        JListPage(title = name, onBack = onBack) { item { JNotice(stringResource(R.string.settings_providers_demo)) } }
+        JListPage(title = fallbackTitle, onBack = onBack) { item { JNotice(stringResource(R.string.settings_providers_demo)) } }
         return
     }
     val model = remember(providers, name) { ProviderDetailModel(providers, name) }
@@ -197,7 +200,8 @@ internal fun ProviderDetailPage(providers: ProviderSetup?, name: String, machine
         return
     }
     val facts = state.launcher?.let { providerFacts(it, label) }.orEmpty()
-    JListPage(title = name, onBack = onBack, actions = {
+    val title = stored?.settingsTitle ?: fallbackTitle
+    JListPage(title = title, onBack = onBack, actions = {
         if (stored?.managed == true) JIconButton(PhIcons.PencilSimple, stringResource(R.string.settings_pedit_edit), { editing = "form" })
     }) {
         val l = state.launcher
@@ -288,7 +292,7 @@ internal fun ProviderDetailPage(providers: ProviderSetup?, name: String, machine
     }
     val l = state.launcher
     if (confirm && l != null) JDialog(onDismiss = { confirm = false },
-        title = stringResource(if (l.managed) R.string.settings_providers_delete_title else R.string.settings_providers_hide_title, l.name),
+        title = stringResource(if (l.managed) R.string.settings_providers_delete_title else R.string.settings_providers_hide_title, l.settingsTitle),
         text = stringResource(if (l.managed) R.string.settings_providers_delete_text else R.string.settings_providers_hidden_note), destructive = l.managed,
         confirm = stringResource(if (l.managed) R.string.settings_providers_delete else R.string.settings_providers_hide) to { confirm = false; scope.launch { model.remove() }; Unit })
 }
@@ -311,7 +315,8 @@ private fun providerFacts(l: HubLauncher, machineName: (String) -> String): List
     if (l.models.size > 1) add(stringResource(R.string.settings_providers_models) to l.models.joinToString(stringResource(R.string.settings_providers_list_sep)) { it.id })
     if (l.hasHeaders) add(stringResource(R.string.settings_providers_headers) to stringResource(R.string.settings_providers_set_hidden))
     if (l.hasEnv) add(stringResource(R.string.settings_providers_env) to stringResource(R.string.settings_providers_set_hidden))
-    if (l.managed) add("API Key" to stringResource(if (l.hasKey) R.string.settings_providers_set_hidden else R.string.settings_providers_unset))
+    if (l.managed) add("API Key" to (l.keyReference?.let { providerReferenceState(LocalResources.current, it) }
+        ?: stringResource(if (l.hasKey) R.string.settings_providers_set_hidden else R.string.settings_providers_unset)))
     if (l.managed && l.api != "responses") add(stringResource(R.string.settings_providers_auth) to if (l.auth == "bearer") "Bearer" else "x-api-key")
     if (l.args.isNotEmpty()) add(stringResource(R.string.settings_providers_args) to l.args.joinToString(" "))
     if (l.machines.isNotEmpty()) add(stringResource(R.string.settings_providers_machines) to l.machines.joinToString(stringResource(R.string.settings_providers_list_sep), transform = machineName))

@@ -303,7 +303,7 @@ func TestInboxPollKeepsRulesGroupsAndDetectsOwnReply(t *testing.T) {
 		t.Fatalf("group title/tag changed = %+v", group)
 	}
 	// ReplyTo says where the reply goes, not which message it answers (Last does that)
-	if group.ReplyTo != "以你的身份发到「Example Group」的这个话题里，群里的人都能看到" || group.Last == "" {
+	if group.ReplyTo != "由机器人（不是你本人）发到「Example Group」的这个话题里，群里的人都能看到" || group.Last == "" {
 		t.Fatalf("topic reply_to = %q, last = %q", group.ReplyTo, group.Last)
 	}
 	if topic := items["larkcli:chat:oc_example_group:thread:omt_topic_two"]; topic.Thread == "" {
@@ -328,7 +328,7 @@ func TestInboxP2PTitleUsesOtherSender(t *testing.T) {
 		dm.Tags[1].Key != connector.TagSender || dm.Tags[1].Value != "ou_example_peer" || dm.Tags[1].Name != "Example Peer" {
 		t.Fatalf("direct title/tag = %+v", dm)
 	}
-	if dm.ReplyTo != "以你的身份发到「Example Peer」，会话里的人都能看到" {
+	if dm.ReplyTo != "由机器人（不是你本人）发到「Example Peer」，会话里的人都能看到" {
 		t.Fatalf("direct reply_to = %q", dm.ReplyTo)
 	}
 	if dm.Done != connector.DoneReplied {
@@ -381,10 +381,10 @@ func TestP2PTitleUsesChatPartnerWhenBatchHasOnlyOwnMessages(t *testing.T) {
 	if title, name := p2pTitle(unnamed, nil, "ou_example_user"), p2pName(unnamed, nil, "ou_example_user"); title != "ou_example_peer" || name != "" {
 		t.Fatalf("title = %q, name = %q", title, name)
 	}
-	if got := replyTo(i18n.En, "", false); got != "sent as you to this chat (everyone in it sees it)" {
+	if got := replyTo(i18n.En, "", false); got != "sent by the bot, not as you, to this chat (everyone in it sees it)" {
 		t.Fatalf("unnamed reply_to = %q", got)
 	}
-	if got := replyTo(i18n.En, "", true); got != "sent as you into this topic (everyone in the chat sees it)" {
+	if got := replyTo(i18n.En, "", true); got != "sent by the bot, not as you, into this topic (everyone in the chat sees it)" {
 		t.Fatalf("unnamed topic reply_to = %q", got)
 	}
 }

@@ -11,6 +11,11 @@ import SwiftUI
 // something waiting. Picking one makes it the current assistant on this device (`AppModel.selectAssistantManager`, kept
 // for each hub across launches); picking one still installing shows how to install it. Without a roster, or without an
 // installed current assistant, the sidebar keeps the old Persona header.
+//
+// With several hubs (docs/protocol/multi-hub.md, #12594) the list starts with them: one row per group, the current hub
+// checked, then the current hub's assistants under its name, so the switcher picks "hub › its assistants" in one place.
+// Picking a hub makes it the current hub (`AppModel.selectHub`) and closes the list; its assistants are then the ones
+// listed. The conversation's own menu has no hub section. With one hub the list is the assistants alone, as before.
 
 /// What the switcher says and how it marks an assistant, kept apart from the views to test.
 enum AssistantSwitcherText {
@@ -55,6 +60,28 @@ enum AssistantSwitcherText {
         if othersWaiting { parts.append(String(localized: "Another assistant has something waiting for you")) }
         return parts.joined(separator: ", ")
     }
+
+    /// One hub in the switcher's first group (#12594).
+    struct HubRow: Equatable, Identifiable {
+        let id: String
+        let name: String
+        let current: Bool
+    }
+
+    /// The hubs over the assistants: every group in order (the default group first), the current one marked. None with
+    /// one group: the list is the assistants alone.
+    static func hubs(_ groups: [String], current: String?, name: (String) -> String) -> [HubRow] {
+        guard groups.count > 1 else { return [] }
+        return groups.map { HubRow(id: $0, name: name($0), current: $0 == current) }
+    }
+
+    /// What VoiceOver says for a hub's row: its name, and Current on the current one.
+    static func spokenHub(_ row: HubRow) -> String {
+        row.current ? [row.name, String(localized: "Current")].joined(separator: ", ") : row.name
+    }
+
+    /// The heading over the current hub's assistants when hubs are listed above them.
+    static func assistantsHeading(hub: String) -> String { String(localized: "Assistants on \(hub)") }
 
     /// Settings' full scope title and the current assistant's line; its header draws no other-assistant waiting dot.
     static func spokenSettingsHeader(title: String, manager m: HubManager, now: Date) -> String {
@@ -202,7 +229,7 @@ struct AssistantSwitcherHeader: View {
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier(switchIdentifier)
         .popover(isPresented: $listShown, arrowEdge: .top) {
-            AssistantSwitcherList(pick: pick, create: { afterList(.create) }, manage: { afterList(.manage) })
+            AssistantSwitcherList(pick: pick, pickHub: pickHub, create: { afterList(.create) }, manage: { afterList(.manage) })
                 .presentationCompactAdaptation(.popover)
                 // A solid panel, as on the other clients: through glass the sidebar's badges showed beside the rows.
                 .presentationBackground(Theme.card)
@@ -275,6 +302,15 @@ struct AssistantSwitcherHeader: View {
         }
     }
 
+    /// Another hub becomes the current one (#12594): the list closes, and the header names that hub's assistant.
+    private func pickHub(_ group: String) {
+        listShown = false
+        guard group != model.hub?.group else { return }
+        model.selectHub(group)
+        Haptics.tap()
+        model.toast = Toast(String(localized: "Switched to \(model.groupName(group))"), style: .success)
+    }
+
     /// An installed one becomes the current assistant; one still installing shows how to install it.
     private func pick(_ m: HubManager) {
         if m.installing != nil {
@@ -289,11 +325,13 @@ struct AssistantSwitcherHeader: View {
     }
 }
 
-/// The hub's assistants as the switcher lists them, then New Assistant and Manage Assistants….
+/// The hubs (with several), the current hub's assistants as the switcher lists them, then New Assistant and Manage
+/// Assistants….
 private struct AssistantSwitcherList: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dynamicTypeSize) private var typeSize
     var pick: (HubManager) -> Void
+    var pickHub: (String) -> Void
     var create: () -> Void
     var manage: () -> Void
 
@@ -301,6 +339,15 @@ private struct AssistantSwitcherList: View {
         // The rows' "code expires in n min" and "last synced …" move on without a push.
         TimelineView(.periodic(from: .now, by: 15)) { clock in
             VStack(spacing: 0) {
+                let hubs = AssistantSwitcherText.hubs(model.groupIDs, current: model.hub?.group, name: model.groupName)
+                if !hubs.isEmpty {
+                    heading(String(localized: "hub"))
+                    ForEach(hubs) { hubRow($0) }
+                    Divider().padding(.horizontal, Theme.Space.s).padding(.vertical, Theme.Space.xs)
+                    if let current = hubs.first(where: \.current) {
+                        heading(AssistantSwitcherText.assistantsHeading(hub: current.name))
+                    }
+                }
                 if let roster = model.managerRoster {
                     let current = model.currentAssistant?.id
                     let badges = model.assistantBadges
@@ -363,6 +410,51 @@ private struct AssistantSwitcherList: View {
         .accessibilityLabel(AssistantSwitcherText.spoken(m, now: now, current: current, isDefault: isDefault, waiting: waiting))
         .accessibilityAddTraits(current ? .isSelected : [])
         .accessibilityIdentifier("assistant-switcher-row-\(m.id)")
+    }
+
+    /// A group's small heading: the hubs, then the current hub's assistants.
+    private func heading(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.Font.labelStrong)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, Theme.Space.xxs)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// One hub: its symbol in a well with its link's dot at the foot, its name, and a check on the current one.
+    private func hubRow(_ hub: AssistantSwitcherText.HubRow) -> some View {
+        Button { pickHub(hub.id) } label: {
+            HStack(spacing: Theme.Space.m) {
+                ThemedIcon(Theme.Icon.hubGroup)
+                    .font(Theme.Font.bodyStrong)
+                    .foregroundStyle(Color.primary)
+                    .scaledFrame(width: Theme.Size.wellL, height: Theme.Size.wellL)
+                    .background(Color.primary.opacity(0.15), in: .circle)
+                    .overlay(alignment: .bottomTrailing) {
+                        if let live = model.socket(hub.id) {
+                            HubStatusDot(live: live)
+                                .padding(Theme.Size.lineMedium)
+                                .background(Theme.card, in: .circle)
+                        }
+                    }
+                Text(hub.name).font(Theme.Font.bodyStrong).foregroundStyle(Color.primary).lineLimit(1)
+                Spacer(minLength: Theme.Space.s)
+                if hub.current {
+                    ThemedIcon(Theme.Icon.done).font(Theme.Font.bodyStrong).foregroundStyle(Theme.accent)
+                }
+            }
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, Theme.Space.xs)
+            .scaledFrame(minHeight: Theme.Size.tapTarget)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(AssistantSwitcherText.spokenHub(hub))
+        .accessibilityAddTraits(hub.current ? .isSelected : [])
+        .accessibilityIdentifier("assistant-switcher-hub-\(hub.name)")
     }
 
     private func action(_ title: String, _ symbol: String, tint: Color?, id: String, run: @escaping () -> Void) -> some View {

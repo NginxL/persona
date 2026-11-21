@@ -193,6 +193,8 @@ func TestHealthSpaceOutbound(t *testing.T) {
 	f := healthHub()
 	f.sessions["server"] = append(f.sessions["server"], proto.Session{SessionID: "code-0000-0000", Cwd: "/home/me/src/app", Agent: "claude",
 		Status: proto.StatusIdle, Title: "app"})
+	f.sessions["server"] = append(f.sessions["server"], proto.Session{SessionID: "health-agent", Cwd: "/home/me/.persona/health/work", Agent: "claude",
+		Status: proto.StatusIdle, Title: "health Agent"})
 	s := newTestService(t, f)
 	setSettings(t, s, func(v *Settings) { v.MachineID, v.Main = "server", "main-0000-0000" })
 
@@ -209,12 +211,12 @@ func TestHealthSpaceOutbound(t *testing.T) {
 	t.Run("phone_notify", testHealthPhoneNotify)
 
 	answerOutbound(t, s, "sleep-000-0000", "agent_send", "睡眠数据", false)
-	out, isErr := spaceTool(t, s, "sleep-000-0000", "agent_send", `{"session_id":"code-0000-0000","text":"把我的睡眠数据画成图"}`)
+	out, isErr := spaceTool(t, s, "sleep-000-0000", "agent_send", `{"session_id":"health-agent","text":"把我的睡眠数据画成图"}`)
 	if isErr || !strings.Contains(out, "declined") || len(f.agentSent) != 0 {
 		t.Fatalf("declined agent_send: %s, sent %v", out, f.agentSent)
 	}
 	answerOutbound(t, s, "sleep-000-0000", "agent_send", "睡眠数据", true)
-	if out, isErr := spaceTool(t, s, "sleep-000-0000", "agent_send", `{"session_id":"code-0000-0000","text":"把我的睡眠数据画成图"}`); isErr || len(f.agentSent) != 1 {
+	if out, isErr := spaceTool(t, s, "sleep-000-0000", "agent_send", `{"session_id":"health-agent","text":"把我的睡眠数据画成图"}`); isErr || len(f.agentSent) != 1 {
 		t.Fatalf("allowed agent_send: %s, sent %v", out, f.agentSent)
 	}
 	if out, isErr := spaceTool(t, s, "work-0000-0000", "agent_send", `{"session_id":"code-0000-0000","text":"跑一下测试"}`); isErr || len(f.agentSent) != 2 {

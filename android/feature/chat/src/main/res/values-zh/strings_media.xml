@@ -19,4 +19,9 @@
     <string name="chat_share_card_light">浅色</string>
     <string name="chat_share_card_dark">深色</string>
     <string name="chat_reply_image_original">打开原图</string>
+    <string name="chat_local_image_load_failed">本地图片加载失败</string>
+    <string name="chat_local_image_not_found">文件不存在</string>
+    <string name="chat_local_image_denied">无权限访问该文件</string>
+    <string name="chat_local_image_unreadable">无法解析该图片</string>
+    <string name="chat_local_image_open_file">打开文件</string>
 </resources>

@@ -235,6 +235,47 @@ func TestMachineCallGatesStartGoal(t *testing.T) {
 	}
 }
 
+// An extension's resume of a conversation the hub does not list (resume_outside_health, #10941) goes only to a node
+// that announces the check: an older one would resume it unchecked, or start a new conversation under an id it has
+// nothing of. The hub asks only a node it saw announce it; this holds when the node changed since. A test's node
+// (no version) does not count as having it.
+func TestMachineCallGatesResumeOutsideHealth(t *testing.T) {
+	d := newTestDevices(t)
+	m := newMachine(d, MachineConfig{ID: "box", Name: "Box", Kind: "ssh", SSHHost: "box.invalid"})
+	set := func(info proto.NodeInfo) {
+		m.mu.Lock()
+		m.info, m.online = info, true
+		m.mu.Unlock()
+	}
+	code := func(method string, params any) string {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		var re *rpc.Error
+		if err := m.call(ctx, method, params, nil); errors.As(err, &re) {
+			return re.Code
+		}
+		return ""
+	}
+	checked := map[string]any{"cwd": "/x", "resume_session_id": "s1", "resume_outside_health": true}
+
+	set(current("b1"))
+	if c := code("session.start", checked); c == proto.CodeNodeOutdated {
+		t.Fatal("a node announcing resume_outside_health was refused")
+	}
+	without := current("b1")
+	without.Capabilities = slices.DeleteFunc(slices.Clone(without.Capabilities), func(c string) bool { return c == nodeproto.ResumeOutsideHealth })
+	for _, info := range []proto.NodeInfo{without, {Version: "b1", ModelConfiguration: true}, {}} {
+		set(info)
+		if c := code("session.start", checked); c != proto.CodeNodeOutdated {
+			t.Fatalf("a checked resume on a node without the check (%+v): code %q", info, c)
+		}
+	}
+	set(without)
+	if c := code("session.start", map[string]any{"cwd": "/x", "resume_session_id": "s1"}); c == proto.CodeNodeOutdated {
+		t.Fatal("an unchecked resume refused on a node without the check")
+	}
+}
+
 func TestMachineCallGatesAssistantConfigDir(t *testing.T) {
 	d := newTestDevices(t)
 	m := newMachine(d, MachineConfig{ID: "box", Name: "Box", Kind: "ssh", SSHHost: "box.invalid"})

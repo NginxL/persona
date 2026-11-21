@@ -49,6 +49,12 @@ func TestAssistantCLICallerUsesOnlyVerifiedRuntimeWorkers(t *testing.T) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("no local peer process lookup")
 	}
+	for _, engine := range []string{"agy", "opencode"} {
+		t.Run(engine, func(t *testing.T) { testAssistantCLICallerVerifiedRuntimeWorkers(t, engine) })
+	}
+}
+
+func testAssistantCLICallerVerifiedRuntimeWorkers(t *testing.T, engine string) {
 	n, hub := runtimeNode(t)
 	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(t.TempDir(), "s"), Net: "unix"})
 	if err != nil {
@@ -91,10 +97,10 @@ func TestAssistantCLICallerUsesOnlyVerifiedRuntimeWorkers(t *testing.T) {
 		role := strings.TrimSpace(line)
 		peers[role], pids[role] = conn, pid
 	}
-	const assistantID, agentID = "agy-assistant", "agy-agent"
+	assistantID, agentID := engine+"-assistant", engine+"-agent"
 	n.state.put(assistantID, sessionState{Cwd: identity.AssistantDir(n.home)})
 	host := n.runtimes.add(nil)
-	host.ready, host.hello.Runtime, host.hello.Caps.Assistant, host.pid = true, "agy", true, pids["runtime"]
+	host.ready, host.hello.Runtime, host.hello.Caps.Assistant, host.pid = true, engine, true, pids["runtime"]
 	n.runtimes.claim(host, assistantID)
 	n.runtimes.claim(host, agentID)
 	report := func(pids map[string]int) {
@@ -111,6 +117,14 @@ func TestAssistantCLICallerUsesOnlyVerifiedRuntimeWorkers(t *testing.T) {
 		if roots := n.assistantRoots(); len(roots) != 0 {
 			t.Fatalf("accepted non-worker PID %d: %v", pid, roots)
 		}
+	}
+	for _, otherID := range []string{agentID, engine + "-assistant-two"} {
+		if otherID != agentID {
+			n.state.put(otherID, sessionState{Cwd: identity.AssistantDir(n.home)})
+			n.runtimes.claim(host, otherID)
+		}
+		report(map[string]int{assistantID: pids["worker"], otherID: pids["worker"]})
+		check("assistant", "")
 	}
 	report(map[string]int{assistantID: pids["worker"], agentID: pids["agent"]})
 	check("assistant", assistantID)
@@ -324,6 +338,13 @@ func TestCLICallOnlyForTheAssistant(t *testing.T) {
 	if res := ask("other_list"); !res.IsError {
 		t.Fatalf("first assistant called the second one's connector: %+v", res)
 	}
+	// An Agent's own tools are an Agent's, by its pane or Codex thread: the assistant's process, naming neither, does
+	// not call them as the assistant (its task_plan is the whole planner), and the hub is not asked (#12096).
+	for _, name := range []string{"task_plan", "todo_decisions", "task_review"} {
+		if res := ask(name); !res.IsError || !strings.Contains(res.Content[0].Text, "is not available") {
+			t.Fatalf("the assistant's %s from its shell: %+v", name, res)
+		}
+	}
 	n.mu.Lock()
 	delete(n.procs, "s1")
 	n.procs["s2"] = &assistantProc{id: "s2", cwd: second, cmd: &exec.Cmd{Process: &os.Process{Pid: os.Getpid()}}}
@@ -379,6 +400,99 @@ func TestCLICallTaskSpawnUsesLivePaneSession(t *testing.T) {
 	denied := n.cliCall(context.Background(), nil, sockRequest{Name: "example_list", Pane: "w1:p1"})
 	if !denied.IsError || !strings.Contains(denied.Content[0].Text, "只能在助手的对话里用") {
 		t.Fatalf("ordinary connector tool from Agent: %+v", denied)
+	}
+}
+
+// An Agent's own tools (callerTools) from the terminal go to the hub as the Agent its pane runs, as an Agent's call,
+// exactly as its MCP server's call from the same pane goes (#12096): a continuation's replacement Agent without the
+// Persona MCP reads its to-do's decisions and, leading its task, plans workers; whether it may is the hub's decision
+// for that session (a worker's task_plan is refused there). What the request says of itself is never read.
+func TestCLICallAgentToolsGoAsThePaneAgent(t *testing.T) {
+	n, hub := runtimeNode(t)
+	n.mu.Lock()
+	n.panes = map[string]string{"w1:p1": "sess-stale", "w2:p2": "sess-bound"}
+	n.agents = map[string]host.Agent{"sess-live": {PaneID: "w1:p1"}}
+	n.mu.Unlock()
+	ask := mcpRelay(t, n, hub)
+	for _, name := range callerTools {
+		got := ask(map[string]any{"kind": "cli.call", "name": name, "args": map[string]any{"tasks": []any{}}, "pane": "w1:p1",
+			"session_id": "forged", "assistant": true})
+		if got["name"] != name || got["session_id"] != "sess-live" || got["assistant"] != false || got["guest"] != false {
+			t.Fatalf("%s: hub request %v: want the pane's Agent (sess-live), assistant false, guest false", name, got)
+		}
+		if args, _ := got["args"].(map[string]any); args == nil || args["tasks"] == nil {
+			t.Fatalf("%s: the arguments did not reach the hub: %v", name, got)
+		}
+	}
+	// A guest conversation's session is said to be one, so the hub gives it only its own tools.
+	n.state.put("sess-bound", sessionState{Launcher: "claude", Guest: []string{"lark_send"}})
+	if got := ask(map[string]any{"kind": "cli.call", "name": "todo_decisions", "args": map[string]any{}, "pane": "w2:p2"}); got["guest"] != true {
+		t.Fatalf("a guest's call: %v", got)
+	}
+	// The same caller as its MCP server's call from that pane: the live Agent there, else the hooks' binding.
+	for pane, want := range map[string]string{"w1:p1": "sess-live", "w2:p2": "sess-bound"} {
+		for _, name := range []string{"task_plan", "todo_decisions"} {
+			viaMCP := ask(map[string]any{"kind": "mcp.call", "name": name, "args": map[string]any{}, "pane": pane})
+			viaCLI := ask(map[string]any{"kind": "cli.call", "name": name, "args": map[string]any{}, "pane": pane})
+			if viaMCP["session_id"] != want || viaCLI["session_id"] != want || viaCLI["assistant"] != viaMCP["assistant"] {
+				t.Fatalf("%s in %s: terminal %v, MCP %v: want both as %s", name, pane, viaCLI, viaMCP, want)
+			}
+		}
+	}
+}
+
+// A call that names no known Agent session, by pane or Codex thread, is refused as before, before the hub is asked;
+// and only an Agent's own tools go as the Agent's: anything else from an Agent's pane still needs the assistant's
+// process. n.peer is nil while they are asked, so a refusal that reached for the hub would say "not connected".
+func TestCLICallAgentToolsRefuseUnknownCallers(t *testing.T) {
+	n, _ := runtimeNode(t)
+	thread := "10000000-0000-0000-0000-000000000001"
+	n.codices = newCodexRegistry()
+	n.codices.threads["c0de-10000000000000000000000000000001"] = codexSource{thread: thread, home: "/profiles/codex"}
+	n.mu.Lock()
+	n.agents = map[string]host.Agent{"sess-live": {PaneID: "w1:p1"}}
+	n.mu.Unlock()
+	peer := n.peer
+	n.peer = nil
+	t.Cleanup(func() { n.peer = peer })
+	const notAssistant = "这个命令只能在助手的对话里用：这个进程不是 Persona 为助手起的" // i18n-ignore: the node's refusal, matched as it is
+	refused := func(what string, req sockRequest, want string) {
+		t.Helper()
+		res := n.cliCall(context.Background(), nil, req)
+		if !res.IsError || res.ErrorKind != proto.ToolErrorUnavailable || len(res.Content) == 0 || res.Content[0].Text != want {
+			t.Fatalf("%s: %+v, want the refusal %q", what, res, want)
+		}
+	}
+	for _, name := range []string{"task_plan", "todo_decisions", "task_review", "report_to_supervisor", "dispatch_start"} {
+		refused(name+" from an unknown pane", sockRequest{Name: name, Pane: "w9:p9", SessionID: "forged", Assistant: true}, notAssistant)
+		refused(name+" from no pane", sockRequest{Name: name, SessionID: "forged", Assistant: true}, notAssistant)
+		// An unknown thread never falls back to the pane a shared Codex daemon may have inherited.
+		refused(name+" from an unknown Codex thread", sockRequest{Name: name, Pane: "w1:p1", CodexThreadID: "20000000-0000-0000-0000-000000000002"}, notAssistant)
+	}
+	refused("task_spawn from an unknown pane", sockRequest{Name: "task_spawn", Pane: "w9:p9"},
+		"task_spawn is not available: no Agent session is known for this pane or Codex thread")
+	for _, name := range []string{"task_status", "agent_send", "agent_start", "kb_search", "example_list", "todo_decisions_cli"} {
+		refused(name+" from an Agent's pane", sockRequest{Name: name, Pane: "w1:p1"}, notAssistant)
+		refused(name+" from a known Codex thread", sockRequest{Name: name, CodexThreadID: thread}, notAssistant)
+	}
+}
+
+// A Codex thread names the caller of every Agent tool, as it does task_spawn's: not the pane its shared daemon may
+// have inherited from another Agent.
+func TestCLICallAgentToolsFollowTheCodexThread(t *testing.T) {
+	n, hub := runtimeNode(t)
+	thread := "10000000-0000-0000-0000-000000000001"
+	public := "c0de-10000000000000000000000000000001"
+	n.codices = newCodexRegistry()
+	n.codices.threads[public] = codexSource{thread: thread, home: "/profiles/codex"}
+	n.panes = map[string]string{"w1:p1": "another-agent"}
+	ask := mcpRelay(t, n, hub)
+	for _, name := range []string{"todo_decisions", "task_plan", "task_review"} {
+		got := ask(map[string]any{"kind": "cli.call", "name": name, "args": map[string]any{}, "pane": "w1:p1", "codex_thread_id": thread,
+			"session_id": "forged", "assistant": true})
+		if got["session_id"] != public || got["assistant"] != false {
+			t.Fatalf("%s: %v: want the Codex thread's session %s, assistant false", name, got, public)
+		}
 	}
 }
 
@@ -696,8 +810,13 @@ func TestMCPAssistantWithoutPeer(t *testing.T) {
 	check := func(cases map[string]bool) {
 		t.Helper()
 		for session, want := range cases {
-			if got, ok := n.mcpAssistantOf(0, errNoPeer, nil, session); ok != want || ok && got != session {
+			got, rt, ok := n.mcpAssistantOf(0, errNoPeer, nil, session)
+			if ok != want || ok && got != session {
 				t.Errorf("%q: %q %v, want %v", session, got, ok, want)
+			}
+			// The runtime that vouches for one of its own conversations, none for one of this node's processes.
+			if onRuntime := strings.HasPrefix(session, "session-"); ok && (rt != nil) != onRuntime {
+				t.Errorf("%q: runtime %v, want one %v", session, rt, onRuntime)
 			}
 		}
 	}
@@ -714,11 +833,15 @@ func TestMCPAssistantWithoutPeer(t *testing.T) {
 	}
 	n.state.put("session-p", sessionState{Cwd: identity.AssistantDir(n.home)})
 	n.runtimes.claim(connect("plain", false), "session-p") // a runtime that runs no assistant
-	n.runtimes.claim(connect("dsh", true), "session-r")
+	dsh := connect("dsh", true)
+	n.runtimes.claim(dsh, "session-r")
 	n.runtimes.claim(connect("dsh2", true), "session-w") // not an assistant conversation
 	check(map[string]bool{"session-r": true, "session-p": false, "session-w": false})
+	if _, rt, _ := n.mcpAssistantOf(0, errNoPeer, nil, "session-r"); rt != dsh {
+		t.Errorf("session-r: runtime %v, want the one that has it", rt)
+	}
 	// Any other reason the peer is not known (not a unix socket) is no assistant's.
-	if got, ok := n.mcpAssistantOf(0, errors.New("not a unix socket"), nil, "s1"); ok {
+	if got, _, ok := n.mcpAssistantOf(0, errors.New("not a unix socket"), nil, "s1"); ok {
 		t.Errorf("a peer not known for another reason: %q", got)
 	}
 }

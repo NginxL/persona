@@ -156,8 +156,9 @@ test("an archived agent keeps its row when its id is not its transcript's: a ses
   const able = { ...started, capabilities: { supportsRewindConversation: true, supportsRewindBoth: true } }
   assert.deepEqual(agentRow(able, { roots, archived: true, thinking: ['low', 'high'] }).capabilities,
     { rewind: false, rewind_code: false, modes: false, model: false })
-  assert.deepEqual(agentRow({ ...able, archivedAt: null }, { roots }).capabilities, { rewind: true, rewind_code: true },
-    "listed: the provider's own rewind, modes and model left to the node")
+  assert.deepEqual(agentRow({ ...able, archivedAt: null }, { roots }).capabilities,
+    { rewind: true, rewind_code: true, a2a_wake_on_send: true },
+    'an idle-retired agent can wake on send until it is archived')
   const grok = agentSnapshot({ id: 'g1', provider: 'grok', archivedAt: at, labels: { 'persona.session': 'paseo-g1' } })
   assert.equal(agentRow(grok, { roots, archived: true, thinking: ['low', 'high'] }).efforts, undefined, 'no effort to pick either')
 })

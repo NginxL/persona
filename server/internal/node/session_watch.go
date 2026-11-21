@@ -220,10 +220,18 @@ func (n *Node) unwatch(id string) {
 // lines hold no items (titles, modes): the batch still tells clients they have everything up to its to_seq, so the
 // next one does not look like it skipped something.
 func (n *Node) refresh(id string, f *transcript.File) error {
+	return n.refreshRead(id, f.RefreshSpan)
+}
+
+func (n *Node) refreshExport(id string, f *transcript.File) error {
+	return n.refreshRead(id, f.RefreshExportSpan)
+}
+
+func (n *Node) refreshRead(id string, read func() ([]proto.Item, transcript.Span, error)) error {
 	mu := n.pushLock(id)
 	mu.Lock()
 	defer mu.Unlock()
-	fresh, span, err := f.RefreshSpan()
+	fresh, span, err := read()
 	if err != nil || span.To == span.From {
 		return err
 	}

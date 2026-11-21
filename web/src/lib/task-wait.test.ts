@@ -219,7 +219,8 @@ describe("wait-age ordering on task surfaces", () => {
     const got = orderWaitGroups(original, now);
     expect(got.sections.parked.map((group) => group.lead.id)).toEqual(["z-older", "middle"]);
     expect(got.sections.parked[0].members.map((todo) => todo.id)).toEqual(["z-older", "a-newer"]);
-    expect(got.sections.parked[0].key).toBe("z-older");
+    expect(got.sections.parked[0].key).toBe(original.sections.parked[0].key);
+    expect(got.sections.parked[0].key).toBe("a-newer");
     expect(got.todoCounts).toBe(original.todoCounts);
     expect(got.sections.working).toBe(original.sections.working);
     expect(got.open).toBe(original.open);

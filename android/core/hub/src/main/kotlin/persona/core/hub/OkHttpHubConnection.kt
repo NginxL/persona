@@ -529,6 +529,32 @@ class OkHttpHubConnection(
         readTimeoutSeconds: Long? = null,
         sharingFence: HubSharingFence? = null,
     ): Response {
+        val (call, owner) = prepareRequest(path, method, body, headers, expectedRoute, readTimeoutSeconds, sharingFence)
+        return checkedResponse(call.awaitResponse(buffered), owner, sharingFence)
+    }
+
+    /** The call owns its body through validation and consumption, including cancellation after its headers. */
+    internal suspend fun <T> consumeStream(path: String, headers: Map<String, String>, consume: (Response) -> T): T {
+        val (call, owner) = prepareRequest(path, "GET", null, headers, null, null, null)
+        return try {
+            call.awaitConsumedResponse { response ->
+                // A 403 whose body cannot be read may still be a coded denial. On a streaming call an incomplete
+                // error response is a transport failure, never proof of an expired credential.
+                if (!response.isSuccessful) throw HubFailure.from(response, requireReadableBody = true)
+                consume(response)
+            }
+        } catch (failure: HubFailure) {
+            // The live owner records the result only after the callback has consumed and closed the response.
+            currentCoroutineContext().ensureActive()
+            if (!call.isCanceled()) recordRequestFailure(failure, owner)
+            throw failure
+        }
+    }
+
+    private suspend fun prepareRequest(
+        path: String, method: String, body: RequestBody?, headers: Map<String, String>,
+        expectedRoute: HubRoute?, readTimeoutSeconds: Long?, sharingFence: HubSharingFence?,
+    ): Pair<Call, Owner> {
         sharingFence?.requireCurrent()
         val selected = awaitRoute()
         if (expectedRoute != null && selected !== expectedRoute) throw HubFailure(HubError.NoNetwork)
@@ -551,16 +577,23 @@ class OkHttpHubConnection(
             headers.forEach { (name, value) -> header(name, value) }
         }.header("Authorization", "Bearer ${owner.token}").method(method, compatibleRequestBody(path, body)).build()
         val client = readTimeoutSeconds?.let { http.client.newBuilder().readTimeout(it, java.util.concurrent.TimeUnit.SECONDS).build() } ?: http.client
-        val response = client.newCall(request).awaitResponse(buffered)
+        return client.newCall(request) to owner
+    }
+
+    private fun checkedResponse(response: Response, owner: Owner, sharingFence: HubSharingFence?): Response {
         try { sharingFence?.requireCurrent() } catch (error: Exception) { response.close(); throw error }
         if (!response.isSuccessful) {
             val error = response.use { if (sharingFence != null) sharingFailure(it) else HubFailure.from(it) }
-            // recordFailure owns revocation: it cancels the socket, clears the route and diagnostics. In a group only
-            // the hub that refused is dropped, and the connection moves on to the others.
-            if (error.kind == HubError.PairingExpired && recordFailure(error, owner)) reconnect()
+            recordRequestFailure(error, owner)
             throw error
         }
         return response
+    }
+
+    private fun recordRequestFailure(error: HubFailure, owner: Owner) {
+        // recordFailure owns revocation: it cancels the socket, clears the route and diagnostics. In a group only
+        // the hub that refused is dropped, and the connection moves on to the others.
+        if (error.kind == HubError.PairingExpired && recordFailure(error, owner)) reconnect()
     }
 
     /** Requests made while the first route is still being chosen (right after pairing, after a network change) wait for it. */

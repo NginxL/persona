@@ -135,6 +135,15 @@ struct SupervisionTests {
         #expect(TodoItem(id: "t", title: "x").reviewBadge == nil)
     }
 
+    @Test func personalVerificationIsOpenUntilPass() {
+        let ledger = TaskSupervision(supervisor: "main", state: "user_check", reviews: [.init(verdict: "accepted")])
+        let waiting = sup(ledger)
+        #expect(waiting.doneAt == nil && waiting.reviewState == .userCheck && !waiting.acceptanceStands)
+        #expect(waiting.reviewBadge?.label == "待你验收" && waiting.reviewBadge?.tone == .caution)
+        let passed = sup(ledger, done: true, doneBy: "review")
+        #expect(passed.reviewState == .accepted && passed.reviewBadge?.label == "已验收")
+    }
+
     /// An accepted or cancelled task the user reopened goes on again.
     @Test func reopenedAcceptedCountsAsInProgress() {
         let accepted = TaskSupervision(supervisor: "main", doneWhen: ["A"], state: "accepted")

@@ -194,7 +194,7 @@ func polledPRs(t Todo) []string {
 	}
 	for i := len(t.PRs) - 1; i >= 0 && len(out) <= prsPolled; i-- {
 		u := t.PRs[i]
-		if u == t.PRURL || !ciPRURL.MatchString(u) {
+		if u == t.PRURL || !ciPRURL.MatchString(u) && !otherReviewLink(u) {
 			continue
 		}
 		if f, ok := known[u]; ok && (f.State == "merged" || f.State == "closed") {
@@ -240,11 +240,10 @@ func prFacts(t Todo, url string) *TodoPRStatus {
 
 // The existing minute deploy pass owns polling. Reads never block a task list or
 // snapshot, and failures leave the last observation to expire rather than invent success.
+// A review request on another host is polled the same way through its code host (code_host.go), which says its state
+// only: no review, checks or head.
 func (s *Service) sweepPRStatuses(ctx context.Context, now time.Time) {
-	f, ok := s.forge().(prStatusForge)
-	if !ok {
-		return
-	}
+	f, github := s.forge().(prStatusForge)
 	if s.ensureTodosLoaded(ctx) != nil {
 		return
 	}
@@ -264,8 +263,16 @@ func (s *Service) sweepPRStatuses(ctx context.Context, now time.Time) {
 		source := externalParkPRURL(held)
 		for _, url := range polledPRs(t) {
 			m := ciPRURL.FindStringSubmatch(url)
-			if m == nil {
+			var other codeHost
+			switch {
+			case m != nil && !github:
 				continue
+			case m == nil && !otherReviewLink(url):
+				continue
+			case m == nil:
+				if other, _ = s.codeHostFor(url); other == nil {
+					continue
+				}
 			}
 			var checkedAt time.Time
 			bound := source != "" && source == triageNormalizePRURL(url)
@@ -299,8 +306,14 @@ func (s *Service) sweepPRStatuses(ctx context.Context, now time.Time) {
 			last.statusPR, last.statusAt = url, now
 			p.seen[key] = last // failures are attempts too, not fresh evidence
 			p.mu.Unlock()
-			number, _ := strconv.Atoi(m[2])
-			status, err := f.PRStatus(ctx, m[1], number)
+			var status TodoPRStatus
+			var err error
+			if other != nil {
+				status, err = otherPRStatus(ctx, other, url)
+			} else {
+				number, _ := strconv.Atoi(m[2])
+				status, err = f.PRStatus(ctx, m[1], number)
+			}
 			if err != nil {
 				s.logf("task %s: PR status: %v", t.ID, err)
 				continue
@@ -507,7 +520,7 @@ func parkWaitsOnPR(r *TaskReview, urls ...string) bool {
 			return false
 		}
 		source := triageNormalizePRURL(e.URL)
-		if ciPRURL.FindString(source) != source || source == "" {
+		if source == "" || ciPRURL.FindString(source) != source && !otherReviewLink(source) { // other hosts: code_host.go
 			return false
 		}
 		for _, u := range urls {
@@ -536,4 +549,18 @@ func parkWaitsOnPR(r *TaskReview, urls ...string) bool {
 		}
 	}
 	return false
+}
+
+// otherPRStatus is url's state as code host h reads it, with the labels GitHub's read keeps when it knows no more.
+func otherPRStatus(ctx context.Context, h codeHost, url string) (TodoPRStatus, error) {
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	st, err := h.ReviewStatus(cctx, url)
+	if err == nil && st.State == "" {
+		err = errReviewUnsupported
+	}
+	if err != nil {
+		return TodoPRStatus{}, fmt.Errorf("%s: %w", h.Name(), err)
+	}
+	return TodoPRStatus{State: st.State, Review: "pending", Checks: "none"}, nil
 }

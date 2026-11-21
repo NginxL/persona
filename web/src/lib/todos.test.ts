@@ -33,6 +33,7 @@ import {
   type TodoSpace,
 } from "./todos";
 import type { AgentMutes } from "./agent-groups";
+import { machineSessionOrder } from "./herdr-tree";
 import { BOARD_ORDER, boardSectionOf } from "./task-board";
 
 const machines: Machine[] = [
@@ -416,9 +417,9 @@ describe("Agents 侧边栏「按待办」分组 (buildTodoAgentGroups)", () => {
     ];
 
     const groups = buildTodoAgentGroups([sMoved, sStays], machines, todos, mutes);
-    expect(groups.map((g) => g.key)).toEqual(["todo:todo-a", "todo:todo-b"]);
-    expect(groups[0].sessions.map((s) => s.session_id)).toEqual(["stays"]);
-    expect(groups[1].sessions.map((s) => s.session_id)).toEqual(["moved"]);
+    expect(groups.map((g) => g.key)).toEqual(["todo:todo-b", "todo:todo-a"]);
+    expect(groups.find((g) => g.todoId === "todo-a")?.sessions.map((s) => s.session_id)).toEqual(["stays"]);
+    expect(groups.find((g) => g.todoId === "todo-b")?.sessions.map((s) => s.session_id)).toEqual(["moved"]);
   });
 
   it("会话挂的待办已完成时，归第一个列着它的未完成待办 (#4802)", () => {
@@ -452,6 +453,21 @@ describe("Agents 侧边栏「按待办」分组 (buildTodoAgentGroups)", () => {
     // nothing above it: the whole list, open
     expect(groups[0].folded).toBe(false);
     expect(groups[0].sessions.map((s) => s.session_id)).toEqual(["done-task"]);
+  });
+
+  it("keeps to-do groups in page order when only a later group's Agent needs you (#11801)", () => {
+    const first = mockSession("mac-1", "first-agent", "idle", { todo: { id: "first", title: "First" } });
+    const second = mockSession("mac-1", "second-agent", "idle", { todo: { id: "second", title: "Second" } });
+    const todos: Todo[] = [
+      { id: "first", title: "First", created_at: "2026-11-02T10:00:00Z", updated_at: "", agents: [{ machine_id: "mac-1", session_id: "first-agent", linked_at: "" }] },
+      { id: "second", title: "Second", created_at: "2026-11-02T09:00:00Z", updated_at: "", agents: [{ machine_id: "mac-1", session_id: "second-agent", linked_at: "" }] },
+    ];
+    const order = machineSessionOrder(machines);
+    const before = buildTodoAgentGroups([first, second], machines, todos, mutes, order);
+    const after = buildTodoAgentGroups([first, { ...second, state: "needs_you" }], machines, todos, mutes, order);
+    expect(before.map((g) => g.todoId)).toEqual(["first", "second"]);
+    expect(after.map((g) => g.todoId)).toEqual(["first", "second"]);
+    expect(after.map((g) => g.todoStatus)).toEqual(["follow_up", "needs_you"]);
   });
 
   it("屏蔽的 Agent 在待办组内降级，但同组的需要你仍然排在最前面", () => {

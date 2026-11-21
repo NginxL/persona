@@ -1,4 +1,4 @@
-Hand part of your own task to workers: each task you give this starts a new coding agent on a computer, beneath the task you lead, at once, with no card for the user to start it. You get this tool only because your task was handed out as a leader task. Workers belong to this task only: you cannot pick another to-do (todo_id and role are refused), a worker cannot hand work on, and at most 8 workers of this task run at a time. A worker that changes files takes the default permission mode unless you set one; a task that only reads sets readonly true and gets the read-only constraint in its first message. Claude-family launchers always start in bypassPermissions mode; Codex read-only tasks keep the plan-mode sandbox. Leave machine and cwd out to start the worker where you run. What a worker reports, and when it stops, stalls or waits for review, reaches you as a message that starts with "Persona · supervision"; your own reports still go to whoever handed your task to you. You supervise each worker: give it done_when, and review it with task_review when its supervision message comes. Returns at once, with each worker's to-do; it does not confirm the agent started.
+Hand part of your own task to workers: each task you give this starts a new coding agent on a computer, beneath the task you lead, at once, with no card for the user to start it. You get this tool only because your task was handed out as a leader task. Workers belong to this task only: you cannot pick another to-do (todo_id is refused, and every task sets role=worker), a worker cannot hand work on, and at most 8 workers of this task run at a time. A worker that changes files takes the default permission mode unless you set one; a task that only reads sets readonly true and gets the read-only constraint in its first message. Claude-family launchers always start in bypassPermissions mode; Codex read-only tasks keep the plan-mode sandbox. Leave machine and cwd out to start the worker where you run. What a worker reports, and when it stops, stalls or waits for review, reaches you as a message that starts with "Persona · supervision"; your own reports still go to whoever handed your task to you. You supervise each worker: give it done_when, and review it with task_review when its supervision message comes. Returns at once, with each worker's to-do; it does not confirm the agent started.{{template "shared/mcp_language" .}}
 
 ```json
 {
@@ -17,6 +17,7 @@ Hand part of your own task to workers: each task you give this starts a new codi
         "required": [
           "title",
           "prompt",
+          "role",
           "readonly"
         ],
         "additionalProperties": false,
@@ -28,6 +29,11 @@ Hand part of your own task to workers: each task you give this starts a new codi
           "prompt": {
             "type": "string",
             "description": "the worker's first message: everything it needs to do the work without asking you"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["worker"],
+            "description": "required: worker; a worker cannot hand work on"
           },
           "machine": {
             "type": "string",
@@ -69,7 +75,7 @@ Hand part of your own task to workers: each task you give this starts a new codi
               "bypassPermissions",
               "plan"
             ],
-            "description": "empty: the default mode for a writable task. Claude-family launchers always use bypassPermissions; readonly=true adds a first-prompt constraint; Codex keeps plan; traex and omp take none"
+            "description": "empty: the default mode for a writable task. Claude-family launchers always use bypassPermissions; readonly=true adds a first-prompt constraint; Codex keeps plan; TRAE CLI and omp take none"
           },
           "readonly": {
             "type": "boolean",
@@ -90,7 +96,7 @@ Hand part of your own task to workers: each task you give this starts a new codi
           "expect_minutes": {
             "type": "integer",
             "minimum": 0,
-            "description": "optional minutes override; omit/0 for 60 (system_default). Review at 1×; stuck at 1.5× (min 20m); overdue at 3× (min 24h)"
+            "description": "optional minutes override; omit/0 for comparable history or the 60-minute system_default. Review at 1×; stuck at 1.5× (min 20m); overdue at 3× (min 24h)"
           },
           "why": {
             "type": "string",

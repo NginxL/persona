@@ -34,7 +34,7 @@ func taskInboxArgs(items ...string) json.RawMessage {
 	var tasks []map[string]any
 	for _, item := range items {
 		tasks = append(tasks, map[string]any{
-			"title": "Investigate report", "prompt": "Inspect the reported defect and verify the result",
+			"title": "Investigate report", "prompt": "Inspect the reported defect and verify the result", "role": "worker",
 			"machine": "box", "cwd": "/code/app", "inbox_item": item,
 			"inbox_handoff": "untrusted-operation", "done_when": []string{"Regression verified"}, "expect_minutes": 10,
 		})
@@ -501,5 +501,69 @@ func TestTaskPlanInboxOneFinishedTaskDoesNotFileOtherWork(t *testing.T) {
 	defer s.inbox.mu.Unlock()
 	if it.open() {
 		t.Fatal("all completed tasks did not settle the item")
+	}
+}
+
+func TestTaskPlanCanDeclineInboxSourceWithSeveralHandoffs(t *testing.T) {
+	const conversation = "sample-inbox-handoffs"
+	s, _ := newTaskService(t)
+	a := taskInboxItem(t, s, "example:first", "box", conversation)
+	b := taskInboxItem(t, s, "example:second", "box", conversation)
+	if _, err := s.toolTaskPlanFrom(t.Context(), "box", conversation, taskInboxArgs("none")); err != nil {
+		t.Fatalf("an unrelated task should be accepted: %v", err)
+	}
+	plan := planOf(t, s, conversation)
+	got := plan.Tasks[0]
+	if got.InboxItem != "" || got.InboxHandoff != "" {
+		t.Fatalf("unrelated plan recorded an Inbox association: %q %q", got.InboxItem, got.InboxHandoff)
+	}
+	started, err := s.startPlan(t.Context(), plan.ID, nil, false)
+	if err != nil || started.Tasks[0].Error != "" {
+		t.Fatalf("unrelated plan did not start: %+v, %v", started, err)
+	}
+	if todo := todoNow(s, started.Tasks[0].TodoID); todo.InboxItem != "" {
+		t.Fatalf("new task was linked to %q", todo.InboxItem)
+	}
+	s.inbox.mu.Lock()
+	defer s.inbox.mu.Unlock()
+	for _, it := range []*InboxItem{a, b} {
+		if it.Agent != nil && it.Agent.TodoID != "" {
+			t.Fatalf("handoff %s was attached to %s", it.ID, it.Agent.TodoID)
+		}
+	}
+}
+
+func TestExistingTaskToolsCanDeclineInboxSource(t *testing.T) {
+	for _, name := range []string{"agent_send", "agent_send with task", "task_scope"} {
+		t.Run(name, func(t *testing.T) {
+			s, f := newQuietService(t)
+			task := agentTask(t, s, f)
+			a := taskInboxItem(t, s, "example:first", "server", "conv1")
+			b := taskInboxItem(t, s, "example:second", "server", "conv1")
+			args := map[string]any{"inbox_item": "none"}
+			tool := name
+			if name == "task_scope" {
+				args["todo_id"], args["change"], args["why"] = task.ID, "Check the sample output", "It needs a second example"
+			} else {
+				tool = "agent_send"
+				args["machine"], args["session_id"], args["text"] = task.Agents[0].MachineID, task.Agents[0].SessionID, "Check the sample output"
+				if name == "agent_send with task" {
+					args["task"] = map[string]any{"title": task.Title, "done_when": []string{"Sample output checked"}}
+				}
+			}
+			if _, err := runJSON(t, s, "conv1", tool, args); err != nil {
+				t.Fatalf("unrelated action refused: %v", err)
+			}
+			if todo := todoNow(s, task.ID); todo.InboxItem != "" {
+				t.Fatalf("unrelated action changed the task source: %s", todo.InboxItem)
+			}
+			s.inbox.mu.Lock()
+			defer s.inbox.mu.Unlock()
+			for _, it := range []*InboxItem{a, b} {
+				if it.Agent != nil && it.Agent.TodoID != "" {
+					t.Fatalf("handoff %s was attached to %s", it.ID, it.Agent.TodoID)
+				}
+			}
+		})
 	}
 }

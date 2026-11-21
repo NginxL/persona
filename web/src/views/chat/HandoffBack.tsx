@@ -1,22 +1,47 @@
-// The strip at the top of an Agent's page opened from a conversation's hand-off card (#5096, cindy's HandoffSourcePill):
-// "Came from <conversation> · click to return", with ✕ to put it away. Returning goes back in the history, so the
-// conversation's chat is where it was left (lib/handoff.ts).
+// The strip at the top of an Agent's page opened from a conversation's hand-off card (#5096, cindy's HandoffSourcePill)
+// or from inside another page (a to-do, a knowledge project, a meeting, #12055): "Came from <conversation or page> ·
+// click to return", with ✕ to put it away. Returning goes back in the history, so the conversation's chat is where it was
+// left (lib/handoff.ts).
 import { type HandoffFrom } from "../../lib/handoff";
-import { navigate, parse } from "../../lib/router";
+import { sessionTitle } from "../../lib/format";
+import { navigate, parse, type Route } from "../../lib/router";
 import { useStore, type State } from "../../lib/store";
 import { IconButton } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { conversationTitle } from "../assistant/conversations";
 import { t } from "../../i18n";
 
-/** What the conversation at `path` is called now: its title, Persona for the main one. */
-export function fromTitle(s: Pick<State, "assistant">, path: string): string {
+/** A page the strip names by its row in the sidebar when it has no title of its own to say (#12055). */
+const PAGE_NAMES: Partial<Record<Route["name"], string>> = {
+  home: "sidebar.nav_home",
+  inbox: "sidebar.nav_inbox",
+  health: "sidebar.nav_health",
+  "workspace-board": "sidebar.nav_board",
+  todos: "sidebar.nav_todos",
+  routines: "sidebar.nav_routines",
+  kb: "sidebar.nav_kb",
+  machines: "sidebar.nav_machines",
+  machine: "sidebar.nav_machines",
+  settings: "sidebar.nav_settings",
+};
+
+/** What the conversation or page at `path` is called now: a conversation's title (Persona for the main one), a to-do's
+ *  or an Agent's title, else the page's name in the sidebar; undefined for a page with neither (#12055). */
+export function fromTitle(s: Pick<State, "assistant"> & Partial<Pick<State, "todos" | "sessions">>, path: string): string | undefined {
   const [p, q] = path.split("?");
   const r = parse(p, q ? `?${q}` : "");
-  const main = s.assistant?.main ?? "";
-  const sid = r.name === "persona" ? r.sid || main : "";
-  const row = s.assistant?.conversations.find((c) => c.session_id === sid);
-  return conversationTitle(row ?? { title: "" }, sid === main);
+  if (r.name === "persona") {
+    const main = s.assistant?.main ?? "";
+    const sid = r.sid || main;
+    const row = s.assistant?.conversations.find((c) => c.session_id === sid);
+    return conversationTitle(row ?? { title: "" }, sid === main);
+  }
+  const todo = r.name === "todos" && r.id ? s.todos?.find((x) => x.id === r.id) : undefined;
+  if (todo?.title.trim()) return todo.title.trim();
+  const agent = r.name === "session" ? s.sessions?.[r.mid]?.find((x) => x.session_id === r.sid) : undefined;
+  if (agent) return sessionTitle(agent);
+  const name = PAGE_NAMES[r.name];
+  return name ? t(name) : undefined;
 }
 
 export function BackStrip({ label, dismissLabel, onBack, onDismiss, inbox = false }: { label: string; dismissLabel: string; onBack: () => void; onDismiss: () => void; inbox?: boolean }) {
@@ -39,7 +64,9 @@ export function BackStrip({ label, dismissLabel, onBack, onDismiss, inbox = fals
 
 export function HandoffBack({ from, onDismiss }: { from: HandoffFrom; onDismiss: () => void }) {
   const title = useStore((s) => fromTitle(s, from.path));
-  // the entry before this one is the conversation (the card pushed this one); a page opened on its own has none to go to
+  // the entry before this one is the conversation or page (the card or row pushed this one); a page opened on its own has
+  // none to go to
   const back = () => (history.length > 1 ? history.back() : navigate(from.path));
-  return <BackStrip label={t("chat-backstrip.handoff_from", { title })} dismissLabel={t("chat-backstrip.handoff_dismiss")} onBack={back} onDismiss={onDismiss} />;
+  const label = title === undefined ? t("chat-backstrip.handoff_previous") : t("chat-backstrip.handoff_from", { title });
+  return <BackStrip label={label} dismissLabel={t("chat-backstrip.handoff_dismiss")} onBack={back} onDismiss={onDismiss} />;
 }

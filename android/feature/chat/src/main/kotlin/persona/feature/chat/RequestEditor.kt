@@ -144,8 +144,8 @@ fun RequestEditor(
             next.fields.filterKeys { key -> ElicitationForm.fields(request.elicitation?.requestedSchema).any { it.key == key && it.secret } }))
         if (storageScope != null) store.save(storageScope, request, next)
     }
-    // A password card's (#1137) only typed value is its password, a fields card's its values (#4641): never a draft.
-    if (storageScope == null && request.secret != true && !request.isSecretRun && !request.hasFieldsForm) Text(stringResource(R.string.chat_request_draft_page_only), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
+    // Password, field and hand-off cards have no general reply draft: only their own tightly scoped input (#1137, #4641, #3962).
+    if (storageScope == null && request.secret != true && !request.isSecretRun && !request.isSecretHandoff && !request.hasFieldsForm) Text(stringResource(R.string.chat_request_draft_page_only), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
     val items by remember(services, request.sessionKey, request.kind) {
         if (request.kind == "screen") services.chats().observe(request.sessionKey) else flowOf(ChatSnapshot())
     }

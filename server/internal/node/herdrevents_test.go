@@ -73,10 +73,10 @@ func TestHostDue(t *testing.T) {
 	// a compatible CLI state lives in the title spinner, which sends no event: its own host stays due, the other one not.
 	n.agents["t1"] = host.Agent{Agent: traexAgent, PaneID: "herdr-core:t9"}
 	if n.hostDue(host.Herdr, now, false) {
-		t.Fatal("TRAEX in herdr-core must not make herdr poll")
+		t.Fatal("TRAE CLI in herdr-core must not make herdr poll")
 	}
 	if !n.hostDue(host.HerdrCore, now, false) {
-		t.Fatal("TRAEX in herdr-core keeps it polling")
+		t.Fatal("TRAE CLI in herdr-core keeps it polling")
 	}
 }
 
@@ -194,5 +194,77 @@ func TestHerdrStatusEventsAreUrgent(t *testing.T) {
 	want := []bool{false, true, true, true, false, true, false} // started, first status, into, out of, idle, older name, lifecycle
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("urgent %v, want %v", got, want)
+	}
+}
+
+func TestHostFailBackoff(t *testing.T) {
+	b := newHostFailBackoff()
+	t0 := time.Date(2026, 11, 21, 16, 0, 0, 0, time.UTC)
+
+	if b.skip(host.Herdr, t0, false) {
+		t.Fatal("fresh host must not be skipped")
+	}
+	wantGaps := []time.Duration{
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		16 * time.Second,
+		30 * time.Second,
+		30 * time.Second,
+	}
+	now := t0
+	for i, want := range wantGaps {
+		b.record(host.Herdr, true, now)
+		if !b.skip(host.Herdr, now.Add(want-time.Millisecond), false) {
+			t.Fatalf("step %d: expected skip before %s", i, want)
+		}
+		if b.skip(host.HerdrCore, now.Add(time.Millisecond), false) {
+			t.Fatalf("step %d: failing herdr must not back off herdr-core", i)
+		}
+		if b.skip(host.Herdr, now.Add(want), false) {
+			t.Fatalf("step %d: expected due at %s", i, want)
+		}
+		now = now.Add(want)
+	}
+
+	// A watcher kick bypasses and clears backoff immediately.
+	b.record(host.Herdr, true, now)
+	if !b.skip(host.Herdr, now.Add(time.Second), false) {
+		t.Fatal("expected skip before kick")
+	}
+	if b.skip(host.Herdr, now.Add(time.Second), true) {
+		t.Fatal("watcher kick must bypass backoff immediately")
+	}
+	if b.skip(host.Herdr, now.Add(2*time.Second), false) {
+		t.Fatal("watcher kick must reset backoff")
+	}
+
+	// A successful refresh resets backoff so the next failure starts at pollFailBackoffFirst again.
+	b.record(host.Herdr, true, now)
+	b.record(host.Herdr, true, now.Add(2*time.Second))
+	b.record(host.Herdr, false, now.Add(6*time.Second))
+	b.record(host.Herdr, true, now.Add(7*time.Second))
+	if b.skip(host.Herdr, now.Add(9*time.Second), false) {
+		t.Fatal("backoff after reset must start at 2s")
+	}
+}
+
+func TestRefreshHostsWithFailuresReportsOnlyFailingHosts(t *testing.T) {
+	n, _, _ := herdrNode(t)
+	failErr := fmt.Errorf("herdr socket unavailable")
+	hFail := &inventoryHost{bareHost: bareHost{kind: host.Herdr}, snapshotErr: failErr, listErr: failErr}
+	hNotRunning := &inventoryHost{bareHost: bareHost{kind: host.HerdrCore}, snapshotErr: host.ErrNotRunning, listErr: host.ErrNotRunning}
+	hOK := &inventoryHost{bareHost: bareHost{kind: host.Orca}}
+	n.hosts = host.NewRegistry(hFail, hNotRunning, hOK)
+
+	failed, err := n.refreshHostsWithFailures(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error when some hosts answered: %v", err)
+	}
+	if !failed[host.Herdr] {
+		t.Fatalf("expected failing host to be marked failed: %v", failed)
+	}
+	if failed[host.HerdrCore] || failed[host.Orca] {
+		t.Fatalf("answered or ErrNotRunning hosts must not be marked failed: %v", failed)
 	}
 }

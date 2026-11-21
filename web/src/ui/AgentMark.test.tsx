@@ -51,7 +51,7 @@ describe("AgentMark", () => {
       expect(html).toContain("width:14px;height:14px");
     }
     expect(draw("omp")).toContain('aria-label="Oh My Pi"');
-    expect(draw("traex")).toContain('aria-label="TRAEX"');
+    expect(draw("traex")).toContain('aria-label="TRAE CLI"');
   });
 
   it("keeps every mark in a box of the size asked, centred, whatever its shape", () => {

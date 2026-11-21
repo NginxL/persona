@@ -49,6 +49,7 @@ import persona.core.domain.tasks.reviewVerdictStage
 private fun ReviewStage.label(round: Int): String = when (this) {
     ReviewStage.Ongoing -> stringResource(R.string.chat_review_ongoing)
     ReviewStage.Pending -> stringResource(R.string.chat_review_pending)
+    ReviewStage.UserCheck -> stringResource(R.string.chat_review_user_check)
     ReviewStage.Rework -> stringResource(R.string.chat_review_rework, maxOf(round, 1))
     ReviewStage.NeedsUser -> stringResource(R.string.chat_review_needs_user)
     ReviewStage.Accepted -> stringResource(R.string.chat_review_accepted)
@@ -56,7 +57,7 @@ private fun ReviewStage.label(round: Int): String = when (this) {
 }
 
 internal val ReviewStage.tone: Tone get() = when (this) {
-    ReviewStage.Pending, ReviewStage.Rework -> Tone.Caution
+    ReviewStage.Pending, ReviewStage.UserCheck, ReviewStage.Rework -> Tone.Caution
     ReviewStage.NeedsUser -> Tone.Caution
     ReviewStage.Accepted -> Tone.Positive
     ReviewStage.Ongoing, ReviewStage.Cancelled -> Tone.Neutral

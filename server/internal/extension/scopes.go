@@ -24,6 +24,7 @@ const (
 	ScopeNotify                  = extwire.ScopeNotify
 	ScopeTodosRead               = extwire.ScopeTodosRead
 	ScopeTodosWrite              = extwire.ScopeTodosWrite
+	ScopeDecisionsRaise          = extwire.ScopeDecisionsRaise
 	ScopeLeadersRead             = extwire.ScopeLeadersRead
 	ScopeAssistantDispatchPolicy = extwire.ScopeAssistantDispatchPolicy
 	ScopeAssistantStartDefaults  = extwire.ScopeAssistantStartDefaults
@@ -38,16 +39,16 @@ const (
 // HubScopes are the scopes, in the order the install screen lists them.
 var HubScopes = []string{ScopeKBRead, ScopeKBWrite, ScopeSentRead, ScopeInboxRead, ScopeInboxWrite, ScopeAgentsRead, ScopeAgentsControl,
 	ScopeAgentsPermissionMode, ScopeMachinesRead, ScopeNotify, ScopeAssistantAsk, ScopeAssistantRead, ScopeAssistantMemoryRead,
-	ScopeTodosRead, ScopeTodosWrite, ScopeLeadersRead, ScopeAssistantDispatchPolicy, ScopeAssistantStartDefaults, ScopeDispatchGuard, ScopeModels,
+	ScopeTodosRead, ScopeTodosWrite, ScopeDecisionsRaise, ScopeLeadersRead, ScopeAssistantDispatchPolicy, ScopeAssistantStartDefaults, ScopeDispatchGuard, ScopeModels,
 	ScopeTranscription, ScopeMarketRefreshOwn}
 
 // InEveryScope says whether a token of every scope (an extension granted the hub's full token the old way, hub_api,
 // that gets one of every scope instead) has scope s. Scopes whose authority must be agreed to by name are left out:
-// agents.permission_mode, assistant.start_defaults (which can raise what task Agents spend), dispatch.guard (which
-// changes which conversations may hand work out), and market.refresh_own (which spends the source marketplace's API
-// quota).
+// agents.permission_mode, assistant.start_defaults (which can raise what task Agents spend), decisions.raise (which can
+// interrupt the owner with a new decision), dispatch.guard (which changes which conversations may hand work out), and
+// market.refresh_own (which spends the source marketplace's API quota).
 func InEveryScope(s string) bool {
-	return s != ScopeAgentsPermissionMode && s != ScopeAssistantStartDefaults && s != ScopeDispatchGuard && s != ScopeMarketRefreshOwn
+	return s != ScopeAgentsPermissionMode && s != ScopeAssistantStartDefaults && s != ScopeDecisionsRaise && s != ScopeDispatchGuard && s != ScopeMarketRefreshOwn
 }
 
 // EveryScope is the scopes of a token of every scope (InEveryScope), in HubScopes' order.
@@ -69,6 +70,7 @@ var scopeTitles = map[string]string{
 	ScopeAssistantAsk:            "scope_assistant_ask",
 	ScopeTodosRead:               "scope_todos_read",
 	ScopeTodosWrite:              "scope_todos_write",
+	ScopeDecisionsRaise:          "scope_decisions_raise",
 	ScopeLeadersRead:             "scope_leaders_read",
 	ScopeAssistantDispatchPolicy: "scope_assistant_dispatch_policy",
 	ScopeAssistantStartDefaults:  "scope_assistant_start_defaults",

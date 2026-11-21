@@ -1,3 +1,5 @@
+import { assistantState, recordAssistant, assistantBeforeTurn } from './assistant.js'
+import { extractShellGates, matchShellGate } from '../../runtime-sdk/lib/shell-gates.js'
 import { wirePackageName } from '../../runtime-sdk/lib/compat.js'
 import { customTypeMatches, legacyCustomType, LEGACY_RELOAD, piHostKind } from './compat.js'
 // The pi runtime (docs/integrations/pi.md): the sessions of one pi process — a pi in a terminal, `pi --mode rpc`, or pi-web's
@@ -14,9 +16,10 @@ import { customTypeMatches, legacyCustomType, LEGACY_RELOAD, piHostKind } from '
 import { basename } from 'node:path'
 import { readFileSync, statSync } from 'node:fs'
 import { createRuntime, installCurrent, interactionId, light, page, RpcError, snippet, summaryOf, verifyPackage } from '../../runtime-sdk/index.js'
+import { a2aTools } from '../../runtime-sdk/lib/a2a.js'
 import { ALLOW_ENTRY, alwaysAllowed, branchItems, branchKey, entryItems, firstText, HOST_ENTRY, imageOf, lastHost, lastText, partialText, toolInput, toolName } from './map.js'
 
-export const RUNTIME_VERSION = '0.3.0'
+export const RUNTIME_VERSION = '0.4.0'
 const DISK_EVERY = 30_000 // ms: list the sessions on disk at most this often (pi-web)
 const TERMINAL_HOSTS = new Set(['herdr', 'terminal']) // resumed in the machine's terminal engine, not in pi-web
 const RELOAD_COMMAND = 'persona-reload' // the command a session runs on itself to load a new version (docs/integrations/pi.md "Automatic updates")
@@ -88,7 +91,8 @@ export function createPiHost(deps, options = {}) {
     item,
     send,
     interrupt,
-    ...(listDisk ? { start } : {}),
+    close,
+    ...(web ? { start } : {}),
     rename,
     hasLocalClient,
   }, {
@@ -96,7 +100,14 @@ export function createPiHost(deps, options = {}) {
     name: options.name ?? (web ? 'Pi Web' : 'pi'),
     agent,
     version: RUNTIME_VERSION,
-    ...(listDisk ? { launcher: 'pi-web', launcherModel: 'pi' } : {}),
+    assistant: Boolean(web),
+    supervisionPolicy: Boolean(web),
+    ...(listDisk ? {
+      launcher: 'pi-web', launcherModel: agent,
+      // A display label is not a model argument. This adapter currently keeps
+      // the model chosen inside pi; choosing its default sends no model/effort.
+      launchers: [{ name: 'pi-web', agent, model: agent, models: [{ id: 'default', name: agent, default: true }], permission_modes: ['default', 'bypassPermissions'] }],
+    } : {}),
     socketPath: options.socketPath,
     answerFirst: options.answerFirst ?? 'auto',
     log,
@@ -146,7 +157,9 @@ export function createPiHost(deps, options = {}) {
     const branch = sm.getBranch()
     const cwd = sm.getCwd()
     const name = sm.getSessionName?.() ?? ''
+    const asst = assistantState(sm)
     const row = {
+      ...(asst ? { assistant: true, permission_mode: asst.mode } : {}),
       session_id: s.id,
       title: name || firstText(branch) || basename(cwd),
       cwd,
@@ -187,7 +200,7 @@ export function createPiHost(deps, options = {}) {
   }
 
   async function listSessions() {
-    const rows = [...live.values()].filter((s) => s.ctx).map(liveRow)
+    const rows = [...live.values()].filter((s) => s.ctx && !assistantState(s.ctx.sessionManager)?.closed).map(liveRow)
     if (listDisk) {
       await refreshDisk()
       // The running ones always; on disk, those the phone touched and the recent ones (the SDK's rule).
@@ -254,6 +267,17 @@ export function createPiHost(deps, options = {}) {
     const { text, images } = content(params) // once per client_msg_id: the SDK's
     const s = live.get(id)
     if (s) {
+      const previous = assistantState(s.ctx.sessionManager)
+      if (previous?.closed) throw new RpcError('This execution session is retired', 'conversation_retired')
+      if (s.running && (params.assistant === true || previous)) {
+        const policy = typeof params.supervision_instructions === 'string' ? params.supervision_instructions : previous?.policy || ''
+        const mode = params.permission_mode || params.mode || previous?.mode || 'default'
+        // Steering cannot refresh context; only an unchanged-role answer may join this turn.
+        if (!s.asking || policy !== (previous?.policy || '') || mode !== (previous?.mode || 'default')) {
+          throw new RpcError('This conversation is busy', 'busy', { delivered: 'none' })
+        }
+      }
+      recordAssistant(s.ctx.sessionManager, params, previous)
       // The turn waits on the user's answer (ask_user): this message is the answer. Steered, it would wait behind the
       // question for as long as nobody answers it.
       if (s.asking) {
@@ -275,6 +299,9 @@ export function createPiHost(deps, options = {}) {
       // A session that ran in a terminal goes back to one (the node resumes it in herdr); this node cannot.
       throw new RpcError('这个 pi 会话是在终端（herdr）里跑的，要在 herdr 里接着它：更新这台电脑上的 personad 后再发。这次没有发送', 'not_running')
     }
+    const sm = deps.SessionManager.open(path)
+    if (assistantState(sm)?.closed) throw new RpcError('This execution session is retired', 'conversation_retired')
+    recordAssistant(sm, params)
     // On disk: pi-web opens it and prompts (its extension load registers it here as it starts).
     await webCall(`/api/agent/${encodeURIComponent(id)}`, { type: 'prompt', message: text, ...(images.length ? { images } : {}) })
   }
@@ -366,13 +393,32 @@ export function createPiHost(deps, options = {}) {
 
   async function start(params) {
     if (!params.cwd) throw new RpcError('要选一个目录', 'bad_request')
+    // No prompt is released until assistant state has been durably recorded.
+    if (params.assistant === true && (params.model || params.effort || !['', 'default', 'bypassPermissions'].includes(params.permission_mode || ''))) throw new RpcError('This pi configuration is unsupported', 'readonly_unsupported')
     const prompt = typeof params.prompt === 'string' ? params.prompt.trim() : ''
-    const res = await webCall('/api/agent/new', prompt ? { cwd: params.cwd, type: 'prompt', message: prompt } : { cwd: params.cwd, type: 'ensure_session' })
+    const res = await webCall('/api/agent/new', prompt && params.assistant !== true ? { cwd: params.cwd, type: 'prompt', message: prompt } : { cwd: params.cwd, type: 'ensure_session' })
     const id = res?.sessionId
     if (!id) throw new RpcError('pi-web 没有返回会话', 'start_failed')
+    if (params.assistant === true) {
+      await refreshDisk(true)
+      const path = await diskPath(id)
+      const running = live.get(id)
+      if (!running && !path) throw new RpcError('The prepared pi session is not yet available', 'assistant_supervision_runtime')
+      recordAssistant(running?.ctx.sessionManager || deps.SessionManager.open(path), params)
+      if (prompt) await send({ ...params, session_id: id, text: prompt })
+    }
     // offline: it runs in pi-web, not here (the extension there lists it as running; the node takes that row).
     return { session: { session_id: id, cwd: params.cwd, title: basename(params.cwd), status: 'offline',
       space_id: params.cwd, space_name: basename(params.cwd), updated_at: new Date().toISOString() } }
+  }
+
+  async function close(params) {
+    await interrupt(params)
+    const s = live.get(params.session_id)
+    const path = await diskPath(params.session_id)
+    const sm = s?.ctx.sessionManager || (path ? deps.SessionManager.open(path) : undefined)
+    if (sm && assistantState(sm)) recordAssistant(sm, { assistant: true, closed: true })
+    rt.sessionsChanged(0)
   }
 
   async function webCall(path, body) {
@@ -408,6 +454,7 @@ export function createPiHost(deps, options = {}) {
 
   /** pi's API for one session (the extension's factory argument): its events, tools and approvals. */
   function register(pi, toolDeps) {
+    const assistantTools = new Set()
     let current // this API's session id (a /new in the terminal moves it to another)
     // The session's own way to load a new version: pi gives an extension reload() only in a command's context, so it
     // runs this command on itself (sendUserMessage with commands on). Only where the command exists: anything else
@@ -456,6 +503,7 @@ export function createPiHost(deps, options = {}) {
       if (want) setTimeout(maybeReload, 0) // a session that opened on the old code (pi cached it): switch it too
     })
     pi.on('session_shutdown', (_e, ctx) => drop(ctx?.sessionManager?.getSessionId() ?? current))
+    pi.on('before_agent_start', (event, ctx) => assistantBeforeTurn(rt, pi, ctx, event, assistantTools))
     pi.on('agent_start', (_e, ctx) => {
       track(ctx).running = true
       rt.sessionsChanged(0)
@@ -484,8 +532,29 @@ export function createPiHost(deps, options = {}) {
       track(ctx)
       rt.sessionsChanged()
     })
-    if (approve.size > 0) pi.on('tool_call', (e, ctx) => approval(track(ctx), e, ctx))
+    pi.on('tool_call', (e, ctx) => approval(track(ctx), e, ctx))
     if (toolDeps?.Type) pi.registerTool(askUserTool(toolDeps.Type, track))
+    if (toolDeps?.A2AType || toolDeps?.Type) {
+      for (const tool of piA2ATools(toolDeps.A2AType ?? toolDeps.Type, track)) pi.registerTool(tool)
+    }
+  }
+
+  function piA2ATools(Type, track) {
+    return a2aTools.map(({ name, description, input }) => ({
+      name,
+      label: name,
+      description,
+      parameters: Type.Object(Object.fromEntries(Object.entries(input.properties).map(([key, property]) => {
+        const schema = property.type === 'boolean' ? Type.Boolean() : Type.String(property.enum ? { enum: property.enum } : undefined)
+        return [key, input.required.includes(key) ? schema : Type.Optional(schema)]
+      }))),
+      executionMode: 'sequential',
+      async execute(_id, args, signal, _onUpdate, ctx) {
+        const session = track(ctx)
+        const res = await rt.callTool({ name, args, session_id: session.id }, { signal })
+        return { content: res.content ?? [], details: { error: res.is_error === true } }
+      },
+    }))
   }
 
   /** Records where the session runs now when that changed (HOST_ENTRY): pi-web, herdr, or a terminal outside it. */
@@ -504,7 +573,25 @@ export function createPiHost(deps, options = {}) {
    */
   async function approval(s, e, ctx) {
     const name = e.toolName ?? e.name
-    if (!approve.has(name)) return undefined
+    const asst = assistantState(ctx.sessionManager)
+    if (asst?.closed) return { block: true, reason: 'This execution session is retired' }
+    // Persona actions retain their dedicated approval/scope path even when
+    // ordinary native tools use bypassPermissions. Failed rule reads stay closed.
+    if (asst && ['bash', 'shell'].includes(String(name).toLowerCase())) {
+      const input = e.input ?? e.args ?? {}
+      const command = input.command ?? input.cmd
+      if (typeof command !== 'string' || !command.trim()) return { block: true, reason: 'The shell command could not be checked. Nothing ran.' }
+      try {
+        if (!rt.hubConnected) throw new Error('rules unavailable')
+        const tools = await rt.tools({ assistant: true, sessionId: s.id, signal: ctx.signal })
+        if (!rt.hubConnected) throw new Error('rules unavailable')
+        if (matchShellGate(command, extractShellGates(tools))) return { block: true, reason: 'Use the Persona action tool instead of running this command directly.' }
+      } catch {
+        return { block: true, reason: 'Persona command rules are unavailable. Nothing ran.' }
+      }
+    }
+    if (asst?.mode === 'bypassPermissions') return undefined
+    if (!asst && !approve.has(name)) return undefined
     const entries = ctx.sessionManager.getEntries()
     if (alwaysAllowed(entries, name)) return undefined // "Always allow" on an earlier card of this session
     const input = e.input ?? e.args ?? {}

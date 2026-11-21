@@ -1,9 +1,15 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // The hub hands the node (and through it a runtime) only the paging the app gave: an empty or missing before_seq,
@@ -90,5 +96,65 @@ func TestSessionItemsUserInputsWireShape(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The private export can distinguish a strict local read from a cached reply or
+// a terminal-only runtime's otherwise valid placeholder page.
+func TestStrictExportTranscriptHubContract(t *testing.T) {
+	for _, strict := range []bool{false, true} {
+		for _, nodeAck := range []bool{false, true} {
+			t.Run(fmt.Sprintf("strict=%t/node-ack=%t", strict, nodeAck), func(t *testing.T) {
+				m := wireNodeRPC(t, func(_ context.Context, method string, raw json.RawMessage) (any, error) {
+					var request map[string]any
+					if err := json.Unmarshal(raw, &request); err != nil {
+						return nil, err
+					}
+					if (request["strict_read"] == true) != strict || request["session_id"] != "s1" {
+						t.Errorf("incorrect strict request: %s %v", method, request)
+					}
+					item := proto.Item{ID: "i#0", Seq: 1, Role: "assistant", Kind: "text", Text: "complete"}
+					if method == "session.item" {
+						if request["item_id"] != item.ID {
+							t.Errorf("wrong full item id: %v", request)
+						}
+						return struct {
+							proto.Item
+							StrictRead      bool `json:"strict_read,omitempty"`
+							SourceTextBytes int  `json:"source_text_bytes,omitempty"`
+						}{item, nodeAck, len(item.Text)}, nil
+					}
+					return map[string]any{"items": []proto.Item{item}, "has_more": false,
+						"history": "fixture", "from_seq": 0, "to_seq": 1, "strict_read": nodeAck}, nil
+				})
+				h := &Hub{}
+				for _, target := range []struct {
+					path string
+					read func(http.ResponseWriter, *http.Request, *Machine)
+				}{
+					{"/items", h.sessionItems},
+					{"/items/i%230/full", h.sessionItemFull},
+				} {
+					req := httptest.NewRequest("GET", "/api/v1/sessions/m1/s1"+target.path, nil)
+					if strict {
+						req.URL.RawQuery = "strict=1"
+					}
+					req.SetPathValue("sid", "s1")
+					req.SetPathValue("iid", "i#0")
+					w := httptest.NewRecorder()
+					target.read(w, req, m)
+					if strict && !nodeAck {
+						if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "node_outdated") {
+							t.Fatalf("unsupported read yielded %d: %s", w.Code, w.Body)
+						}
+						continue
+					}
+					if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "complete") ||
+						(strict && !strings.Contains(w.Body.String(), `"strict_read":true`)) {
+						t.Fatalf("unexpected wire response %d: %s", w.Code, w.Body)
+					}
+				}
+			})
+		}
 	}
 }

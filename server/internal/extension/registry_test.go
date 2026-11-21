@@ -45,10 +45,35 @@ func (s *memStore) Extensions(context.Context) ([]Record, error) {
 	return out, nil
 }
 
-func (s *memStore) PutExtension(_ context.Context, r Record) error {
+func (s *memStore) PutExtension(ctx context.Context, r Record) error {
+	return s.PutExtensionPlan(ctx, []Record{r})
+}
+
+func (s *memStore) PutExtensionPlan(_ context.Context, records []Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.rows[r.StorageKey()] = r
+	for _, r := range records {
+		if r.ExpectedConfig != nil {
+			current, ok := s.rows[r.StorageKey()]
+			if ok {
+				old := current.Config
+				if len(old) == 0 {
+					old = json.RawMessage(`{}`)
+				}
+				if !sameJSON(old, r.ExpectedConfig) {
+					return ErrSettingsMoved
+				}
+			}
+		}
+	}
+	for _, r := range records {
+		deleted := slices.Clone(r.DeleteSecrets)
+		r.ExpectedConfig, r.DeleteSecrets = nil, nil
+		s.rows[r.StorageKey()] = r
+		for _, name := range deleted {
+			delete(s.secrets[r.StorageKey()], name)
+		}
+	}
 	return nil
 }
 

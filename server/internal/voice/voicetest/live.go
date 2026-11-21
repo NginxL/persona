@@ -65,6 +65,18 @@ type Script struct {
 	Bursts int
 	// TextOnlyRefused: a session start with output_modalities is refused with an unknown_parameter error.
 	TextOnlyRefused bool
+	// FinalCaptions: a verbatim session granted the caption extension writes a whole, final user caption at each
+	// turn's end, using the same item id as that turn's interim captions.
+	FinalCaptions bool
+	// StandardCaptions: a verbatim session also writes a whole standard input transcript delta at each turn's end,
+	// whether or not it granted the interim-caption extension. With both, a client must choose one representation.
+	StandardCaptions bool
+	// ReplyAudio: a verbatim session also writes generated output audio with each reply.
+	ReplyAudio bool
+	// ReplyCalls: a verbatim session also writes a client delegation and its function call with each reply.
+	ReplyCalls bool
+	// ReplyCancelled: a verbatim session writes response.cancelled before response.completed for each reply.
+	ReplyCancelled bool
 	// ExpiresIn: each session ends this long after it started (session.started's expires_at says when; the service
 	// then closes it); 0: far in the future, never.
 	ExpiresIn time.Duration
@@ -160,14 +172,15 @@ type Live struct {
 	s   Script
 	srv *httptest.Server
 
-	mu       sync.Mutex
-	conns    []*conn
-	starts   []map[string]any
-	verbatim int
-	captions int
-	first    time.Time
-	failed   bool
-	refused  int // verbatim starts refused (RefuseVerbatim)
+	mu         sync.Mutex
+	conns      []*conn
+	starts     []map[string]any
+	handshakes int
+	verbatim   int
+	captions   int
+	first      time.Time
+	failed     bool
+	refused    int // verbatim starts refused (RefuseVerbatim)
 }
 
 // NewLive starts the stand-in; it stops with the test.
@@ -201,6 +214,24 @@ func (l *Live) Sessions() (caption, verbatim int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.captions, l.verbatim
+}
+
+// Handshakes is how many session WebSocket handshakes the service received, including rejected ones.
+func (l *Live) Handshakes() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.handshakes
+}
+
+// Done is closed after session n (1-based, in connection order) has ended and is no longer counted by Open.
+func (l *Live) Done(n int) <-chan struct{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if n < 1 || n > len(l.conns) {
+		l.t.Fatalf("session %d does not exist (%d connections)", n, len(l.conns))
+		return nil
+	}
+	return l.conns[n-1].done
 }
 
 // Audio is the seconds of audio each session got, in the order they connected.
@@ -253,6 +284,7 @@ func (l *Live) Open() int {
 
 func (l *Live) serve(w http.ResponseWriter, r *http.Request) {
 	l.mu.Lock()
+	l.handshakes++
 	if l.first.IsZero() {
 		l.first = time.Now()
 		if l.s.FailAfter > 0 {
@@ -499,7 +531,7 @@ func (c *conn) audio(pcm []byte) bool {
 			if c.caption {
 				c.sentenceCaption(false)
 			} else {
-				c.turnCaption()
+				c.turnCaption(false)
 			}
 		}
 		if at+block-c.usage >= rate {
@@ -593,18 +625,29 @@ func (c *conn) sentenceCaption(whole bool) {
 	c.sendCaption(c.capItem, c.capStart, text, whole && c.l.s.CaptionItems)
 }
 
-// turnCaption sends a verbatim session's caption of its turn so far: an item per turn, as the measured service's
-// verbatim sessions with the extension had (an item per reply). The adapter does not use them.
-func (c *conn) turnCaption() {
+// turnCaption sends a verbatim session's caption of its turn: an item per turn, as the measured service's verbatim
+// sessions with the extension had (an item per reply). Interim captions contain as much as the session has heard;
+// a final caption contains the whole turn and keeps the same item id.
+func (c *conn) turnText(final bool) string {
 	var b strings.Builder
 	for k, i := range c.idx {
 		text := c.text(i)
-		if k == len(c.idx)-1 {
+		if k == len(c.idx)-1 && !final {
 			text = c.heardOf(i, text)
 		}
 		b.WriteString(text)
 	}
-	c.sendCaption(fmt.Sprintf("item-%d-%d", c.n, c.item), c.sessionMS(c.from), b.String(), false)
+	return b.String()
+}
+
+func (c *conn) turnCaption(final bool) {
+	c.sendCaption(fmt.Sprintf("item-%d-%d", c.n, c.item), c.sessionMS(c.from), c.turnText(final), final)
+}
+
+// standardCaption sends the same turn through the standard delta representation, with the same upstream item id.
+func (c *conn) standardCaption() {
+	c.send(map[string]any{"type": "session.input_transcript.delta", "item_id": fmt.Sprintf("item-%d-%d", c.n, c.item),
+		"delta": c.turnText(true)})
 }
 
 // heardOf is as much of sentence i's text as the turn has heard of it.
@@ -644,6 +687,12 @@ func (c *conn) endTurn() {
 	}
 	if c.vn == 0 {
 		return
+	}
+	if c.partials && c.l.s.FinalCaptions {
+		c.turnCaption(true)
+	}
+	if c.l.s.StandardCaptions {
+		c.standardCaption()
 	}
 	for _, i := range c.idx {
 		if c.replied[i] || i < 0 || i >= len(c.l.s.Sentences) {
@@ -705,7 +754,8 @@ func (c *conn) writeReplies() {
 	}
 }
 
-// reply is one reply of the measured shape: created, the text in pieces, its whole text, completed.
+// reply is one reply of the measured shape: created, the text in pieces, its whole text, completed. Script switches
+// add output audio, a client delegation and function call, and cancellation for tests that must discard those effects.
 func (c *conn) reply(text string) {
 	c.replyNo++
 	id := fmt.Sprintf("resp-%d-%d", c.n, c.replyNo)
@@ -713,11 +763,24 @@ func (c *conn) reply(text string) {
 		c.send(map[string]any{"type": "response.event", "delegation_id": id, "event": e})
 	}
 	ev(map[string]any{"type": "response.created", "response": map[string]any{"id": id}})
+	if c.l.s.ReplyAudio {
+		c.send(map[string]any{"type": "session.output_audio.delta", "delta": base64.StdEncoding.EncodeToString([]byte{1, 2, 3, 4})})
+	}
+	if c.l.s.ReplyCalls {
+		c.send(map[string]any{"type": "session.delegation.created", "delegation": map[string]any{
+			"id": id, "target": "client", "type": "delegation",
+			"content": []map[string]string{{"type": "input_text", "text": "generated reply task"}},
+		}})
+		ev(map[string]any{"type": "function_call", "call_id": "call-" + id, "name": "search_knowledge", "arguments": `{"query":"generated reply"}`})
+	}
 	rs := []rune(text)
 	for k := 0; k < len(rs); k += 7 {
 		ev(map[string]any{"type": "response.output_text.delta", "delta": string(rs[k:min(k+7, len(rs))])})
 	}
 	ev(map[string]any{"type": "response.output_text.done", "text": text})
+	if c.l.s.ReplyCancelled {
+		ev(map[string]any{"type": "response.cancelled", "response": map[string]any{"id": id}})
+	}
 	ev(map[string]any{"type": "response.completed", "response": map[string]any{"id": id}})
 }
 

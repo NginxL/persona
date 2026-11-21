@@ -9,6 +9,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 func (s *stateFile) stopped(id string, cause proto.StopCause) {
@@ -80,6 +81,66 @@ func (n *Node) stopCause(id string) proto.StopCause {
 	return st.StopCause
 }
 
+// noteGatewayRunning keeps a live observation after a gateway error even inside recordRunning's five-minute
+// write interval. A transcript found only after its terminal disappeared is not evidence of a non-user stop.
+func (n *Node) noteGatewayRunning(s *proto.Session) {
+	kind, _ := transcript.GatewayErrorKind(s.TurnError, s.UpdatedAt)
+	if kind == "" || (s.TurnErrorKind != "" && s.TurnErrorKind != kind) || s.UpdatedAt.IsZero() || s.UpdatedAt.After(time.Now()) {
+		return
+	}
+	release, ok := n.recovery.tryLock(s.SessionID)
+	if !ok {
+		return
+	}
+	defer release()
+	n.state.update(s.SessionID, func(st *sessionState) bool {
+		if st.StopCause != proto.StopUnknown || st.Pane == "" || st.Pane != s.PaneID ||
+			s.UpdatedAt.UnixNano() <= st.StopCauseAt || st.RanAt >= s.UpdatedAt.Unix() {
+			return false
+		}
+		st.RanAt = time.Now().Unix()
+		return true
+	})
+}
+
+// noteGatewayStop requires both a live observation after the recognized error and the original, retained Persona
+// terminal. An explicit stop, a closed pane, unobserved history or a consumed resume cannot grant recovery.
+func (n *Node) noteGatewayStop(s *proto.Session) {
+	kind, _ := transcript.GatewayErrorKind(s.TurnError, s.UpdatedAt)
+	if s.TurnErrorKind != "" && s.TurnErrorKind != kind {
+		return // Structured authentication/model failures are never gateway recovery permission.
+	}
+	var cause proto.StopCause
+	switch kind {
+	case proto.TurnErrorUsageLimit:
+		cause = proto.StopUsageLimit
+	case proto.TurnErrorTransient:
+		cause = proto.StopTransientError
+	default:
+		return
+	}
+	release, ok := n.recovery.tryLock(s.SessionID)
+	if !ok {
+		return
+	}
+	defer release()
+	if _, live := n.agent(s.SessionID); live {
+		return
+	}
+	pane, kept := n.keptPane(s.SessionID)
+	if !kept {
+		return
+	}
+	n.state.update(s.SessionID, func(st *sessionState) bool {
+		if st.StopCause != proto.StopUnknown || s.UpdatedAt.IsZero() || s.UpdatedAt.UnixNano() <= st.StopCauseAt ||
+			st.Pane != pane.PaneID || st.RanAt <= 0 || st.RanAt < s.UpdatedAt.Unix() {
+			return false
+		}
+		st.StopCause, st.StopCauseAt = cause, max(time.Now().UnixNano(), st.StopCauseAt+1)
+		return true
+	})
+}
+
 // Called again under the session's recovery lock: a cached assistant row must not
 // undo a user close that happened after that row was listed.
 func (n *Node) supervisorResumeAllowed(id, mode, launcher string) error {
@@ -92,6 +153,13 @@ func (n *Node) supervisorResumeAllowed(id, mode, launcher string) error {
 	}
 	if _, live := n.agent(id); live {
 		return refusal("resume_not_allowed", "The session is running again; refresh it before sending.", nil)
+	}
+	if cause == proto.StopUsageLimit || cause == proto.StopTransientError {
+		st, _ := n.state.get(id)
+		pane, kept := n.keptPane(id)
+		if !kept || st.Pane != pane.PaneID {
+			return refusal("resume_not_allowed", "The original terminal was closed or changed; use the owner's Resume.", nil)
+		}
 	}
 	return nil
 }

@@ -258,13 +258,13 @@ func TestAISourcesAreBoundedAndGoWithTheOwner(t *testing.T) {
 	w := newBotWorld(t)
 	w.pair(t)
 	for i := range botAISourcesKeep + 5 {
-		w.h.takeAISource(askChat, fmt.Sprintf("om_s%d", i))
+		w.h.takeAISource(askChat, fmt.Sprintf("om_s%d", i), "")
 	}
 	set := w.settings()
 	if len(set.AISources) != botAISourcesKeep || set.aiSource("om_s0", time.Now()) != nil || set.aiSource(fmt.Sprintf("om_s%d", botAISourcesKeep+4), time.Now()) == nil {
 		t.Fatalf("%d sources kept; first one still there: %v", len(set.AISources), set.aiSource("om_s0", time.Now()) != nil)
 	}
-	w.h.takeAISource(askChat, fmt.Sprintf("om_s%d", botAISourcesKeep+4)) // again: nothing changes
+	w.h.takeAISource(askChat, fmt.Sprintf("om_s%d", botAISourcesKeep+4), "") // again: nothing changes
 	if got := len(w.settings().AISources); got != botAISourcesKeep {
 		t.Fatalf("%d after taking one twice", got)
 	}
@@ -272,7 +272,7 @@ func TestAISourcesAreBoundedAndGoWithTheOwner(t *testing.T) {
 	w.h.bots.mu.Lock()
 	w.h.bots.set.AISources[0].At = time.Now().Add(-botAISourcesKeepFor - time.Hour)
 	w.h.bots.mu.Unlock()
-	w.h.takeAISource(askChat, "om_new")
+	w.h.takeAISource(askChat, "om_new", "")
 	if set := w.settings(); set.aiSource("om_new", time.Now()) == nil || len(set.AISources) != botAISourcesKeep {
 		t.Fatalf("old sources were not dropped: %d", len(set.AISources))
 	}

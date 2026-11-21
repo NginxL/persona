@@ -271,7 +271,6 @@ func TestModelPickRefusals(t *testing.T) {
 		{"own sign-in", "main", `{"launcher":"own"}`, 409, proto.CodeLauncherOwnService, "own"},
 		{"missing", "main", `{"launcher":"gone"}`, 409, proto.CodeLauncherMissing, "“gone”"},
 		{"can't run the assistant", "main", `{"launcher":"cc-relay"}`, 400, "", "can’t run assistant chats"},
-		{"managed Codex on a side chat", "side", `{"launcher":"codex-gw"}`, 400, "", "can’t run assistant chats"},
 		{"no launcher", "main", `{"model":"opus"}`, 400, "", "Choose a model provider"},
 		{"no model id", "main", `{"launcher":"claude","model":"-rf"}`, 400, "", "-rf"},
 		{"locked", "main", `{"launcher":"cx","model":"gpt-5"}`, 400, "", "sets its own model"},
@@ -406,7 +405,6 @@ func TestMainChatPickerListsWhatItCantRun(t *testing.T) {
 	}
 	want := []string{
 		"cc-relay:launcher:claude::not_main_chat",
-		"codex-gw:launcher:codex::not_main_chat",
 		"far:launcher:::launcher_out_of_scope",
 		"own:launcher:::launcher_own_service",
 		"resp:api::responses:api_protocol",

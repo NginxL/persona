@@ -99,7 +99,7 @@ beforeEach(() => {
     requests.push(r);
     if (url.endsWith("/managers")) return json(ROSTER);
     if (url.endsWith("/extensions")) return json({ extensions: listedOwners.map((manager) => ({ id: "example", manager })) });
-    if (/example\/-\/$/.test(url)) return json({
+    if (/example\/-\/\?entry_lists=1$/.test(url)) return json({
       id: "example", name: `${r.manager === "m-1" ? "Work" : "Personal"} extension`, kind: "process", status: "running", enabled: true,
       ui: [{ id: "main", title: "Main settings" }, { id: "details", title: "Detail settings" }],
     });
@@ -130,7 +130,7 @@ it.each(["example@m-1/ui/main", "example/ui/main"])("keeps resolved owner conten
   const onOpen = await render(route);
   expect(host.textContent).toContain("Work main content");
   expect(host.textContent).not.toContain("Personal main content");
-  expect(requests.find((r) => /example\/-\/$/.test(r.url))?.manager).toBe("m-1");
+  expect(requests.find((r) => /example\/-\/\?entry_lists=1$/.test(r.url))?.manager).toBe("m-1");
   expect(opens()).toHaveLength(0);
   await click("Change setting");
   expect(actions()).toHaveLength(1);

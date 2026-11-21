@@ -326,7 +326,8 @@ Prefer the hub's own TLS and fingerprint when possible; when hub TLS is enabled,
 A computer that reaches the internet only through an HTTP(S) proxy (common on company networks) can still use active mode: persona-link reaches the hub with an HTTP `CONNECT` through that proxy (#10659). Passive mode, the hub and the manager are unchanged.
 
 - **Which proxy**: `proxy` in `link.json` when it is set (`persona-link proxy <url>`, or `--proxy <url>` on `pair` and `install`, which saves it before pairing so the pairing goes through it too), else `HTTPS_PROXY`, then `ALL_PROXY` (each in lower case before upper case, as Go's `net/http` reads them) from persona-link's own environment. A launchd agent, systemd user service or scheduled task rarely has those variables, so on a service set the proxy with `persona-link proxy`. `persona-link proxy --off` (`"proxy": "off"`) uses no proxy, not even the environment's; `persona-link proxy --env` removes the setting again; `persona-link proxy` shows it. The URL is `http://` or `https://` with `[user:password@]host[:port]`; a bare `host:port` means `http://`, as for `HTTPS_PROXY`. SOCKS proxies are not supported: one in the environment is left to the programs it is for, and `persona-link proxy` refuses one (a hand-edited unusable `proxy` shows as invalid in `status` and fails only the proxy route). `NO_PROXY` / `no_proxy` exempts hub addresses, with Go's rules: `localhost` and loopback addresses never go through a proxy.
-- **Routing order**: direct candidates are raced first, unchanged; when all of them fail, the same candidates are raced through the proxy (LAN addresses last: a proxy rarely reaches them); then the SSH tunnel, when one is set. **Always use SSH** dials only the tunnel. The route that worked last (proxy or SSH) is dialed first on the next reconnect; while connected through the proxy, direct candidates are probed every 2 minutes (`link.DirectRetryEvery`) and on network changes, and the first one that answers takes over, as it does from the tunnel. A pinned hub that refuses the credential, on whichever route, ends the attempt. A proxy setting that cannot be used fails only the proxy route: direct candidates still work. Pairing tries the routes in the same order.
+- **Routing order**: direct candidates are raced first by default. If they all fail, Link races the same candidates through the proxy (LAN addresses last), then tries the SSH tunnel if configured. **Always use SSH** dials only the tunnel. A pinned hub that refuses the credential ends the attempt on any route. An unusable proxy setting affects only the proxy route. Pairing follows the default order.
+- **Reconnects and restarts**: Link tries the last working proxy or SSH route first while the pairing, route settings (including environment proxy and `NO_PROXY`), and local network still match. It keeps this hint in the disposable `link.route.json` file beside `link.json`. Link compares usable IPv4 addresses and IPv6 `/64` prefixes, so IPv6 privacy address rotation on the same prefix does not clear the hint. A new pairing, changed settings, a detected network change, or a missing or unreadable hint restores the default order. If no usable address is known yet, Link skips the saved hint without deleting it and checks again on the next dial. While connected through a fallback, Link probes direct candidates every 2 minutes (`link.DirectRetryEvery`) and on network changes. When one connects, it takes over and Link forgets the saved fallback.
 - **Why the proxy comes before the tunnel**: the proxy is what the network itself asks for and needs nothing on the hub machine, no `ssh` process, keys or hardware-key touches; the tunnel stays the explicit fallback for a hub that is reachable only over SSH.
 - **One route for the link and its streams**: the link WebSocket and every Agent stream opened on it go through the same proxy, each with a `CONNECT` of its own.
 - **End-to-end TLS unchanged**: the hub's TLS handshake runs inside the tunnel with the check a direct connection uses, pinned to `fp` or checked against system CAs and the hub's host name when `trust` is `system`, so a wrong hub key is refused through the proxy with the same words as directly. The check is the HTTP transport's `tls.Config` (the pin in `VerifyConnection`) on every route. An `https://` proxy is checked first and separately, against system CAs and its own name; it can never stand in for the hub.
@@ -380,7 +381,7 @@ When a hub machine exposes only SSH (port 22) — its HTTP and TLS ports listen 
 - **End-to-end TLS unchanged**: the TLS handshake (pinned to `fp`, or checked against system CAs and hostname when `trust` is `system`) still runs end to end through the tunnel to the hub's TLS port; a wrong hub key is refused identically to a direct connection. Over the tunnel, `hello.address` is left empty so the hub does not record the SSH server string as one of its own HTTPS URLs.
 - **Routing order**:
   - **Always use SSH** on: only the tunnel is dialed; direct hub candidates are skipped.
-  - **Always use SSH** off: direct candidates are raced first, then the outbound proxy when one is set (see "Outbound proxy"), and the tunnel is dialed when all of them fail. When the last working connection used the tunnel, the next reconnect dials the tunnel immediately instead of waiting for direct candidates to fail again, while probing direct candidates every 2 minutes (`link.DirectRetryEvery`) and on network changes to switch back and close the tunnel once a direct address answers.
+  - **Always use SSH** off: the default order is direct, outbound proxy if configured, then SSH. If there are no direct candidates, Link dials only the tunnel. If SSH was the last working route, Link tries it first on reconnect and after a restart while the pairing, route settings and local network still match (see "Outbound proxy"). Link probes direct candidates every 2 minutes (`link.DirectRetryEvery`) and on network changes. When one connects, it takes over, the tunnel closes and Link forgets the saved fallback.
 - **Status and plain-word errors**: when connected through the tunnel, status reports `"kind": "ssh"` and `"address": "<server>"`, labelled **SSH** in `en`, `zh-Hans` and `ja` across `persona-link status` and the desktop setup status (and marked **In use** in the address list). Five failure modes each produce a distinct single-sentence explanation (`ssh_error` in the status line): no `ssh` command installed, authentication refused, server host key not trusted yet (with `ssh [-p <port>] <server>` to accept it once in a terminal), port forwarding refused by the server (`AllowTcpForwarding` / `permitopen`), and the hub not answering at `<target>`.
 
 ## Passive mode (the hub connects)
@@ -641,10 +642,10 @@ For Linux see "Linux (headless)" below: build `persona-link`, then `persona-link
 ## Switching from SSH
 
 A Linux computer the hub already reaches over SSH (`kind: ssh`) can move to Persona Link with one confirmed click (#10662), under
-**Switch to Persona Link** on its machine detail in the signed-in web app and on its row in the admin **Computers** page. The
-computer keeps its id and name, and so its pins, mutes, trust, settings and history, which are all stored by id. Afterwards it
-connects to the hub by itself, also from other networks. It is for people who manage their computers, so it sits with the
-machine's details, not in the Assistant. iOS and Android follow in #10671.
+**Switch to Persona Link** on its machine detail in the signed-in web app, on the iPhone / iPad app's advanced computer detail
+page (#10671), and on its row in the admin **Computers** page. The computer keeps its id and name, and so its pins, mutes, trust,
+settings and history, which are all stored by id. Afterwards it connects to the hub by itself, also from other networks. It is for
+people who manage their computers, so it sits with the machine's details, not in the Assistant.
 
 **What it needs**: the hub takes Persona Link (`public.tls_listen` or an `https://` `public_url`, as for pairing). The computer
 must also meet all of these:
@@ -758,6 +759,19 @@ After the build is put in place, its SHA-256 is checked once more before it runs
 
 Progress and the result come with the machine itself (`link_switch` in the machine list, [protocol.md](../protocol/protocol.md)),
 so every open client sees each step at once. A finished switch stays shown for an hour.
+
+On iPhone and iPad, the optional field is also the compatibility gate: an older hub or manager sends no field and the page does not
+change, and a computer owned by a linked hub is switched there. The confirmation uses the large-text-safe system dialog. One
+confirmation creates one app-lifetime attempt per computer, shared across detail-page remounts. **Starting…** is local feedback;
+the accepted 202 is held only until the machine list catches up by the hub's `at` clock (or changes when timestamps are absent).
+While a phase is running, its expected disconnect does not also show the ordinary offline error or **Reconnect**.
+
+A definite refusal other than 403 reads the machine list once and keeps its localized reason recoverable; 403 explains the full-access requirement without another read. A lost, unreadable, cancelled, 408, 429
+or 5xx answer is uncertain: the app reads the list once and never retries automatically. If the unchanged hub state still offers
+**Switch to Persona Link**, the owner may tap it and confirm again; a duplicate already running is the hub's ordinary 409 refusal.
+**Check Status** only reads the list again. A changed authoritative list clears the notice, and every settled attempt expires after
+two minutes as on web. A failed result with `rollback_unconfirmed` never claims the SSH fallback was restored and offers the same
+status check.
 
 
 ## Status line

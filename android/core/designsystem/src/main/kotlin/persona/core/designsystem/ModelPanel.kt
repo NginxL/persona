@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -70,6 +71,7 @@ class ModelPanelWords(
  * page in the same sheet (the web's flyout): the thinking effort and, for the model that runs, [currentExtra]
  * (ultracode). A pick goes to [onPick], which applies it and closes the sheet once it did; while [picking] everything
  * waits. Favorites, Recent and the per-model setups are [prefs], kept by the caller ([onPrefs]).
+ * [catalog] is the optional load state of the provider list, separate from each provider's models and [onReload].
  */
 @Composable
 fun JModelPanel(
@@ -87,12 +89,17 @@ fun JModelPanel(
     currentExtra: (@Composable () -> Unit)? = null,
     onReload: ((String) -> Unit)? = null,
     onConfigure: (() -> Unit)? = null,
+    catalog: JLoadable<*>? = null,
+    onRetryCatalog: (() -> Unit)? = null,
 ) {
     var view by remember { mutableStateOf<PanelView>(PanelView.All) }
     var query by remember { mutableStateOf("") }
     var customizing by remember { mutableStateOf<String?>(null) }
     val sections = remember(providers, state, view, query, prefs) { ModelPanel.sections(providers, state, view, query, prefs) }
     val rows = sections.flatMap { it.rows }
+    val cached = catalog as? JLoadable.Loaded<*>
+    // Keep the retry visible when the lazy list holds its scroll position over the cached rows.
+    val refreshFailure = cached?.failure?.takeIf { sections.isNotEmpty() }
     JSheet(onDismiss = onDismiss, showDragHandle = true, contentPadding = Tokens.Space.flush) {
         val open = customizing?.let { key -> rows.firstOrNull { it.key == key } }
         if (open != null) {
@@ -110,6 +117,10 @@ fun JModelPanel(
                 }
             }
             state.busy?.let { Text(words.reason(it), style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink2) }
+            if (refreshFailure != null) {
+                JNotice(refreshFailure, status = Status.NeedsYou, inlineAction = true, onAction = onRetryCatalog,
+                    actionLabel = onRetryCatalog?.let { stringResource(R.string.designsystem_retry) })
+            }
         }
         Spacer(Modifier.height(Tokens.Space.s))
         Row(Modifier.fillMaxWidth().height(Tokens.Size.box150 * 3)) {
@@ -117,7 +128,8 @@ fun JModelPanel(
             Box(Modifier.width(Tokens.Size.line).fillMaxHeight().background(PersonaTheme.palette.line))
             ModelList(sections, view, query, state, prefs, onPrefs, words, picking, onPick,
                 onCustomize = { customizing = it.key }, live = onApplyCurrent != null, onReload = onReload,
-                modifier = Modifier.weight(1f))
+                modifier = Modifier.weight(1f), catalog = if (refreshFailure != null) cached?.copy(failure = null) else catalog,
+                onRetryCatalog = onRetryCatalog)
         }
         if (onConfigure != null) {
             JDivider()
@@ -160,7 +172,7 @@ private fun Rail(providers: List<PanelProvider>, view: PanelView, searching: Boo
 private fun ModelList(
     sections: List<PanelSection>, view: PanelView, query: String, state: PanelState, prefs: PanelPrefs, onPrefs: (PanelPrefs) -> Unit,
     words: ModelPanelWords, picking: Boolean, onPick: (PanelConfig) -> Unit, onCustomize: (PanelRow) -> Unit, live: Boolean,
-    onReload: ((String) -> Unit)?, modifier: Modifier,
+    onReload: ((String) -> Unit)?, modifier: Modifier, catalog: JLoadable<*>?, onRetryCatalog: (() -> Unit)?,
 ) {
     val palette = PersonaTheme.palette
     val list = rememberLazyListState()
@@ -174,12 +186,13 @@ private fun ModelList(
         } ?: -1
     }
     LaunchedEffect(Unit) { if (current > 0) list.scrollToItem(current) }
-    LazyColumn(modifier.fillMaxHeight().testTag("model-panel-list"), list) {
+    val content: LazyListScope.() -> Unit = {
         if (sections.isEmpty()) item("empty") {
             val words = when {
                 query.isNotBlank() -> R.string.designsystem_modelpanel_no_match
                 view == PanelView.Recent -> R.string.designsystem_modelpanel_recent_empty
                 view == PanelView.Favorites -> R.string.designsystem_modelpanel_favorites_empty
+                catalog != null -> R.string.designsystem_modelpanel_empty
                 else -> R.string.designsystem_modelpanel_loading
             }
             Text(stringResource(words), Modifier.padding(Tokens.Space.l), style = PersonaTheme.type.caption, color = palette.ink2)
@@ -200,6 +213,11 @@ private fun ModelList(
                     onCustomize = { onCustomize(row) })
             }
         }
+    }
+    val loadingText = stringResource(R.string.designsystem_modelpanel_loading)
+    LazyColumn(modifier.fillMaxHeight().testTag("model-panel-list"), list) {
+        if (catalog == null) content()
+        else jLoadableContent(catalog, onRetryCatalog, loadingText, isEmpty = { sections.isEmpty() }, empty = content) { content() }
     }
 }
 

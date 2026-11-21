@@ -5,11 +5,51 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+// assistantIdleTimeout: how long an idle process is kept, unless the main conversation's release policy says otherwise
+// (assistantRelease).
 const assistantIdleTimeout = 20 * time.Minute
+
+// assistantRelease is when the main conversation's idle process is let go and the context it is compacted at first,
+// from the manager's idle compaction policy (assistant.idle_release_minutes, a saved assistant.idle_auto_compact_tokens,
+// #12008). Zero values keep assistantIdleTimeout and the window's threshold (compactIdleAt).
+type assistantRelease struct {
+	after     time.Duration
+	compactAt int
+}
+
+// releaseOf reads a policy's release fields; one out of range is left at zero, as if it were not sent.
+func releaseOf(c assistantwire.IdleCompaction) assistantRelease {
+	var r assistantRelease
+	if assistantwire.ReleaseMinutesValid(c.ReleaseMinutes) {
+		r.after = time.Duration(c.ReleaseMinutes) * time.Minute
+	}
+	if assistantwire.ReleaseTokensValid(c.ReleaseTokens) {
+		r.compactAt = c.ReleaseTokens
+	}
+	return r
+}
+
+// assistantReleases returns the release policy of each of ids that is the main conversation and has one, from the
+// policy the manager last sent with its messages (kept on its record, so it outlives a node restart). Read without
+// n.mu held: the reaper takes n.mu and each process's lock afterwards.
+func (n *Node) assistantReleases(ids []string) map[string]assistantRelease {
+	out := map[string]assistantRelease{}
+	for _, id := range ids {
+		st, ok := n.state.get(id)
+		if !ok || !st.IsMain || st.IdleCompaction == nil {
+			continue
+		}
+		if r := releaseOf(st.IdleCompaction.Policy); r != (assistantRelease{}) {
+			out[id] = r
+		}
+	}
+	return out
+}
 
 // A process with background tasks or monitors running is kept: they are its children, and their notifications are
 // what wakes the conversation up again. Past this long without a turn it is let go anyway (a forgotten `tail -f`).
@@ -121,15 +161,23 @@ func (p *assistantProc) reapable(now time.Time) bool {
 	if len(p.tasks) > 0 {
 		return now.Sub(p.lastActive) > assistantTaskMaxIdle
 	}
-	return now.Sub(p.lastActive) > assistantIdleTimeout
+	idle := assistantIdleTimeout
+	if p.release.after > 0 {
+		idle = p.release.after
+	}
+	return now.Sub(p.lastActive) > idle
 }
 
 // idleCompactable: about to be let go with a context worth compacting first (assistantIdleCompact); p.mu is held. A
-// supervision round's process never is (assistantProc.round): its next round starts from the first turn anyway.
+// supervision round's process never is (assistantProc.round): its next round starts from the first turn anyway. The
+// main conversation's release policy, when it sets a threshold, replaces the window's (assistantRelease).
 func (p *assistantProc) idleCompactable() bool {
 	threshold := p.compactIdleAt
 	if threshold == 0 {
 		threshold = assistantIdleCompact
+	}
+	if p.release.compactAt > 0 {
+		threshold = p.release.compactAt
 	}
 	return p.agent == "claude" && !p.round && !p.compacting && !p.compacted && p.context >= threshold
 }
@@ -150,7 +198,8 @@ func (n *Node) compactIdle(p *assistantProc) {
 	p.mu.Lock()
 	idle := !p.busy && !p.compacting && !p.manual
 	p.mu.Unlock()
-	if !same || !idle {
+	state, _ := n.state.get(p.id)
+	if !same || !idle || state.SegmentRetired {
 		return
 	}
 	line, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "/compact"}})
@@ -195,43 +244,57 @@ func (n *Node) reapAssistants(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		n.mu.Lock()
-		var stale *assistantProc
-		if n.spare != nil && time.Since(n.spare.born) > assistantSpareMaxAge {
-			stale, n.spare = n.spare, nil
+		n.sweepAssistants()
+	}
+}
+
+// sweepAssistants is one look of reapAssistants: it compacts the idle processes worth compacting before they go
+// (idleCompactable) and lets the other idle ones go (reapable).
+func (n *Node) sweepAssistants() {
+	n.mu.Lock()
+	ids := make([]string, 0, len(n.procs))
+	for id := range n.procs {
+		ids = append(ids, id)
+	}
+	n.mu.Unlock()
+	release := n.assistantReleases(ids)
+	n.mu.Lock()
+	var stale *assistantProc
+	if n.spare != nil && time.Since(n.spare.born) > assistantSpareMaxAge {
+		stale, n.spare = n.spare, nil
+	}
+	var idle []string
+	var compact []*assistantProc
+	var timedOut []string
+	for id, p := range n.procs {
+		p.mu.Lock()
+		p.release = release[id]
+		if p.manual && time.Since(p.lastActive) > assistantCompactTimeout {
+			p.manual, p.compacting = false, false
+			timedOut = append(timedOut, id)
 		}
-		var idle []string
-		var compact []*assistantProc
-		var timedOut []string
-		for id, p := range n.procs {
-			p.mu.Lock()
-			if p.manual && time.Since(p.lastActive) > assistantCompactTimeout {
-				p.manual, p.compacting = false, false
-				timedOut = append(timedOut, id)
+		if p.reapable(time.Now()) {
+			if p.idleCompactable() {
+				compact = append(compact, p)
+			} else {
+				idle = append(idle, id)
 			}
-			if p.reapable(time.Now()) {
-				if p.idleCompactable() {
-					compact = append(compact, p)
-				} else {
-					idle = append(idle, id)
-				}
-			}
-			p.mu.Unlock()
 		}
-		n.mu.Unlock()
-		for _, id := range timedOut {
-			n.compactionEnded(id, "压缩超过 10 分钟没有结果")
-		}
-		n.sweepCompactions()
-		for _, p := range compact {
-			n.compactIdle(p)
-		}
-		for _, id := range idle {
-			n.stopAssistant(id)
-			n.rememberTasks(id, nil) // let go on purpose: nothing to tell it after a restart
-		}
-		if stale != nil {
-			stale.stop()
-		}
+		p.mu.Unlock()
+	}
+	n.mu.Unlock()
+	for _, id := range timedOut {
+		n.compactionEnded(id, "压缩超过 10 分钟没有结果")
+	}
+	n.sweepCompactions()
+	for _, p := range compact {
+		n.compactIdle(p)
+	}
+	for _, id := range idle {
+		n.stopAssistant(id)
+		n.rememberTasks(id, nil) // let go on purpose: nothing to tell it after a restart
+	}
+	if stale != nil {
+		stale.stop()
 	}
 }

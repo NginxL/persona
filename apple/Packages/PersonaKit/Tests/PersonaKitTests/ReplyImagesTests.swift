@@ -52,13 +52,54 @@ struct ReplyImagesTests {
             "> ![a](https://x.test/a.png)",
             "[![a](https://x.test/a.png)](https://x.test/page)",
             "`![a](https://x.test/a.png)`",
-            "![shot](/tmp/shot.png)",
-            "![a](https://x.test/a.png) ![local](shot.png)",
             "![math](persona-math:inline/x)",
+            "![file](file:///tmp/shot.png)",
+            "![data](data:image/png;base64,iVBORw0KGgo=)",
+            "![attachment](persona-attachment:shot.png)",
             "no pictures here",
         ] {
             #expect(ReplyImages.apply(text) == text, "\(text)")
         }
+    }
+
+    @Test func absoluteAndWorkingDirectoryRelativePicturesBecomeBlocks() throws {
+        let text = "![截图](/tmp/shot.png)\n![相对](相对/路径/文件.png)\n![short](shot.png)"
+        let out = ReplyImages.apply(text)
+        #expect(out == """
+        ~~~~persona-images
+        show 0 2
+        /tmp/shot.png\t截图
+        相对/路径/文件.png\t相对
+        shot.png\tshort
+        ~~~~
+        """)
+        let block = try #require(ReplyImages.block("show 0 2\n/tmp/shot.png\t截图\n相对/路径/文件.png\t相对\nshot.png\tshort"))
+        #expect(block.all.map(\.url) == ["/tmp/shot.png", "相对/路径/文件.png", "shot.png"])
+        #expect(ReplyImages.all(in: text).map(\.url) == ["/tmp/shot.png", "相对/路径/文件.png", "shot.png"])
+    }
+
+    @Test func localPicturesKeepWebCompanyAndInlineOnesKeepTheirText() {
+        let mixed = "![web](https://x.test/a.png) ![local](shot.png)"
+        #expect(ReplyImages.apply(mixed) == """
+        ~~~~persona-images
+        show 0 1
+        https://x.test/a.png\tweb
+        shot.png\tlocal
+        ~~~~
+        """)
+
+        let inline = "Before ![icon](shots/icon.png) after"
+        #expect(ReplyImages.apply(inline) == """
+        Before
+
+        ~~~~persona-images
+        show 0 0
+        shots/icon.png\ticon
+        ~~~~
+
+        after
+        """)
+        #expect(ReplyImages.all(in: inline).map(\.url) == ["shots/icon.png"])
     }
 
     @Test func titlesAngleBracketsAndTabsInWords() throws {

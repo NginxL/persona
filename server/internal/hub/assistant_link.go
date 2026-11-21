@@ -179,7 +179,7 @@ func (l assistantLink) Hello(context.Context) (assistantwire.Hello, error) {
 	// machine's archived rows apart from its list (fleet.archived, fleet_link.go).
 	// QuietPush: this hub's push tiering switch, which the managers follow for what is not a hub push (cards they
 	// post, cards they hand up); a change sends manager.updated.
-	out := assistantwire.Hello{Locale: string(h.userLang()), SecretHandoffGate: true, ArchivedApart: true, QuietPush: h.push.lnModeOn()}
+	out := assistantwire.Hello{Locale: string(h.userLang()), SecretHandoffGate: true, ArchivedApart: true, QuietPush: h.push.pushGradingOn()}
 	if m, ok := h.mutesEvent(); ok { // the hub's mutes, before the manager pushes anything (fleet_link.go)
 		out.Mutes = m.Mutes
 	}

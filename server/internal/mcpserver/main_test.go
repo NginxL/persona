@@ -1,0 +1,20 @@
+package mcpserver
+
+import (
+	"os"
+	"testing"
+
+	"github.com/nwverse/persona/server/internal/testhome"
+)
+
+// TestMain runs the tests in a throw-away HOME with no PERSONA_HOME (testhome). Run from a shell Persona started,
+// PERSONA_HOME names the running node's directory, and the progress tests (waitingNode), which only move HOME, tried
+// to listen on that node's own socket.
+func TestMain(m *testing.M) { os.Exit(testhome.Main(m.Run)) }
+
+// The socket the tests listen on and dial is under the throw-away home, never the caller's.
+func TestTestsRunInAThrowAwayHome(t *testing.T) {
+	if !testhome.Active() || os.Getenv("PERSONA_HOME") != "" {
+		t.Fatalf("not isolated: active %v, PERSONA_HOME %q", testhome.Active(), os.Getenv("PERSONA_HOME"))
+	}
+}

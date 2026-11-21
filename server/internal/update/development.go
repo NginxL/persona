@@ -22,10 +22,33 @@ type DevelopmentConfig struct {
 }
 
 type DevelopmentBackupConfig struct {
-	Quiesce        []string `json:"quiesce"`
-	Resume         []string `json:"resume"`
+	// Quiesce and Resume are the optional advanced override for installations
+	// with writers outside the hub's control. When both are empty the hub
+	// pauses its own writers (the built-in child manager, background writes and
+	// request writes) for the snapshot, and Builtin is set for the helper.
+	Quiesce        []string `json:"quiesce,omitempty"`
+	Resume         []string `json:"resume,omitempty"`
 	ExtraRoots     []string `json:"extra_roots,omitempty"`
 	ExtraDatabases []string `json:"extra_databases,omitempty"`
+	// Directory is the snapshot store (an absolute path; empty uses the
+	// runtime's update/development-backups) and Retain how many verified
+	// snapshots are kept (0 uses the default of three).
+	Directory string `json:"directory,omitempty"`
+	Retain    int    `json:"retain,omitempty"`
+	// Builtin is true when the hub itself paused the writers, so the helper
+	// must not run quiesce/resume hooks or its own coordination marker.
+	Builtin bool `json:"builtin,omitempty"`
+}
+
+// ExternalQuiesce reports whether quiesce/resume hooks are configured. Both
+// are required together; a half-configured pair is refused rather than
+// silently replaced by the built-in pause.
+func (c DevelopmentBackupConfig) ExternalQuiesce() bool { return len(c.Quiesce) > 0 }
+
+// Coordinated reports whether the configured hooks are usable: both, or
+// neither (the built-in pause).
+func (c DevelopmentBackupConfig) Coordinated() bool {
+	return (len(c.Quiesce) > 0) == (len(c.Resume) > 0)
 }
 
 type DevelopmentCandidate struct {

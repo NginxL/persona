@@ -1,0 +1,7 @@
+<persona-context kind="context" title="Project · Weather &quot;direction&quot; · Lessons" url="">
+Lessons learned from this project's accepted tasks, the most repeated first. Use them to avoid known detours; where one differs from this task's instructions, the instructions win.
+- Background to know: Use the stock simulator for layout bugs. · 3 times · 2026-11-21
+- Mistake that came back: Run the landscape screenshot test before handing in. · 2026-11-20
+- Step that wasted time: Skip the full rebuild; the focused target is enough.
+- Better way to work: Ask which device first. · 2 times · 2026-11-19
+</persona-context>

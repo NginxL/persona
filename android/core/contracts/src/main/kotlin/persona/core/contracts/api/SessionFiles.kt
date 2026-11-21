@@ -29,6 +29,9 @@ interface SessionFiles {
      */
     suspend fun download(machineId: String, cwd: String, path: String, into: java.io.File): Long =
         throw UnsupportedOperationException("download")
+    /** The authenticated file stream's bounded text suffix for a background command's live output. */
+    suspend fun readLogTail(machineId: String, cwd: String, path: String, manager: String?): SessionLogTail =
+        throw UnsupportedOperationException("log tail")
     /** Whether [blob] works for [machineId] (its hub's `git_blob` feature): the Git page compares documents and pictures. */
     fun comparesVersions(machineId: String): Boolean = false
     /**
@@ -80,6 +83,8 @@ interface SessionFiles {
 }
 
 /** `POST …/files/rename` and each of `…/files/restore`'s answers: where the file is now. */
+data class SessionLogTail(val text: String, val suffix: Boolean)
+
 @Serializable data class SessionFilePath(val path: String)
 
 enum class SessionMoveConflictPolicy { KeepBoth, Replace }

@@ -40,6 +40,8 @@ type RepositoryProvider struct {
 	Hosts []string
 	// LinkKinds relabel the link kinds it names ("MR" for pull_request); the others keep the built-in words.
 	LinkKinds []RepositoryLinkLabel
+	// Capabilities are the optional answers its program gives (wire.RepositoryCapabilities: pr_status).
+	Capabilities []string
 	// On: the extension is enabled, has no problem and the contribution is switched on. Whether its program runs is
 	// the manager's to say.
 	On bool
@@ -67,6 +69,14 @@ func checkRepositoryProvider(p RepositoryProviderItem) error {
 		}
 		if slices.Contains(p.Hosts[:i], h) {
 			return fmt.Errorf("repository_providers %s: host %q twice", p.ID, h)
+		}
+	}
+	for i, c := range p.Capabilities {
+		if !slices.Contains(wire.RepositoryCapabilities, c) {
+			return fmt.Errorf("repository_providers %s: capability %q: one of %s", p.ID, c, strings.Join(wire.RepositoryCapabilities, ", "))
+		}
+		if slices.Contains(p.Capabilities[:i], c) {
+			return fmt.Errorf("repository_providers %s: capability %q twice", p.ID, c)
 		}
 	}
 	if len(p.LinkKinds) > len(wire.RepositoryLinkKinds) {
@@ -118,7 +128,7 @@ func repositoryProvidersOf(id string, p *Extension) []RepositoryProvider {
 	var out []RepositoryProvider
 	for _, it := range p.Full.RepositoryProviders() {
 		out = append(out, RepositoryProvider{Extension: id, Contribution: it.ID, Name: it.Name, Hosts: slices.Clone(it.Hosts),
-			LinkKinds: slices.Clone(it.LinkKinds), On: slices.Contains(on, it.ID)})
+			LinkKinds: slices.Clone(it.LinkKinds), Capabilities: slices.Clone(it.Capabilities), On: slices.Contains(on, it.ID)})
 	}
 	return out
 }

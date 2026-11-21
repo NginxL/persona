@@ -16,5 +16,12 @@
   "effort_parent": "The parent Agent controls this session's thinking effort.",
   "effort_read_only": "This session is read-only. Change thinking effort in the app that owns it.",
   "effort_model_fixed": "This model does not offer adjustable thinking effort.",
-  "effort_terminal": "This Codex session has no shared control connection. Change thinking effort in its terminal."
+  "effort_terminal": "This Codex session has no shared control connection. Change thinking effort in its terminal.",
+  "switch_title": "Switch this conversation?",
+  "switch_explanation": "Continue with {name} using recent messages and a summary. The conversation and its tasks stay here. Some details may be summarized. The new connection will take over with your next message.",
+  "switch_confirm": "Switch connection",
+  "switch_requested": "Switch requested. You can continue in this conversation.",
+  "switch_unavailable": "Switching connections is unavailable. Refresh the conversation and try again.",
+  "switch_unconfirmed": "The switch result is unconfirmed. Retrying uses the same request; it will not start another switch. {error}",
+  "supervision_unavailable": "This connection cannot receive separate task follow-up instructions."
 }

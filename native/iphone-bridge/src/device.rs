@@ -14,6 +14,7 @@ use idevice::core_device::{
     UniversalHidServiceClient, build_screen_audio_offer, build_screen_video_offer, build_start_audio_parameters,
     build_start_video_parameters,
 };
+use idevice::cryptexd::{self, Cryptex1Assets, CryptexInstallRequest, CryptexdClient};
 use idevice::dvt::device_info::DeviceInfoClient;
 use idevice::dvt::message::AuxValue;
 use idevice::dvt::remote_server::RemoteServerClient;
@@ -25,6 +26,7 @@ use idevice::rsd::RsdHandshake;
 use idevice::springboardservices::{InterfaceOrientation, SpringBoardServicesClient};
 use idevice::tcp::adapter::Adapter;
 use idevice::tcp::handle::AdapterHandle;
+use idevice::tss::TSSRequest;
 use idevice::{IdeviceError, ReadWrite, RsdService};
 use serde_json::{Map, Value, json};
 use tokio::net::TcpStream;
@@ -55,6 +57,34 @@ const CLIENT_SUPPORTED_FEATURES: u64 = 140;
 const DEVELOPER_MODE: (&str, Option<&str>) = ("DeveloperModeStatus", Some("com.apple.security.mac.amfi"));
 /// Stopping the display stream when idle must not hang `serve` on a link that has gone quiet.
 const STOP_TIMEOUT: Duration = Duration::from_secs(3);
+/// A service directory read (or tried) this recently is current: `device_info` doesn't read it again.
+const SERVICES_FRESH: Duration = Duration::from_secs(5);
+/// Reading the service directory again must not hold up `device_info` on a link that has gone quiet.
+const SERVICES_REREAD_TIMEOUT: Duration = Duration::from_secs(5);
+/// cryptexd answers a lookup in well under a second. One that doesn't (seen on iOS 27.2.1: every routine hung while an
+/// install sent to the locked phone was pending) must not hold up the request, nor `device_info` and the node's
+/// health check behind it.
+const CRYPTEXD_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// cryptexd answers one routine per connection.
+type Cryptexd = CryptexdClient<Box<dyn ReadWrite>>;
+
+/// A cryptexd lookup that must answer within CRYPTEXD_TIMEOUT. A phone that doesn't is most likely locked.
+async fn cryptexd_within<T>(
+    what: &str,
+    lookup: impl Future<Output = Result<T, IdeviceError>>,
+) -> Result<T, BridgeError> {
+    match tokio::time::timeout(CRYPTEXD_TIMEOUT, lookup).await {
+        Ok(answer) => answer.map_err(|e| from_idevice(e, Phase::Operation, what)),
+        Err(_) => Err(BridgeError::new(
+            Code::Locked,
+            format!(
+                "{what}: cryptexd didn't answer within {} s, as on a locked phone: unlock it, keep it awake and try again",
+                CRYPTEXD_TIMEOUT.as_secs()
+            ),
+        )),
+    }
+}
 
 /// Where to reach the phone.
 pub struct Target {
@@ -77,9 +107,11 @@ pub struct Device {
     springboard: Option<SpringBoardServicesClient>,
     /// Where the service directory answers inside the tunnel, to read it again after a mount.
     rsd_port: u16,
+    /// When the service directory was last read or tried (tokio's clock, so tests can move it).
+    services_checked: tokio::time::Instant,
     /// The iOS major version, read once.
     ios_major: Option<u32>,
-    /// The service directory could not be read again after a mount: the session must be started afresh.
+    /// The developer services came with a disk image this session can't list: it must be started afresh.
     stale: bool,
 }
 
@@ -194,6 +226,7 @@ impl Device {
             apps: None,
             springboard: None,
             rsd_port: info.server_rsd_port,
+            services_checked: tokio::time::Instant::now(),
             ios_major: None,
             stale: false,
         };
@@ -356,6 +389,34 @@ impl Device {
         let developer_mode = developer_mode.and_then(|v| v.as_boolean());
         let level = level.and_then(|v| v.as_unsigned_integer());
         let charging = charging.and_then(|v| v.as_boolean());
+        // The developer services are listed only while the disk image is mounted, and a session reads the directory
+        // when it connects. One mounted since (by Xcode, or by another session's mount_ddi) needs a fresh read. A
+        // cryptex install resets the phone's service directory connections (seen on iOS 27.2.1: Xcode's was torn down
+        // when this bridge installed the image), and a directory that can't be read again, or still doesn't list the
+        // services although the phone has the image, means this session can't reach them: connect again.
+        if developer_mode != Some(false)
+            && !self.lists_developer_services()
+            && self.services_checked.elapsed() >= SERVICES_FRESH
+        {
+            let reason = if !self.read_services_again().await {
+                Some("the phone's service directory can't be read again (a disk image mounted since resets it)")
+            } else if !self.lists_developer_services()
+                && matches!(
+                    tokio::time::timeout(CRYPTEXD_TIMEOUT, crate::ddi::Mounter::mounted(self)).await,
+                    Ok(Ok(true))
+                )
+            {
+                Some(
+                    "the developer disk image was mounted after this session connected and its services aren't listed here",
+                )
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                self.stale = true;
+                return Err(BridgeError::new(Code::Disconnected, format!("{reason}: connect again")));
+            }
+        }
         let orientation = self.orientation().await;
         let screen = self.screen().await.ok();
         let frame = screen.map(|s| s.frame(orientation));
@@ -1091,36 +1152,70 @@ fn percent_decode(s: &str) -> String {
 
 impl Device {
     /// `mount_ddi` (ddi.rs), then the service directory read again so the developer services show up in this
-    /// session. If that fails the mount still stands and is reported; the session asks to be started afresh.
+    /// session: after this call mounted the image, and when it found the image mounted (by Xcode, or by another
+    /// session) but this session doesn't list the services yet. If they still aren't listed the mount stands and is
+    /// reported; the session asks to be started afresh.
     async fn mount_ddi(&mut self, dir: Option<String>, force: bool) -> Result<Value, BridgeError> {
         let dir = crate::ddi::resolve_dir(dir.as_deref(), std::env::var_os(crate::ddi::DIR_ENV));
         let mut result = crate::ddi::mount(self, &dir, force).await?;
-        if result["already"] == true {
+        if result["already"] == true && self.lists_developer_services() {
             return Ok(result);
         }
-        let refreshed = match self.adapter.connect(self.rsd_port).await {
-            Ok(stream) => RsdHandshake::new(stream).await.ok(),
-            Err(_) => None,
-        };
-        match refreshed {
-            Some(rsd) => {
-                self.rsd = rsd;
-                self.springboard = None;
-                self.apps = None;
-                result["services_refreshed"] = json!(true);
-            }
-            None => {
-                self.stale = true;
-                result["services_refreshed"] = json!(false);
-            }
+        let listed = self.read_services_again().await && self.lists_developer_services();
+        if !listed {
+            self.stale = true;
         }
+        result["services_refreshed"] = json!(listed);
         Ok(result)
+    }
+
+    /// Whether this session's service directory lists the developer services the disk image brings: the ones
+    /// `device_info` reads `ddi_mounted` from.
+    fn lists_developer_services(&self) -> bool {
+        self.has_service::<ScreenCaptureServiceClient<Box<dyn ReadWrite>>>()
+            || (self.has_service::<UniversalHidServiceClient<Box<dyn ReadWrite>>>()
+                && self.has_service::<IndigoHidClient<Box<dyn ReadWrite>>>()
+                && self.has_service::<DisplayServiceClient<Box<dyn ReadWrite>>>())
+    }
+
+    /// Reads the service directory again, for services that came (or went) with a disk image since this session
+    /// read it; the clients opened from the old one are dropped. False, keeping the old one, when it can't be read.
+    async fn read_services_again(&mut self) -> bool {
+        self.services_checked = tokio::time::Instant::now();
+        let read = async {
+            let stream = self.adapter.connect(self.rsd_port).await.ok()?;
+            RsdHandshake::new(stream).await.ok()
+        };
+        let Ok(Some(rsd)) = tokio::time::timeout(SERVICES_REREAD_TIMEOUT, read).await else {
+            return false;
+        };
+        self.rsd = rsd;
+        self.springboard = None;
+        self.apps = None;
+        true
     }
 
     async fn mounter(&mut self) -> Result<ImageMounter, BridgeError> {
         ImageMounter::connect_rsd(&mut self.adapter, &mut self.rsd)
             .await
             .map_err(|e| from_idevice(e, Phase::Operation, "image mounter"))
+    }
+
+    async fn cryptexd(&mut self) -> Result<Cryptexd, BridgeError> {
+        Cryptexd::connect_rsd(&mut self.adapter, &mut self.rsd)
+            .await
+            .map_err(|e| from_idevice(e, Phase::Operation, "cryptexd"))
+    }
+}
+
+/// A signing request that failed on the way or was refused: Apple's signing server gave no ticket.
+fn tss_error(e: IdeviceError) -> BridgeError {
+    match e {
+        IdeviceError::Socket(_) | IdeviceError::Http(_) | IdeviceError::UnexpectedResponse(_) => BridgeError::new(
+            Code::TssFailed,
+            format!("Apple's signing server (gs.apple.com) gave no ticket: {e}"),
+        ),
+        other => from_idevice(other, Phase::Operation, "personalization request"),
     }
 }
 
@@ -1135,6 +1230,17 @@ fn mount_error(e: IdeviceError, what: &str) -> BridgeError {
 
 impl crate::ddi::Mounter for Device {
     async fn mounted(&mut self) -> Result<bool, BridgeError> {
+        // The cryptex (how the image goes on from iOS 27, Xcode's included) is not among the image mounter's images.
+        if self.takes_cryptex().await?
+            && cryptexd_within(
+                "look up installed cryptexes",
+                cryptexd::installed_ddi(&mut self.adapter, &mut self.rsd),
+            )
+            .await?
+            .is_some()
+        {
+            return Ok(true);
+        }
         match self.mounter().await?.lookup_image(crate::ddi::IMAGE_TYPE).await {
             Ok(_) => Ok(true),
             Err(IdeviceError::NotFound) => Ok(false),
@@ -1147,6 +1253,85 @@ impl crate::ddi::Mounter for Device {
             Ok(on) => Ok(Some(on)),
             Err(_) => Ok(self.developer_mode().await),
         }
+    }
+
+    async fn takes_cryptex(&mut self) -> Result<bool, BridgeError> {
+        Ok(self.has_service::<Cryptexd>()
+            && self
+                .ios_major()
+                .await
+                .is_some_and(|m| m >= crate::ddi::CRYPTEX_FROM_IOS))
+    }
+
+    async fn locked(&mut self) -> Result<Option<bool>, BridgeError> {
+        // What CoreDevice checks before it mounts the image: true while the phone wants its passcode.
+        let [v] = self.lockdown_values([("PasswordProtected", None)]).await;
+        Ok(v.and_then(|v| v.as_boolean()))
+    }
+
+    async fn cryptex_ticket(&mut self, identity: &plist::Dictionary) -> Result<Vec<u8>, BridgeError> {
+        let domain = identity
+            .get("Cryptex1,NonceDomain")
+            .and_then(plist::Value::as_unsigned_integer)
+            .ok_or_else(|| BridgeError::new(Code::DdiMissing, "the cryptex build has no Cryptex1,NonceDomain"))?;
+        let (adapter, rsd) = (&mut self.adapter, &mut self.rsd);
+        let chip = cryptexd_within("personalization identifiers", async {
+            Cryptexd::connect_rsd(&mut *adapter, &mut *rsd)
+                .await?
+                .read_personalization_identifiers()
+                .await
+        })
+        .await?;
+        let nonce = cryptexd_within("cryptex nonce", async {
+            Cryptexd::connect_rsd(&mut *adapter, &mut *rsd)
+                .await?
+                .cryptex_nonce(domain)
+                .await
+        })
+        .await?;
+        let mut request = TSSRequest::new();
+        request
+            .add_cryptex1_tags(identity, &chip, &nonce)
+            .map_err(|e| BridgeError::internal(format!("the cryptex signing request: {e}")))?;
+        let answer = request.send().await.map_err(tss_error)?;
+        // The ticket comes under its own key from current servers, under the AP one from older ones.
+        answer
+            .as_dictionary()
+            .and_then(|d| d.get("Cryptex1,Ticket").or_else(|| d.get("ApImg4Ticket")))
+            .and_then(plist::Value::as_data)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| {
+                BridgeError::new(
+                    Code::TssFailed,
+                    "Apple's signing server (gs.apple.com) answered without a ticket for the cryptex",
+                )
+            })
+    }
+
+    async fn install_cryptex(&mut self, image: crate::ddi::CryptexImage, ticket: Vec<u8>) -> Result<(), BridgeError> {
+        let assets = Cryptex1Assets::from_parts(
+            image.image,
+            image.trust_cache,
+            image.info,
+            image.volume_hash,
+            image.identity,
+        );
+        let properties = assets
+            .cryptex1_properties()
+            .map_err(|e| BridgeError::new(Code::DdiMissing, format!("the cryptex build: {e}")))?;
+        let request = CryptexInstallRequest::new(
+            assets.image,
+            assets.trustcache,
+            ticket,
+            assets.info,
+            assets.volumehash,
+            properties,
+        );
+        self.cryptexd()
+            .await?
+            .install(request)
+            .await
+            .map_err(|e| mount_error(e, "install the disk image"))
     }
 
     async fn identifiers(&mut self) -> Result<(u64, u64), BridgeError> {
@@ -1179,18 +1364,7 @@ impl crate::ddi::Mounter for Device {
             .and_then(|v| v.as_unsigned_integer())
             .ok_or_else(|| BridgeError::internal("the phone did not give the chip ID the signing request needs"))?;
         let mut mounter = self.mounter().await?;
-        mounter
-            .get_manifest_from_tss(manifest, ecid)
-            .await
-            .map_err(|e| match e {
-                IdeviceError::Socket(_) | IdeviceError::Http(_) | IdeviceError::UnexpectedResponse(_) => {
-                    BridgeError::new(
-                        Code::TssFailed,
-                        format!("Apple's signing server (gs.apple.com) gave no ticket: {e}"),
-                    )
-                }
-                other => from_idevice(other, Phase::Operation, "personalization request"),
-            })
+        mounter.get_manifest_from_tss(manifest, ecid).await.map_err(tss_error)
     }
 
     async fn upload_and_mount(

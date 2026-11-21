@@ -188,11 +188,18 @@ func (s *Service) backgroundLost(ctx context.Context, old, to, web string) []sup
 			if to != "" {
 				msg.OnceID = ""                                                     // another destination is a separate delivery
 				msg.TriedAt, msg.Looks, msg.LookAfter = time.Time{}, 0, time.Time{} // the earlier try was to another conversation
-				r.st.Queue[to] = append(r.st.Queue[to], msg)
 				moved++
 			}
 		}
 		s.handoversMovedLocked(handovers, to, title)
+		if to != "" {
+			for _, msg := range r.st.Queue[old] {
+				if msg.Tool == superviseTool && len(lost) > 0 {
+					continue
+				}
+				r.st.Queue[to] = append(r.st.Queue[to], msg)
+			}
+		}
 		delete(r.st.Queue, old)
 		s.saveRelayLocked()
 	}
@@ -350,7 +357,7 @@ func (s *Service) backgroundNeeded(ctx context.Context, cfg Settings, list []sup
 // the purpose cannot be resolved: the conversation then goes on with what it ran last.
 func (s *Service) backgroundModel(ctx context.Context, params map[string]any) {
 	p := maps.Clone(params)
-	if err := s.applyModel(ctx, purposeSupervise, p); err != nil {
+	if err := preservePermissionMode(p, func() error { return s.applyModel(ctx, purposeSupervise, p) }); err != nil {
 		s.logf("supervise: the background supervisor's model: %v; it keeps what it ran last", err)
 		return
 	}

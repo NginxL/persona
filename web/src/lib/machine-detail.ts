@@ -1,6 +1,7 @@
 // Machine details (docs/server/machines.md "App"): the pure part of the page — ranges, the metric charts' scales, gaps, ticks and
 // the hover read-out, the number formats, the agents by space and the system facts. MachineDetail.tsx only draws.
 import { formatDate, t } from "../i18n";
+import { normalizeTraeCliName } from "./agent-kind";
 import { stateOf, tabLabel } from "./format";
 import type { AgentState, Machine, Session } from "./types";
 import type { MachineComputer } from "./computer";
@@ -333,7 +334,7 @@ export function countsText(c: SpaceGroup["counts"]): string {
 
 /** The tab label and, for anything but Claude Code, which agent it is: "#2 · Codex". */
 export function agentMeta(s: Session): string {
-  const agent = s.agent && s.agent !== "claude" ? (s.agent_label || (s.agent === "codex" ? "Codex" : s.agent === "traex" ? "TRAEX" : s.agent)) : "";
+  const agent = s.agent && s.agent !== "claude" ? normalizeTraeCliName(s.agent_label || (s.agent === "codex" ? "Codex" : s.agent)) : "";
   return [tabLabel(s), agent].filter(Boolean).join(" · ");
 }
 

@@ -1,5 +1,7 @@
 import Foundation
+import PersonaKit
 import Testing
+import UIKit
 @testable import Persona
 
 /// The file viewer's models (docs/apple/ios.md「File viewer」): lines and pages of a text file, colors worked out in chunks,
@@ -179,5 +181,86 @@ struct FileViewerTests {
         presence.ask(["~/a.go"], in: scope, api: hub.client)
         try await Task.sleep(for: .milliseconds(400))
         #expect(hub.sent("GET", path).count == 2)
+    }
+
+    // MARK: Local Markdown files
+
+    private let localPNG = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")!
+
+    @Test func markdownImageTargetsReadValidPNGThroughTheSessionMachineAndWorkingDirectory() async throws {
+        let hub = FakeHub()
+        let route = "/api/v1/machines/studio/file/download"
+        hub.on("GET", route) { [localPNG] _ in localPNG }
+        let scope = FileScope(machine: MachineRef(group: "work", id: "studio"), cwd: "/Users/me/code/reports")
+        let markdown = "![absolute](/tmp/shot.png)\n![relative](shots/shot.png)"
+        let images = ReplyImages.all(in: markdown)
+        #expect(images.map(\.url) == ["/tmp/shot.png", "shots/shot.png"])
+
+        var decoded: [String: UIImage] = [:]
+        for image in images {
+            let bytes = try await hub.client.fileBytes(machine: scope.machine.id, path: image.url, cwd: scope.cwd)
+            decoded[image.url] = try #require(UIImage(data: bytes), "the machine returned a valid PNG")
+        }
+        #expect(decoded.count == 2)
+        #expect(decoded.values.allSatisfy { $0.size == CGSize(width: 1, height: 1) })
+        let requests = hub.sent("GET", route)
+        #expect(requests.map { $0.query["path"] } == ["/tmp/shot.png", "shots/shot.png"])
+        #expect(requests.allSatisfy { $0.query["cwd"] == scope.cwd })
+    }
+
+    @Test func markdownImageReadFailuresKeepTheirLocalizedReasonsAndDoNotRetryAutomatically() async {
+        let hub = FakeHub()
+        let route = "/api/v1/machines/studio/file/download"
+        let expected = [
+            "shots/missing.png": "The image does not exist on this computer.",
+            "private/denied.png": "Permission denied. Allow Persona to read this folder on the computer.",
+            "/tmp/unreadable.png": "The image exists but its contents could not be read.",
+        ]
+        hub.on("GET", route) { req in
+            let path = req.query["path"] ?? ""
+            let status = path.contains("missing") ? 404 : path.contains("denied") ? 403 : 422
+            throw APIError(status: status, message: expected[path] ?? "Unknown fixture path")
+        }
+        let scope = FileScope(machine: MachineRef(id: "studio"), cwd: "/Users/me/code/reports")
+        let markdown = expected.keys.sorted().map { "![failed](\($0))" }.joined(separator: "\n")
+        var reasons: [String: String] = [:]
+        for image in ReplyImages.all(in: markdown) {
+            do {
+                _ = try await hub.client.fileBytes(machine: scope.machine.id, path: image.url, cwd: scope.cwd)
+                Issue.record("the \(image.url) fixture should fail")
+            } catch {
+                reasons[image.url] = error.shown
+            }
+        }
+        #expect(reasons == expected)
+        let requests = hub.sent("GET", route)
+        #expect(requests.count == expected.count)
+        #expect(Set(requests.map { $0.query["path"] ?? "" }) == Set(expected.keys))
+        #expect(requests.allSatisfy { $0.query["cwd"] == scope.cwd })
+    }
+
+    @Test(arguments: [
+        (path: "missing.md", status: 404, reason: "The file does not exist on this computer."),
+        (path: "private/denied.md", status: 403, reason: "Permission denied. Allow Persona to read this folder on the computer."),
+        (path: "/tmp/unreadable.md", status: 422, reason: "The file exists but its contents could not be read."),
+    ])
+    func localLinkFailuresReachTheFileViewer(path: String, status: Int, reason: String) async {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/machines/studio/file") { _ in throw APIError(status: status, message: reason) }
+        let model = FileViewerModel(ref: FileRef(machineID: "studio", path: path, cwd: "/Users/me/code/reports"), api: hub.client)
+        await model.load()
+        #expect(model.file == nil)
+        #expect(model.error == reason)
+    }
+}
+
+@MainActor
+struct AttachmentImageRegressionTests {
+    @Test func inlineAttachmentBytesStillDecodeWithoutAMachineFile() async throws {
+        let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")!
+        let payload = ImagePayload(mime: "image/png", data: png.base64EncodedString())
+        let image = try #require(await ChatImageLoader.image(payload, side: nil))
+        #expect(image.size == CGSize(width: 1, height: 1))
+        #expect(payload.ref == nil)
     }
 }

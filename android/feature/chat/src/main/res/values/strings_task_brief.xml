@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_task_brief_show_all">Show All</string>
+    <string name="chat_task_brief_asked_owner">You asked on %1$s:</string>
+    <string name="chat_task_brief_asked_cut">Cut short here. The whole message is in its conversation.</string>
+    <string name="chat_task_brief_started_assistant">Started by the assistant on %1$s</string>
+    <string name="chat_task_brief_started_leader">Started by a leader conversation on %1$s</string>
+    <string name="chat_task_brief_started_routine">Started by a routine on %1$s</string>
+    <string name="chat_task_brief_started_hub">Started by Persona itself on %1$s</string>
+    <string name="chat_task_brief_started_unknown">Started on %1$s. Who asked for it was not recorded.</string>
+    <string name="chat_task_brief_started_why">%1$s: %2$s</string>
+    <string name="chat_task_brief_reconstructed">Reconstructed: the original request was not recorded</string>
+    <string name="chat_task_brief_handover">Hand-over Prompt</string>
+    <string name="chat_task_brief_done_when">Done When</string>
+    <string name="chat_task_brief_expected_time">Expected Time</string>
+    <string name="chat_task_brief_expect_hours">About %1$s h</string>
+    <string name="chat_task_brief_out_of_bounds">Out of Bounds</string>
+    <string name="chat_task_brief_summary_minutes">about %1$d min</string>
+    <string name="chat_task_brief_summary_hours">about %1$s h</string>
+    <plurals name="chat_task_brief_summary_criteria">
+        <item quantity="one">%1$d criterion</item>
+        <item quantity="other">%1$d criteria</item>
+    </plurals>
+    <plurals name="chat_task_brief_summary_bounds">
+        <item quantity="one">%1$d out of bounds</item>
+        <item quantity="other">%1$d out of bounds</item>
+    </plurals>
+</resources>

@@ -55,15 +55,15 @@ async function render(features: string[]) {
       return json({show_botmux: showBotmux, configured: true});
     }
     if (url.pathname.endsWith("/sessions")) {
-      const todo = q.get("todo"), state = q.get("state"), waiting = q.get("waiting"), only = q.get("pane_source"), not = q.get("exclude_pane_source");
-      const rows = rowsNow.filter((r) => (!todo || (todo === "none" ? !r.todo : r.todo?.id === todo)) && (!state || r.state === state) &&
+      const todo = q.get("todo"), state = q.get("state"), machine = q.get("machine_id"), waiting = q.get("waiting"), only = q.get("pane_source"), not = q.get("exclude_pane_source");
+      const rows = rowsNow.filter((r) => (!todo || (todo === "none" ? !r.todo : r.todo?.id === todo)) && (!state || r.state === state) && (!machine || r.machine_id === machine) &&
         (!waiting || Boolean(r.background_waiting) === (waiting === "1")) && (!only || origin(r) === only) && (!not || origin(r) !== not));
       if (q.has("counts")) {
         const count = (key: (r: Session) => string) => rows.reduce<Record<string, number>>((m, r) => ({ ...m, [key(r)]: (m[key(r)] ?? 0) + 1 }), {});
         return json({ total: rows.length, state: count((r) => r.state!), machine: count((r) => r.machine_id), group: {}, project: {}, todo: count((r) => r.todo?.id ?? ""),
           pane_source: count(origin), background_waiting: rows.filter((r) => r.background_waiting).length, revision: "r1" });
       }
-      return json({ sessions: q.has("since") ? [] : rows, remove: [], has_more: false, revision: "r1", total: rows.length });
+      return json({ sessions: rows, remove: [], has_more: false, revision: "r1", total: rows.length });
     }
     if (url.pathname.endsWith("/pins")) return json({ sessions: [], spaces: [] });
     if (url.pathname.endsWith("/machines")) return json({ machines: [{ id: "mac", name: "MacBook", online: true }, { id: "linux", name: "Linux box", online: true }] });
@@ -100,7 +100,7 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => {
-  act(() => root.unmount()); host.remove(); reset(); vi.unstubAllGlobals();
+  act(() => root.unmount()); host.remove(); reset(); vi.useRealTimers(); vi.unstubAllGlobals();
 });
 
 beforeAll(() => loadPages(), 60_000);
@@ -187,7 +187,7 @@ describe("the sidebar's paged Agents by to-do", () => {
     expect(chips.some((c) => c!.startsWith("已看"))).toBe(true);
   });
 
-  it("has the complete list's title row: fold all acts on the paged sections, the ⋯ holds its sorts and the archived Agents", async () => {
+  it("has the complete list's title row: fold all acts on the paged sections and the ⋯ holds the archived Agents", async () => {
     await render(["sessions_list", "sessions_lookup", "sessions_agents_only", "sessions_todo", "agent_session_archives"]);
     const foldAll = () => host.querySelector<HTMLButtonElement>("[data-testid=agents-fold-all]")!;
     const open = () => sections().map((s) => heading(s).getAttribute("aria-expanded"));
@@ -205,31 +205,49 @@ describe("the sidebar's paged Agents by to-do", () => {
     const menu = host.querySelector<HTMLButtonElement>('button[aria-label="Agent 列表选项"]')!;
     await act(async () => menu.click());
     await flush();
-    expect(menuItems()).toEqual(["状态优先", "最近更新", "已归档的 Agent"]);
+    expect(menuItems()).toEqual(["已归档的 Agent"]);
   });
 
-  it("orders the computers by their newest Agent under Recently updated, and offers no sort By status, as the complete list", async () => {
-    rowsNow = [row("Nightly build", 10, undefined, "idle", { machine_id: "linux" }), ...ROWS];
-    await render(["sessions_list", "sessions_lookup", "sessions_agents_only", "sessions_todo", "agent_session_archives"]);
-    const choose = async (label: string) => {
-      await act(async () => [...bar()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === label)!.click());
-      await flush();
-    };
+  it("keeps machine groups and tab rows stable through activity, hover, focus, refresh and reload (#11801)", async () => {
+    rowsNow = [
+      row("z-first", 1, undefined, "idle", { space_id: "alpha", space_name: "Alpha", space_index: 0, slot_id: "z-first", slot_index: 0 }),
+      row("a-second", 9, undefined, "idle", { space_id: "alpha", space_name: "Alpha", space_index: 0, slot_id: "a-second", slot_index: 1 }),
+      row("linux-one", 8, undefined, "idle", { machine_id: "linux", space_id: "gamma", space_name: "Gamma", space_index: 0, slot_id: "linux-one", slot_index: 0 }),
+    ];
+    const features = ["sessions_list", "sessions_lookup", "sessions_agents_only", "sessions_todo", "agent_session_archives"];
+    await render(features);
+    await act(async () => [...bar()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "机器")!.click());
+    await flush();
     const keys = () => sections().map((s) => s.getAttribute("data-session-group"));
-    const menu = () => host.querySelector<HTMLButtonElement>('button[aria-label^="Agent 列表选项"]');
-    await choose("机器");
-    // State first: the busiest computer first
+    const macRows = () => rowTexts(sections().find((s) => s.getAttribute("data-session-group") === "mac")!);
     expect(keys()).toEqual(["mac", "linux"]);
-    await act(async () => menu()!.click());
+    expect(macRows()).toEqual([expect.stringMatching(/^z-first/), expect.stringMatching(/^a-second/)]);
+
+    const focused = sections().find((s) => s.getAttribute("data-session-group") === "mac")!.querySelector<HTMLAnchorElement>('a[href="/s/mac/z-first"]')!;
+    act(() => {
+      focused.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      focused.focus();
+    });
+    rowsNow = [
+      ...rowsNow.map((r) => r.session_id === "z-first" ? { ...r, state: "needs_you" as const, updated_at: at(20) } : r),
+      row("linux-two", 21, undefined, "idle", { machine_id: "linux" }), row("linux-three", 22, undefined, "idle", { machine_id: "linux" }),
+    ];
+    vi.useFakeTimers();
+    await act(async () => {
+      FakeSocket.all.at(-1)!.push({ type: "sessions_list" });
+      await vi.advanceTimersByTimeAsync(2_100);
+    });
     await flush();
-    await act(async () => [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find((el) => el.textContent === "最近更新")!.click());
-    await flush();
-    expect(keys()).toEqual(["linux", "mac"]);
-    expect(localStorage.getItem("persona.agentSort")).toBe("updated");
-    await choose("状态");
-    await act(async () => menu()!.click());
-    await flush();
-    expect(menuItems()).toEqual(["已归档的 Agent"]);
+    expect(keys()).toEqual(["mac", "linux"]);
+    expect(macRows()).toEqual([expect.stringMatching(/^z-first/), expect.stringMatching(/^a-second/)]);
+    expect(document.activeElement).toBe(focused);
+
+    act(() => root.unmount());
+    reset();
+    root = createRoot(host);
+    await render(features);
+    expect(keys()).toEqual(["mac", "linux"]);
+    expect(macRows()).toEqual([expect.stringMatching(/^z-first/), expect.stringMatching(/^a-second/)]);
   });
 });
 const menuItems = () => [...document.querySelectorAll('[role^="menuitem"]')].map((el) => el.textContent);

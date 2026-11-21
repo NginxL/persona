@@ -313,9 +313,13 @@ private const val HISTORY_LIMIT = 500
  * drops the one that waited, and the rest then apply to the session as without it.
  */
 internal fun modesApplied(current: Session, action: ChatAction.Modes): Boolean {
-    val own = current.launcher?.takeIf(String::isNotEmpty) ?: "claude"
-    if (action.launcher != null && action.launcher != own)
-        return current.pendingSwitch?.launcher == action.launcher || current.launcher == action.launcher
+    val own = current.effectiveLauncher
+    if (action.launcher != null && action.launcher != own) {
+        val pending = current.pendingSwitch ?: return false
+        return pending.launcher == action.launcher &&
+            pending.model.orEmpty().equals(action.model.orEmpty(), ignoreCase = true) &&
+            pending.effort.orEmpty() == action.effort.orEmpty()
+    }
     return (action.launcher == null || current.pendingSwitch == null) &&
         (action.model == null || current.model.equals(action.model, ignoreCase = true)) &&
         // a queued bypass restart keeps the running mode with bypassPending; cancelling it clears bypassPending

@@ -3,9 +3,15 @@ package backup
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -14,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/link"
+	"github.com/nwverse/persona/server/internal/managerconf"
 	"github.com/nwverse/persona/server/internal/secretkey"
 )
 
@@ -404,6 +412,82 @@ func TestWholeInstallCreateVerifyRestore(t *testing.T) {
 		errorf(t, "extension executable mode = %v, %v", info.Mode(), err)
 	}
 	assertNoTemporaryDatabases(t, fixture.backend)
+}
+
+func writeTLSIdentity(t *testing.T, home string) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		fatal(t, err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(12422),
+		NotBefore:    time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:     time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		fatal(t, err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		fatal(t, err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		fatal(t, err)
+	}
+	writeFixtureFile(t, filepath.Join(home, "tls", "hub.key"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+	writeFixtureFile(t, filepath.Join(home, "tls", "hub.crt"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	return link.Pin(cert)
+}
+
+func readTLSFingerprint(t *testing.T, home string) string {
+	t.Helper()
+	cert, err := tls.LoadX509KeyPair(filepath.Join(home, "tls", "hub.crt"), filepath.Join(home, "tls", "hub.key"))
+	if errors.Is(err, os.ErrNotExist) {
+		return ""
+	}
+	if err != nil {
+		fatal(t, err)
+	}
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		fatal(t, err)
+	}
+	return link.Pin(leaf)
+}
+
+func TestWholeInstallRestorePreservesTLSFingerprint(t *testing.T) {
+	fixture := newBackupFixture(t, "persona_manager")
+	fingerprint := writeTLSIdentity(t, fixture.home)
+	if err := managerconf.WriteBinding(fixture.home, managerconf.Binding{
+		Hub: "https://hub.example:18662", HubID: "synthetic-hub", Token: "synthetic-manager-token", Fingerprint: fingerprint,
+	}); err != nil {
+		fatal(t, err)
+	}
+	operator := fixture.operator()
+	if _, err := operator.Create(context.Background(), fixture.options()); err != nil {
+		fatal(t, err)
+	}
+	if err := os.RemoveAll(fixture.home); err != nil {
+		fatal(t, err)
+	}
+	if _, err := operator.Restore(context.Background(), Options{Home: fixture.home, Bundle: fixture.output, WritesQuiesced: true}); err != nil {
+		fatal(t, err)
+	}
+	binding, err := managerconf.ReadBinding(fixture.home)
+	if err != nil {
+		fatal(t, err)
+	}
+	if binding.Fingerprint != fingerprint {
+		fatalf(t, "manager fingerprint after restore = %q; want original %q", binding.Fingerprint, fingerprint)
+	}
+	if restored := readTLSFingerprint(t, fixture.home); restored != binding.Fingerprint {
+		fatalf(t, "hub fingerprint after empty-runtime restore = %q, manager fingerprint = %q; want original %q", restored, binding.Fingerprint, fingerprint)
+	}
 }
 
 func TestRestoreFailureRollsBackFilesAndBothDatabases(t *testing.T) {

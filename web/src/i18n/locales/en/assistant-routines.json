@@ -39,5 +39,10 @@
   "chat_at": "Chat · {when} {time}",
   "chat_n": "Chat {n}",
   "chats_label": "Chats from “{title}”",
-  "until": "Until {when}"
+  "until": "Until {when}",
+  "menu_actions": "Actions for {title}",
+  "menu_skip_next": "Skip next run",
+  "menu_cancel_skip": "Cancel skip",
+  "skip_conflict": "The schedule changed. Review the next run and try again.",
+  "skip_failed": "Couldn't update the skip. {error}"
 }

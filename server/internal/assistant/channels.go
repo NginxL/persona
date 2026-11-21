@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -30,9 +31,25 @@ type channelPrefs struct {
 	Features map[string]bool `json:"features,omitempty"`
 	// Recent are the conversations its messages went to lately (newest first, a few).
 	Recent []channel.Conversation `json:"recent,omitempty"`
+	// Threads are the conversations of its threads (capabilities.threads), by the thread key its messages carry.
+	Threads map[string]*channelThread `json:"threads,omitempty"`
 }
 
 const channelRecentKeep = 5
+
+// channelThread is the conversation one of a channel's threads talks to (the thread's first message started it), and
+// when a message of the thread last went there.
+type channelThread struct {
+	MachineID string    `json:"machine_id"`
+	SessionID string    `json:"session_id"`
+	At        time.Time `json:"at"`
+}
+
+// A thread nobody wrote in for channelThreadsKeepFor starts a new conversation; past channelThreadsKeep the oldest go.
+const (
+	channelThreadsKeep    = 500
+	channelThreadsKeepFor = 30 * 24 * time.Hour
+)
 
 type channelsState struct {
 	Runs []*channel.Run `json:"runs,omitempty"`
@@ -210,6 +227,68 @@ func (s *Service) saveChannelStateLocked() error {
 		return err
 	}
 	return nil
+}
+
+// bindChannelThread notes that thread of channel id talks to a conversation (machine, session), now.
+func (s *Service) bindChannelThread(id, thread, machine, session string) {
+	c := &s.chans
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s.loadChannelsLocked(context.Background())
+	p := s.channelPrefLocked(id)
+	if p.Threads == nil {
+		p.Threads = map[string]*channelThread{}
+	}
+	now := c.clock().UTC()
+	p.Threads[thread] = &channelThread{MachineID: machine, SessionID: session, At: now}
+	pruneChannelThreads(p.Threads, now)
+	s.saveChannelsLocked()
+}
+
+// unbindChannelThread forgets thread's conversation: its next message starts a new one (/new in the thread).
+func (s *Service) unbindChannelThread(id, thread string) {
+	c := &s.chans
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s.loadChannelsLocked(context.Background())
+	p := s.channelPrefLocked(id)
+	if _, ok := p.Threads[thread]; !ok {
+		return
+	}
+	delete(p.Threads, thread)
+	s.saveChannelsLocked()
+}
+
+// channelThreadOf is thread's conversation, nil when it has none (or it went quiet too long ago).
+func (s *Service) channelThreadOf(ctx context.Context, id, thread string) *channelThread {
+	c := &s.chans
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s.loadChannelsLocked(ctx)
+	t := s.channelPrefLocked(id).Threads[thread]
+	if t == nil || c.clock().Sub(t.At) > channelThreadsKeepFor {
+		return nil
+	}
+	cp := *t
+	return &cp
+}
+
+// pruneChannelThreads drops the threads quiet for longer than channelThreadsKeepFor, then the oldest beyond
+// channelThreadsKeep.
+func pruneChannelThreads(threads map[string]*channelThread, now time.Time) {
+	for key, t := range threads {
+		if t == nil || now.Sub(t.At) > channelThreadsKeepFor {
+			delete(threads, key)
+		}
+	}
+	if len(threads) <= channelThreadsKeep {
+		return
+	}
+	keys := slices.Collect(maps.Keys(threads))
+	slices.SortFunc(keys, func(a, b string) int { return threads[a].At.Compare(threads[b].At) })
+	for _, key := range keys[:len(keys)-channelThreadsKeep] {
+		delete(threads, key)
+	}
 }
 
 // noteChannelConversation remembers that channel id's message went to a conversation (the detail's recent list, the

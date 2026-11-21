@@ -1,0 +1,13 @@
+{
+  "busy": "This conversation is busy. Try again when its current work is finished.",
+  "private_segment": "Open this message through its conversation.",
+  "unavailable": "This conversation is temporarily unavailable.",
+  "message_id_required": "This message needs an identifier before it can be queued.",
+  "retired": "This session no longer runs the conversation.",
+  "missing_generation": "The conversation history is not ready yet.",
+  "unknown_engine": "This engine could not be identified. Refresh its launcher list and try again.",
+  "disabled": "Switching engines is paused.",
+  "unsupported_policy": "This engine cannot apply the conversation’s supervision instructions.",
+  "in_doubt": "The result is being reconciled. Do not send it again.",
+  "explicit_switch_required": "Use the conversation’s model panel to confirm a connection switch before continuing on another engine."
+}

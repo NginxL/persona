@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"debug/buildinfo"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -594,31 +593,13 @@ func selfCheck(ctx context.Context, path string, spec proto.NodeUpdateBeginParam
 	return syncFile(path)
 }
 
-// runCheck is what path's node-update-check says.
+// runCheck is what path's node-update-check says, under the update's limits.
 func runCheck(ctx context.Context, path string) (Check, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, path, "node-update-check")
-	var output limitedBuffer
-	cmd.Stdout, cmd.Stderr = &output, io.Discard
-	cmd.WaitDelay = time.Second
-	if err := cmd.Run(); err != nil {
+	check, err := RunCheck(ctx, path, checkLimits)
+	if err != nil {
 		return Check{}, fmt.Errorf("node executable self-check: %w", err)
 	}
-	var check Check
-	if err := json.Unmarshal(output.Bytes(), &check); err != nil {
-		return Check{}, fmt.Errorf("node executable self-check output: %w", err)
-	}
 	return check, nil
-}
-
-type limitedBuffer struct{ bytes.Buffer }
-
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > 4096 {
-		return 0, errors.New("self-check output exceeds limit")
-	}
-	return b.Buffer.Write(p)
 }
 
 func fileHash(path string) (string, error) {

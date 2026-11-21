@@ -96,11 +96,31 @@ describe("空间的顺序", () => {
     expect(r2.idle.map((x) => x.name)).toEqual(["a"]);
   });
 
-  it("有筛选时全部列出、最近的在前，不折叠", () => {
+  it("有筛选时全部列出、保持原有顺序，不折叠", () => {
     const r = arrangeSpaces([a, b, d, c], { pins: NO_PINS, mutes: none, filtered: true, busy });
-    // b is working since :02 (its own lines do not move it), c finished at :07, the quiet one at :08
-    expect(r.active.map((x) => x.name)).toEqual(["安静", "c", "a", "b"]);
+    // Activity still updates each row, but no longer moves its workspace (#11801).
+    expect(r.active.map((x) => x.name)).toEqual(["a", "b", "安静", "c"]);
     expect(r.idle).toEqual([]);
+  });
+
+  it("retains a quieted active space but brings new attention out of Idle (#11801)", () => {
+    const currentBusy = (x: SpaceLike) => x.sessions.some((s) => !isQuiet(s, none));
+    const busyA = sp("a", [session("a1", "working")]);
+    const quietB = sp("b", [session("b1", "idle")]);
+    const quietC = sp("c", [session("c1", "idle")]);
+    const first = arrangeSpaces([busyA, quietB, quietC], { pins: NO_PINS, mutes: none, filtered: false, busy: currentBusy });
+    expect(first.active.map((x) => x.name)).toEqual(["a"]);
+    expect(first.idle.map((x) => x.name)).toEqual(["b", "c"]);
+
+    const quietA = sp("a", [session("a1", "idle", { updated_at: date(10) })]);
+    const busyB = sp("b", [session("b1", "needs_you", { updated_at: date(11) })]);
+    const finishedC = sp("c", [session("c1", "idle", { work: { phase: "done", just_finished: true } })]);
+    const after = arrangeSpaces([quietA, busyB, finishedC], { pins: NO_PINS, mutes: none, filtered: false, busy: currentBusy, retainedActive: new Set(first.active.map((x) => x.key)) });
+    expect(after.active.map((x) => x.name)).toEqual(["a", "b", "c"]);
+    expect(after.idle).toEqual([]);
+    expect(after.active[0]!.sessions[0]!.state).toBe("idle");
+    expect(after.active[1]!.sessions[0]!.state).toBe("needs_you");
+    expect(after.active[2]!.sessions[0]!.work?.just_finished).toBe(true);
   });
 });
 

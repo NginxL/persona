@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../../../spec/fixtures/entries/cases.json";
-import { assistantEntries, decisionLaterKey } from "./assistant-entries";
+import { assistantEntries, decisionLaterKey, needsYouBySupervisor } from "./assistant-entries";
 import { triageTodos } from "./todo-triage";
 import { makeSessionLookup } from "./todos";
 import type { FeedItem, TaskPlan } from "./feed";
@@ -316,6 +316,16 @@ describe("Finished in the Assistant's entries", () => {
     expect([...got.needsYou, ...got.running, ...got.shelved, ...got.parked, ...got.review]).toEqual([]);
   });
 
+  it("files closed pending-review tasks as finished only within the completion window", () => {
+    const supervision = { supervisor: "main", state: "pending_review" as const };
+    const got = run([
+      done("recent-review", "2026-11-10T08:30:00Z", { supervision }),
+      done("expired-review", "2026-11-08T08:00:00Z", { supervision }),
+    ]);
+    expect(got.finished.map((item) => item.key)).toEqual(["task:recent-review"]);
+    expect([...got.needsYou, ...got.running, ...got.shelved, ...got.parked, ...got.review]).toEqual([]);
+  });
+
   it("keeps a row once it is opened: seeing it changes only that it is new", () => {
     const task = done("opened", "2026-11-10T08:30:00Z");
     expect(run([task]).finished.map((i) => [i.key, i.fresh])).toEqual([["task:opened", true]]);
@@ -372,4 +382,45 @@ describe("Persona reviewing in the Assistant's entries", () => {
     expect(got.parked).toEqual([]);
     expect(got.needsYou).toEqual([]);
   });
+});
+
+
+describe("pending plans across Persona conversations", () => {
+  const at = "2026-11-21T01:00:00Z";
+  const plan = (id: string, conversation: string, state: TaskPlan["state"] = "open"): TaskPlan => ({
+    id, conversation, state, created_at: at, tasks: [],
+  });
+  const plans = { local: plan("local", "main"), routine: plan("routine", "routine-chat"),
+    side: plan("side", "side-chat"), done: plan("done", "routine-chat", "dismissed") };
+  const entries = (conversation: string, main?: string) => assistantEntries({
+    conversation, main, plans, todos: [], sessions: [], interactions: [], feed: [],
+  }).needsYou;
+
+  it("shows every open plan in Main, attributed to its source", () => {
+    const items = entries("main", "main");
+    expect(items.map((item) => item.key)).toEqual(["plan:local", "plan:routine", "plan:side"]);
+    expect(needsYouBySupervisor(items, "main").map((group) => [group.supervisor, group.items.map((item) => item.key)]))
+      .toEqual([["main", ["plan:local"]], ["routine-chat", ["plan:routine"]], ["side-chat", ["plan:side"]]]);
+  });
+
+  it("excludes another manager's pending plan from Main", () => {
+    const result = assistantEntries({ conversation: "main", main: "main", manager: "home",
+      plans: { home: { ...plan("home", "routine"), manager: "home" }, work: { ...plan("work", "work-chat"), manager: "work" } },
+      todos: [], sessions: [], interactions: [], feed: [],
+    });
+    expect(result.needsYou.map((item) => item.key)).toEqual(["plan:home"]);
+  });
+
+  it("keeps a side conversation scoped, including before Main is known", () => {
+    expect(entries("side-chat", "main").map((item) => item.key)).toEqual(["plan:side"]);
+    expect(entries("side-chat").map((item) => item.key)).toEqual(["plan:side"]);
+  });
+});
+
+
+it("keeps Health plans out of Main while retaining them in their own conversation", () => {
+ const plans: Record<string, TaskPlan> = { health: {id:"health",conversation:"health-chat",space:"health",state:"open",tasks:[]} };
+ const input = {main:"main",plans,todos:[],sessions:[],interactions:[],feed:[]};
+ expect(assistantEntries({...input,conversation:"main"}).needsYou).toEqual([]);
+ expect(assistantEntries({...input,conversation:"health-chat"}).needsYou.map((item)=>item.key)).toEqual(["plan:health"]);
 });

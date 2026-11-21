@@ -31,6 +31,43 @@ import Testing
         #expect(m.remembered.map(\.id) == ["vendor/model-x", "~vendor/model-latest"])
     }
 
+    @Test func anExplicitHerdrWorkspaceReadsItsOwnCatalogAndDropsTheLateDefaultHostReply() async throws {
+        let hub = FakeHub()
+        let route = "/api/v1/machines/box/launchers/omp/models"
+        let releaseDefault = AsyncStream<Void>.makeStream()
+        defer { releaseDefault.continuation.finish() }
+        hub.onAsync("GET", route) { request in
+            if hub.sent("GET", route).count == 1 {
+                for await _ in releaseDefault.stream { break }
+            }
+            if request.query["host"] == "herdr" {
+                return Data(#"{"agent":"omp","models":[],"supports_start_model":true}"#.utf8)
+            }
+            return Data(#"{"agent":"omp","models":[],"locked":"The default herdr-core host does not take a model."}"#.utf8)
+        }
+        let m = LauncherModelsModel(deps: .init(api: { _ in hub.client }))
+        let first = Task { await m.load(box, launcher: "omp") }
+        try await waitForRefreshTest { !hub.sent("GET", route).isEmpty }
+        await m.load(box, launcher: "omp", host: "herdr")
+        releaseDefault.continuation.yield(())
+        await first.value
+        #expect(hub.sent("GET", route).map { $0.query["host"] } == [nil, "herdr"])
+        #expect(m.key == "box|omp|host=herdr")
+        #expect(m.list?.supportsStartModel == true && m.list?.locked == nil)
+    }
+
+    @Test func losingTheModelsRouteOnRefreshClearsTheOmpStartCapability() async {
+        let hub = FakeHub()
+        let route = "/api/v1/machines/box/launchers/omp/models"
+        hub.on("GET", route, json: #"{"agent":"omp","models":[],"supports_start_model":true}"#)
+        let m = LauncherModelsModel(deps: .init(api: { _ in hub.client }))
+        await m.load(box, launcher: "omp")
+        #expect(m.list?.supportsStartModel == true)
+        hub.on("GET", route) { _ in throw APIError(status: 404, message: "Not found") }
+        await m.load(box, launcher: "omp", refresh: true)
+        #expect(m.list == nil && m.error == nil)
+    }
+
     @Test func forgetSendsTheIDAndDropsTheRow() async throws {
         let hub = FakeHub()
         hub.on("GET", path, json: list)

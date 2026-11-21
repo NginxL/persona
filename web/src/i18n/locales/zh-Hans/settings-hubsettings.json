@@ -55,7 +55,7 @@
   "beta_channel": "Beta（预发布）",
   "beta_scope": "从 Beta 通道接收预发布版本。选择“正式版”即可恢复稳定版更新；进行中的更新结束后才能切换通道。",
   "web_dev": "Web 开发版",
-  "dev_setup": "请先在 hub 机器上配置备份时暂停、恢复写入的命令，再启用开发版更新。",
+  "dev_setup": "开发版更新需要一台启动内置助手的 Linux 或 macOS hub。",
   "dev_scope": "从同一提交编译网页、hub 和电脑服务。开发版以编译成功作为验证门槛。",
   "branch": "来源分支",
   "current_commit": "当前提交",
@@ -71,5 +71,15 @@
   "apply_backup": "应用备份",
   "apply_backup_confirm": "应用此程序版本？当前数据库和历史数据会保留。安装前会新建备份，并关闭开发版自动更新；更新会等待运行中的会话空闲。",
   "backup_error": "读取历史备份失败：{error}",
-  "latest_commit": "最新提交"
+  "latest_commit": "最新提交",
+  "dev_backup": "开发版备份",
+  "dev_backup_footer": "快照包含数据库转储、配置和密钥。备份文件夹保持私有（0700），不能位于快照会收集的数据内，也不能是符号链接。",
+  "backup_folder": "备份文件夹",
+  "backup_folder_hint": "留空使用推荐路径：{path}。也可以填绝对路径或以 ~ 开头的路径。",
+  "backup_retain": "保留快照数",
+  "backup_builtin": "创建快照时，hub 会暂停自己的写入，完成后恢复。",
+  "backup_external": "hub.json 里的 pause/resume 命令负责暂停写入。",
+  "use_recommended": "使用推荐路径",
+  "save_backup": "保存",
+  "backup_saved": "备份设置已保存。"
 }

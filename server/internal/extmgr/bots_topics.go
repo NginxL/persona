@@ -59,8 +59,12 @@ type BotAISource struct {
 	ChatID    string    `json:"chat_id"`
 	MessageID string    `json:"message_id"`
 	At        time.Time `json:"at"`
-	// Replies is how many replies the bot has been let write under it (botSourceReplies at most).
+	// Replies is how many replies the bot has been let write under it (botSourceReplies at most, botReadReplies for
+	// a /read source).
 	Replies int `json:"replies,omitempty"`
+	// Kind is what the owner asked with: "" for "/ai" (#6146), botSourceRead for "/read" (#11803, bots_read.go), whose
+	// answer is cards under the message rather than one short line.
+	Kind string `json:"kind,omitempty"`
 }
 
 const (
@@ -316,6 +320,9 @@ func (h *Manager) botGroupMessage(api *feishubot.Client, set FeishuBotSettings, 
 			return // the hub's own: it never goes to the assistant
 		}
 	}
+	if h.botReadGroup(api, set, ev, raw, since, pass) {
+		return // the owner's "@bot /read …", from any group (bots_read.go)
+	}
 	if !set.topicChat(msg.ChatID) {
 		h.botAIElsewhere(api, set, ev, raw, since, pass)
 		return
@@ -357,7 +364,7 @@ func (h *Manager) botAIElsewhere(api *feishubot.Client, set FeishuBotSettings, e
 	if _, ok := feishubot.AICommand(feishubot.StripLeadingMentions(content.Text, msg.Mentions, isBot)); !ok {
 		return
 	}
-	h.takeAISource(msg.ChatID, msg.MessageID)
+	h.takeAISource(msg.ChatID, msg.MessageID, "")
 	h.audit(context.Background(), channel.Feishu, auditBotAITaken, botChatActor(set.Owner.OpenID), map[string]any{"chat_id": msg.ChatID})
 	h.handToAssistant(api, ev, raw, "", assistantwire.FeishuFromElsewhere, since, pass, false)
 }
@@ -395,7 +402,7 @@ func (h *Manager) useAISourceReply(messageID string, fullReply bool) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	src := b.set.aiSource(messageID, b.clock().UTC())
-	if b.set.Owner == nil || src == nil || src.Replies >= botSourceReplies || fullReply && !b.set.SourceReportFullReply {
+	if b.set.Owner == nil || src == nil || src.Replies >= src.repliesMax() || fullReply && !b.set.SourceReportFullReply {
 		return false
 	}
 	src.Replies++
@@ -405,7 +412,7 @@ func (h *Manager) useAISourceReply(messageID string, fullReply bool) bool {
 
 // takeAISource keeps the message as one the bot may reply to (the same message again changes nothing), dropping the
 // oldest past botAISourcesKeep and the ones older than botAISourcesKeepFor.
-func (h *Manager) takeAISource(chatID, messageID string) {
+func (h *Manager) takeAISource(chatID, messageID, kind string) {
 	b := &h.bots
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -414,7 +421,7 @@ func (h *Manager) takeAISource(chatID, messageID string) {
 	}
 	now := b.clock().UTC()
 	kept := slices.DeleteFunc(slices.Clone(b.set.AISources), func(s BotAISource) bool { return now.Sub(s.At) > botAISourcesKeepFor })
-	kept = append(kept, BotAISource{ChatID: chatID, MessageID: messageID, At: now})
+	kept = append(kept, BotAISource{ChatID: chatID, MessageID: messageID, At: now, Kind: kind})
 	if len(kept) > botAISourcesKeep {
 		kept = kept[len(kept)-botAISourcesKeep:]
 	}
@@ -436,7 +443,7 @@ func aiSourceReply(set FeishuBotSettings, chatID, replyTo, text string, now time
 		return "", false, nil
 	}
 	if chatID != "" && chatID != src.ChatID || !fullReply && utf8.RuneCountInString(text) > botSourceTextMax ||
-		fullReply && !set.SourceReportFullReply {
+		fullReply && (!set.SourceReportFullReply || src.Kind == botSourceRead) {
 		return "", true, errBotSourceReply
 	}
 	return src.ChatID, true, nil

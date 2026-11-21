@@ -37,7 +37,7 @@ beforeEach(() => {
   setRoster(ROSTER);
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     if (url.endsWith("/managers")) return reply(ROSTER);
-    if (/\/(plugins|extensions)\/example-ui\/-\/$/.test(url)) return reply(detail);
+    if (/\/(plugins|extensions)\/example-ui\/-\/\?entry_lists=1$/.test(url)) return reply(detail);
     return reply({ error: "not found" }, 404);
   }));
   host = document.createElement("div");

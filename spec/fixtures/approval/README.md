@@ -44,7 +44,7 @@
 | `input` | `feedback` 或 `message` 表示支持文本输入，`none` 表示没有文本框；省略时由对应表单决定 |
 | `max_options` | 通知选项按钮最多 3 个；其余选项通过打开 App 处理 |
 
-`requirements` 可取 `not_rejecting`、`feedback_empty`、`reason_empty`、`full_plan_read`、`session_present`、`single_question_single_choice`、`question_not_irreversible`（`reversible: false` 的提问只能打开 App）、`plain_dialog_option`、`always_offered`（授权卡是 Claude 的，或者别的 Agent 的卡带了 `always_label`：Codex / TRAEX / Agent 运行时的卡只有在终端界面给出「总是同意」会放行什么时才有这个按钮，iOS `AgentPermissionForm` 同理）。`choose_option` 是待展开的按钮模板，仅在要求满足时按原始选项顺序取前 3 个；文本输入／转回对话选项不冒充普通按钮。`open_app` 是导航，不产生 Resolution；`answer`、`screen_answer` 是打开或操作对应表单，不是批准权限。
+`requirements` 可取 `not_rejecting`、`feedback_empty`、`reason_empty`、`full_plan_read`、`session_present`、`single_question_single_choice`、`question_not_irreversible`（`reversible: false` 的提问只能打开 App）、`plain_dialog_option`、`always_offered`（授权卡是 Claude 的，或者别的 Agent 的卡带了 `always_label`：Codex / TRAE CLI / Agent 运行时的卡只有在终端界面给出「总是同意」会放行什么时才有这个按钮，iOS `AgentPermissionForm` 同理）。`choose_option` 是待展开的按钮模板，仅在要求满足时按原始选项顺序取前 3 个；文本输入／转回对话选项不冒充普通按钮。`open_app` 是导航，不产生 Resolution；`answer`、`screen_answer` 是打开或操作对应表单，不是批准权限。
 
 null 是明确的未知值，不能当 false 放行：iOS 没显式声明手表的认证要求，不足以证明锁定时能执行。通知上的提问／屏幕选项按钮原来没有定义是否要认证；协调者 2026-10-31 补定：**和「允许」一样要先解锁**（选项会让 Agent 往下做，屏幕对话框的选项常常就是命令审批），只有拒绝和打回不用。统一表已按此填 `required`。
 

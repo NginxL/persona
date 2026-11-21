@@ -73,6 +73,7 @@ RUN go run ./internal/webasset/precompress internal/hub/webdist
 COPY integrations/antigravity/ /src/integrations/antigravity/
 COPY integrations/claude-code-plugin/ /src/integrations/claude-code-plugin/
 COPY integrations/dsh/ /src/integrations/dsh/
+COPY integrations/opencode/ /src/integrations/opencode/
 COPY integrations/paseo/ /src/integrations/paseo/
 COPY integrations/pi/ /src/integrations/pi/
 COPY integrations/runtime-sdk/ /src/integrations/runtime-sdk/

@@ -33,13 +33,37 @@ const partitionEnv = "NODE_TEST_PARTITION"
 var testName = regexp.MustCompile(`^(?:Test|Example|Fuzz)\w*$`)
 
 // testPartitions is how many processes share the tests: NODE_TEST_PARTITIONS when it is a number, else half the CPUs,
-// at most six (a four-CPU runner gets two, as CI's shard). The tests mostly wait on processes and timers: on an 18-CPU
-// Mac six took 265–281 s, four 399–460 s and one 1,100–1,500 s. Fewer than two runs the tests in this process.
+// at least three and at most six (matching the CI shard's three on its four-CPU runner). The tests mostly wait on
+// processes and timers: on an 18-CPU Mac six took 265–281 s, four 399–460 s and one 1,100–1,500 s. Two later took
+// about 570 s each on the CI lane, beyond its 600-second budget after startup. Fewer than two runs in this process.
 func testPartitions() int {
 	if n, err := strconv.Atoi(os.Getenv("NODE_TEST_PARTITIONS")); err == nil {
 		return n
 	}
-	return min(runtime.NumCPU()/2, 6)
+	return partitionCount(runtime.NumCPU())
+}
+
+func partitionCount(cpus int) int {
+	return min(max(cpus/2, 3), 6)
+}
+
+// TestPartitionDefaultMatchesCI keeps the plain run and scripts/test/go_partitions.py's three node partitions aligned.
+func TestPartitionDefaultMatchesCI(t *testing.T) {
+	for cpus, want := range map[int]int{1: 3, 2: 3, 4: 3, 6: 3, 12: 6, 64: 6} {
+		if got := partitionCount(cpus); got != want {
+			t.Errorf("%d CPUs: partitions = %d, want %d", cpus, got, want)
+		}
+	}
+	t.Setenv("NODE_TEST_PARTITIONS", "")
+	if got := testPartitions(); got != partitionCount(runtime.NumCPU()) {
+		t.Fatalf("default partitions = %d, want %d", got, partitionCount(runtime.NumCPU()))
+	}
+	for _, count := range []string{"1", "3"} {
+		t.Setenv("NODE_TEST_PARTITIONS", count)
+		if got := testPartitions(); got != int(count[0]-'0') {
+			t.Fatalf("NODE_TEST_PARTITIONS=%s gave %d", count, got)
+		}
+	}
 }
 
 // runPartitioned runs the tests in partitions when this is a plain run of the whole package, and returns the run's exit

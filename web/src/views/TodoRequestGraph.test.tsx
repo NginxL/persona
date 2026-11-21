@@ -335,6 +335,18 @@ describe("a piece's Agent tree", () => {
     expect(opened).toEqual(["lead"]);
   });
 
+  it("opens a line's Agent as a drill-down from the To-dos page when the page leaves it to the graph (#12055)", () => {
+    history.replaceState(null, "", "/todos?id=lead");
+    act(() => root.render(<TodoRequestGraph todos={list} lookup={makeSessionLookup(rows)} machines={machines} onOpenTodo={(id) => opened.push(id)} />));
+    const before = history.length;
+    act(() => line("mac/W1").click());
+    // a page of its own on top of the To-dos page, whose address its entry keeps for Back and the sidebar
+    expect(location.pathname).toBe("/s/mac/W1");
+    expect(history.length).toBe(before + 1);
+    expect(history.state).toEqual({ handoff: { path: "/todos?id=lead" } });
+    history.replaceState(null, "", "/");
+  });
+
   it("folds to its first line and opens again, the card shrinking with it", () => {
     const box = () => host.querySelector<HTMLElement>('[data-node-card="todo:lead"]')!;
     const tall = parseFloat(box().style.height);

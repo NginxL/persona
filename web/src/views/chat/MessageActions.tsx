@@ -19,6 +19,7 @@ import { clock } from "../../lib/format";
 import { sendDraft, type QuotedTask } from "../../lib/drafts";
 import type { ForwardPick } from "../../lib/forward";
 import { addContext, newContext } from "../../lib/links";
+import type { StarOrigin } from "../../lib/starred-rows";
 import type { Item } from "../../lib/types";
 import { copyText, cx, type MenuItem } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
@@ -34,6 +35,8 @@ import { lazyDialog, lazyOverlay } from "../LazyOverlay";
 // Hidden until the pointer comes, so it is not part of the first screen (startup-preload.ts): its row is kept while it
 // loads, so nothing moves when it comes.
 const replyBar = () => import("./ReplyBar");
+const StarAvailability = lazy(() => replyBar().then((m) => ({ default: m.StarAvailability })));
+const StarBadge = lazy(() => replyBar().then((m) => ({ default: m.StarBadge })));
 const ReplyBar = lazy(() => replyBar().then((m) => ({ default: m.ReplyBar })));
 // what the exchange cost, at the end of a touch screen's row (the reply bar has it on hover)
 const TurnUsage = lazy(() => replyBar().then((m) => ({ default: m.TurnUsage })));
@@ -97,6 +100,7 @@ export function MessageActions({
   usage,
   usageMs,
   translationSource,
+  starSource,
   children,
   className,
 }: {
@@ -123,6 +127,8 @@ export function MessageActions({
   usageMs?: number;
   /** A hub-paged reply must load all its words before translation, without changing its in-flight identity. */
   translationSource?: ReplyTranslationSource;
+  /** The persisted source item, separate from the Forward / Rewind identifiers. */
+  starSource?: StarOrigin;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -134,6 +140,7 @@ export function MessageActions({
   const forwarded = itemId ?? messageId;
   const pick: ForwardPick | undefined = forwarded ? { itemId: forwarded, text, isUser: Boolean(isUser), ts, images, photos } : undefined;
   const chat = useChatActions();
+  const [starAvailable, setStarAvailable] = useState<"read" | "write" | null>(null);
   const actions = messageActions(chat, text, Boolean(isUser), ts, task, pick, editText);
   // the chat picks messages to forward (#3838): the checkbox over this one, when it is one to forward
   const picker = chat?.forward ? chat.pick : undefined;
@@ -143,7 +150,8 @@ export function MessageActions({
   const [menu, setMenu] = useState<{ anchor: HTMLElement | { x: number; y: number }; more?: boolean } | null>(null);
   const moreAnchor = menu?.more;
   const canFork = Boolean(itemId && chat?.fork && !itemId.startsWith("line") && itemId.includes("#"));
-  const hasMore = Boolean((side && (chat?.canCompose || (chat?.forward && pick))) || canFork || (isUser && (chat?.canCompose || (messageId && chat?.rewind && (editText ?? text).trim()))) || onDelete);
+  const hasMore = Boolean((starAvailable === "write" && starSource) || canFork || onDelete || ((side || isUser) && chat?.canCompose) ||
+    (side && chat?.forward && pick) || (isUser && messageId && chat?.rewind && (editText ?? text).trim()));
   // Your bubble's hover bar sits to its left; in a narrow window a wide bubble leaves no room there and the bar fell
   // off the screen, its buttons still reached by Tab (audit item 73). Measured when the pointer comes or focus moves in
   // (not for every bubble as the chat opens): with no room, the same buttons sit under the bubble instead, so the one
@@ -173,10 +181,16 @@ export function MessageActions({
 
   return (
     <div
-      className={cx("group/msg", (side || corner || PickRow) && "relative", PickRow && (side ? "isolate" : "isolate pl-7"), className)}
+      className={cx("group/msg", (side || corner || PickRow || starAvailable) && "relative", PickRow && (side ? "isolate" : "isolate pl-7"), className)}
       onPointerEnter={side ? (e) => e.pointerType !== "touch" && placeBar(e.currentTarget) : undefined}
       onFocus={side ? (e) => placeBar(e.currentTarget) : undefined}
     >
+      {!picking && starSource && (
+        <Suspense fallback={null}>
+          <StarAvailability origin={starSource} chat={chat} report={setStarAvailable} />
+          {starAvailable && <StarBadge origin={starSource} />}
+        </Suspense>
+      )}
       {PickRow && picker && pick && <PickRow pick={picker} message={pick} side={side} />}
       <div
         inert={picking || undefined}
@@ -229,7 +243,7 @@ export function MessageActions({
       {canTranslate && translation.error && <p role="alert" className="mt-1 text-xs text-red">{translation.error}</p>}
       {picking ? null : bar ? (
         <Suspense fallback={<div data-reply-bar="loading" className="mt-1.5 hidden h-6 [@media(hover:hover)]:block" />}>
-          <ReplyBar text={text} ts={ts} pinned={latest} itemId={itemId} more={actions} usage={usage} usageMs={usageMs} persona={chat?.assistant} translation={canTranslate ? translation : undefined} />
+          <ReplyBar text={text} ts={ts} pinned={latest} itemId={itemId} more={actions} star={starAvailable ? starSource : undefined} loadStar={translationSource?.load} usage={usage} usageMs={usageMs} persona={chat?.assistant} translation={canTranslate ? translation : undefined} />
         </Suspense>
       ) : (side || corner) && (
       <div
@@ -305,7 +319,7 @@ export function MessageActions({
       )}
       {menu && !picking && <MessageMenu
         anchor={menu.anchor} onClose={close} primary={actions} more={menu.more}
-        itemId={itemId} text={text} rewindText={editText ?? text} messageId={messageId} isUser={isUser} onDelete={onDelete} pick={pick}
+        itemId={itemId} text={text} ts={ts} star={starAvailable ? starSource : undefined} loadStar={translationSource?.load} rewindText={editText ?? text} messageId={messageId} isUser={isUser} onDelete={onDelete} pick={pick}
         onSelectText={() => setSelecting(true)}
       />}
       <SelectMessageText open={selecting} onClose={() => setSelecting(false)} text={text} />

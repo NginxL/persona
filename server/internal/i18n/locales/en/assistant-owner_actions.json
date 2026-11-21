@@ -1,0 +1,3 @@
+{
+  "batch": "Exact approval batch {id} · {count} item(s). The following item cards show every decision-relevant argument in full. Reply to this batch card with exactly {phrases} to approve every still-pending item once, or reply to one item card to approve only that item. Allow/Deny buttons have the same scope. Editing text, recipients, accounts or any other argument requires a fresh approval. This is not an Always rule."
+}

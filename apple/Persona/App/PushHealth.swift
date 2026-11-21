@@ -59,6 +59,9 @@ nonisolated struct PushStatus: Equatable, Sendable {
 /// Diagnostics stay in Settings; the main screen says what is affected and the next useful step.
 nonisolated struct PushNoticeContent: Equatable, Sendable {
     enum Repair: Sendable { case notificationSettings, systemSettings }
+    /// Which outage it says, one per sentence: what a dismissal remembers, so a different one shows again (#12319).
+    enum Cause: String, Codable, Sendable { case notificationsOff, reregistering, updateApp, setup, network, retrying }
+    var cause: Cause
     var text: String
     var actionTitle: String
     var repair: Repair
@@ -69,31 +72,31 @@ extension PushHealth {
     func mainNotice(group: String, allowed: Bool?) -> PushNoticeContent? {
         guard status(group: group, allowed: allowed).level == .unavailable else { return nil }
         if (allowed ?? notificationsAllowed) == false {
-            return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Allow them in Settings."),
+            return PushNoticeContent(cause: .notificationsOff, text: String(localized: "Notifications can't reach this device. Allow them in Settings."),
                                      actionTitle: String(localized: "Open Settings"), repair: .systemSettings)
         }
         let settings = String(localized: "Persona Notification Settings")
         if missingRoutes?.contains(group) == true {
-            return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Keep Persona open while it tries again."),
+            return PushNoticeContent(cause: .reregistering, text: String(localized: "Notifications can't reach this device. Keep Persona open while it tries again."),
                                      actionTitle: settings, repair: .notificationSettings)
         }
         if let route = routes[group], route.reason == "relay_failed" || route.reason == "no_relay" {
             switch relay {
             case .moved:
-                return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Update Persona to turn them back on."),
+                return PushNoticeContent(cause: .updateApp, text: String(localized: "Notifications can't reach this device. Update Persona to turn them back on."),
                                          actionTitle: settings, repair: .notificationSettings)
             case .refused, .notConfigured, nil:
-                return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Ask the person who set up Persona to finish notification setup."),
+                return PushNoticeContent(cause: .setup, text: String(localized: "Notifications can't reach this device. Ask the person who set up Persona to finish notification setup."),
                                          actionTitle: settings, repair: .notificationSettings)
             case .registered, .unreachable:
                 break
             }
         }
         if routes[group]?.reason == "no_token" || relay?.isUnreachable == true {
-            return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Check your network. Persona will try again."),
+            return PushNoticeContent(cause: .network, text: String(localized: "Notifications can't reach this device. Check your network. Persona will try again."),
                                      actionTitle: settings, repair: .notificationSettings)
         }
-        return PushNoticeContent(text: String(localized: "Notifications can't reach this device. Keep Persona open while it tries again."),
+        return PushNoticeContent(cause: .retrying, text: String(localized: "Notifications can't reach this device. Keep Persona open while it tries again."),
                                  actionTitle: settings, repair: .notificationSettings)
     }
 }
@@ -269,15 +272,28 @@ extension PushHealth {
 
 /// The device's PushHealth, kept on disk (StateCache: it changes at most a few times a launch; only the small push-health
 /// readers on Settings › Notifications and Persona's main screen observe it).
+///
+/// Also which main-screen notices the person closed (#12319), per hub group and cause, in this device's UserDefaults (it
+/// changes only on a ✕ or a recovery). A closed cause stays hidden until pushes reach the device at that hub again; a
+/// different cause (notifications turned off, an update needed) or another hub shows its notice. Unknown or unchecked
+/// states keep it: a passing network error is not a recovery. Settings › Notifications always shows the full status.
 @MainActor @Observable
 final class PushHealthStore {
     static let shared = PushHealthStore()
     private static let cacheName = "push-health"
+    static let dismissedKey = "pushNotice.dismissed"
 
     private(set) var health: PushHealth
+    /// Per hub group, the causes whose notice was closed on this device.
+    private(set) var dismissed: [String: Set<PushNoticeContent.Cause>]
+    @ObservationIgnored private let defaults: UserDefaults
 
-    init(health: PushHealth? = nil) {
+    init(health: PushHealth? = nil, defaults: UserDefaults = .standard) {
         self.health = health ?? StateCache.load(Self.cacheName) ?? PushHealth()
+        self.defaults = defaults
+        let saved = defaults.dictionary(forKey: Self.dismissedKey) as? [String: [String]] ?? [:]
+        dismissed = saved.mapValues { Set($0.compactMap(PushNoticeContent.Cause.init(rawValue:))) }.filter { !$0.value.isEmpty }
+        forgetRecovered()
     }
 
     func update(_ change: (inout PushHealth) -> Void) {
@@ -286,5 +302,43 @@ final class PushHealthStore {
         guard h != health else { return }
         health = h
         StateCache.save(Self.cacheName, h)
+        forgetRecovered()
+    }
+
+    /// What Persona's main screen shows for `group`: a confirmed outage whose cause was not closed here.
+    func notice(group: String) -> PushNoticeContent? {
+        guard let notice = current(group: group).mainNotice(group: group, allowed: nil),
+              dismissed[group]?.contains(notice.cause) != true else { return nil }
+        return notice
+    }
+
+    /// The ✕ on the main screen's notice: hidden on this device until its cause changes or pushes come back.
+    func dismiss(_ notice: PushNoticeContent, group: String) {
+        dismissed[group, default: []].insert(notice.cause)
+        save()
+    }
+
+    /// Pushes reach `group` again: a later outage there is news, so its notice shows even for a cause closed before.
+    private func forgetRecovered() {
+        let kept = dismissed.filter { group, _ in
+            let level = current(group: group).status(group: group, allowed: nil).level
+            return level != .available && level != .lastFailed
+        }
+        guard kept != dismissed else { return }
+        dismissed = kept
+        save()
+    }
+
+    private func save() {
+        defaults.set(dismissed.mapValues { $0.map(\.rawValue).sorted() }, forKey: Self.dismissedKey)
+    }
+
+    /// The health the main screen reads for `group`.
+    private func current(group: String) -> PushHealth {
+        #if DEBUG
+        // `-showPushHealth <name>`: the same sample as Settings › Notifications, for screenshots and UI tests.
+        if let sample = defaults.string(forKey: "showPushHealth") { return .sample(sample, group: group) }
+        #endif
+        return health
     }
 }

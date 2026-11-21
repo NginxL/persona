@@ -1,0 +1,84 @@
+[
+  {
+    "type": "function",
+    "name": "search_knowledge",
+    "description": "Search the user's knowledge base: archived chats, people, groups, projects, documents, meeting summaries and minutes of recorded meetings. Returns matching lines, newest first. Separate keywords with spaces; every keyword must match. Use specific terms such as a person, project or group name. For past recorded meetings (decisions, responsibilities or unresolved points), set kind=recordings and search by meeting title or words spoken in it.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Keywords separated by spaces"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "projects",
+            "chats",
+            "people",
+            "docs",
+            "meetings",
+            "events",
+            "recordings",
+            "topics"
+          ],
+          "description": "Search only this kind: recordings = recorded meetings (minutes and retained transcripts), meetings = calendar meetings, projects = projects, chats = groups and chat history, people = people, docs = documents, events = events, topics = knowledge topics. Omit to search all kinds"
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "name": "list_agents",
+    "description": "List the coding Agents (Claude Code / Codex) on the user's computers: computer, title, status (needs you / working / finished unread / idle) and last words.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "type": "function",
+    "name": "send_to_agent",
+    "description": "Send a message to an Agent, as if the user typed it into its input and pressed Enter. Use only when the user explicitly asks. If the recipient and content are clear, send directly without repeating them or waiting for confirmation; ask first if you are unsure which Agent. machine_id and session_id come from list_agents.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "machine_id",
+        "session_id",
+        "text"
+      ],
+      "properties": {
+        "machine_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "description": "The message to send"
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "name": "ask_persona",
+    "description": "Hand work to the Persona main conversation: the full assistant can use all the user's data and tools (calendar, mail, Lark, documents, computers, scheduled tasks, writing and more). It can do much more than you, but takes tens of seconds to several minutes. Use it when your own tools cannot answer or the user needs something done. The call does not return immediately: tell the user you have handed it to the main conversation, then keep talking normally. When that turn finishes, this call returns its answer, possibly minutes later; tell the user then. Make task clear and self-contained, with the work to do in its first sentence: the main conversation cannot see this voice conversation's context.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "task"
+      ],
+      "properties": {
+        "task": {
+          "type": "string",
+          "description": "The work for the main conversation, in one or more complete sentences"
+        }
+      }
+    }
+  }
+]

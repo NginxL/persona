@@ -179,3 +179,32 @@ usage, cache warming's `usage` entries and the compaction and branch summaries' 
     Unit tests: the last five cases in `integrations/pi/test/pi.test.js` (wait until idle before switching; no switch or message without a command; companion exits after installation; restore and stop retrying when returning to the same version; do not install a mismatched hash).
   - `node integrations/pi/e2e/pi-web.mjs`: real pi-web (isolated configuration directory, this package installed through `packages`, idle reclamation set to 6 seconds) + companion:
     launcher visible before any session exists, creation from the phone, sending, disk listing and pagination after reclamation, waking on another message, extension taking ownership again, and listing sessions created in the web client. 2026-11-01: 11/11.
+
+### Assistant conversations
+
+The pi-web path can start an empty Assistant session and apply session-local tool,
+live-context and supervision hooks before the first prompt. The ordinary terminal
+pi path does not advertise Assistant starts. Assistant custom state stays outside
+user message text; closing the execution session revokes its hooks. Tools verify
+the actual session context on every call.
+
+The pi-web launcher advertises one default model row. Choosing it sends no model
+or effort override: this adapter keeps the model selected inside pi. It refuses
+unsupported explicit model/effort choices and permission modes before releasing
+input; it supports default approvals and bypassPermissions. No permission upgrade
+is inferred during a logical conversation switch. Unit contracts use fake pi
+extension APIs and a fake web backend, without a provider call.
+
+Native shell actions still obey Persona command gates in bypassPermissions. The
+adapter reads current tool rules for the actual session, rejects matching shell
+commands (including nested shell wrappers), and asks the model to use the scoped
+Persona action tool. Failed rule reads block shell execution; ordinary coding
+Agent sessions retain their existing behavior. Gate parsing is shared with the
+OpenCode companion and covered by its existing contracts plus pi-specific fakes.
+
+A Persona message arriving during an active pi Assistant turn returns retryable
+`busy` with `delivered: none`, leaving role, permissions and hidden context intact.
+The normal durable delivery path waits for idle, so the next `before_agent_start`
+can apply the fresh snapshot and policy together. An answer to the current turn's
+own question may resolve that question without changing its role or permissions.
+Ordinary coding Agent steering is unchanged.

@@ -89,10 +89,12 @@ describe("a task card's agent line", () => {
     expect(line?.who).toBe("MacBook · 5.5");
   });
 
-  it("never shows a raw model id: one nobody names reads as the model pill reads it", () => {
-    const line = agentLine([todo("a", { agents: [on("s1")] })], [row("s1", { model: "acme/orbit-7", effort: "medium" })]);
-    expect(line?.who).toBe(`MacBook · orbit-7 · ${effort("medium")}`);
-    expect(line?.who).not.toContain("acme/");
+  it("keeps the gateway channel in an unnamed model label as the model pill does (#10125)", () => {
+    const work = [todo("a", { agents: [on("s1")] })];
+    for (const channel of ["acme", "relay"]) {
+      const line = agentLine(work, [row("s1", { model: `${channel}/orbit-7`, effort: "medium" })]);
+      expect(line?.who).toBe(`MacBook · ${channel}/orbit-7 · ${effort("medium")}`);
+    }
   });
 
   it("counts the agents as before while none of their rows is read", () => {

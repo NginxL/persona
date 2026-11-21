@@ -68,6 +68,9 @@ type ExtensionSecretView struct {
 	Description string `json:"description,omitempty"`
 	Required    bool   `json:"required,omitempty"`
 	Set         bool   `json:"set"`
+	// List and EntryTitle associate a live entry secret with its list; Name is its stable entry/storage ID.
+	List       string `json:"list,omitempty"`
+	EntryTitle string `json:"entry_title,omitempty"`
 	// Hint is a set secret's last four characters, when its spec asks (hint "last4", #5906); never more of it.
 	Hint string `json:"hint,omitempty"`
 	// Reference: the secret holds a reference, not a value (secret_refs.go); never a hint then.
@@ -76,11 +79,39 @@ type ExtensionSecretView struct {
 
 // switched is the detail a switch answers, with what did not follow it (switchExtension).
 func (ps *extensions) switched(ctx context.Context, id string, warnings []string) ExtensionDetail {
-	d := ps.detail(ctx, ps.reg.Get(id))
+	d := ps.detail(ctx, ps.reg.Snapshot(id))
 	if len(warnings) > 0 {
 		d.Warnings = append(slices.Clone(d.Warnings), warnings...)
 	}
 	return d
+}
+
+func entryNetworkForm(form *extension.Schema, m *extension.Manifest) *extension.Schema {
+	if form == nil {
+		return nil
+	}
+	out := *form
+	out.Fields = slices.Clone(form.Fields)
+	for i := range out.Fields {
+		list := &out.Fields[i]
+		if !list.EntryList() || list.Items == nil {
+			continue
+		}
+		item := *list.Items
+		item.Fields = slices.Clone(list.Items.Fields)
+		list.Items = &item
+		for _, network := range m.Permissions.ConfiguredNetworks() {
+			if network.Malformed || network.List != list.Name {
+				continue
+			}
+			for j := range list.Items.Fields {
+				if list.Items.Fields[j].Name == network.Field {
+					list.Items.Fields[j].ClearsSecret = true
+				}
+			}
+		}
+	}
+	return &out
 }
 
 func (ps *extensions) detail(ctx context.Context, p *extension.Extension) ExtensionDetail {
@@ -88,6 +119,7 @@ func (ps *extensions) detail(ctx context.Context, p *extension.Extension) Extens
 	l := ps.h.contextLang(ctx)
 	form := p.L10n.Schema(l, p.Schema)  // the form's text in the request's language (#897); p.Schema is shared
 	form = withoutIPhonePhones(p, form) // each iPhone's own consent, never set from a form (iphone.go)
+	form = entryNetworkForm(form, m)
 	d := ExtensionDetail{ExtensionView: ps.view(ctx, p), Publisher: m.Publisher, Homepage: m.Homepage, Origin: p.Record.Origin,
 		PreviousVersion: p.Record.PreviousVersion, ReadOnly: p.ReadOnly(), Form: form, Permissions: extension.ExplainWith(l, m, ps.reg.Config(p)),
 		Contributions: ps.contributionViews(p), Depends: ps.reg.DependenciesContext(ctx, m), ExtensionPack: m.ExtensionPack}
@@ -121,9 +153,14 @@ func (ps *extensions) detail(ctx context.Context, p *extension.Extension) Extens
 		}
 		set := ps.reg.SecretsSet(ctx, p)
 		var plain map[string]string // read when a secret is set: shown by its end, or a reference
-		for _, s := range m.Secrets {
-			if set[s.Name] && plain == nil {
+		loadPlain := func() {
+			if plain == nil {
 				plain, _ = ps.reg.Secrets(ctx, p.Record.ID)
+			}
+		}
+		for _, s := range m.Secrets {
+			if set[s.Name] {
+				loadPlain()
 			}
 			shown := p.L10n.Secret(l, s)
 			view := ExtensionSecretView{Name: s.Name, Title: shown.Title, Description: shown.Description, Required: s.Required, Set: set[s.Name]}
@@ -134,6 +171,32 @@ func (ps *extensions) detail(ctx context.Context, p *extension.Extension) Extens
 			}
 			d.Secrets = append(d.Secrets, view)
 		}
+		if form != nil {
+			var config map[string]json.RawMessage
+			_ = json.Unmarshal(d.Config, &config)
+			for _, f := range form.EntryListFields() {
+				var entries []map[string]json.RawMessage
+				_ = json.Unmarshal(config[f.Name], &entries)
+				for _, entry := range entries {
+					var id string
+					if json.Unmarshal(entry["_id"], &id) != nil || id == "" {
+						continue
+					}
+					if set[id] {
+						loadPlain()
+					}
+					spec := *f.Secret
+					view := ExtensionSecretView{Name: id, Title: spec.Title, Description: spec.Description, Required: spec.Required,
+						Set: set[id], List: f.Name, EntryTitle: extensionEntryTitle(f, entry)}
+					if ref, ok := extension.ReferenceOf(plain[id]); ok {
+						view.Reference = ps.secretReferenceView(ctx, ref)
+					} else {
+						view.Hint = extension.SecretHint(spec, plain[id])
+					}
+					d.Secrets = append(d.Secrets, view)
+				}
+			}
+		}
 		d.SecretUsers = ps.secretUsers(ctx, p, l)
 		ps.h.volcDetail(ctx, p, &d) // its meetings switch is the assistant's choice (volc_extension.go)
 	}
@@ -141,6 +204,21 @@ func (ps *extensions) detail(ctx context.Context, p *extension.Extension) Extens
 		d.HandoffRules = ps.h.handoffRulesOf(ctx, p.Record.ID)
 	}
 	return d
+}
+
+func extensionEntryTitle(list extension.Field, entry map[string]json.RawMessage) string {
+	for pass := range 2 {
+		for _, field := range list.Items.Fields {
+			if pass == 0 && field.Name != "name" {
+				continue
+			}
+			var value string
+			if json.Unmarshal(entry[field.Name], &value) == nil && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return ""
 }
 
 // actorOr is actor, or def for the master token over loopback.
@@ -299,9 +377,14 @@ func (h *Manager) extensionRoutes(api *http.ServeMux) {
 			}
 			in.Config = rest
 		}
-		// Secrets bound to the old configuration go first (the voice extension's key, moved to another host:
-		// voice_extension.go); said in the answer, an error's too.
-		cleared, err := ps().reg.SetConfigClearing(r.Context(), p.Record.ID, in.Config, actor(r))
+		// Only an opted-in full editor may change entry lists. An immediate save can explicitly preserve them while
+		// still receiving the opted-in detail; older full-config drafts always preserve the hub's current arrays.
+		var cleared []string
+		if r.URL.Query().Get("entry_lists") == "1" && r.URL.Query().Get("preserve_entries") != "1" {
+			cleared, err = ps().reg.SetConfigClearing(r.Context(), p.Record.ID, in.Config, actor(r))
+		} else {
+			cleared, err = ps().reg.SetConfigPreservingEntries(r.Context(), p.Record.ID, in.Config, actor(r))
+		}
 		if err != nil {
 			var fe *extension.FieldError
 			if errors.As(err, &fe) {

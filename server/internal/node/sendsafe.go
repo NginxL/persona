@@ -543,10 +543,10 @@ const (
 // notRunningRefusal refuses, with nothing typed, a send to a session that is not live when the machine's engine
 // cannot start sessions (no host.Launcher) or is Orca, instead of trying to resume it there: when the pane it was last
 // seen in is still there, its agent is not in front (suspended, in the background); otherwise it is gone. nil when the
-// engine can resume it: herdr, and Orca for a Claude session (its own <id>.jsonl; Codex, TRAEX and pi sessions are
+// engine can resume it: herdr, and Orca for a Claude session (its own <id>.jsonl; Codex, TRAE CLI and pi sessions are
 // not resumed in Orca).
 // orcaContinues: Orca can continue session id once its agent is gone — a Claude session (its own <id>.jsonl, not a
-// Codex or TRAEX rollout); Codex, TRAEX and pi sessions are not resumed in Orca (#5548). Send (notRunningRefusal) and
+// Codex or TRAE CLI rollout); Codex, TRAE CLI and pi sessions are not resumed in Orca (#5548). Send (notRunningRefusal) and
 // retire share it, so the task closer never closes an agent a message cannot bring back.
 func (n *Node) orcaContinues(id string) bool { return n.claudeTranscript(id, true) != "" }
 

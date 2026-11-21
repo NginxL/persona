@@ -2,7 +2,7 @@ import SwiftUI
 import PersonaWire
 
 /// One dispatch, one card per Agent (docs/design/DESIGN_SYSTEM.md §3.3; the web's `HandoffCard`): an arrow, the Agent's
-/// title with how it came to the task (New, Already Active, Resumed), when it last moved and its state, and an arrow out.
+/// title with how it came to the task (New, Already Active, Resumed, Continuation), when it last moved and its state, and an arrow out.
 /// A plan names only its own tasks. Before an Agent is up the card stands for the task: starting, why it did not start,
 /// or that it closed. Agents linked together are each a card; a later Agent is not on this hand-off. It is the task's only
 /// card in the chat (#8237): a start that failed or a turn the model service cut off shows here, in place, with why.
@@ -85,7 +85,9 @@ struct DispatchHandoffCard: View {
             }
             return .agent(at: at, state: state, limit: limit)
         }
-        if let failure = failure(todo) { return .failed(StartFailureWords.cardLine(failure)) }
+        if let failure = failure(todo) {
+            return .failed(StartFailureWords.cardLine(failure, canOpen: entry.detailTodoID != nil))
+        }
         if todo?.doneAt != nil { return .closedEarly }
         if todo == nil, entry.todoID != nil, !store.todos.isEmpty { return .gone }
         return .starting
@@ -119,12 +121,18 @@ struct DispatchHandoffCardBody: View, Equatable {
     var disambiguate = false
     private var store: TasksStore { .shared }
 
-    /// "3 min. ago": minutes are enough for when an Agent last moved.
+    private static let justNow = String(localized: "Just now")
     private static let relative: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
         return f
     }()
+
+    static func activityTime(_ at: Date, now: Date) -> String {
+        // Match the web hand-off card's recent window, including timestamps ahead of the device clock.
+        if now.timeIntervalSince(at) < 45 { return justNow }
+        return relative.localizedString(for: at, relativeTo: now)
+    }
 
     var body: some View {
         let card = HStack(spacing: Theme.Space.m) {
@@ -140,14 +148,14 @@ struct DispatchHandoffCardBody: View, Equatable {
                 metaLine
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if entry.todoID != nil || entry.sessionID != nil {
+            if entry.detailTodoID != nil {
                 ThemedIcon(Theme.Icon.open).font(Theme.Font.labelStrong).foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(padding: Theme.Space.m)
-        if let id = entry.todoID {
+        if let id = entry.detailTodoID {
             let ident = (disambiguate && entry.sessionID != nil) ? "dispatch.task.\(id).\(entry.sessionID!)" : "dispatch.task.\(id)"
             Button { open(id) } label: { card.contentShape(.rect) }
                 .buttonStyle(.plain)
@@ -161,10 +169,10 @@ struct DispatchHandoffCardBody: View, Equatable {
         }
     }
 
-    /// How the Agent came to the task: filled for New and Resumed, outlined for one that was running already.
+    /// Filled for New, Resumed and Continuation, outlined for an Agent that was running already.
     @ViewBuilder private var badge: some View {
         let active = entry.wake == "active"
-        Text(active ? String(localized: "Already Active") : entry.wake == "resumed" ? String(localized: "Resumed") : String(localized: "New [Task Handoff Badge]"))
+        Text(badgeTitle)
             .font(Theme.Font.labelHeavy)
             .textCase(.uppercase)
             .lineLimit(1)
@@ -177,6 +185,15 @@ struct DispatchHandoffCardBody: View, Equatable {
             .accessibilityIdentifier("dispatch.badge")
     }
 
+    private var badgeTitle: String {
+        switch entry.wake {
+        case "active": String(localized: "Already Active")
+        case "resumed": String(localized: "Resumed")
+        case "continuation": String(localized: "Continuation [Task Handoff Badge]")
+        default: String(localized: "New [Task Handoff Badge]")
+        }
+    }
+
     @ViewBuilder private var metaLine: some View {
         switch meta {
         case .agent(let at, let state, let limit):
@@ -184,7 +201,7 @@ struct DispatchHandoffCardBody: View, Equatable {
                 if let at {
                     ThemedIcon(Theme.Icon.recent).font(Theme.Font.label).foregroundStyle(.secondary)
                     VisibleTimelineView(interval: 60) { now in
-                        Text(Self.relative.localizedString(for: min(at, now), relativeTo: now)).lineLimit(1)
+                        Text(Self.activityTime(at, now: now)).lineLimit(1)
                     }
                 } else {
                     Text("No activity yet").lineLimit(1).foregroundStyle(.tertiary)
@@ -206,7 +223,7 @@ struct DispatchHandoffCardBody: View, Equatable {
                 if let at {
                     ThemedIcon(Theme.Icon.recent).font(Theme.Font.label).foregroundStyle(.secondary)
                     VisibleTimelineView(interval: 60) { now in
-                        Text(Self.relative.localizedString(for: min(at, now), relativeTo: now)).lineLimit(1).foregroundStyle(.secondary)
+                        Text(Self.activityTime(at, now: now)).lineLimit(1).foregroundStyle(.secondary)
                     }
                     Text(verbatim: "·").foregroundStyle(.tertiary)
                 }
@@ -219,7 +236,7 @@ struct DispatchHandoffCardBody: View, Equatable {
             .accessibilityIdentifier("dispatch.interrupted")
         case .failed(let line):
             // the raw error is the task's details' (TaskDetailSheet), never the card's
-            Text(line).font(Theme.Font.caption).foregroundStyle(Theme.danger).lineLimit(2)
+            Text(line).font(Theme.Font.caption).foregroundStyle(Theme.danger).lineLimit(entry.detailTodoID == nil ? nil : 2)
                 .accessibilityIdentifier("dispatch.failure")
         case .gone:
             Text("This task no longer exists").font(Theme.Font.caption).foregroundStyle(.tertiary).lineLimit(1)

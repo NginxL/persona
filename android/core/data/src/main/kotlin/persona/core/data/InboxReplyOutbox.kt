@@ -1,6 +1,7 @@
 package persona.core.data
 
 import persona.core.contracts.SessionKey
+import persona.core.contracts.api.LarkMention
 import persona.feature.inbox.InboxHandOffRequest
 import persona.feature.inbox.ReplyRequest
 import persona.feature.inbox.ReplyTarget
@@ -11,7 +12,13 @@ import kotlin.coroutines.CoroutineContext
 
 /** AI-authored drafts require confirmation; the flag is omitted on disk when false. */
 @Serializable
-internal data class InboxStoredDraft(val text: String, val clientId: String, val version: String? = null, val ai: Boolean = false)
+internal data class InboxStoredDraft(
+    val text: String,
+    val clientId: String,
+    val version: String? = null,
+    val ai: Boolean = false,
+    val mentions: List<LarkMention> = emptyList(),
+)
 
 @Serializable
 internal data class InboxPendingReply(

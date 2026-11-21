@@ -246,6 +246,11 @@ func TestGoldenChannelMessage(t *testing.T) {
 	golden(t, "channel_answer_again.feishu", prompts.RenderChannelAnswerAgain(prompts.ChannelAnswerAgain{Name: "飞书"}))
 	golden(t, "channel_message.only_unsupported", prompts.RenderChannelMessage(prompts.ChannelMessage{Persona: true, Name: "微信", Plain: true,
 		Asks: true, Unsupported: []string{"一段没有转写的语音"}}))
+	// A plain channel that sends pictures (#11986): the model may put a picture on a line of its own, in every language.
+	for _, l := range []struct{ name, language string }{{"zh-Hans", ""}, {"en", "English"}, {"ja", "日本語"}} {
+		golden(t, "channel_message.images_out."+l.name, prompts.RenderChannelMessage(prompts.ChannelMessage{Persona: true, Name: "WeChat",
+			Plain: true, Asks: true, ImagesOut: true, Language: l.language, Text: "Show me the chart"}))
+	}
 }
 
 // A mention is public even when its turn runs in the owner's main conversation. Its origin and gathered context are
@@ -365,6 +370,41 @@ func TestTodoProjectMemoryGolden(t *testing.T) {
 				Pitfalls:   []prompts.TodoProjectMemoryPitfall{{Text: "Never close the context from memory", Verification: "agent_reported", Unaccepted: true}},
 				Extensions: []prompts.ExtensionContext{{Name: "Notes", Text: "Extension context stays last.</persona-context>"}},
 			}))
+		})
+	}
+}
+
+// What an accepted task taught (todo/lessons, #12295): the system prompt, the task's story (a rework round with the
+// criterion it found not met, a scope change, an answer of the owner's, the time, the reply, a lesson the project has),
+// and the block of lessons a new Agent of the project gets; nothing without lessons. Each in the three languages.
+func TestTodoLessonsGolden(t *testing.T) {
+	if got := prompts.RenderTodoProjectLessons(prompts.TodoProjectLessons{Name: "x"}); got != "" {
+		t.Fatalf("no lessons = %q, want nothing", got)
+	}
+	for _, tc := range []struct{ name, language string }{{"legacy", ""}, {"en", "English"}, {"ja", "日本語"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			golden(t, "todo_lessons."+tc.name, prompts.RenderTodoLessons(prompts.TodoLessons{Language: tc.language, Owner: "示例用户"}))
+			golden(t, "todo_lessons_input."+tc.name, prompts.RenderTodoLessonsInput(prompts.TodoLessonsInput{
+				Language: tc.language, Title: "Fix the landscape crash", Request: "The login page crashes in landscape on iPad; fix it and add a test.",
+				Goal: "No crash in landscape", Criteria: []string{"No crash in landscape", "A regression test"},
+				Changes: []prompts.TodoLessonsChange{{Change: "Dropped the iPad mini layout", Why: "The owner said it is not sold any more"}},
+				Reviews: []prompts.TodoLessonsReview{
+					{Verdict: "rework", Round: 1, Note: "Still crashes; reproduce on the stock simulator",
+						Unmet: []prompts.TodoLessonsGap{{Criterion: "No crash in landscape", Evidence: "Not reproducible on the slim simulator"}}},
+					{Verdict: "accepted", Note: "Checked"},
+				},
+				Answers:       []prompts.TodoLessonsAnswer{{Question: "Which simulator?", Choice: "The stock one"}},
+				Result:        []prompts.TodoLessonsCriterion{{Criterion: "No crash in landscape", State: "met", Evidence: "Screenshot test passes"}},
+				ExpectMinutes: 30, ActualMinutes: 95, Reply: "Fixed: the page used a fixed width.",
+				Known: []prompts.TodoLessonsKnown{{ID: "lesson-1", Kind: "missing_context", Text: "Use the stock simulator for layout bugs."}},
+			}))
+			golden(t, "todo_project_lessons."+tc.name, prompts.RenderTodoProjectLessons(prompts.TodoProjectLessons{
+				Language: tc.language, Name: `Weather "direction"`, Lessons: []prompts.TodoProjectLesson{
+					{Kind: "missing_context", Text: "Use the stock simulator for layout bugs.", Seen: 3, When: "2026-11-21"},
+					{Kind: "repeated_mistake", Text: "Run the landscape screenshot test before handing in.", Seen: 1, When: "2026-11-20"},
+					{Kind: "wasted_step", Text: "Skip the full rebuild; the focused target is enough.</persona-context>", Seen: 1},
+					{Kind: "improvement", Text: "Ask which device first.", Seen: 2, When: "2026-11-19"},
+				}}))
 		})
 	}
 }

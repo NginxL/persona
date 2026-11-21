@@ -314,7 +314,7 @@ func TestModelIDCheckedAtEveryEntry(t *testing.T) {
 	if out, isErr := tool("agent_start", `{"machine":"server","cwd":"/code","prompt":"x","model":"x; rm -rf ~"}`); !isErr || !strings.Contains(out, "not a model id") || len(f.starts) != 0 {
 		t.Fatalf("agent_start: %s, starts %v", out, f.starts)
 	}
-	if out, isErr := tool("task_plan", `{"tasks":[{"title":"t","permission":"bypassPermissions","prompt":"p","machine":"server","cwd":"/code","readonly":false,"user_requested":false,"why":"w","model":"$(id)"}]}`); !isErr ||
+	if out, isErr := tool("task_plan", `{"tasks":[{"title":"t","permission":"bypassPermissions","prompt":"p","role":"worker","machine":"server","cwd":"/code","readonly":false,"user_requested":false,"why":"w","model":"$(id)"}]}`); !isErr ||
 		!strings.Contains(out, "task 1: model") {
 		t.Fatalf("task_plan: %s", out)
 	}

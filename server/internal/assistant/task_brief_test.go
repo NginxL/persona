@@ -43,7 +43,7 @@ func tool(t testing.TB, s *Service, name string, args any) (string, bool) {
 
 func briefTask(over map[string]any) map[string]any {
 	task := map[string]any{"title": "fix the login crash", "prompt": "the login page crashes in landscape: fix it and add a test",
-		"machine": "box", "cwd": "/code/app", "readonly": true, "permission": "bypassPermissions", "why": "the repository is on box",
+		"role": "worker", "machine": "box", "cwd": "/code/app", "readonly": true, "permission": "bypassPermissions", "why": "the repository is on box",
 		"goal": "the login page no longer crashes in landscape", "done_when": []string{"PR merged to main", "a test covers landscape"},
 		"expect_minutes": 30}
 	for k, v := range over {

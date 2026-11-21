@@ -44,19 +44,25 @@ def go_binary(platform, commit=COMMIT, program='personad', **overrides):
     return bytes(header) + info + encoded_string(b'go1.24.13') + encoded_string(module)
 
 
-def release(directory, commit=COMMIT, build=BUILD):
+def release(directory, commit=COMMIT, build=BUILD, *, nodes=False, wrong_program=None):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     manifest = {'version': f'master-{commit[:12]}-{build}', 'build': build,
                 'commit': commit, 'files': {}}
-    for platform in sorted(artifacts.PLATFORMS):
-        binary = go_binary(platform, commit)
-        name = f'personad-{platform}-{commit[:12]}.gz'
-        compressed = gzip.compress(binary, mtime=0)
-        (directory / name).write_bytes(compressed)
-        manifest['files'][platform] = {'name': name, 'size': len(compressed),
-                                      'sha256': hashlib.sha256(compressed).hexdigest(),
-                                      'binary_sha256': hashlib.sha256(binary).hexdigest()}
+    groups = {'personad': manifest['files']}
+    if nodes:
+        manifest['nodes'] = {'persona-node': {}}
+        groups.update(manifest['nodes'])
+    for program, files in groups.items():
+        for platform in sorted(artifacts.PLATFORMS):
+            identity = 'personad' if wrong_program == (program, platform) else program
+            binary = go_binary(platform, commit, program=identity)
+            name = f'{program}-{platform}-{commit[:12]}.gz'
+            compressed = gzip.compress(binary, mtime=0)
+            (directory / name).write_bytes(compressed)
+            files[platform] = {'name': name, 'size': len(compressed),
+                               'sha256': hashlib.sha256(compressed).hexdigest(),
+                               'binary_sha256': hashlib.sha256(binary).hexdigest()}
     (directory / 'node-manifest.json').write_text(json.dumps(manifest))
     return manifest
 
@@ -65,9 +71,9 @@ def health(manifest):
     return {'ok': True, 'version': manifest['version'], 'build': manifest['build']}
 
 
-def native_result(manifest):
+def native_result(manifest, program='personad'):
     return json.dumps({'version': manifest['version'], 'os': 'linux',
-                       'arch': 'amd64', 'program': 'personad'}).encode()
+                       'arch': 'amd64', 'program': program}).encode()
 
 
 class NodeArtifactTests(unittest.TestCase):
@@ -85,7 +91,11 @@ class NodeArtifactTests(unittest.TestCase):
 
     def publish(self, manifest=None, staged=None):
         manifest = manifest or self.manifest
-        with patch.object(artifacts.subprocess, 'check_output', return_value=native_result(manifest)) as native:
+        def check(args, **kwargs):
+            program = Path(args[0]).name.removesuffix('-linux-amd64')
+            return native_result(manifest, program)
+
+        with patch.object(artifacts.subprocess, 'check_output', side_effect=check) as native:
             result = artifacts.publish_nodes(self.root, staged or self.staged, manifest, health(manifest))
         for call in native.call_args_list:
             self.assertEqual(call.args[0][-1], 'node-update-check')
@@ -108,6 +118,7 @@ class NodeArtifactTests(unittest.TestCase):
                      lambda m: m.update(version='other'), lambda m: m['files'].pop('darwin-arm64'),
                      lambda m: m['files'].update({'windows-amd64': {}}),
                      lambda m: m.update(programs={'other': {}}), lambda m: m.update(nodes={'other': {}}),
+                     lambda m: m.update(nodes={'persona-node': {'linux-amd64': {}}}),
                      lambda m: m['files']['linux-amd64'].update(sha256='f' * 64)]
         for change in mutations:
             changed = copy.deepcopy(self.manifest)
@@ -172,6 +183,41 @@ class NodeArtifactTests(unittest.TestCase):
         self.assertEqual(self.pointer.resolve(), old)
         self.assertFalse((self.root / 'releases/nodes' / self.manifest['version']).exists())
         self.assertFalse(list((self.root / 'releases/nodes').glob('.stage-*')))
+
+    def test_split_release_replaces_legacy_pointer_and_checks_dedicated_files(self):
+        old = self.old_publication()
+        manifest = release(self.staged, nodes=True)
+        self.assertEqual(artifacts.node_manifest(self.staged, self.hub), manifest)
+        destination = self.publish(manifest)
+        self.assertEqual(self.pointer.resolve(), destination)
+        self.assertTrue(old.is_dir())
+        self.assertTrue(artifacts.managed_nodes(self.root))
+        for program, platform, artifact in artifacts.node_files(manifest):
+            binary = destination / f'{program}-{platform}'
+            self.assertEqual(artifacts.digest(binary), artifact['binary_sha256'])
+            self.assertEqual(binary.with_suffix('.version').read_text(), manifest['version'] + '\n')
+        self.assertEqual(self.publish(manifest), destination)
+        metadata = destination / 'manifest.json'
+        metadata.write_text(json.dumps({k: v for k, v in manifest.items() if k != 'nodes'}))
+        self.assertFalse(artifacts.managed_nodes(self.root))
+        metadata.write_text(json.dumps(manifest))
+        (destination / 'persona-node-darwin-arm64.version').write_text('wrong\n')
+        self.assertFalse(artifacts.managed_nodes(self.root))
+
+    def test_dedicated_program_and_native_self_check_fail_before_activation(self):
+        old = self.old_publication()
+        manifest = release(self.staged, nodes=True, wrong_program=('persona-node', 'darwin-arm64'))
+        with self.assertRaisesRegex(ValueError, 'Node source or build platform mismatch'):
+            self.publish(manifest)
+        self.assertEqual(self.pointer.resolve(), old)
+
+        manifest = release(self.staged, nodes=True)
+        with patch.object(artifacts.subprocess, 'check_output', return_value=native_result(manifest)):
+            with self.assertRaisesRegex(ValueError, 'Native node self-check differs'):
+                artifacts.publish_nodes(self.root, self.staged, manifest, health(manifest))
+        self.assertEqual(self.pointer.resolve(), old)
+        self.assertFalse((old.parent / manifest['version']).exists())
+        self.assertFalse(list(old.parent.glob('.stage-*')))
 
     def test_native_self_check_failure_preserves_previous_publication(self):
         old = self.old_publication()

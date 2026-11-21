@@ -7,5 +7,6 @@
   "remove_label": "Remove this context",
   "remove": "Remove",
   "workspace": "Workspace",
+  "repository": "Repository",
   "skill": "Skill"
 }

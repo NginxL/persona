@@ -15,6 +15,7 @@ import persona.android.formatSharedContent
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.ConnectionState
+import persona.core.contracts.api.MessageVia
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
@@ -150,14 +151,14 @@ class ShareQueue @Inject constructor(
         drainQueuedShares(entries, owner::active) { file ->
             deliverQueuedShare(file, owner.hub.connection.state.value == ConnectionState.Online,
                 untitled = application.getString(R.string.app_share_content),
-                prepareMain = { owner.data.messages.prepareMainConversation() },
+                prepareMain = { via -> owner.data.messages.prepareMainConversation(via) },
                 upload = { machine, attachment, name, main -> upload(owner, machine, main, attachment, name) },
-                main = { body, id -> owner.data.messages.sendToMain(body, id) },
+                main = { body, id, via -> owner.data.messages.sendToMain(body, id, null, via) },
                 // A session of another hub group goes to that group (docs/android/android.md "Multiple hubs"); one group: the same outbox.
-                agent = { target, body, id ->
+                agent = { target, body, id, via ->
                     if (persona.core.contracts.GroupKeys.namespaceOf(target.machineId) == null && runtime.groupOf(target.machineId)?.data === owner.data)
-                        owner.data.messages.send(target, body, id)
-                    else runtime.messages.send(target, body, id)
+                        owner.data.messages.send(target, body, id, null, null, null, via)
+                    else runtime.messages.send(target, body, id, null, null, null, via)
                 })
         }
     } }
@@ -241,10 +242,10 @@ internal suspend fun drainQueuedShares(entries: List<File>, active: () -> Unit, 
 internal suspend fun deliverQueuedShare(
     file: File, connected: Boolean,
     untitled: String,
-    prepareMain: suspend () -> SessionKey?,
+    prepareMain: suspend (String) -> SessionKey?,
     upload: suspend (String, File, String, Boolean) -> String,
-    main: suspend (String, String) -> Unit,
-    agent: suspend (SessionKey, String, String) -> Unit,
+    main: suspend (String, String, String) -> Unit,
+    agent: suspend (SessionKey, String, String, String) -> Unit,
 ): Boolean {
     var entry = JsonCodec.decodeFromString<QueuedShare>(file.readText())
     fun save() = writePlatformFile(file, JsonCodec.encodeToString(QueuedShare.serializer(), entry))
@@ -255,7 +256,7 @@ internal suspend fun deliverQueuedShare(
     }
     if (entry.attachments.isNotEmpty() && entry.finalText == null) {
         if (!connected) return true
-        val target = entry.machine?.let { SessionKey(it, requireNotNull(entry.session)) } ?: prepareMain() ?: return true
+        val target = entry.machine?.let { SessionKey(it, requireNotNull(entry.session)) } ?: prepareMain(MessageVia.Share) ?: return true
         for (index in entry.attachments.indices) {
             val attachment = entry.attachments[index]
             if (attachment.path != null) continue
@@ -270,8 +271,8 @@ internal suspend fun deliverQueuedShare(
         entry.attachments.map { requireNotNull(it.path) }, entry.note, entry.asContext, untitled)
     if (entry.finalText == null) { entry = entry.copy(finalText = text); save() }
     check(text.isNotBlank())
-    if (entry.machine == null) main(text, entry.id)
-    else agent(SessionKey(requireNotNull(entry.machine), requireNotNull(entry.session)), text, entry.id)
+    if (entry.machine == null) main(text, entry.id, MessageVia.Share)
+    else agent(SessionKey(requireNotNull(entry.machine), requireNotNull(entry.session)), text, entry.id, MessageVia.Share)
     // Core outbox has committed the complete message, including all uploaded paths.
     check(file.parentFile!!.deleteRecursively())
     return false

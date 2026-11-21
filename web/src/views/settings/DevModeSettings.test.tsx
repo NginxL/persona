@@ -101,7 +101,11 @@ describe("Developing Persona", () => {
   it("turns off at once when nothing is recorded", async () => {
     localStorage.setItem(DEV_MODE_KEY, "2027-01-15T08:00:00.000Z");
     act(() => root.render(<DevModeRows />));
-    await flush();
+    // Even an empty recorder must finish reporting its size before Turn Off chooses the immediate or confirm path.
+    await vi.waitFor(async () => {
+      await flush();
+      expect(host.textContent).toContain(" · ");
+    });
     await act(async () => toggle().click());
     await vi.waitFor(async () => {
       await flush();

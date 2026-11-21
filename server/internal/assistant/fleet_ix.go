@@ -218,6 +218,11 @@ func (s *Service) markTold(ix proto.Interaction) {
 // nodeInteraction is a node's interaction.create: allowed right away when "Always allow in this session" already covers it, else
 // shown and waited for.
 func (s *Service) nodeInteraction(ctx context.Context, ix proto.Interaction) (proto.Resolution, error) {
+	// These capabilities are manager-minted only. A node cannot turn its card
+	// into an exact owner-action proposal or exempt it from expiry.
+	ix.ApprovalBatchID, ix.ApprovalItemID = "", ""
+	ix.OwnerProposal, ix.NoExpiry = false, false
+	ix.OwnerApprovalPhrases = nil
 	if reservedCard(ix) {
 		return proto.Resolution{}, errReservedCard
 	}
@@ -306,17 +311,31 @@ func (s *Service) waitInteraction(ctx context.Context, ix proto.Interaction) (pr
 }
 
 func (s *Service) waitInteractionPrepared(ctx context.Context, ix proto.Interaction, prepared *preparedApproval) (proto.Resolution, error) {
+	return s.waitInteractionReady(ctx, ix, prepared, nil)
+}
+
+// waitInteractionReady is waitInteractionPrepared with an optional registration
+// notification for server-owned proposal groups. The notification is closed
+// after the pending entry and its announcement exist, before this waiter blocks.
+func (s *Service) waitInteractionReady(ctx context.Context, ix proto.Interaction, prepared *preparedApproval, ready chan<- struct{}) (proto.Resolution, error) {
 	ix = cleanTitle(ix)
 	// Only an operation registered by this process can advertise clarification.
 	ix.CanClarify = prepared != nil
 	// A Just me turn's card, the node's or the manager's own (ask_user, a confirmation): pushed without its content,
 	// never to Lark or a channel (meeting_justme.go).
 	ix.Private = ix.Private || s.justMeNow(ix.MachineID, ix.SessionID)
-	if ix.ExpiresAt.IsZero() {
+	if ix.ExpiresAt.IsZero() && !persistentOwnerProposal(ix) {
 		ix.ExpiresAt = time.Now().Add(s.notifyTimings().hookTimeout()).UTC()
 	}
+	if !ownerActionProposal(ix) {
+		ix.NoExpiry = false
+	}
+	freshLogical, err := s.logicalPublishInteraction(ctx, ix)
+	if err != nil {
+		return proto.Resolution{}, err
+	}
 	again := false
-	if ix.Resumable {
+	if ix.Resumable && !freshLogical {
 		restartPrepared := false
 		s.fleet.mu.Lock()
 		if p := s.fleet.interactions[ix.ID]; p != nil && p.local == nil {
@@ -350,6 +369,9 @@ func (s *Service) waitInteractionPrepared(ctx context.Context, ix proto.Interact
 			}
 			if ix.Kind == proto.IxElicitation && !s.elicitationReachable(ix) {
 				_ = s.resolve(ix.ID, proto.Resolution{Dismiss: true})
+			}
+			if ready != nil {
+				close(ready)
 			}
 			// Resumable node cards reconnect through reporter-less interaction.create requests; MCP elicitation cards
 			// are not resumable, so this branch never has a wait reporter to restore.
@@ -441,6 +463,9 @@ func (s *Service) waitInteractionPrepared(ctx context.Context, ix proto.Interact
 	if prepared != nil {
 		s.startPreparedTimer(p)
 	}
+	if ready != nil {
+		close(ready)
+	}
 	resume := pushMCPInteraction(ctx, ix)
 	defer resume()
 	return s.await(ctx, p)
@@ -457,10 +482,17 @@ func (s *Service) await(ctx context.Context, p *pending) (proto.Resolution, erro
 		p.resolved = make(chan struct{})
 	}
 	resolved := p.resolved
-	s.fleet.mu.Unlock()
 	id := p.ix.ID
-	timer := time.NewTimer(time.Until(p.ix.ExpiresAt))
-	defer timer.Stop()
+	expiresAt := p.ix.ExpiresAt
+	persistent := persistentOwnerProposal(p.ix)
+	s.fleet.mu.Unlock()
+	var timer *time.Timer
+	var timeout <-chan time.Time
+	if !expiresAt.IsZero() && !persistent {
+		timer = time.NewTimer(time.Until(expiresAt))
+		timeout = timer.C
+		defer timer.Stop()
+	}
 	status := "cancelled"
 	select {
 	case <-resolved:
@@ -469,7 +501,7 @@ func (s *Service) await(ctx context.Context, p *pending) (proto.Resolution, erro
 	case r := <-p.done:
 		s.finishInteraction(id)
 		return r, nil
-	case <-timer.C:
+	case <-timeout:
 		status = "expired"
 	case <-ctx.Done():
 	}
@@ -506,6 +538,12 @@ func (s *Service) await(ctx context.Context, p *pending) (proto.Resolution, erro
 		s.fleet.mu.Unlock()
 		return proto.Resolution{Dismiss: true}, nil
 	}
+	if status == "cancelled" && persistentOwnerProposal(p.ix) {
+		// Only this caller is leaving. The durable proposal and every original
+		// surface remain pending; there is no interrupted Apply to replay.
+		s.fleet.mu.Unlock()
+		return proto.Resolution{Dismiss: true, Reason: "owner-action proposal remains pending"}, nil
+	}
 	if status == "cancelled" && p.ix.Resumable && s.orphanLocked(p) {
 		s.fleet.mu.Unlock()
 		return proto.Resolution{Dismiss: true}, nil // disconnected hook; a new one can resume
@@ -521,6 +559,9 @@ func (s *Service) await(ctx context.Context, p *pending) (proto.Resolution, erro
 // orphanLocked starts p's grace period: it ends (cancelled) unless its hook claims it again first. Callers hold
 // s.fleet.mu.
 func (s *Service) orphanLocked(p *pending) bool {
+	if persistentOwnerProposal(p.ix) {
+		return true // no grace deadline: the proposal itself is reconstructable
+	}
 	if p.orphaned != nil {
 		return true
 	}
@@ -663,6 +704,9 @@ func (s *Service) resolveApproved(ctx context.Context, id string, r proto.Resolu
 		ownerSession = prepared.ix.SessionID
 	}
 	s.fleet.mu.Unlock()
+	if prepared != nil && ownerActionProposal(prepared.ix) {
+		return s.resolveOwnerProposal(ctx, prepared.ix, r, ownerActionCardProof(prepared.ix, "app"))
+	}
 	if ownerSession != "" {
 		// The web route resolves prepared cards directly instead of through Action;
 		// preserve the same owner-activity notification as every other answer path.
@@ -672,6 +716,11 @@ func (s *Service) resolveApproved(ctx context.Context, id string, r proto.Resolu
 }
 
 func (s *Service) resolveAnswer(ctx context.Context, id string, r proto.Resolution, remember bool, authorization *standingResolution,
+	approver *assistantwire.HandoffApprover) error {
+	return s.logicalInteractionAnswer(ctx, id, r, func() error { return s.resolveActiveAnswer(ctx, id, r, remember, authorization, approver) })
+}
+
+func (s *Service) resolveActiveAnswer(ctx context.Context, id string, r proto.Resolution, remember bool, authorization *standingResolution,
 	approver *assistantwire.HandoffApprover) error {
 	r.ModeActor = nil // provenance is never taken from an answer body
 	s.fleet.mu.Lock()
@@ -927,6 +976,11 @@ func hasSecretField(ix proto.Interaction) bool {
 }
 
 func (s *Service) finishInteraction(id string) {
+	if routes, ok := s.store().(logicalInteractionStore); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = routes.FinishConversationInteraction(ctx, id)
+		cancel()
+	}
 	s.fleet.mu.Lock()
 	p, ok := s.fleet.interactions[id]
 	delete(s.fleet.interactions, id)
@@ -1103,7 +1157,7 @@ func (s *Service) expireLoop(ctx context.Context) {
 		s.fleet.mu.Lock()
 		var ids []string
 		for id, p := range s.fleet.interactions {
-			if p.local != nil && time.Now().After(p.ix.ExpiresAt) {
+			if p.local != nil && !p.ix.ExpiresAt.IsZero() && time.Now().After(p.ix.ExpiresAt) {
 				ids = append(ids, id)
 			}
 		}
@@ -1139,6 +1193,18 @@ func (s *Service) askHub(ctx context.Context, ix proto.Interaction) (proto.Resol
 	}
 	if m, ok := s.fleetMachine(ix.MachineID); ok {
 		ix.MachineID = m.ID
+	}
+	if ix.Kind == proto.IxPermission && !ix.OwnerProposal && len(ix.ToolInput) > 0 {
+		if book, ok := newOwnerActionBook(s.store()); ok {
+			granted, err := book.consume(ctx, ix.MachineID, ix.SessionID, ix.ToolName, ix.ToolInput)
+			if err != nil {
+				return proto.Resolution{}, err
+			}
+			if granted {
+				allow := true
+				return proto.Resolution{Allow: &allow, Reason: "exact owner-action grant"}, nil
+			}
+		}
 	}
 	return s.waitInteraction(ctx, s.ownCard(ctx, ix))
 }
@@ -1381,6 +1447,14 @@ func (s *Service) restoreInteractions(ctx context.Context) {
 	if err != nil {
 		s.logf("expire stale interactions: %v", err)
 		return
+	}
+	// The database has now retained exactly the explicitly persistent proposal
+	// cards. Cancel only their nonpersistent durable counterparts left by the
+	// crashed caller; persistent proposals and recorded grants stay untouched.
+	if book, supported := newOwnerActionBook(s.store()); supported {
+		if err := book.cancelNonpersistentPending(ctx); err != nil {
+			s.logf("reconcile owner-action proposals after restart: %v", err)
+		}
 	}
 	for _, id := range cancelled {
 		s.hub.Tell(assistantwire.EventFleetResolved, assistantwire.FleetResolved{ID: id})

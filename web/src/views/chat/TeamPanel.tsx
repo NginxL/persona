@@ -50,7 +50,7 @@ function pillState(w: Session, awaiting: boolean, finished: boolean): string {
   return STATE_LABEL[st];
 }
 
-export function TeamPanel({ mid, sid, worker, onClose }: { mid: string; sid: string; worker?: string; onClose: () => void }) {
+export function TeamPanel({ mid, sid, worker, at, onClose }: { mid: string; sid: string; worker?: string; at?: string; onClose: () => void }) {
   const lead = useStore(() => getSession(mid, sid));
   // the lead's folded rows (lib/use-child-sessions.ts): the store's, or on a paging hub one bounded read of them
   const kids = useChildSessions(mid, sid, workerCount(lead) > 0 || Boolean(worker));
@@ -70,7 +70,7 @@ export function TeamPanel({ mid, sid, worker, onClose }: { mid: string; sid: str
     >
       {shown ? (
         // the worker's conversation: its own chat, keyed by it, so switching pills starts it at its latest message
-        <ChatView key={`${mid}/${shown.session_id}`} mid={mid} sid={shown.session_id} embedded />
+        <ChatView key={`${mid}/${shown.session_id}`} mid={mid} sid={shown.session_id} embedded landAt={shown.session_id === worker ? at : undefined} />
       ) : !kids.loaded ? (
         <div className="flex flex-1 items-center justify-center"><Loading /></div>
       ) : (

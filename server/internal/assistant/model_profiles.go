@@ -3,7 +3,6 @@ package assistant
 import (
 	"cmp"
 	"context"
-	"errors"
 	"maps"
 	"slices"
 	"strings"
@@ -93,18 +92,19 @@ type launcherField struct {
 
 func profileValue(v string) *string { return &v }
 
-// ModelTier is what an Agent started on a tier runs on: a launcher, and its model, effort and start speed ("" for its
-// defaults). Description says when to use it (Paseo's "When to use"): the assistant reads it to pick a tier, the New
-// Agent form shows it.
+// ModelTier is what an Agent started on a tier runs on: a launcher, and its model, effort, start speed and permission
+// mode ("" for its defaults). Description says when to use it (Paseo's "When to use"): the assistant reads it to pick
+// a tier, the New Agent form shows it.
 type ModelTier struct {
-	Launcher    string `json:"launcher"`
-	Model       string `json:"model,omitempty"`
-	Effort      string `json:"effort,omitempty"`
-	Speed       string `json:"speed,omitempty"`
-	Description string `json:"description,omitempty"`
+	Launcher       string `json:"launcher"`
+	Model          string `json:"model,omitempty"`
+	Effort         string `json:"effort,omitempty"`
+	Speed          string `json:"speed,omitempty"`
+	PermissionMode string `json:"permission_mode,omitempty"`
+	Description    string `json:"description,omitempty"`
 }
 
-// runs is what the tier runs on, in a line: its launcher, then the model and effort it sets.
+// runs is what the tier runs on, in a line: its launcher, then the model, effort, speed and permission mode it sets.
 func (t ModelTier) runs() string {
 	parts := []string{t.Launcher}
 	for _, v := range []string{t.Model, t.Effort} {
@@ -114,6 +114,9 @@ func (t ModelTier) runs() string {
 	}
 	if proto.FasterSpeed(t.Speed) {
 		parts = append(parts, t.Speed)
+	}
+	if t.PermissionMode != "" {
+		parts = append(parts, t.PermissionMode)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -322,14 +325,17 @@ func (s *Service) tierModel(ctx context.Context, tier string) (ModelTier, error)
 		return ModelTier{}, err
 	}
 	if p == nil && active != "" {
-		return ModelTier{}, errors.New("the model profile in use (" + active + ") no longer exists: switch to another with model_profile_switch, or leave tier out")
+		return ModelTier{}, i18n.ErrEnglish("assistant-model_profiles.err_active_profile_missing", i18n.Args{"profile": i18n.Verbatim(active)})
 	}
 	if p == nil {
-		return ModelTier{}, errors.New("no model profile is in use: switch to one with model_profile_switch, or leave tier out")
+		return ModelTier{}, i18n.ErrEnglish("assistant-model_profiles.err_no_active_profile")
 	}
 	t, ok := p.Tiers[tier]
 	if !ok {
-		return ModelTier{}, errors.New("the model profile in use (" + cmp.Or(p.Name, p.ID) + ") has no tier " + strings.TrimSpace(tier) + "; its tiers: " + strings.Join(slices.Sorted(maps.Keys(p.Tiers)), ", "))
+		return ModelTier{}, i18n.ErrEnglish("assistant-model_profiles.err_tier_not_found", i18n.Args{
+			"profile": i18n.Verbatim(cmp.Or(p.Name, p.ID)), "tier": i18n.Verbatim(strings.TrimSpace(tier)),
+			"tiers": i18n.Verbatim(strings.Join(slices.Sorted(maps.Keys(p.Tiers)), ", ")),
+		})
 	}
 	if proto.IsExternalLauncher(t.Launcher) {
 		return ModelTier{}, i18n.Err("external-adapter.purpose_unsupported")

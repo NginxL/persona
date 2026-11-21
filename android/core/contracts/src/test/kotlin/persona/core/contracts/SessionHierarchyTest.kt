@@ -19,6 +19,16 @@ class SessionHierarchyTest {
         assertEquals(old.agentState, old.foldedState)
     }
 
+    @Test fun historyLegsDecodeInOrderWithoutRequiringTheNewFieldOnOlderRows() {
+        val row = JsonCodec.decodeFromString(Session.serializer(), """{"machine_id":"m","session_id":"latest",
+            "engine_history":[{"session_id":"first","agent":"claude","until":"2026-11-20T01:00:00Z"},
+            {"session_id":"second","agent":"codex","until":"2026-11-20T02:00:00Z"}]}""")
+        assertEquals(listOf("first", "second"), row.engineHistory.map { it.sessionId })
+        assertEquals(listOf("claude", "codex"), row.engineHistory.map { it.agent })
+        assertNotNull(parseTime(row.engineHistory.first().until))
+        assertTrue(JsonCodec.decodeFromString(Session.serializer(), """{"session_id":"old"}""").engineHistory.isEmpty())
+    }
+
     @Test fun interactionsHaveAParentHomeAndKeepTheOriginalAnswerTarget() {
         val row = JsonCodec.decodeFromString(Interaction.serializer(), """{"id":"q","machine_id":"m","session_id":"child","folded_under":"parent","session_title":"Review"}""")
         assertEquals(SessionKey("m", "parent"), row.homeKey)

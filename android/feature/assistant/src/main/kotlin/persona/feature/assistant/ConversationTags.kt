@@ -1,10 +1,12 @@
 package persona.feature.assistant
 
 import persona.core.contracts.Session
+import persona.core.contracts.api.ConversationTagFilters
 
 /** The hub's write limits (issue #9719), mirrored so the editor refuses what the API would. */
 internal const val CONVERSATION_TAG_MAX_CODE_POINTS = 32
 internal const val CONVERSATION_TAGS_MAX = 10
+internal const val CONVERSATION_TAG_FILTERS_MAX = 50
 
 internal enum class ConversationTagProblem { TooLong, TooMany }
 
@@ -31,3 +33,16 @@ internal fun inUseConversationTags(sessions: List<Session>): List<String> =
 /** Only rows carrying this exact, case-sensitive tag; no selection returns the original list and structure. */
 internal fun List<Session>.withConversationTag(tag: String?): List<Session> =
     if (tag.isNullOrEmpty()) this else filter { it.tags?.contains(tag) == true }
+
+/** Null (and a hub without the field) keeps automatic chips; an array, including [], is the exact customized order. */
+internal fun conversationTagFilterEntries(inUse: List<String>, chosen: ConversationTagFilters): List<String> =
+    chosen.entries ?: inUse
+
+/** The filter list has its own server limit; a conversation's ten-tag limit does not apply to it. */
+internal fun conversationTagFiltersProblem(input: List<String>): ConversationTagProblem? {
+    for (raw in input) {
+        val tag = raw.trim()
+        if (tag.codePointCount(0, tag.length) > CONVERSATION_TAG_MAX_CODE_POINTS) return ConversationTagProblem.TooLong
+    }
+    return if (normalizeConversationTags(input).size > CONVERSATION_TAG_FILTERS_MAX) ConversationTagProblem.TooMany else null
+}

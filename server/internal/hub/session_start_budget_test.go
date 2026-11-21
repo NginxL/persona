@@ -30,10 +30,10 @@ func TestSessionStartBudgetMatchesNodeStartup(t *testing.T) {
 		{name: "default Claude async", async: true, short: true},
 		{name: "explicit Claude async", agentType: "claude", async: true, short: true},
 		{name: "explicit Codex async", agentType: "codex", async: true},
-		{name: "explicit TRAEX async", agentType: "traex", async: true},
+		{name: "explicit TRAE CLI async", agentType: "traex", async: true},
 		{name: "explicit AGY async", agentType: "agy", async: true},
 		{name: "configured Codex async", configured: "codex", async: true},
-		{name: "configured TRAEX async", configured: "traex", async: true},
+		{name: "configured TRAE CLI async", configured: "traex", async: true},
 		{name: "Claude sync"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

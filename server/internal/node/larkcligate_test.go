@@ -312,3 +312,23 @@ func TestAssistantEnvNamesTheLarkCLIProfile(t *testing.T) {
 		}
 	}
 }
+
+// TestParseLoginPATH: only the marked line counts, the last one, and only its absolute directories. A shell that
+// printed no marked line is asked again later (nil), while a PATH of no directories is an answer.
+func TestParseLoginPATH(t *testing.T) {
+	for _, tc := range []struct{ name, out, want string }{
+		{"greeting before it", "welcome back\n__PERSONA_LOGIN_PATH__/usr/bin:/opt/tools/node/bin\n", "/usr/bin:/opt/tools/node/bin"},
+		{"the last line wins", "__PERSONA_LOGIN_PATH__/usr/bin\n__PERSONA_LOGIN_PATH__/opt/bin\n", "/opt/bin"},
+		{"relative and empty entries dropped", "__PERSONA_LOGIN_PATH__/usr/bin:relative::bin\n", "/usr/bin"},
+		{"an empty PATH is an answer", "__PERSONA_LOGIN_PATH__\n", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := strings.Join(parseLoginPATH([]byte(tc.out)), ":"); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if got := parseLoginPATH([]byte("no marker here\n")); got != nil {
+		t.Fatalf("no marked line: %q", got)
+	}
+}

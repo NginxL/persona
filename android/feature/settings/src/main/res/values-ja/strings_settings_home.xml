@@ -15,14 +15,14 @@
     <string name="settings_search_placeholder">設定を検索</string>
     <string name="settings_search_empty">一致する設定がありません</string>
     <string name="settings_search_empty_detail">別の名前で検索するか、検索をクリアしてください。</string>
-    <string name="settings_search_models_aliases">プロバイダー モデル設定 用途 API キー 実行方式</string>
+    <string name="settings_search_models_aliases">プロバイダー モデル設定 モデルプロファイル プロファイル 用途 API キー 実行方式</string>
     <string name="settings_search_agents_aliases">Claude Code Codex Antigravity agy セッション 振り分け ランタイム</string>
     <string name="settings_search_notifications_aliases">通知設定 通知 チャンネル バッテリー 自動起動 カプセル ミュート パソコン ロック画面 バックグラウンド</string>
     <string name="settings_search_connectors_aliases">メール スマホ Lark Feishu あなたの名前で送信</string>
     <string name="settings_search_extensions_aliases">拡張機能 プラグイン マーケット</string>
     <string name="settings_search_about_aliases">アプリ バージョン 更新 APK インストール</string>
     <string name="settings_search_connection_aliases">ハブ サーバー 状態 診断 ネットワーク ペアリング アドレス</string>
-    <string name="settings_search_appearance_aliases">スタイル テーマ 色 ダーク ライト 外観 密度 コンパクト 余白</string>
+    <string name="settings_search_appearance_aliases">スタイル テーマ 色 ダーク ライト 外観 密度 コンパクト 余白 サイドバー 分ける まとめる</string>
     <string name="settings_model_add_provider">プロバイダーを追加</string>
     <string name="settings_model_how_runs">モデルの実行方法</string>
     <string name="settings_model_how_runs_detail">モデルプロバイダーで認証情報や接続方法を管理します。モデルを変更しても、表示や有効な機能は変わりません。</string>

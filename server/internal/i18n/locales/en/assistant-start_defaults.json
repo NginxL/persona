@@ -1,0 +1,4 @@
+{
+  "alias_match_conflict": "when and applies_when disagree; name one match",
+  "alias_candidates_conflict": "presets and candidates disagree; name one candidate list"
+}

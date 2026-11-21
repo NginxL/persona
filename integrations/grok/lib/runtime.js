@@ -49,10 +49,12 @@ export function createGrokRuntime(options = {}) {
     env: { ...process.env, GROK_HOME: grokHome }, log, request: handleRequest })
   acp.request = handleRequest
   const mcp = createMcpProxy({
-    tools: async (s) => { s.personaTools = await rt.tools({ assistant: s.assistant }); return s.personaTools },
+    tools: async (s) => { s.personaTools = await rt.tools({ assistant: s.assistant, sessionId: s.id }); return s.personaTools },
     call: async (s, name, args) => {
       if (!s.raw || !sessions.has(s.id)) throw new Error('Conversation is not available')
-      if (s.mode === 'plan') return { content: [{ type: 'text', text: 'Persona tools are unavailable in read-only mode.' }], is_error: true }
+      if (s.mode === 'plan' && !['a2a_get', 'a2a_report', 'a2a_sessions'].includes(name)) {
+        return { content: [{ type: 'text', text: 'Persona tools are unavailable in read-only mode.' }], is_error: true }
+      }
       return rt.callTool({ name, args, session_id: s.id, assistant: s.assistant }, { signal: s.abort?.signal })
     },
   })
@@ -390,7 +392,7 @@ export function createGrokRuntime(options = {}) {
       push(s)
       try {
         await apply(s, { model: params.model, effort: params.effort, mode: params.mode || params.permission_mode })
-        s.personaTools = await rt.tools({ assistant: s.assistant })
+        s.personaTools = await rt.tools({ assistant: s.assistant, sessionId: s.id })
         const context = params.context ? (contextWrapped(params.context) ? params.context + '\n\n' : `<persona-context>\n${params.context}\n</persona-context>\n\n`) : ''
         const prompt = [{ type: 'text', text: context + (params.text || '') }, ...(params.images || []).filter((i) => i.data).map((i) => ({ type: 'image', data: i.data, mimeType: i.media_type || i.mime || 'image/png' }))]
         await acp.call('session/prompt', { sessionId: s.raw, prompt }, 0)

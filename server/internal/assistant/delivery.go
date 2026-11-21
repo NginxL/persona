@@ -224,10 +224,41 @@ func (s *Service) setTaskDelivery(ctx context.Context, id string, d TodoDelivery
 	return true
 }
 
-// doneNeedsDelivery: a finished task closes only once live (assistant.done_needs_delivery, off by default).
+// Delivery gate tiers (assistant.delivery_gate): how far a PR/Issue-backed task must go before task_review accepted
+// closes it. "merged" is the default; "live" matches legacy assistant.done_needs_delivery=true; "off" disables the
+// gate (legacy assistant.done_needs_delivery=false).
+const (
+	deliveryGateOff    = "off"
+	deliveryGateMerged = "merged"
+	deliveryGateLive   = "live"
+)
+
+var deliveryGates = []string{deliveryGateOff, deliveryGateMerged, deliveryGateLive}
+
+// deliveryGateOf resolves the effective delivery closeout tier from v, preserving backward compatibility with the
+// legacy boolean done_needs_delivery setting (true -> live, explicit false -> off, both unset -> merged).
+func deliveryGateOf(v Settings) string {
+	if v.DeliveryGate != nil && slices.Contains(deliveryGates, *v.DeliveryGate) {
+		return *v.DeliveryGate
+	}
+	if v.DoneNeedsDelivery != nil {
+		if *v.DoneNeedsDelivery {
+			return deliveryGateLive
+		}
+		return deliveryGateOff
+	}
+	return deliveryGateMerged
+}
+
+// deliveryGate is the effective delivery closeout gate (off, merged or live; merged by default).
+func (s *Service) deliveryGate(ctx context.Context) string {
+	return deliveryGateOf(s.settings(ctx))
+}
+
+// doneNeedsDelivery: a finished task closes only once live and checked (delivery_gate == live, or legacy
+// assistant.done_needs_delivery == true; false by default).
 func (s *Service) doneNeedsDelivery(ctx context.Context) bool {
-	v := s.settings(ctx).DoneNeedsDelivery
-	return v != nil && *v
+	return s.deliveryGate(ctx) == deliveryGateLive
 }
 
 var deliveryLabels = map[string]string{deliveryPR: "停在 PR", deliveryMerged: "已合未上线", deliveryOff: "默认关待启用"}
@@ -261,7 +292,7 @@ func currentDelivery(t Todo) *TodoDelivery {
 			d.Gate, d.Unblock = r.Reason, unblockOther
 		case r.Verdict == reviewNeedsUser && v.State == reviewNeedsUser && !ownerDecisionReturned(v):
 			d.Gate, d.Unblock = cmp.Or(r.Reason, r.Note), unblockUser
-		case acceptanceStands(t) && !r.At.Before(d.At):
+		case (acceptanceStands(t) || userCheckAsked(t)) && !r.At.Before(d.At):
 			d.Gate, d.Unblock = "", ""
 		case d.Unblock == unblockUser && !r.At.Before(d.At) &&
 			(r.Verdict == reviewNeedsUser || r.Verdict == reviewParked || r.Verdict == reviewRework):

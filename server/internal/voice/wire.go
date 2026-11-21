@@ -36,6 +36,9 @@ type session struct {
 	Model, Voice, Instructions string
 	InputRate                  int
 	Tools                      []toolDecl
+	// Dictation: an unbound transcription session (dictation.go), with no delegation, voice or tools.
+	// DictationCaptions requests interim user captions; TextOnly requests output_modalities ["text"] until refused.
+	Dictation, DictationCaptions, TextOnly bool
 	// ReadAloud: the session only reads texts aloud (speak.go). The services are told so by Instructions alone; the
 	// fake dialect, which has no voice, answers such a session with a little silence.
 	ReadAloud bool
@@ -73,6 +76,7 @@ type event struct {
 	args, code       string
 	param, eventID   string
 	rate             int
+	captions         bool // evStarted: the interim-caption extension was granted
 }
 
 func newWire(dialect string) wire {
@@ -96,10 +100,20 @@ func (liveWire) header() http.Header                { return http.Header{} }
 
 func (liveWire) start(s session) any {
 	audio := map[string]any{"format": map[string]any{"type": "audio/pcm", "rate": s.InputRate}}
-	if s.Voice != "" {
+	if s.Voice != "" && !s.Dictation {
 		audio["output"] = map[string]any{"voice": s.Voice}
 	}
-	sess := map[string]any{"model": s.Model, "audio": audio, "delegation": map[string]any{"type": "client"}}
+	sess := map[string]any{"model": s.Model, "audio": audio}
+	if s.Dictation {
+		if s.DictationCaptions {
+			sess["extensions"] = map[string]any{trCaptionExtension: trCaptionExtensionVersion}
+		}
+		if s.TextOnly {
+			sess["output_modalities"] = []string{"text"}
+		}
+	} else {
+		sess["delegation"] = map[string]any{"type": "client"}
+	}
 	if s.Instructions != "" {
 		sess["instructions"] = s.Instructions
 	}
@@ -150,7 +164,8 @@ func (liveWire) decode(raw []byte) []event {
 		Type    string `json:"type"`
 		Delta   string `json:"delta"`
 		Session struct {
-			Audio struct {
+			Extensions map[string]any `json:"extensions"`
+			Audio      struct {
 				Format struct {
 					Rate int `json:"rate"`
 				} `json:"format"`
@@ -185,7 +200,7 @@ func (liveWire) decode(raw []byte) []event {
 		if rate == 0 {
 			rate = f.Session.Audio.Format.Rate
 		}
-		return []event{{kind: evStarted, rate: rate}}
+		return []event{{kind: evStarted, rate: rate, captions: captionExtensionGranted(f.Session.Extensions)}}
 	case "session.output_audio.delta":
 		pcm, err := base64.StdEncoding.DecodeString(f.Delta)
 		if err != nil || len(pcm) == 0 {

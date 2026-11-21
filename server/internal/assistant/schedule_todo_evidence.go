@@ -166,12 +166,14 @@ func scheduledCheckOf(ctx context.Context) string {
 // to t's supervising conversation, not its Agent. Change approach asks the supervisor for another approach and Keep
 // waiting keeps the one it has: neither is an instruction for the Agent at work, which hears only what the supervisor
 // then sends it. The supervisor gets the decision as asked, with each option's result. A worker's decision goes to
-// the conversation above its task leader, which reviewed it. The caller records the decision and ends the ask.
-func (s *Service) checkDecided(ctx context.Context, t Todo, a *acceptAsk, label string) {
+// the conversation above its task leader, which reviewed it. told: the answer is already in the Agent's chat (the
+// owner named the option there, or a conversation passed it on: decisionTold), and the supervisor hears that instead of
+// "not told". The caller records the decision and ends the ask.
+func (s *Service) checkDecided(ctx context.Context, t Todo, a *acceptAsk, label string, told bool) {
 	s.userDecided(ctx, t.ID) // no longer needs_user: the signal goes to the supervisor, not the main conversation
 	g := superviseSignal{Todo: t.ID, Kind: sigCheck, Report: checkDecidedReport,
 		Key: checkDecidedReport + "@" + a.AskedAt.UTC().Format(time.RFC3339Nano), Detail: label,
-		Decision: s.signalDecision(ctx, a)}
+		Decision: s.signalDecision(ctx, a), Told: told}
 	if ag := scheduleAgent(t); ag.SessionID != "" {
 		g.Machine, g.Session = ag.MachineID, ag.SessionID
 	}

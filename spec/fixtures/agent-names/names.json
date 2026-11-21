@@ -3,7 +3,8 @@
   "names": {
     "claude": "Claude Code",
     "codex": "Codex",
-    "traex": "TRAEX",
+    "traex": "TRAE CLI",
+    "traecli": "TRAE CLI",
     "trae": "TRAE",
     "opencode": "opencode",
     "pi": "pi",

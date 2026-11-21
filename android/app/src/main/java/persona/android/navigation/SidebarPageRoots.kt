@@ -13,6 +13,7 @@ import persona.core.navigation.ConversationKind
 import persona.core.navigation.ExtensionUiRoute
 import persona.core.navigation.InboxRoute
 import persona.core.navigation.InteractionRoute
+import persona.core.navigation.LarkMessagesRoute
 import persona.core.navigation.MachinesRoute
 import persona.core.navigation.TerminalRoute
 import persona.core.navigation.TodoDetailRoute
@@ -91,6 +92,13 @@ internal class SidebarPageRoots {
         return Step(AssistantRoute, emptyList(), Move.SwitchRoot)
     }
 
+    /** Forget one hidden optional place without disturbing the other retained roots. */
+    fun forgetPlace(root: NavKey) {
+        saved.remove(root)
+        openedAsRootIds.remove(sidebarHostId(root))
+        if (current == root) current = AssistantRoute
+    }
+
     /** A width change shows [root] without treating it as a pick, so saved drill-downs stay. */
     fun adoptVisible(root: NavKey) {
         current = root
@@ -105,14 +113,14 @@ internal class SidebarPageRoots {
  * is in front. iOS keeps paths, not live views (docs/design/sidebar-navigation.md).
  */
 internal fun retainsSidebarComposition(root: NavKey): Boolean = when (root) {
-    AssistantRoute, InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute -> true
+    AssistantRoute, InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute, LarkMessagesRoute, SidebarScheduleRoute -> true
     is KnowledgeKindRoute -> true
     else -> false
 }
 
 /** A sidebar place that is its own root at regular width. A pushed extension page (`depth > 0`) is a drill-down. */
 internal fun isSidebarPlaceRoot(key: NavKey): Boolean = when (key) {
-    InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute -> true
+    InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute, LarkMessagesRoute, SidebarScheduleRoute -> true
     is KnowledgeKindRoute -> true
     is TodoDetailRoute -> true
     is ExtensionUiRoute -> key.depth == 0
@@ -126,10 +134,12 @@ internal fun isSidebarPlaceRoot(key: NavKey): Boolean = when (key) {
 internal fun sidebarShadeKey(root: NavKey): String = when (root) {
     AssistantRoute -> AssistantSidebarShade.Conversation
     InboxRoute -> AssistantSidebarShade.Inbox
+    LarkMessagesRoute -> AssistantSidebarShade.Messages
     TodosRoute -> AssistantSidebarShade.Todos
     KnowledgeRoute -> AssistantSidebarShade.Knowledge
     is KnowledgeKindRoute -> AssistantSidebarShade.Knowledge
     MachinesRoute -> AssistantSidebarShade.Machines
+    SidebarScheduleRoute -> AssistantSidebarShade.Schedule
     is ChatRoute -> if (root.kind == ConversationKind.Assistant) {
         AssistantSidebarShade.Conversation
     } else {
@@ -226,6 +236,7 @@ internal fun regularPromotion(stack: List<NavKey>, openedAsRoot: (NavKey) -> Boo
  * conversation is not a place route (item 6).
  */
 internal fun placeRootFor(key: NavKey): NavKey? = when {
+    key == LarkMessagesRoute -> LarkMessagesRoute
     isInboxDestination(key) -> InboxRoute
     key == TodosRoute -> TodosRoute
     key == KnowledgeRoute -> KnowledgeRoute
@@ -238,10 +249,12 @@ internal fun placeRootFor(key: NavKey): NavKey? = when {
 internal fun sidebarHostId(root: NavKey): String = when (root) {
     AssistantRoute -> SidebarRootHosts.CONVERSATION
     InboxRoute -> "inbox"
+    LarkMessagesRoute -> "lark-messages"
     TodosRoute -> "todos"
     KnowledgeRoute -> "knowledge"
     is KnowledgeKindRoute -> "knowledge:${root.kind.wire}"
     MachinesRoute -> "machines"
+    SidebarScheduleRoute -> "schedule"
     is TodoDetailRoute -> "todo:${root.todoId}"
     is ExtensionUiRoute -> "extension:${root.extensionId}/${root.uiId}"
     else -> "other:${root::class.qualifiedName ?: "route"}"

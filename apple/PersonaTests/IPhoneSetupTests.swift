@@ -21,6 +21,15 @@ struct IPhoneSetupTests {
 
     private let cable = IPhoneDevice(id: "dev-1", name: "我的 iPhone", productType: "iPhone18,1", ios: "27.0", paired: false, usb: true)
 
+    private var needsPrepare: IPhoneDevice {
+        var phone = cable
+        phone.paired = true
+        phone.connected = true
+        phone.developerMode = true
+        phone.code = "ddi_not_mounted"
+        return phone
+    }
+
     @Test func stepsFollowTheHub() {
         var i = IPhoneSetupInput()
         #expect(IPhoneSetupFlow.current(i) == .turnOn)
@@ -94,6 +103,92 @@ struct IPhoneSetupTests {
         #expect(IPhoneSetupFlow.computer(i) == nil, "an offline Mac isn't the one to go through")
         #expect(i.computers[0].unusable == .offline)
         #expect(mac("st", ddi: false).noXcode && !mac("mb").noXcode && !mac("x", ddi: nil).noXcode)
+    }
+
+    @Test func prepareShowsTheJobForThisIPhone() {
+        var phone = needsPrepare
+        phone.autoPrepare = true
+        let reason = "This computer can't get this version of iOS ready."
+        let failure = ComputerJob(kind: "prepare", state: "failed", error: reason, code: "ddi_unsupported_device", device: phone.id)
+        var input = IPhoneSetupInput(extensionOn: true, computers: [mac("mb", devices: [phone], job: failure)], chosen: "mb", me: me(phone))
+        #expect(IPhoneSetupFlow.current(input) == .developerMode)
+        #expect(IPhoneSetupFlow.devPhase(input) == .prepareFailed(reason: reason, developerModeOn: true))
+        #expect(IPhoneSetupFlow.state(.developerMode, input) == .needsYou)
+        input.computers[0].iphone?.devices[0].developerMode = false
+        #expect(IPhoneSetupFlow.devPhase(input) == .prepareFailed(reason: reason, developerModeOn: false))
+        input.computers[0].iphone?.devices[0].developerMode = true
+
+        let running = ComputerJob(kind: "prepare", state: "running", step: "Getting this iPhone ready…", device: phone.id)
+        input.computers[0].iphone?.job = running
+        #expect(IPhoneSetupFlow.devPhase(input) == .preparing(step: running.step))
+        #expect(IPhoneSetupFlow.state(.developerMode, input) == .working)
+
+        input.computers[0].iphone?.job?.device = "other-iphone"
+        #expect(IPhoneSetupFlow.devPhase(input) == .prepare(auto: true))
+        input.computers[0].iphone?.job = failure
+        input.computers[0].iphone?.job?.device = "other-iphone"
+        #expect(IPhoneSetupFlow.devPhase(input) == .prepare(auto: true))
+
+        phone.code = nil
+        phone.ready = true
+        input.computers[0] = mac("mb", devices: [phone], job: failure)
+        #expect(IPhoneSetupFlow.devPhase(input) == .done)
+    }
+
+    @Test func prepareRetryFollowsTheNewJob() async throws {
+        let phone = needsPrepare
+        let old = try JSON.decoder.decode(ComputerJob.self, from: Data(
+            #"{"kind":"prepare","state":"failed","error":"Reconnect the cable.","device":"dev-1","started":"2026-11-21T00:00:00.123456789Z"}"#.utf8
+        ))
+        let oldStart = try #require(old.started)
+        let running = ComputerJob(kind: "prepare", state: "running", device: phone.id, started: oldStart.addingTimeInterval(2))
+        var returned = MachineIPhone(enabled: true, installed: true, devices: [phone], job: running)
+        var polled = MachineIPhone(enabled: true, installed: true, devices: [phone], job: old)
+        var requests: [String] = []
+        var machine = Machine(id: "mb", name: "MacBook", kind: "ssh", online: true)
+        machine.os = "darwin"
+        let deps = IPhoneSetupModel.Deps(
+            list: { IPhoneList(on: true, devices: [me(phone)]) }, machines: { [machine] }, machineIPhone: { _ in polled },
+            setExtension: { _ in }, setComputer: { _, _ in polled },
+            job: { _, action, device in requests.append(action + " " + (device ?? "")); return returned },
+            consent: { _, _ in me(phone) }, tryIt: { _ in IPhoneTryResult() },
+            askEvery: { false }, setAskEvery: { _ in },
+            model: "iPhone18,1", ios: "27.0", picked: { nil }, pick: { _ in }, chosen: { "mb" }, choose: { _ in })
+        let setup = IPhoneSetupModel(deps: deps)
+        await setup.load()
+        #expect(IPhoneSetupFlow.devPhase(setup.input) == .prepareFailed(reason: old.error, developerModeOn: true))
+
+        await setup.prepare()
+        await setup.load()
+        #expect(requests == ["prepare dev-1"])
+        #expect(IPhoneSetupFlow.devPhase(setup.input) == .preparing(step: nil), "a read with the old failure can't replace the retry")
+
+        var failed = running
+        failed.state = "failed"
+        failed.error = old.error
+        polled.job = failed
+        await setup.load()
+        #expect(IPhoneSetupFlow.devPhase(setup.input) == .prepareFailed(reason: old.error, developerModeOn: true),
+                "the same reason can be reported by a new job")
+
+        returned.job?.started = oldStart.addingTimeInterval(4)
+        returned.job?.state = "failed"
+        returned.job?.error = "Unlock this iPhone."
+        await setup.prepare()
+        #expect(requests == ["prepare dev-1", "prepare dev-1"])
+        #expect(IPhoneSetupFlow.devPhase(setup.input) == .prepareFailed(reason: returned.job?.error, developerModeOn: true),
+                "the start request can return a failure")
+    }
+
+    @Test func theComputerPageNamesTheFailedAction() {
+        let reason = "Reconnect the cable."
+        let prepare = ComputerJob(kind: "prepare", state: "failed", error: reason)
+        let pair = ComputerJob(kind: "pair", state: "failed", error: reason)
+        #expect(IPhoneControlText.jobFailure(prepare) == String(localized: "Couldn't get this iPhone ready: \(reason)"))
+        #expect(IPhoneControlText.jobFailure(pair) == String(localized: "Couldn't pair: \(reason)"))
+        #expect(IPhoneControlText.jobFailure(ComputerJob(kind: "prepare", state: "failed", code: "ddi_missing"))
+            == String(localized: "Couldn't get this iPhone ready."))
+        #expect(IPhoneControlText.jobFailure(ComputerJob(kind: "prepare", state: "running")) == nil)
     }
 
     @Test func iOSMajor() {

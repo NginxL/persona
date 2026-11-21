@@ -1,4 +1,4 @@
-The decisions in force on the Persona todo you work on: the calls the user made on it (written in the todo, or answered in your question cards) and the ones agents noted, each with who made it (`by`: user or agent). They are what was settled before or while you worked: read them before choosing again, and again after your context was compacted. Only the todo you work on; elsewhere it says there is none.
+The decisions in force on the Persona todo you work on: the calls the user made on it (written in the todo, or answered in your question cards) and the ones agents noted, each with who made it (`by`: user or agent). They are what was settled before or while you worked: read them before choosing again, and again after your context was compacted. Only the todo you work on; elsewhere it says there is none.{{template "shared/mcp_language" .}}
 
 ```json
 {

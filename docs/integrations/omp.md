@@ -7,14 +7,19 @@ rename, start a new omp with a first message, answer its `ask_user` questions an
 
 Verified with omp 18.18.x and herdr 0.9.5. Everything here needs a herdr engine.
 
-Being added in steps (issue #4148). Not here yet: resuming a stopped omp session from the phone, and starting omp from the iOS New
-Agent sheet with its first message.
+Added in steps (issue #4148).
+
+In New Agent on web or Android, select the computer's `omp` launcher in herdr. Enter a model ID such as
+`opus` or `openai/gpt-5.2` to use it for this session. You can enter an ID even when the model list is empty.
+Leaving the model at Default lets omp read `modelRoles.default` from its own configuration.
+An older Persona node offers the launcher default. Upgrade the node on that computer to enter a model ID.
+iOS and iPadOS leave the model to omp's own configuration, as described under "Starting from the apps".
 
 ## Scope
 
 | Works from the phone | Not supported |
 | --- | --- |
-| Start `omp` in a new herdr tab, with the first message | Choosing its model, thinking effort, permission mode or ultracode (omp's own `config.yml` decides; `omp_options`) |
+| Start `omp` in a new herdr tab with a first message and an optional model | Setting thinking effort, permission mode or ultracode on that start |
 | List running omp sessions and their state, and the stopped ones of the last 7 days | Engines other than herdr, and Windows |
 | Read the chat, including live text | A web client for omp (the equivalent of pi-web) |
 | Send messages, interrupt, rename | Sessions under an `omp --profile` directory |
@@ -123,6 +128,20 @@ extension listed it and then left with the omp is resumed the same way: a runtim
 
 The hub puts the refusals into the reader's language (`rpc-errors.omp_resume_unknown`, `rpc-errors.omp_stopped`).
 
+## Starting from the apps
+
+Only the launcher named `omp` starts omp natively (the node lists it with agent `omp`), and a native start sets nothing omp's
+own config decides unless a client explicitly selects a supported model override:
+
+- **iOS and iPadOS New Agent.** With an omp launcher picked (`Launcher.isOmp` or the native `Launcher.startsOmp`), Permissions &
+  Thinking is not shown (no permission mode, thinking effort or ultracode), no model is sent, and the first message goes with the
+  start, as a Codex's does: the node types it into omp's command and answers with omp's session. A message sent after the start would
+  reach an omp whose extension has not connected yet and be refused, so the first message is never sent that way. omp takes no
+  attachments: there is no add menu, and a photo or file picked before holds Start Chat back ("omp takes no attachments") until it
+  is removed.
+- **Pushes.** An omp card's push is titled with omp's name: the extension names its cards `omp`, and the hub uses a runtime
+  card's own label (`server/internal/hub/push_payload.go`).
+
 ## Differences from pi
 
 - **No pi-web and no companion process.** omp has no web client; its sessions live in its own process.
@@ -146,7 +165,8 @@ entries (calls outside the conversation), orchestration tokens included, under t
 - Only omp's default agent directory is read. Sessions started with `omp --profile <name>` live elsewhere.
 - A stopped session is resumed only in herdr: an Orca default engine refuses it.
 - Only the launcher named exactly `omp` starts omp. A wrapper script or alias around omp is refused as an omp start.
-- A start with a model, permission mode, thinking effort or ultracode is refused with `omp_options` before anything runs.
+- A new `session.start` with a model passes `--model` and the selected ID to omp. The same choice is available to `agent_start`, `task_plan` and Agent presets. The override lasts for one session and leaves `~/.omp/agent/config.yml` untouched.
+- A resume uses the saved session. Asking for a model override on resume, or for a permission mode, thinking effort or ultracode on an omp start, is refused before a tab opens.
 - `omp -p`, `--print` and `--mode json` do not register with Persona: a one-shot run has nothing to drive from the phone.
 
 ## Validation
@@ -162,4 +182,10 @@ entries (calls outside the conversation), orchestration tokens included, under t
   resume from disk, two sends or two starts at once, a start racing a send, a send or start after the extension left, a
   start's images and `client_msg_id`, the refusals, a resume that never comes up and herdr's restore command; `server/internal/node/omp_guards_test.go`
   covers a live pane's file, a start for a runtime's session, the fallback row moving to its session, and the calls a stopped
-  session refuses.
+  session refuses. `server/internal/node/omp_start_model_test.go` checks the new session's recorded model and the arguments
+  the terminal receives for default, short and provider-qualified model IDs.
+- iOS: `apple/PersonaTests/OmpNewAgentTests.swift` covers telling an omp launcher, no modes or efforts and no attachments;
+  against `MOCK_OMP=1 PORT=<dedicated port> python3 scripts/mock/mock_hub.py` (which lists an `omp` launcher and refuses an omp
+  start that is async or sets those options, as the node does), `PersonaUITests/NewAgentAttachmentsTests/testOmpStartsWithItsFirstMessageAndNoOptions`
+  picks omp in New Agent and checks the start's body.
+- Hub: `TestRuntimePushTitle` (`server/internal/hub/runtime_test.go`) covers an omp card's push title.

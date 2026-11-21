@@ -160,6 +160,13 @@ class NotificationPolicyTest {
         assertNull(NotificationPolicy.resolution(card, "allow", null))
     }
 
+    @Test fun aSecretHandoffHasNoNotificationApprovalOrStaleResolution() {
+        val card = persona.core.contracts.JsonCodec.decodeFromString<Interaction>(
+            """{"id":"request","kind":"permission","tool_name":"secret_handoff","tool_input":{"variables":[{"name":"TOKEN"}],"reference":"op://Dev/Vault/token","value":"sentinel"}}""")
+        assertTrue(NotificationPolicy.actions(card).isEmpty())
+        for (key in listOf("allow", "always", "deny")) assertNull(NotificationPolicy.resolution(card, key, null))
+    }
+
     private fun interaction(kind: String) = Interaction("request", kind = kind,
         questions = listOf(Question(question = "选择", options = List(4) { QuestionOption("选项 $it") })),
         dialog = ScreenDialog(options = listOf(DialogOption("input", "输入", kind = "type_something")) +

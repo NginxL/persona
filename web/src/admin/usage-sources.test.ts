@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AdminError } from "./api";
 import type { UsageSource } from "./types";
-import { hubWords, needsKeyAgain, normalUrl, reasonText, sourceStatus, testText, validUrl } from "./usage-sources";
+import { hubWords, keyRequired, needsKeyAgain, normalUrl, reasonText, sourceStatus, testText, typeLabel, validUrl } from "./usage-sources";
 
 const NOW = Date.parse("2026-11-05T10:00:00Z");
 const source = (o: Partial<UsageSource> = {}): UsageSource => ({ id: "s1", name: "Relay", type: "relay", url: "https://gateway.example.com", has_key: true, enabled: true, status: {}, ...o });
@@ -27,6 +27,28 @@ describe("how a source is doing", () => {
     }
     expect(reasonText("something new")).toBe(reasonText("unreachable"));
   });
+  it("says what a relay read with an API key lacks when its route is missing (#12311)", () => {
+    expect(reasonText("not_found", "relay_key")).toBe("这个地址没有给 API Key 查用量的接口：检查地址，或者中转版本太旧");
+    expect(reasonText("not_found", "relay")).toBe(reasonText("not_found"));
+    expect(sourceStatus(source({ type: "relay_key", status: { error: "not_found" } }), true, NOW).detail).toBe(reasonText("not_found", "relay_key"));
+  });
+  it("says a key shares no allowances instead of counting zero", () => {
+    const hidden = sourceStatus(source({ type: "relay_key", status: { ok_at: "2026-11-05T09:58:00Z", seen: { accounts: 0, windows: 0, listed: 0, providers: {}, quota_hidden: true } } }), true, NOW);
+    expect(hidden.tone).toBe("green");
+    expect(hidden.detail).toContain("这把 Key 没有开放账号额度");
+    expect(hidden.detail).not.toContain("0 个账号");
+  });
+});
+
+describe("the types", () => {
+  it("names the three and needs a key for both relay reads", () => {
+    expect(typeLabel("relay")).toBe("中转（账号池）");
+    expect(typeLabel("relay_key")).toBe("中转（API Key）");
+    expect(typeLabel("generic")).toBe("通用格式");
+    expect(keyRequired("relay")).toBe(true);
+    expect(keyRequired("relay_key")).toBe(true);
+    expect(keyRequired("generic")).toBe(false);
+  });
 });
 
 describe("a test of the connection", () => {
@@ -40,6 +62,13 @@ describe("a test of the connection", () => {
   });
   it("says why it did not", () => {
     expect(testText({ ok: false, code: "unauthorized" })).toEqual({ ok: false, text: "没连上：Key 不对或已过期" });
+    expect(testText({ ok: false, code: "not_found" }, "relay_key").text).toContain("没有给 API Key 查用量的接口");
+  });
+  it("says so when the relay shares no account allowances with the key", () => {
+    expect(testText({ ok: true, accounts: 0, windows: 0, listed: 0, providers: {}, quota_hidden: true }, "relay_key")).toEqual({
+      ok: true,
+      text: "连上了，但中转没有对这把 Key 开放账号额度。在中转上为这把 Key 开放后再测一次。",
+    });
   });
 });
 

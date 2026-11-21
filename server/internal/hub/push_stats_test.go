@@ -21,7 +21,7 @@ import (
 func statsRequest(t *testing.T, h *Hub, p *principal, target string) (int, []byte) {
 	t.Helper()
 	mux := http.NewServeMux()
-	h.lnRoutes(mux)
+	h.pushGradingRoutes(mux)
 	r := httptest.NewRequest("GET", target, nil)
 	if p != nil {
 		r = r.WithContext(context.WithValue(r.Context(), principalKey{}, *p))
@@ -36,10 +36,10 @@ func extPrincipal(manager string) *principal {
 }
 
 // An extension token with the notify scope may read the switch state; only a full credential may change it. The PUT
-// guard itself is covered in TestLnInterceptsHeldToManager.
+// guard itself is covered in TestPushGradingInterceptsHeldToManager.
 func TestPushGradingSwitchReadableByNotifyExtension(t *testing.T) {
-	h, _ := lnHub(t)
-	if err := h.push.setLnMode(context.Background(), true); err != nil {
+	h, _ := gradingHub(t)
+	if err := h.push.setPushGrading(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	code, body := statsRequest(t, h, extPrincipal("manager-a"), "/api/v1/push/ln-mode")
@@ -54,25 +54,82 @@ func TestPushGradingSwitchReadableByNotifyExtension(t *testing.T) {
 	}
 }
 
+// The neutral switch alias and the legacy route share one handler: GET/PUT parity, extension authorization and the
+// original single storage key are pinned together so the alias cannot drift or introduce a persistence migration.
+func TestPushGradingRouteAliasMatchesLegacy(t *testing.T) {
+	h, _ := gradingHub(t)
+	if err := h.push.setPushGrading(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{"/api/v1/push/ln-mode", "/api/v1/push/grading"}
+	for _, path := range paths {
+		for _, p := range []*principal{nil, extPrincipal("manager-a")} {
+			code, body := statsRequest(t, h, p, path)
+			if code != http.StatusOK || string(body) != "{\"enabled\":true}\n" {
+				t.Fatalf("GET %s (extension=%v) = %d %s, want the same enabled response", path, p != nil, code, body)
+			}
+		}
+	}
+	put := func(path string, p *principal, enabled bool) (int, []byte) {
+		t.Helper()
+		mux := http.NewServeMux()
+		h.pushGradingRoutes(mux)
+		value := "false"
+		if enabled {
+			value = "true"
+		}
+		r := httptest.NewRequest("PUT", path, strings.NewReader(`{"enabled":`+value+`}`))
+		if p != nil {
+			r = r.WithContext(context.WithValue(r.Context(), principalKey{}, *p))
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w.Code, w.Body.Bytes()
+	}
+	oldCode, oldBody := put(paths[0], extPrincipal("manager-a"), false)
+	newCode, newBody := put(paths[1], extPrincipal("manager-a"), false)
+	if oldCode != http.StatusForbidden || newCode != oldCode || !bytes.Equal(newBody, oldBody) {
+		t.Fatalf("extension PUT parity = old %d %s, new %d %s; want identical 403", oldCode, oldBody, newCode, newBody)
+	}
+	if code, body := put(paths[1], nil, false); code != http.StatusOK || string(body) != "{\"enabled\":false}\n" {
+		t.Fatalf("full-credential PUT on the alias = %d %s", code, body)
+	}
+	if code, body := statsRequest(t, h, nil, paths[0]); code != http.StatusOK || string(body) != "{\"enabled\":false}\n" {
+		t.Fatalf("legacy GET after alias PUT = %d %s", code, body)
+	}
+	if code, body := put(paths[0], nil, true); code != http.StatusOK {
+		t.Fatalf("full-credential PUT on the legacy route = %d %s", code, body)
+	}
+	if code, body := statsRequest(t, h, nil, paths[1]); code != http.StatusOK || string(body) != "{\"enabled\":true}\n" {
+		t.Fatalf("alias GET after legacy PUT = %d %s", code, body)
+	}
+	store := h.push.store.(*gradingStore)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.vals) != 1 || string(store.vals[gradingSwitchSettingKey]) != "true" {
+		t.Fatalf("stored settings = %#v, want only the original grading switch key set to true", store.vals)
+	}
+}
+
 // The manager filter runs before the 200-entry limit: another manager's burst cannot push this extension's entries
 // out of its view. manager-b's three entries are the oldest, so a truncate-then-filter implementation would hide all
 // of them behind manager-a's 220 newer ones.
 func TestPushInterceptsManagerFilterBeforeLimit(t *testing.T) {
-	h, _ := lnHub(t)
+	h, _ := gradingHub(t)
 	h.cfg = &Config{InterceptReaders: []string{"ext-intercept-panels"}}
 	now := h.push.now()
 	for i := range 3 {
-		h.push.recordIntercept(pushIntercept{At: now.Add(time.Duration(i) * time.Second).UTC(), Level: assistantwire.LevelP2,
+		h.push.recordIntercept(heldPushRecord{At: now.Add(time.Duration(i) * time.Second).UTC(), Level: assistantwire.LevelP2,
 			Reason: interceptReasonP2, Manager: "manager-b"})
 	}
 	for i := range 220 {
-		h.push.recordIntercept(pushIntercept{At: now.Add(time.Minute + time.Duration(i)*time.Second).UTC(), Level: assistantwire.LevelP2,
+		h.push.recordIntercept(heldPushRecord{At: now.Add(time.Minute + time.Duration(i)*time.Second).UTC(), Level: assistantwire.LevelP2,
 			Reason: interceptReasonP2, Manager: "manager-a"})
 	}
-	if all := h.push.lnInterceptsView("", 0); len(all) != lnInterceptLimitMax {
+	if all := h.push.heldPushesView("", 0); len(all) != heldPushViewLimitMax {
 		t.Fatalf("full credential view = %d entries, want the 200 cap", len(all))
 	}
-	own := h.push.lnInterceptsView("manager-b", 0)
+	own := h.push.heldPushesView("manager-b", 0)
 	if len(own) != 3 {
 		t.Fatalf("manager-b view = %d entries, want all 3 of its own past the 200 cap", len(own))
 	}
@@ -87,7 +144,7 @@ func TestPushInterceptsManagerFilterBeforeLimit(t *testing.T) {
 		t.Fatalf("intercepts over HTTP: %d %s", code, body)
 	}
 	var viaHTTP struct {
-		Intercepts []pushIntercept `json:"intercepts"`
+		Intercepts []heldPushRecord `json:"intercepts"`
 	}
 	if err := json.Unmarshal(body, &viaHTTP); err != nil {
 		t.Fatal(err)
@@ -100,24 +157,24 @@ func TestPushInterceptsManagerFilterBeforeLimit(t *testing.T) {
 // Delivered pushes are counted with the switch off as well as on, held pushes carry their reason, and the counts read
 // the full records so they stay exact past the 200-entry view limit.
 func TestPushDailyStatsCounts(t *testing.T) {
-	h, f := lnHub(t)
+	h, f := gradingHub(t)
 	// Switch off: two pushes go out and still count as delivered.
-	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "off-1", "one")); err != nil {
+	if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP1, "off-1", "one")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP2, "off-2", "two")); err != nil {
+	if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP2, "off-2", "two")); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.push.setLnMode(context.Background(), true); err != nil {
+	if err := h.push.setPushGrading(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP0, "p0-key", "rings")); err != nil {
+	if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP0, "p0-key", "rings")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP2, "p2-key", "silent")); err != nil {
+	if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP2, "p2-key", "silent")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "p1-key", "held")); err != nil {
+	if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP1, "p1-key", "held")); err != nil {
 		t.Fatal(err)
 	}
 	// Wait for the three pushes that actually went out (two with the switch off, one P0): their APNs goroutines must
@@ -126,7 +183,7 @@ func TestPushDailyStatsCounts(t *testing.T) {
 	// A busy day: 220 more held pushes, beyond the 200-entry view.
 	now := h.push.now()
 	for i := range 220 {
-		h.push.recordIntercept(pushIntercept{At: now.Add(time.Duration(i) * time.Millisecond).UTC(), Level: assistantwire.LevelP2,
+		h.push.recordIntercept(heldPushRecord{At: now.Add(time.Duration(i) * time.Millisecond).UTC(), Level: assistantwire.LevelP2,
 			Reason: interceptReasonP2, Manager: "manager-a"})
 	}
 	stats := h.push.pushDailyStats(now.Add(-24*time.Hour), "")
@@ -143,8 +200,8 @@ func TestPushDailyStatsCounts(t *testing.T) {
 	}
 }
 
-// lnZonedClock installs one race-free clock whose instant and UTC offset can move independently.
-func lnZonedClock(h *Hub) (instant, offset *atomic.Int64) {
+// gradingZonedClock installs one race-free clock whose instant and UTC offset can move independently.
+func gradingZonedClock(h *Hub) (instant, offset *atomic.Int64) {
 	instant, offset = &atomic.Int64{}, &atomic.Int64{}
 	instant.Store(time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC).UnixNano())
 	h.push.now = func() time.Time {
@@ -171,11 +228,11 @@ func TestPushDailyStatsWindowUsesUTCCalendarDay(t *testing.T) {
 	}
 
 	t.Run("UTC+8 does not start in the future", func(t *testing.T) {
-		h, f := lnHub(t)
-		clock, offset := lnZonedClock(h)
+		h, f := gradingHub(t)
+		clock, offset := gradingZonedClock(h)
 		clock.Store(time.Date(2026, 11, 14, 23, 30, 0, 0, time.UTC).UnixNano())
 		offset.Store(8 * 60 * 60) // local 2026-11-15 07:30 +08:00
-		if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "utc-east-day", "one")); err != nil {
+		if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP1, "utc-east-day", "one")); err != nil {
 			t.Fatal(err)
 		}
 		f.calls(t, 1)
@@ -189,16 +246,16 @@ func TestPushDailyStatsWindowUsesUTCCalendarDay(t *testing.T) {
 	})
 
 	t.Run("UTC-8 does not include the previous UTC day", func(t *testing.T) {
-		h, f := lnHub(t)
-		clock, offset := lnZonedClock(h)
+		h, f := gradingHub(t)
+		clock, offset := gradingZonedClock(h)
 		clock.Store(time.Date(2026, 11, 14, 23, 30, 0, 0, time.UTC).UnixNano())
 		offset.Store(8 * 60 * 60) // the previous notification is at local 2026-11-15 07:30 +08:00
-		if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "utc-previous-day", "old")); err != nil {
+		if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP1, "utc-previous-day", "old")); err != nil {
 			t.Fatal(err)
 		}
 		clock.Store(time.Date(2026, 11, 15, 0, 30, 0, 0, time.UTC).UnixNano())
 		offset.Store(-8 * 60 * 60) // the current clock reads local 2026-11-14 16:30 -08:00
-		if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "utc-current-day", "new")); err != nil {
+		if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP1, "utc-current-day", "new")); err != nil {
 			t.Fatal(err)
 		}
 		f.calls(t, 2)
@@ -213,20 +270,20 @@ func TestPushDailyStatsWindowUsesUTCCalendarDay(t *testing.T) {
 // The stats endpoint answers only the extension's own manager, understands since/days and rejects bad windows. Days
 // bucket by UTC calendar day.
 func TestPushDailyStatsHeldToManager(t *testing.T) {
-	h, f := lnHub(t)
+	h, f := gradingHub(t)
 	base := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
-	lnSetClock(h, base)
-	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "a-today", "a")); err != nil {
+	setGradingClock(h, base)
+	if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP1, "a-today", "a")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.deliverPushFrom("manager-b", lnNotification(assistantwire.LevelP1, "b-today", "b")); err != nil {
+	if _, err := h.deliverPushFrom("manager-b", gradingNotification(assistantwire.LevelP1, "b-today", "b")); err != nil {
 		t.Fatal(err)
 	}
-	lnMoveClock(h, base.AddDate(0, 0, -1))
-	if _, err := h.deliverPushFrom("manager-b", lnNotification(assistantwire.LevelP1, "b-yesterday", "b old")); err != nil {
+	moveGradingClock(h, base.AddDate(0, 0, -1))
+	if _, err := h.deliverPushFrom("manager-b", gradingNotification(assistantwire.LevelP1, "b-yesterday", "b old")); err != nil {
 		t.Fatal(err)
 	}
-	lnMoveClock(h, base)
+	moveGradingClock(h, base)
 	// The switch is off, so all three went to the fake APNs; wait out their goroutines before the server closes.
 	f.calls(t, 3)
 
@@ -291,8 +348,8 @@ func TestPushDailyStatsHeldToManager(t *testing.T) {
 // The delivered-push record lives in the store (hub_push_sent), so a restart keeps the counts like the switch and the
 // held list.
 func TestPushSentPersists(t *testing.T) {
-	h, f := lnHub(t)
-	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "persisted-sent", "x")); err != nil {
+	h, f := gradingHub(t)
+	if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP1, "persisted-sent", "x")); err != nil {
 		t.Fatal(err)
 	}
 	f.calls(t, 1) // let the APNs goroutine finish before the fake server closes
@@ -309,7 +366,7 @@ func TestPushSentPersists(t *testing.T) {
 // A pairing receipt bypasses the push grading filter on purpose (sendBuilt), so notifyComputerCode records it explicitly:
 // the phone visibly received a hub alert and the daily sent count must include it, under the hub's empty manager.
 func TestPushPairingReceiptCountsAsSent(t *testing.T) {
-	h, f := lnHub(t)
+	h, f := gradingHub(t)
 	if !h.push.ready() {
 		t.Fatal("the fixture phone is not reachable")
 	}
@@ -323,7 +380,7 @@ func TestPushPairingReceiptCountsAsSent(t *testing.T) {
 
 // flakyPutStore fails the first failsLeft PutSetting and AddPushSent calls, then delegates to the real in-memory store.
 type flakyPutStore struct {
-	*lnStore
+	*gradingStore
 	mu        sync.Mutex
 	failsLeft int
 }
@@ -342,23 +399,23 @@ func (s *flakyPutStore) PutSetting(ctx context.Context, key string, v any) error
 	if s.fail() {
 		return errors.New("database down")
 	}
-	return s.lnStore.PutSetting(ctx, key, v)
+	return s.gradingStore.PutSetting(ctx, key, v)
 }
 
 func (s *flakyPutStore) AddPushSent(ctx context.Context, entries []db.PushSent) error {
 	if s.fail() {
 		return errors.New("database down")
 	}
-	return s.lnStore.AddPushSent(ctx, entries)
+	return s.gradingStore.AddPushSent(ctx, entries)
 }
 
 // A failed write is retried instead of dropped: waitInterceptsSaved must not report idle while the change is unsaved,
 // and the row eventually lands, once.
 func TestPushWriterRetriesFailedSave(t *testing.T) {
-	h, f := lnHub(t)
-	store := &flakyPutStore{lnStore: h.push.store.(*lnStore), failsLeft: 2}
+	h, f := gradingHub(t)
+	store := &flakyPutStore{gradingStore: h.push.store.(*gradingStore), failsLeft: 2}
 	h.push.store = store
-	if _, err := h.deliverPushFrom("manager-a", lnNotification(assistantwire.LevelP1, "retry-me", "x")); err != nil {
+	if _, err := h.deliverPushFrom("manager-a", gradingNotification(assistantwire.LevelP1, "retry-me", "x")); err != nil {
 		t.Fatal(err)
 	}
 	f.calls(t, 1) // wait for the push goroutine; the store retries are what this test measures
@@ -374,9 +431,9 @@ func TestPushWriterRetriesFailedSave(t *testing.T) {
 	if rows := store.sentTable(); len(rows) != 1 || rows[0].RelatedKey != "retry-me" {
 		t.Fatalf("saved rows = %+v, want one delivered push", rows)
 	}
-	h.push.lnMu.Lock()
-	idle := !h.push.lnWriting && !h.push.lnDirty && len(h.push.sentPending) == 0
-	h.push.lnMu.Unlock()
+	h.push.gradingMu.Lock()
+	idle := !h.push.gradingWriting && !h.push.heldDirty && len(h.push.sentPending) == 0
+	h.push.gradingMu.Unlock()
 	if !idle {
 		t.Fatal("the writer stayed busy after the retry landed")
 	}
@@ -386,12 +443,12 @@ func TestPushWriterRetriesFailedSave(t *testing.T) {
 // intercept_readers allow-list may read them (its own manager's entries); every other extension token gets 403, and a
 // full credential keeps reading every manager.
 func TestPushInterceptsAllowlist(t *testing.T) {
-	h, _ := lnHub(t)
+	h, _ := gradingHub(t)
 	h.cfg = &Config{InterceptReaders: []string{"ext-push-panels"}}
 	now := h.push.now()
-	h.push.recordIntercept(pushIntercept{At: now.UTC(), Level: assistantwire.LevelP0, Reason: interceptReasonDedup,
+	h.push.recordIntercept(heldPushRecord{At: now.UTC(), Level: assistantwire.LevelP0, Reason: interceptReasonDedup,
 		Title: "a card", Body: "summary for a", Manager: "manager-a", TodoID: "todo_a", MachineID: "machine-a", SessionID: "session-a"})
-	h.push.recordIntercept(pushIntercept{At: now.Add(time.Second).UTC(), Level: assistantwire.LevelP1, Reason: interceptReasonP1,
+	h.push.recordIntercept(heldPushRecord{At: now.Add(time.Second).UTC(), Level: assistantwire.LevelP1, Reason: interceptReasonP1,
 		Title: "b card", Body: "summary for b", Manager: "manager-b", TodoID: "todo_b", MachineID: "machine-b", SessionID: "session-b"})
 
 	// No allow-list entry matches: extension tokens are refused even though they carry the notify scope.
@@ -411,7 +468,7 @@ func TestPushInterceptsAllowlist(t *testing.T) {
 		t.Fatalf("the allow-listed extension got %d: %s", code, body)
 	}
 	var out struct {
-		Intercepts []pushIntercept `json:"intercepts"`
+		Intercepts []heldPushRecord `json:"intercepts"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		t.Fatal(err)
@@ -444,29 +501,29 @@ func TestPushInterceptsAllowlist(t *testing.T) {
 // A held push's full body is never stored, even before any read: the record keeps the title plus a summary capped at
 // pushInterceptBodyMaxRunes runes. Merged titles and short bodies are unaffected.
 func TestPushInterceptsBodyStoredAsSummary(t *testing.T) {
-	h, _ := lnHub(t)
+	h, _ := gradingHub(t)
 	longBody := strings.Repeat("秘", pushInterceptBodyMaxRunes+50)
-	h.push.recordIntercept(pushIntercept{At: h.push.now().UTC(), Level: assistantwire.LevelP2, Reason: interceptReasonP2,
+	h.push.recordIntercept(heldPushRecord{At: h.push.now().UTC(), Level: assistantwire.LevelP2, Reason: interceptReasonP2,
 		Title: "long card", Body: longBody, Manager: "manager-a"})
-	h.push.recordIntercept(pushIntercept{At: h.push.now().Add(time.Second).UTC(), Level: assistantwire.LevelP1,
+	h.push.recordIntercept(heldPushRecord{At: h.push.now().Add(time.Second).UTC(), Level: assistantwire.LevelP1,
 		Reason: interceptReasonP1, Title: "short card", Body: "one short line", Manager: "manager-a"})
 
 	if !h.push.waitInterceptsSaved(2 * time.Second) {
 		t.Fatal("the intercepts were not saved")
 	}
 	var raw []byte
-	store := h.push.store.(*lnStore)
+	store := h.push.store.(*gradingStore)
 	store.mu.Lock()
-	raw = append([]byte(nil), store.vals[lnInterceptsSettingKey]...)
+	raw = append([]byte(nil), store.vals[heldPushesSettingKey]...)
 	store.mu.Unlock()
 	if bytes.Contains(raw, []byte(longBody)) {
 		t.Fatal("the full long body was persisted into the intercepts setting")
 	}
-	var stored []pushIntercept
+	var stored []heldPushRecord
 	if err := json.Unmarshal(raw, &stored); err != nil || len(stored) != 2 {
 		t.Fatalf("stored rows = %+v (err %v), want 2", stored, err)
 	}
-	var long *pushIntercept
+	var long *heldPushRecord
 	for i := range stored {
 		if stored[i].Title == "long card" {
 			long = &stored[i]
@@ -483,8 +540,8 @@ func TestPushInterceptsBodyStoredAsSummary(t *testing.T) {
 // Rows written before the summary limit may still hold a full body: a restart must sanitize them in memory and write
 // the sanitized list back, so the old full text does not stay in the database until some unrelated write.
 func TestPushInterceptsSanitizeOldRowsOnLoad(t *testing.T) {
-	h, _ := lnHub(t)
-	store := h.push.store.(*lnStore)
+	h, _ := gradingHub(t)
+	store := h.push.store.(*gradingStore)
 	longBody := strings.Repeat("密", pushInterceptBodyMaxRunes+80)
 	legacy := []map[string]any{{
 		"at": h.push.now().UTC(), "level": assistantwire.LevelP1, "reason": interceptReasonP1,
@@ -495,11 +552,11 @@ func TestPushInterceptsSanitizeOldRowsOnLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.mu.Lock()
-	store.vals[lnInterceptsSettingKey] = append([]byte(nil), raw...)
+	store.vals[heldPushesSettingKey] = append([]byte(nil), raw...)
 	store.mu.Unlock()
 
 	restarted := newPusher(t.TempDir(), store, t.Logf)
-	view := restarted.lnInterceptsView("", 0)
+	view := restarted.heldPushesView("", 0)
 	if len(view) != 1 {
 		t.Fatalf("reloaded view = %d entries, want 1", len(view))
 	}
@@ -513,12 +570,12 @@ func TestPushInterceptsSanitizeOldRowsOnLoad(t *testing.T) {
 		t.Fatal("the sanitized list was not written back")
 	}
 	store.mu.Lock()
-	persisted := append([]byte(nil), store.vals[lnInterceptsSettingKey]...)
+	persisted := append([]byte(nil), store.vals[heldPushesSettingKey]...)
 	store.mu.Unlock()
 	if bytes.Contains(persisted, []byte(longBody)) {
 		t.Fatal("the full legacy body is still in the stored setting row after reload")
 	}
-	var back []pushIntercept
+	var back []heldPushRecord
 	if err := json.Unmarshal(persisted, &back); err != nil || len(back) != 1 {
 		t.Fatalf("persisted rows = %+v (err %v), want one sanitized row", back, err)
 	}

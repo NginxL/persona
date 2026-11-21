@@ -14,7 +14,7 @@ import (
 // ---- what a node call runs on ----
 
 // applyModel fills params (a node call's: session.start, assistant.send…) with what purpose id runs on; a launcher,
-// model or effort already in params is this call's own pick. The permission mode is left as it is.
+// model, effort or permission_mode already in params is this call's own pick.
 func (s *Service) applyModel(ctx context.Context, id string, params map[string]any) error {
 	return s.applyModelBinding(ctx, id, params, false)
 }
@@ -51,6 +51,9 @@ func (s *Service) applyModelBinding(ctx context.Context, id string, params map[s
 		b.Effort = effort
 	} else if native, _ := params["launcher_default_effort"].(bool); id == "agent.new" && native && launcher != "" {
 		b.Effort = ""
+	}
+	if mode, _ := params["permission_mode"].(string); strings.TrimSpace(mode) != "" {
+		b.PermissionMode = strings.TrimSpace(mode)
 	}
 	return s.finishModel(ctx, id, params, b)
 }
@@ -138,8 +141,12 @@ func (s *Service) finishModel(ctx context.Context, id string, params map[string]
 	if b.Effort != "" {
 		params["effort"] = b.Effort
 	}
-	// The profile new conversations start in is not what a running process runs on (#4633): choosing one restarts nothing.
+	if b.PermissionMode != "" {
+		params["permission_mode"] = b.PermissionMode
+	}
+	// The profile and permission mode new conversations start in are not what a running process runs on (#4633): choosing one restarts nothing.
 	b.ConfigDir = ""
+	b.PermissionMode = ""
 	raw, _ := json.Marshal(b)
 	sum := sha256.Sum256(append([]byte(s.modelBindingFingerprint(ctx, b)), raw...))
 	params["model_fingerprint"] = hex.EncodeToString(sum[:])

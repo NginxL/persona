@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -30,6 +31,7 @@ import kotlinx.coroutines.launch
 import persona.core.contracts.api.*
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
+import persona.core.designsystem.icons.PersonaIcons
 import java.time.Instant
 
 /**
@@ -462,6 +464,8 @@ internal fun FeishuConnectorPage(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var displayPage by remember { mutableStateOf(false) }
+    val homePreference = LocalAppStyleStore.current
+    val homeMessages = homePreference?.larkHomeMessages?.collectAsState()?.value ?: false
     if (displayPage) { LarkMessageDisplayPage(connectors, onBack = { displayPage = false }); return }
 
     fun load() {
@@ -559,12 +563,32 @@ internal fun FeishuConnectorPage(
             }
             item("accounts-caption") {
                 SettingsCaption(
-                    stringResource(R.string.settings_src_lark_accounts_caption),
+                    stringResource(
+                        if (homeMessages) R.string.settings_src_lark_accounts_caption_default
+                        else R.string.settings_src_lark_accounts_caption
+                    ),
                     Modifier.padding(horizontal = pagePadding, vertical = Tokens.Space.s),
                 )
             }
         }
 
+        // Demo has no conversation repository, so it must not offer a destination that can only say "unavailable".
+        if (homePreference != null && connectors != null) {
+            item("home-messages") {
+                JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.l)) {
+                    JSwitchRow(
+                        title = stringResource(R.string.settings_src_lark_home_messages),
+                        checked = homeMessages,
+                        onCheckedChange = homePreference::setLarkHomeMessages,
+                        modifier = Modifier.testTag("settings.lark.homeMessages"),
+                        subtitle = stringResource(R.string.settings_src_lark_home_messages_detail),
+                        leadingIcon = PersonaIcons.messagesApp,
+                        subtitleLines = Int.MAX_VALUE,
+                        titleLines = 2,
+                    )
+                }
+            }
+        }
         item("display") {
             JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.l)) {
                 JRow(stringResource(R.string.settings_src_display_title), leadingIcon = PhIcons.Eye, onClick = { displayPage = true })

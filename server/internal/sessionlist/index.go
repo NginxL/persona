@@ -101,6 +101,11 @@ type Options struct {
 	AllowedMachines                                                                    []string
 	Limit                                                                              int
 	ID, Cursor, Since, State, Machine, Project, Group, Source, Provider, Q, PaneSource string
+	// Providers is the personal-Agent OR-set form of Provider. ParseProviderSets
+	// uses it for every nonempty provider value, including a singleton. Values are
+	// exact and case-sensitive; order and duplicates do not affect matching, cache
+	// keys or cursor bindings. At most 64 supplied values, none empty.
+	Providers []string
 	// Manager selects the rows of the batches replaced with that owner (ReplaceOwned); like the other filters, a
 	// cursor is bound to it. It is the adapter's to set (not a key Parse reads): the adapter knows which owners exist
 	// and who may ask for which.
@@ -151,10 +156,13 @@ type Page struct {
 	SearchHits map[string]SearchHit `json:"search_hits,omitempty"`
 	Sessions   []any                `json:"sessions"`
 	Remove     []string             `json:"remove"`
-	HasMore    bool                 `json:"has_more"`
-	NextCursor string               `json:"next_cursor,omitempty"`
-	Revision   string               `json:"revision"`
-	Total      int                  `json:"total"`
+	// Added identifies rows created after a delta's baseline, not existing rows that only changed or entered its filter.
+	// It is always an array so a client can distinguish no creations from an older hub that omits the field (#11801).
+	Added      []string `json:"added"`
+	HasMore    bool     `json:"has_more"`
+	NextCursor string   `json:"next_cursor,omitempty"`
+	Revision   string   `json:"revision"`
+	Total      int      `json:"total"`
 }
 
 // Counts describes the complete filtered membership, ignoring page size.
@@ -176,8 +184,10 @@ type Counts struct {
 	BackgroundWaiting int `json:"background_waiting,omitempty"`
 	// JustFinished: how many of State["idle"] are Just finished (#9751): a client that shows them apart takes them out
 	// of its Seen count.
-	JustFinished int    `json:"just_finished,omitempty"`
-	Revision     string `json:"revision"`
+	JustFinished int `json:"just_finished,omitempty"`
+	// HeldNeeds: how many of State["needs_you"] only wait on held non-interrupting cards (P1/P2) for push grading.
+	HeldNeeds int    `json:"held_needs,omitempty"`
+	Revision  string `json:"revision"`
 }
 
 // PageWithCounts is a page with its view's current counts (with_counts=1): what a separate ?counts=1 read with the
@@ -215,8 +225,9 @@ type journalEntry struct {
 
 type filters struct {
 	ID, State, Machine, Project, Group, Source, Provider, Q, PaneSource, Manager, Under, Todo, Waiting, ExcludePaneSource, JustFinished string
-	// Places and Spaces are Options' as placesKey spells them: filters stay comparable.
-	Places, Spaces                              string
+	// Places and Spaces are Options' as placesKey spells them, Providers as
+	// providersKey spells the set: filters stay comparable.
+	Places, Spaces, Providers                   string
 	Roots, NoPrivate, IncludeHidden, AgentsOnly bool
 }
 
@@ -236,6 +247,7 @@ type event struct {
 	id      string
 	updated time.Time
 	value   *record // nil means a removal
+	added   bool    // created after a delta's baseline; full pages and filter entrances leave this false
 }
 
 type result struct {

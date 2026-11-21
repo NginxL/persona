@@ -22,9 +22,33 @@ accepted keeps its fixed candidate; source changes are refused until it ends. Re
 join that attempt. A rolled-back development commit is never automatically tried again.
 
 Development updates always use `https://github.com/nwverse/persona.git`, branch `main`.
-Configure `update.development` in the installation's private `hub.json`, then start the Hub
-through its original installation channel. The Web settings cannot supply a shell command,
-credential or arbitrary path:
+They work out of the box on a Linux or macOS Hub that starts the built-in child manager: the
+Hub pauses its own writers for the snapshot, so no hook script is needed. **Settings › Hub ›
+Update source › Web development** offers **Backup folder** and **Snapshots to keep**. The Web
+settings are declarative only: a folder and a count, never a shell command, credential or
+helper path.
+
+The recommended folder is `<runtime>/update/development-backups` (where the Hub has always
+kept these snapshots); it is shown as the placeholder and used when no folder is set. **Use
+recommended** and an empty field are an explicit Web choice of it, so they win over a
+`directory` in `hub.json`; leaving the field out of a request keeps whatever is set. A
+custom folder is validated on the Hub with the backup command's rules (`internal/operations/backup`):
+it must be an absolute path (a leading `~` is expanded), may not be inside data a snapshot
+collects (the knowledge base, `managers/assistant`, extensions, skills or
+`hub.machines_kept`), may not be the runtime directory or contain it (or an external
+knowledge base) — a snapshot leaves its own store out of the archive, so such a store would
+drop what the snapshot is for — it may not be a symbolic link, and it must be private
+(`0700`; an existing folder readable by other users is refused with the `chmod` to run). A
+folder chosen inside the runtime is never archived into the snapshot. The folder cannot be
+changed while the current one holds a `coordination-pending.json` marker or an
+`.incomplete-*` snapshot: those fail-closed gates stop any retry until someone inspects them,
+and a new folder would otherwise pause and dump writers again past them. The retention count
+defaults to three and may be 1–50; an explicit `0` is refused (omit the field to inherit).
+
+For installations with writers outside the Hub's control, `update.development.backup.quiesce`
+and `resume` in private `hub.json` remain an optional advanced override. Both must be set
+together; a half-configured pair disables the channel rather than silently using the built-in
+pause. The Web settings cannot supply a shell command, credential or arbitrary path:
 
 ```json
 {
@@ -33,6 +57,8 @@ credential or arbitrary path:
       "backup": {
         "quiesce": ["/absolute/path/to/pause-persona-writers"],
         "resume": ["/absolute/path/to/resume-persona-writers"],
+        "directory": "/absolute/path/to/snapshots",
+        "retain": 5,
         "extra_roots": [],
         "extra_databases": []
       }
@@ -49,6 +75,27 @@ ingestion, extensions, uploads and manager/node children. Keep the Hub updater i
 every failure attempts resume, and a failed resume blocks adoption and subsequent attempts.
 Stopping a service that the Hub immediately respawns does not establish this contract. Do not
 use no-op hooks on real data. Missing coordination disables installation and automatic opt-in.
+`directory`/`retain` in `hub.json` are read when the Web UI does not set them; a Web choice
+wins.
+
+### Built-in writer pause
+
+Without hooks the Hub pauses the writers itself for the whole snapshot: request writes are
+refused with `503` until resume — the apps' API, signing in with a password or a browser, a
+manager trading its install code, and the admin pages — writes already under way finish, and
+the built-in child manager is stopped and kept stopped until resume. Background writers (app
+registrations, extension reports, device-session rows, heartbeats and pruning, the
+computer-trust sweep) leave their work pending and write it after resume; the pause is lifted
+before those pending workers are woken, so the wake they use is not consumed by a refused
+write. The Hub then checks the databases with the backup command's own `Quiesced` rules,
+counting only its own connection-pool sessions as its own (`backup.QuiescedExcept`), and
+refuses the snapshot when another session, or one it cannot see, is still connected. A
+built-in manager whose tables still share the Hub's database (before
+`moved_to_own_database`) needs only that database checked; one moved to its own is checked
+separately (`backup.DiscoverDevelopment`, the same rules as the helper's inventory). Resume
+runs on every failure path, including cancellation; a Hub process that dies mid-snapshot
+leaves the incomplete directory in the store, which the next attempt refuses until it is
+inspected. Snapshot JSON, SQL dumps and file history keep their existing privacy rules.
 
 The host needs Git, Python 3.11+, Node matching `web/package.json`, Go matching `server/go.mod`,
 and compatible `pg_dump`/`pg_restore` tools with access to every included database. Their libpq
@@ -134,7 +181,8 @@ switch until confirmation or rollback. The binaries retain the `release` ABI/cha
 the independent persisted `source: web-dev` identifies this update channel.
 
 After compilation and the existing idle wait, before changing executables, the helper makes
-a recovery point under `<runtime>/update/development-backups`. It includes:
+a recovery point in the configured backup folder (the recommended default is
+`<runtime>/update/development-backups`). It includes:
 
 - Custom-format PostgreSQL dumps of the Hub database and every local manager database found
   in `managers/*/manager.json` (shared databases deduplicated), plus `extra_databases`.
@@ -163,11 +211,12 @@ their own configured URLs. A stale URL cannot replace the named manager database
 Protect these snapshots like the original data.
 
 Only verified directories with this helper's exact name and ownership manifest are rotated,
-oldest timestamp/name first, retaining the newest **three**. Unknown directories, changed
-manifests, symlinks, additional user files, damaged archives and other backup systems are left
-alone. A failed/incomplete snapshot is not counted and removes no valid recovery point. Cleanup
-failure stops adoption; it can temporarily leave more than three valid snapshots rather than
-discard recovery evidence. The API retains the last snapshot/rotation receipt; the Web selector
+oldest timestamp/name first, retaining the newest **three** by default (the **Snapshots to
+keep** setting, 1–50, replaces that count). Unknown directories, changed manifests, symlinks,
+additional user files, damaged archives and other backup systems are left alone. A
+failed/incomplete snapshot is not counted and removes no valid recovery point. Cleanup failure
+stops adoption; it can temporarily leave more valid snapshots than the configured count rather
+than discard recovery evidence. The API retains the last snapshot/rotation receipt; the Web selector
 lists available program versions. Private phase logs are `update/development/<operation>.log`.
 
 The data archive intentionally captures the existing standalone `web/` override before it is
@@ -376,20 +425,21 @@ must remain intact during a Hub-only rollout. The publisher rejects unmanaged
 `bin/nodes` contents and never writes Android artifacts.
 
 Set `publish_nodes: true` in both private worker and SSH publisher configs to
-continuously publish matching `personad` packages for `linux-amd64` and
-`darwin-arm64`. This is package publication only: the publisher never requests
+continuously publish matching `personad` and `persona-node` packages for
+`linux-amd64` and `darwin-arm64`. This is package publication only: the publisher never requests
 computer deployment and `auto_update_nodes` remains false. Users choose when
 to update each computer in the client.
 
-Both binaries are built from the same fixed clean commit with the same version,
+All four binaries are built from the same fixed clean commit with the same version,
 release channel and build flags, after the full validation gates. The standard
 release manifest binds compressed and executable SHA-256 hashes to that source
-and build; the Linux descriptor must equal the Hub descriptor. Before promoting
-the Hub manifest, publication verifies both archives, executable platforms, Go
-main package, clean VCS commit and hashes, and runs the Linux self-check. Go
+and build. The Linux `personad` descriptor must equal the Hub descriptor. Before
+promoting the Hub manifest, publication verifies all archives, executable platforms,
+Go main packages, clean VCS commits and hashes, and runs both Linux self-checks. Go
 `-trimpath` omits linker flags from build info, so foreign runtime version values
 are established by this controlled build manifest rather than a `.version` file.
 An old Hub-only cache does not satisfy an enabled node publication requirement.
+Existing `personad`-only node manifests remain valid for their original versions.
 
 Verified executables and version sidecars are staged under the immutable
 `releases/nodes/<version>/` directory. Once the matching Hub is healthy and
@@ -403,12 +453,13 @@ missing-package result may remain cached for ten minutes.
 The same publisher also retains a consumer download mirror under the selected
 `releases/<release_namespace>/node-packages/` (the private feed stays separate from
 `releases/hub`). Each immutable `<version>/` has `manifest.json`,
-`personad-linux-amd64.gz` and `personad-darwin-arm64.gz`. These are byte-for-byte
-copies of the verified compressed archives, with canonical consumer names; their
-sizes, compressed and native hashes, source, version, build and protocol metadata
-stay unchanged. `source-manifest.json` retains the original producer descriptors.
-Existing qualified Linux native packages are reused, not rebuilt. Versioned
-mirrors are retained independently of native-cache pruning and upload cleanup.
+`personad-linux-amd64.gz`, `personad-darwin-arm64.gz`,
+`persona-node-linux-amd64.gz` and `persona-node-darwin-arm64.gz`. The manifest lists
+the dedicated packages under `nodes.persona-node`. The mirror copies the verified
+archives byte for byte and preserves their sizes, hashes and release metadata.
+`source-manifest.json` retains the original producer descriptors. The publisher
+reuses verified native packages. Versioned mirrors outlive native-cache pruning
+and upload cleanup.
 
 Download preparation runs inside the original `.publish.lock`, before Hub
 promotion. The version directory and download `latest.json` become public only
@@ -418,13 +469,13 @@ fail closed. Publishing these files never deploys a node or enables node updates
 
 A directory on disk is not a working remote package source. The configured
 HTTPS provider must mount **only** this mirror as a read-only static root and map
-`<base>/<version>/manifest.json`, its two canonical archives and
+`<base>/<version>/manifest.json`, its listed archives and
 `<base>/latest.json` to it. An installation may expose only these privacy-checked
 release artifacts anonymously over HTTPS. If its provider requires authentication,
 the consumer supports credentials in `node_packages.url` through HTTP Basic;
 it does not inject the Hub API token or arbitrary custom headers. Never put
 credentials in artifact files. Allow only `latest.json`, valid versioned
-`manifest.json` and the two canonical archives. Return 404 for the release root,
+`manifest.json` and the listed canonical archives. Return 404 for the release root,
 directory listings, hidden staging directories, the producer's
 `source-manifest.json`, unlisted paths and missing versions/files. A
 reverse-proxy-only route does not serve these files. Select the formal
@@ -432,11 +483,11 @@ reverse-proxy-only route does not serve these files. Select the formal
 `off` setting remains off until that owner changes it. This helper never rewrites
 Caddy, mounts, credentials or a running Hub configuration.
 
-Before reporting a remote source ready, fetch the versioned manifest and **both**
-archives through the configured HTTPS provider, compare the manifest's
-source/version/build to the confirmed running Hub and verify both compressed
-size/hash and decompressed native hashes. Check 404 for an absent version, and
-authentication failure without credentials when the provider is private. Local
+Before reporting a remote source ready, fetch the versioned manifest and each listed
+archive through the configured HTTPS provider, compare the manifest's
+source, version and build to the confirmed running Hub, and verify each archive's
+size, compressed hash and executable hash. Check that an absent version returns
+404 and that a private provider rejects requests without credentials. Local
 mirror tests and Hub confirmation do not establish remote reachability or
 consumer installation. The publisher's confirmed receipt reports the relative
 mirror directory and consumer manifest hash for this separate read-only check.

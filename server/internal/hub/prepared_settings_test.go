@@ -310,7 +310,7 @@ func TestHubSelfSettingRechecksCurrentProposalAfterClarification(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				h := newTestHub(t)
-				h.push.store = newLnStore()
+				h.push.store = newGradingStore()
 				h.askVia = nil
 				mgr := playManager(t, h, func(context.Context, string, json.RawMessage) (any, error) { return map[string]any{}, nil })
 				shown := make(chan proto.Interaction, 1)
@@ -356,7 +356,7 @@ func TestHubSelfSettingRechecksCurrentProposalAfterClarification(t *testing.T) {
 				}
 				if externalChange {
 					// Another path turns the switch on after the off→on card was prepared.
-					if err := h.push.setLnMode(context.Background(), true); err != nil {
+					if err := h.push.setPushGrading(context.Background(), true); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -371,11 +371,11 @@ func TestHubSelfSettingRechecksCurrentProposalAfterClarification(t *testing.T) {
 					t.Fatalf("apply bus result = %#v", raw)
 				}
 				if externalChange {
-					if !out.Stale || out.Text != "" || !h.push.lnModeOn() {
-						t.Fatalf("stale Hub setting result = %+v, switch=%v", out, h.push.lnModeOn())
+					if !out.Stale || out.Text != "" || !h.push.pushGradingOn() {
+						t.Fatalf("stale Hub setting result = %+v, switch=%v", out, h.push.pushGradingOn())
 					}
-				} else if out.Stale || !strings.Contains(out.Text, "true") || !h.push.lnModeOn() {
-					t.Fatalf("fresh Hub setting result = %+v, switch=%v", out, h.push.lnModeOn())
+				} else if out.Stale || !strings.Contains(out.Text, "true") || !h.push.pushGradingOn() {
+					t.Fatalf("fresh Hub setting result = %+v, switch=%v", out, h.push.pushGradingOn())
 				}
 			})
 		})

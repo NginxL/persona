@@ -25,6 +25,7 @@ describe("turnImages", () => {
       tool("g", "Read", { file_path: "/tmp/missing.png" }, [], false), // still running / failed: nothing yet
       tool("h", "mcp__figma__get_image", {}, [img("i5")]),
       tool("k", "view_image", { path: "/Users/me/shots/codex.png" }, [img("i6", 1200, 800)]), // Codex
+      tool("l", "read_file", { Path: "C:\\Users\\me\\charts\\aa.png" }, []), // Antigravity read_file
     ];
     const got = turnImages({ steps }, "MacBook");
     expect(got.map((g) => [g.key, g.label, g.source])).toEqual([
@@ -34,6 +35,7 @@ describe("turnImages", () => {
       ["r:f", "plot.png", "read"],
       ["i:i5", "figma 返回的图片", "mcp"],
       ["i:i6", "codex.png", "read"],
+      ["r:l", "aa.png", "read"],
     ]);
     expect(got[0]).toMatchObject({ path: "/Users/me/code/weather/docs/icon.png", width: 512, height: 512 });
     expect(got[3].item).toBeUndefined();

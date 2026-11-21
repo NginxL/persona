@@ -13,10 +13,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
+
+func TestA2ARuntimeEchoKeepsPeerSourceAfterRestore(t *testing.T) {
+	record, err := json.Marshal(echoRecord{
+		SessionID: "session", ClientMsgID: "a2a-message", Line: "line", In: echoInRuntime, SentAt: time.Now(),
+		Source: &proto.MessageSource{Kind: proto.SourceConversation, ConversationID: "peer", Title: "computer/peer"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored echoRecord
+	if err := json.Unmarshal(record, &restored); err != nil {
+		t.Fatal(err)
+	}
+	n := &Node{}
+	n.restoreEchoes([]echoRecord{restored})
+	raw := n.echoedRaw("session", json.RawMessage(`{"items":[{"id":"line#0","seq":1,"role":"user","kind":"text","text":"Peer request","client_msg_id":"a2a-message"}]}`), "items")
+	var page struct{ Items []proto.Item }
+	if err := json.Unmarshal(raw, &page); err != nil || len(page.Items) != 1 {
+		t.Fatalf("unexpected page %s: %v", raw, err)
+	}
+	if got := prompts.ItemSource(page.Items[0]); got == nil || *got != *restored.Source {
+		t.Fatalf("A2A echo lost peer provenance: %+v", page.Items[0])
+	}
+}
 
 // echoItems parses Claude Code transcript lines the way the node serves them.
 func echoItems(t *testing.T, lines ...string) []proto.Item {

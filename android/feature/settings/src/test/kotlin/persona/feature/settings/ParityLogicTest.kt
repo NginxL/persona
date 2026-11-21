@@ -15,6 +15,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import persona.core.contracts.PaseoAgent
 import persona.core.contracts.api.ClaudeDir
 import persona.core.contracts.api.ClaudeDirsState
 import persona.core.contracts.api.HubLauncher
@@ -74,6 +75,14 @@ class ParityLogicTest {
         assertEquals(listOf("cc_old"), all.hidden.map { it.name })
         assertEquals(listOf("team"), ProviderGroups.of(launchers, "GATEWAY.example").managed.map { it.name })
         assertEquals(listOf("cc_work"), ProviderGroups.of(launchers, "laptop") { if (it == "mac") "Laptop" else it }.zshrc.map { it.name })
+        val traeCli = HubLauncher("traex", agent = "traex")
+        val paseoTraeCli = HubLauncher("traecli", agent = PaseoAgent)
+        val customTraeCli = HubLauncher("trae-cli", agent = PaseoAgent, displayName = "Team CLI")
+        val withTraeCli = launchers + listOf(traeCli, paseoTraeCli, customTraeCli)
+        assertEquals(listOf(traeCli, paseoTraeCli), ProviderGroups.of(withTraeCli, "TRAE CLI").zshrc)
+        assertEquals(listOf(traeCli), ProviderGroups.of(withTraeCli, "traex").zshrc)
+        assertEquals(listOf(customTraeCli), ProviderGroups.of(withTraeCli, "Team CLI").zshrc)
+        assertEquals("TRAE CLI", harnessName("trae-cli"))
         assertTrue(ProviderGroups.of(launchers, "nothing").isEmpty)
         assertEquals("gateway.example.com", providerHost("https://gateway.example.com/v1"))
         assertNull(providerHost(""))

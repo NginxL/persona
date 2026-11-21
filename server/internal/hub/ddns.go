@@ -17,11 +17,21 @@ import (
 	"github.com/nwverse/persona/server/internal/netaddr"
 )
 
+const (
+	cloudflareDefaultAPI = "https://api.cloudflare.com/client/v4"
+	alidnsDefaultAPI     = "https://alidns.aliyuncs.com"
+	cloudflareAutoTTL    = 1
+	cloudflareMinTTL     = 30
+	ddnsMaxTTL           = 86400
+	ddnsMaxResponseBytes = 1 << 20
+)
+
 // DDNSConfig optionally publishes the hub's stable addresses.
-// TODO: Add Alibaba Cloud DNS and DNSPod providers later.
+// TODO: Add DNSPod provider later.
 type DDNSConfig struct {
 	Provider   string `json:"provider"`
 	Record     string `json:"record"`
+	Domain     string `json:"domain,omitempty"`
 	ZoneID     string `json:"zone_id,omitempty"`
 	TokenFile  string `json:"token_file,omitempty"`
 	WebhookURL string `json:"webhook_url,omitempty"`
@@ -42,6 +52,8 @@ type ddnsUpdater struct {
 	api       string
 	list      func() ([]netaddr.Addr, error)
 	logf      func(string, ...any)
+	now       func() time.Time
+	nonce     func() (string, error)
 	wake      chan struct{}
 	retryMin  time.Duration
 	retryMax  time.Duration
@@ -49,17 +61,25 @@ type ddnsUpdater struct {
 	published ddnsAddresses
 }
 
+func defaultDDNSAPI(provider string) string {
+	switch provider {
+	case "alidns":
+		return alidnsDefaultAPI
+	default:
+		return cloudflareDefaultAPI
+	}
+}
+
 func newDDNSUpdater(cfg DDNSConfig, advertise []string, logf func(string, ...any)) *ddnsUpdater {
 	cfg.Record = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(cfg.Record)), ".")
-	if cfg.TTL == 0 {
-		cfg.TTL = 1 // Cloudflare's automatic TTL.
-	}
+	cfg.Domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(cfg.Domain)), ".")
 	return &ddnsUpdater{
 		cfg: cfg, advertise: append([]string(nil), advertise...), logf: logf,
 		client: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}},
-		api: "https://api.cloudflare.com/client/v4", list: netaddr.List,
+		api: defaultDDNSAPI(cfg.Provider), list: netaddr.List,
+		now: time.Now, nonce: randomAlidnsNonce,
 		wake: make(chan struct{}, 1), retryMin: time.Second, retryMax: 5 * time.Minute,
 	}
 }
@@ -155,7 +175,7 @@ func (d *ddnsUpdater) update(ctx context.Context) error {
 	if next == d.published || (next.IPv6 == "" && next.IPv4 == "") {
 		return nil
 	}
-	token, err := ddnsToken(d.cfg.TokenFile, d.cfg.Provider == "cloudflare")
+	token, err := ddnsToken(d.cfg.TokenFile, d.cfg.Provider == "cloudflare" || d.cfg.Provider == "alidns")
 	if err != nil {
 		return err
 	}
@@ -165,28 +185,58 @@ func (d *ddnsUpdater) update(ctx context.Context) error {
 			return err
 		}
 	case "cloudflare":
-		if d.cfg.ZoneID == "" || (d.cfg.TTL != 1 && (d.cfg.TTL < 30 || d.cfg.TTL > 86400)) {
+		ttl := d.cfg.TTL
+		if ttl == 0 {
+			ttl = cloudflareAutoTTL // Cloudflare's automatic TTL.
+		}
+		if d.cfg.ZoneID == "" || (ttl != cloudflareAutoTTL && (ttl < cloudflareMinTTL || ttl > ddnsMaxTTL)) {
 			return errors.New("invalid Cloudflare zone_id or ttl")
 		}
-		// Remember each successful family separately so a partial failure is not republished.
-		for _, record := range []struct {
-			kind, address string
-			published     *string
-		}{
-			{"AAAA", next.IPv6, &d.published.IPv6},
-			{"A", next.IPv4, &d.published.IPv4},
-		} {
-			if record.address != "" && record.address != *record.published {
-				if err := d.cloudflare(ctx, token, record.kind, record.address); err != nil {
-					return err
-				}
-				*record.published = record.address
-			}
+		if err := d.publishFamilies(next, func(kind, address string) error {
+			return d.cloudflare(ctx, token, kind, address, ttl)
+		}); err != nil {
+			return err
+		}
+	case "alidns":
+		accessKeyID, accessKeySecret, err := alidnsCredentials(token)
+		if err != nil {
+			return err
+		}
+		rr, err := splitAlidnsRecord(d.cfg.Record, d.cfg.Domain)
+		if err != nil {
+			return err
+		}
+		if d.cfg.TTL < 0 || d.cfg.TTL > ddnsMaxTTL {
+			return errors.New("invalid Alibaba Cloud DNS ttl")
+		}
+		if err := d.publishFamilies(next, func(kind, address string) error {
+			return d.alidns(ctx, accessKeyID, accessKeySecret, rr, kind, address)
+		}); err != nil {
+			return err
 		}
 	default:
 		return errors.New("unsupported DDNS provider")
 	}
 	d.published = next
+	return nil
+}
+
+// publishFamilies remembers each successful family separately so a partial failure is not republished.
+func (d *ddnsUpdater) publishFamilies(next ddnsAddresses, publish func(kind, address string) error) error {
+	for _, record := range []struct {
+		kind, address string
+		published     *string
+	}{
+		{"AAAA", next.IPv6, &d.published.IPv6},
+		{"A", next.IPv4, &d.published.IPv4},
+	} {
+		if record.address != "" && record.address != *record.published {
+			if err := publish(record.kind, record.address); err != nil {
+				return err
+			}
+			*record.published = record.address
+		}
+	}
 	return nil
 }
 
@@ -222,7 +272,7 @@ type ddnsCloudflareResponse struct {
 	Result  json.RawMessage `json:"result"`
 }
 
-func (d *ddnsUpdater) cloudflare(ctx context.Context, token, kind, address string) error {
+func (d *ddnsUpdater) cloudflare(ctx context.Context, token, kind, address string, ttl int) error {
 	base := d.api + "/zones/" + url.PathEscape(d.cfg.ZoneID) + "/dns_records"
 	query := url.Values{"type": {kind}, "name": {d.cfg.Record}, "per_page": {"2"}}
 	var response ddnsCloudflareResponse
@@ -255,7 +305,7 @@ func (d *ddnsUpdater) cloudflare(ctx context.Context, token, kind, address strin
 		Content string `json:"content"`
 		TTL     int    `json:"ttl"`
 		Proxied bool   `json:"proxied"`
-	}{kind, d.cfg.Record, address, d.cfg.TTL, false}
+	}{kind, d.cfg.Record, address, ttl, false}
 	return d.request(ctx, method, target, token, payload, &response)
 }
 
@@ -289,7 +339,7 @@ func (d *ddnsUpdater) request(ctx context.Context, method, target, token string,
 	}
 	if response != nil {
 		*response = ddnsCloudflareResponse{}
-		if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(response); err != nil {
+		if err := json.NewDecoder(io.LimitReader(res.Body, ddnsMaxResponseBytes)).Decode(response); err != nil {
 			return errors.New("invalid Cloudflare response")
 		}
 		if !response.Success {

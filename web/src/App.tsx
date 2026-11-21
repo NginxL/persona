@@ -83,6 +83,7 @@ const History = lazyPage(() => import("./views/assistant/History").then((m) => m
 const Profile = lazyPage(() => import("./views/assistant/Profile").then((m) => m.Profile), { routes: ["profile"] });
 const Routines = lazyPage(() => import("./views/assistant/Routines").then((m) => m.Routines), { routes: ["routines"] });
 const Inbox = lazyPage(() => import("./views/inbox/Inbox").then((m) => m.Inbox), { routes: ["inbox"] });
+const StarredMessages = lazyPage(() => import("./views/StarredMessages").then((m) => m.StarredMessages), { routes: ["starred"] });
 const Messages = lazyPage(() => import("./views/messages/Messages").then((m) => m.Messages), { routes: ["messages"] });
 const Knowledge = lazyPage(() => import("./views/knowledge/Knowledge").then((m) => m.Knowledge), { routes: ["kb"] });
 const TodosView = lazyPage(() => import("./views/Todos").then((m) => m.TodosView), { routes: ["todos"] });
@@ -296,9 +297,11 @@ function pageTarget(s: State, route: Route): PageTarget | undefined {
     return { link: undefined, to: "", mid: route.mid, sid: pane?.sid };
   }
   if (route.name !== "session") return undefined;
+  // A compact card or another engine's conversation cannot land on this transcript's message.
+  const exact = (): PageTarget => ({ link: "exact", to: "", mid: route.mid, sid: route.sid });
   // a link to a subagent's own conversation (#5030): its parent's chat, which shows the subagent's card (lib/subagent-link.ts)
   const sub = splitSubagentLink(route.sid);
-  if (sub) return { link: undefined, to: routePath({ ...route, sid: sub.parent }), mid: route.mid, sid: undefined };
+  if (sub) return route.at ? exact() : { link: undefined, to: routePath({ ...route, sid: sub.parent }), mid: route.mid, sid: undefined };
   const rows = pageRows(s, route.mid);
   const row = rows.find((r) => r.session_id === route.sid);
   // a lead's worker's (#5180): the lead's page, the worker in its Team panel
@@ -306,22 +309,23 @@ function pageTarget(s: State, route: Route): PageTarget | undefined {
   if (worker) return worker;
   // a side session's (#7944): its parent's page, the side in its Side sessions panel
   const side = sideTarget(rows, route.mid, row, inWorkView(route));
-  if (side) return side;
+  if (side) return route.at && side.child ? exact() : side;
   // a child session's (#5120): its parent's chat, which shows the child's card; known once its row is (a listed one, or
   // the lookup of an unlisted chat), the session itself until then
   const parent = row ? foldsUnder(row) : undefined;
-  if (parent && parent !== route.sid) return { link: undefined, to: routePath(withWorkView({ name: "session", mid: route.mid, sid: parent }, inWorkView(route))), mid: route.mid, sid: undefined, parent };
+  if (parent && parent !== route.sid) return route.at ? exact() : { link: undefined, to: routePath(withWorkView({ name: "session", mid: route.mid, sid: parent }, inWorkView(route))), mid: route.mid, sid: undefined, parent };
   // an earlier session of a conversation that moved between Claude Code and Codex (#5054): the conversation's own row,
   // whose chat reads that session's stretch in its place
   const home = engineSwitchHome(rows, route.sid);
-  if (home) return { link: undefined, to: routePath(withWorkView({ name: "session", mid: route.mid, sid: home.session_id }, inWorkView(route))), mid: route.mid, sid: undefined };
+  if (home) return route.at ? exact() : { link: undefined, to: routePath(withWorkView({ name: "session", mid: route.mid, sid: home.session_id }, inWorkView(route))), mid: route.mid, sid: undefined };
   // an old `/s/…` link of a pane in a tab becomes that tab's `/t/…`
   const tab = tabOfSessionLink(rows, route);
   // a `/s/…` link with only the front of an id (the 8-character ones shown everywhere, #2464): the whole id's link;
   // several sessions starting with it are listed to pick from (SessionChoices)
   const link = resolveSessionLink(rows, route.mid, route.sid, s.loaded);
   const resolved = tab ?? (link.kind === "prefix" ? sessionLinkRoute(rows, link.session, route.view) : undefined);
-  const to = resolved ? routePath(withWorkView(resolved, inWorkView(route))) : "";
+  const landing = resolved && (resolved.name === "session" || resolved.name === "tab") && route.at ? { ...resolved, at: route.at } : resolved;
+  const to = landing ? routePath(withWorkView(landing, inWorkView(route))) : "";
   const shown = link.kind === "exact" || link.kind === "unlisted";
   return { link: link.kind, to, mid: route.mid, sid: shown ? route.sid : undefined };
 }
@@ -340,6 +344,7 @@ function Shell() {
   const tabLinkPath = target?.to ?? "";
   const linkMid = route.name === "session" ? route.mid : "";
   const linkSid = route.name === "session" ? route.sid : "";
+  const linkAt = route.name === "session" || route.name === "tab" ? route.at : undefined;
   const linkParent = target?.parent;
   const linkWorker = target?.worker;
   const linkSide = target?.side;
@@ -347,14 +352,14 @@ function Shell() {
   const targetMid = target?.mid ?? "";
   useEffect(() => {
     if (!tabLinkPath) return;
-    if (linkWorker && linkParent) askTeamWorker(targetMid, linkParent, linkWorker);
+    if (linkWorker && linkParent) askTeamWorker(targetMid, linkParent, linkWorker, linkAt);
     else if (linkSide && linkParent) {
-      askSide(targetMid, linkParent, linkSide);
+      askSide(targetMid, linkParent, linkSide, linkAt);
       // a row of the side's own (its Codex child): the side's chat opens at its card
       if (linkChild) followChildSession(targetMid, linkChild, linkSide);
     } else if (linkSid) followSubagentLink(linkMid, linkSid, linkParent);
     navigate(tabLinkPath, true);
-  }, [tabLinkPath, linkMid, linkSid, linkParent, linkWorker, linkSide, linkChild, targetMid]);
+  }, [tabLinkPath, linkMid, linkSid, linkAt, linkParent, linkWorker, linkSide, linkChild, targetMid]);
   // a tab not among the page's rows (a paged hub lists only active and pinned ones): asked of the hub before it is gone
   const tabRoute = route.name === "tab" ? route : undefined;
   const lookup = useTabLookup(tabRoute, !!tabRoute && loaded && !target?.sid);
@@ -491,7 +496,7 @@ function Shell() {
 
   const extensionTitle = useExtensionPlace(route.name === "extension" ? route.extension : "", route.name === "extension" ? route.ui : "")?.title;
   const title =
-    inWorkView(route) || route.name === "terminal" ? t("work-entry.title") : pane ? agentTitle || "Agent" : route.name === "persona" ? "Persona" : route.name === "persona-new" ? t("app.title_new_chat") : route.name === "history" ? t("app.title_history") : route.name === "health" ? t("app.title_health") : route.name === "profile" ? t("app.title_profile") : route.name === "inbox" ? t("app.title_inbox") : route.name === "messages" ? t("app.title_messages")
+    inWorkView(route) || route.name === "terminal" ? t("work-entry.title") : pane ? agentTitle || "Agent" : route.name === "persona" ? "Persona" : route.name === "persona-new" ? t("app.title_new_chat") : route.name === "history" ? t("app.title_history") : route.name === "health" ? t("app.title_health") : route.name === "profile" ? t("app.title_profile") : route.name === "inbox" ? t("app.title_inbox") : route.name === "messages" ? t("app.title_messages") : route.name === "starred" ? t("starred.title")
       : route.name === "request" ? t("app.title_request") : route.name === "routines" ? t("app.title_routines") : route.name === "kb" ? t("app.title_kb") : route.name === "workspace-board" ? t("app.title_workspace_board") : route.name === "todos" ? t("app.title_todos") : route.name === "machines" || route.name === "machine" ? t("app.title_machines") : route.name === "space" ? route.space : route.name === "settings" ? t("app.title_settings")
       : route.name === "agents" ? t("app.title_agents") : route.name === "agent-list" ? "Agents" : route.name === "agent-archives" ? t("app.title_agent_archives") : route.name === "compare" ? t("app.title_compare_runs") : route.name === "extension" ? extensionTitle || t("app.title_extension") : route.name === "subscriptions" ? t("app.title_subscriptions") : route.name === "not-found" ? t("app.title_not_found") : t("app.title_home");
 
@@ -536,6 +541,9 @@ function Shell() {
       break;
     case "messages":
       main = <Messages id={route.id} onToggleSidebar={toggle} />;
+      break;
+    case "starred":
+      main = <StarredMessages onToggleSidebar={toggle} />;
       break;
     case "routines":
       main = <Routines onToggleSidebar={toggle} />;

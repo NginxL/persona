@@ -46,15 +46,21 @@ func (r *Registry) AddDevContext(ctx context.Context, dir string, config json.Ra
 	if len(config) == 0 {
 		config = json.RawMessage("{}")
 	}
-	if err := schema.Check(config); err != nil {
+	candidate := &Extension{Record: Record{ID: m.ID, Config: devIdentityBaseline(schema, config)}, Manifest: m, Full: m, Schema: schema}
+	prepared, err := prepareEntryConfig(candidate, config, false)
+	if err != nil {
 		return nil, fmt.Errorf("配置：%w", err)
 	}
+	config = prepared.raw
+	candidate.Record.Config = config
 	for name := range secrets {
-		if !m.hasSecret(name) {
+		if _, ok := candidate.SecretDeclaration(name); !ok {
 			return nil, fmt.Errorf("清单里没有密钥 %s", name)
 		}
 	}
 	translations, l10nWarnings := ReadTranslations(dir) // read before the lock: it is file I/O
+	mutation := r.settingsWrite(m.ID)
+	defer mutation.finish()
 	r.mu.Lock()
 	cur := r.extensions[m.ID]
 	if cur != nil && cur.Record.Source != SourceDev {
@@ -86,7 +92,7 @@ func (r *Registry) AddDevContext(ctx context.Context, dir string, config json.Ra
 		kind = "upgraded"
 	}
 	unlock()
-	r.changed(Change{ID: m.ID, Kind: kind, Old: cur})
+	mutation.changed(Change{ID: m.ID, Kind: kind, Old: cur})
 	return p, nil
 }
 
@@ -95,7 +101,8 @@ func (r *Registry) RestartDev(id string) error {
 	if p := r.Get(id); p == nil || p.Record.Source != SourceDev {
 		return fmt.Errorf("没有开发中的扩展 %s", id)
 	}
-	r.changed(Change{ID: id, Kind: "config"})
+	mutation := r.settingsWrite(id)
+	mutation.changed(Change{ID: id, Kind: "config"})
 	return nil
 }
 
@@ -106,6 +113,8 @@ func (r *Registry) RemoveDev(id string) error {
 		return err
 	}
 	defer unlock()
+	mutation := r.settingsWrite(id)
+	defer mutation.finish()
 	r.mu.Lock()
 	p := r.extensions[id]
 	if p == nil || p.Record.Source != SourceDev {
@@ -116,15 +125,31 @@ func (r *Registry) RemoveDev(id string) error {
 	delete(r.devSecrets, id)
 	r.mu.Unlock()
 	unlock()
-	r.changed(Change{ID: id, Kind: "removed", Old: p})
+	mutation.changed(Change{ID: id, Kind: "removed", Old: p})
 	return nil
 }
 
-func (m *Manifest) hasSecret(name string) bool {
-	for _, s := range m.Secrets {
-		if s.Name == name {
-			return true
-		}
+// devIdentityBaseline trusts IDs already present in a development config as its starting state, while rows without
+// one are new and receive a hub-minted ID in prepareEntryConfig.
+func devIdentityBaseline(schema *Schema, raw json.RawMessage) json.RawMessage {
+	var config map[string]json.RawMessage
+	if json.Unmarshal(compactConfig(raw), &config) != nil {
+		return json.RawMessage(`{}`)
 	}
-	return false
+	for _, f := range schema.EntryListFields() {
+		var rows []map[string]json.RawMessage
+		if json.Unmarshal(config[f.Name], &rows) != nil {
+			continue
+		}
+		kept := rows[:0]
+		for _, row := range rows {
+			var id string
+			if json.Unmarshal(row[entryIDField], &id) == nil && id != "" {
+				kept = append(kept, row)
+			}
+		}
+		config[f.Name], _ = json.Marshal(kept)
+	}
+	out, _ := json.Marshal(config)
+	return out
 }

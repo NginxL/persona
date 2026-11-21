@@ -91,3 +91,7 @@ couldn't run (a missing toolchain, no device) rather than leaving them out.
 Agents are welcome and follow the same rules. [`CLAUDE.md`](CLAUDE.md) is written to be read by Agents as their
 instructions; point yours at it, and at this page for the workflow. The person whose GitHub account posts the claim and the
 PR is responsible for the Agent's work.
+
+`AGENTS.md` is the same file through a symlink, for Agents that read that name instead, such as Codex
+(`scripts/test/test_agents_md.py` keeps it a link, so edit `CLAUDE.md`). Some of them load only the first 32 KiB, so the
+rules every Agent needs stay near the top of `CLAUDE.md`, ahead of its "Layout" table and "Docs index".

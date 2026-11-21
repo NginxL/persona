@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import launcherFixture from "../../../spec/fixtures/assistant-launchers/cases.json";
 import { assistantInfoText, conversationKey, effectiveLauncher, launcherOffered, NEW_CONVERSATION, pickedLauncher, pickLauncher, runsAssistant, shortModel } from "./assistant-chat";
 
 describe("the assistant's launchers", () => {
-  it("runs on Claude Code or Codex, not TRAEX or other agents", () => {
+  it("runs on Claude Code or Codex, not TRAE CLI or other agents", () => {
     expect(runsAssistant({ name: "claude" })).toBe(true);
     expect(runsAssistant({ name: "claude-fast", agent: "claude" })).toBe(true);
     expect(runsAssistant({ name: "codex", agent: "codex" })).toBe(true);
@@ -13,14 +14,22 @@ describe("the assistant's launchers", () => {
     expect(runsAssistant({ name: "dsh", agent: "dsh" })).toBe(false);
   });
 
-  it("leaves out a runtime's provider that doesn't run the assistant and a managed Codex launcher", () => {
+  it("keeps managed native engines and requires an assistant contract from runtime providers", () => {
     expect(runsAssistant({ name: "cc-relay", source: "paseo" })).toBe(false);
     expect(runsAssistant({ name: "agy-rt", source: "agy", agent: "agy", assistant: true })).toBe(true);
-    expect(runsAssistant({ name: "codex-gw", source: "jarvis", agent: "codex" })).toBe(false);
-    expect(runsAssistant({ name: "codex-gw", source: "persona", agent: "codex" })).toBe(false);
+    expect(runsAssistant({ name: "codex-gw", source: "jarvis", agent: "codex" })).toBe(true);
+    expect(runsAssistant({ name: "codex-gw", source: "persona", agent: "codex" })).toBe(true);
     expect(runsAssistant({ name: "gw-claude", source: "jarvis" })).toBe(true);
     expect(runsAssistant({ name: "codex", source: "zshrc", agent: "codex" })).toBe(true);
     expect(runsAssistant({ name: "claude", source: "builtin" })).toBe(true);
+  });
+
+  it("matches the shared assistant catalog without dropping managed Codex", () => {
+    for (const fixture of launcherFixture.cases) {
+      expect(fixture.candidates.filter(runsAssistant).map((l) => l.name)).toEqual(fixture.assistant);
+    }
+    expect(runsAssistant({ name: "provider", source: "persona", agent: "claude", agent_type: "unknown" })).toBe(false);
+    expect(runsAssistant({ name: "provider", source: "persona", agent_type: "codex" })).toBe(true);
   });
 
   it("drops picks only against a loaded list, an empty one included", () => {

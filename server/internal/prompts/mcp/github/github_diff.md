@@ -1,4 +1,4 @@
-What a GitHub pull request changes. Without path: every changed file with its status and lines added / removed. With path: that file's patch (cut when very long; a file too big for GitHub to show has only its counts).
+What a GitHub pull request changes. Without path: every changed file with its status and lines added / removed. With path: that file's patch (cut when very long; a file too big for GitHub to show has only its counts).{{template "shared/mcp_language" .}}
 
 ```json
 {

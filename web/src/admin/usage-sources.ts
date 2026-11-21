@@ -8,17 +8,21 @@ import type { UsageSource, UsageSourceType, UsageTestResult } from "./types";
 /** The intervals the page offers; the hub accepts 1 to 1440 minutes, so one set by hand in hub.json is shown too. */
 export const POLL_CHOICES = [1, 5, 15, 30, 60];
 
-export const typeLabel = (type: UsageSourceType | string): string => (type === "generic" ? t("admin-pages-usage.type_generic") : t("admin-pages-usage.type_relay"));
+export const typeLabel = (type: UsageSourceType | string): string =>
+  type === "generic" ? t("admin-pages-usage.type_generic") : type === "relay_key" ? t("admin-pages-usage.type_relay_key") : t("admin-pages-usage.type_relay");
 
-/** The words for a failed read, by the code the hub gives (usagesource.Code*). */
-export function reasonText(code: string): string {
+/** Both relay types are read with a key (a management key, or an ordinary API key); a generic gateway may need none. */
+export const keyRequired = (type: UsageSourceType): boolean => type !== "generic";
+
+/** The words for a failed read, by the code the hub gives (usagesource.Code*); a missing route depends on what the type reads. */
+export function reasonText(code: string, type?: UsageSourceType | string): string {
   switch (code) {
     case "unauthorized":
       return t("admin-pages-usage.err_unauthorized");
     case "forbidden":
       return t("admin-pages-usage.err_forbidden");
     case "not_found":
-      return t("admin-pages-usage.err_not_found");
+      return type === "relay_key" ? t("admin-pages-usage.err_not_found_key") : t("admin-pages-usage.err_not_found");
     case "timeout":
       return t("admin-pages-usage.err_timeout");
     case "bad_response":
@@ -41,8 +45,9 @@ const HUB_WORDS = new Set(["invalid_type", "invalid_url", "invalid_name", "inval
 export const hubWords = (e: unknown): string | null => (e instanceof AdminError && HUB_WORDS.has(e.code) && e.message ? e.message : null);
 
 /** What a test of the connection found, as one sentence. */
-export function testText(r: UsageTestResult): { ok: boolean; text: string } {
-  if (!r.ok) return { ok: false, text: t("admin-pages-usage.test_failed", { reason: reasonText(r.code) }) };
+export function testText(r: UsageTestResult, type?: UsageSourceType): { ok: boolean; text: string } {
+  if (!r.ok) return { ok: false, text: t("admin-pages-usage.test_failed", { reason: reasonText(r.code, type) }) };
+  if (r.quota_hidden) return { ok: true, text: t("admin-pages-usage.test_hidden") };
   if (r.windows === 0) return { ok: true, text: t("admin-pages-usage.test_none", { listed: r.listed }) };
   const providers = Object.entries(r.providers)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -59,8 +64,13 @@ export function sourceStatus(s: UsageSource, globalOn: boolean, now = Date.now()
   if (!s.enabled) return { tone: "gray", label: t("admin-pages-usage.status_off") };
   if (!globalOn) return { tone: "gray", label: t("admin-pages-usage.status_paused") };
   const st = s.status;
-  const seen = st.seen ? `${t("admin-pages-usage.n_accounts", { count: st.seen.accounts })} · ${t("admin-pages-usage.n_windows", { count: st.seen.windows })}` : "";
-  if (st.error) return { tone: "red", label: t("admin-pages-usage.status_failed"), detail: st.ok_at ? `${reasonText(st.error)} · ${t("admin-pages-usage.last_ok", { ago: ago(st.ok_at, now) })}` : reasonText(st.error) };
+  const seen = st.seen?.quota_hidden
+    ? t("admin-pages-usage.quota_hidden")
+    : st.seen
+      ? `${t("admin-pages-usage.n_accounts", { count: st.seen.accounts })} · ${t("admin-pages-usage.n_windows", { count: st.seen.windows })}`
+      : "";
+  if (st.error)
+    return { tone: "red", label: t("admin-pages-usage.status_failed"), detail: st.ok_at ? `${reasonText(st.error, s.type)} · ${t("admin-pages-usage.last_ok", { ago: ago(st.ok_at, now) })}` : reasonText(st.error, s.type) };
   if (!st.ok_at) return { tone: "gray", label: t("admin-pages-usage.status_never") };
   return { tone: "green", label: t("admin-pages-usage.status_ok"), detail: `${seen} · ${t("admin-pages-usage.read_ago", { ago: ago(st.ok_at, now) })}` };
 }

@@ -22,18 +22,16 @@ final class HubSwitchSidebarTests: XCTestCase {
         (self.a, self.b) = (a, b)
     }
 
-    /// The Separate layout (the iPhone's own): Work made current in the Persona page's menu, then Home picked in the
-    /// Agents page's own hub menu, each time with the sidebar closed. Opened again, it lists the hub picked last.
+    /// The Separate layout (the iPhone's own): Work made current in the sidebar's assistant switcher (#12594), then Home
+    /// picked in the Agents page's own hub menu with the sidebar closed. Opened again, it lists the hub picked last.
     @MainActor func testSeparateLayoutSidebarFollowsTheHub() throws {
         let scheme = env["PERSONA_SCHEME"] ?? "light"
         let app = launch(layout: "separate", scheme: scheme)
         openSidebar(app)
         expectChats(of: "Home", app)
         shot(app, "separate-1-home-\(scheme)")
-        closeSidebar(app)
 
-        pickHub("Work", menu: "shell-assistant", app)
-        openSidebar(app)
+        pickHubInSwitcher("Work", app)
         expectChats(of: "Work", app)
         shot(app, "separate-2-work-\(scheme)")
         closeSidebar(app)
@@ -54,7 +52,8 @@ final class HubSwitchSidebarTests: XCTestCase {
     }
 
     /// The Sidebar layout (Merged): the same drawer holds Persona's chats over the Agents list, here narrowed to Home in
-    /// its own menu. Work made current in the conversation's menu: opened again, both lists are Work's.
+    /// its own menu. Work made current in the sidebar's assistant switcher (#12594): both lists are Work's, and stay so
+    /// when the sidebar is opened again. The conversation's menu has no hub section any more.
     @MainActor func testMergedLayoutSidebarFollowsTheHub() throws {
         let scheme = env["PERSONA_SCHEME"] ?? "light"
         let app = launch(layout: "sidebar", scheme: scheme)
@@ -64,16 +63,19 @@ final class HubSwitchSidebarTests: XCTestCase {
         expectAgents(of: "Home", app)
         shot(app, "sidebar-1-home-\(scheme)")
         closeSidebar(app)
+        expectNoHubInConversationMenu(app)
 
-        pickHub("Work", menu: "persona-avatar", app)
         openSidebar(app)
+        pickHubInSwitcher("Work", app)
         expectChats(of: "Work", app)
         shot(app, "sidebar-2-work-\(scheme)")
         expectAgents(of: "Work", app)
         shot(app, "sidebar-3-work-agents-\(scheme)")
         closeSidebar(app)
 
-        pickHub("Home", menu: "persona-avatar", app)
+        openSidebar(app)
+        pickHubInSwitcher("Home", app)
+        closeSidebar(app)
         openSidebar(app)
         expectChats(of: "Home", app)
         expectAgents(of: "Home", app)
@@ -147,8 +149,10 @@ final class HubSwitchSidebarTests: XCTestCase {
     /// conversation's name in the Merged layout, the Agents heading's ⋯ further down the Merged sidebar).
     @MainActor private func pickHub(_ name: String, menu: String, _ app: XCUIApplication) {
         let button = app.descendants(matching: .any).matching(identifier: menu).firstMatch
-        // The sidebar's Agents heading, further down the Merged sidebar: a slow swipe at a time, not past it.
+        // The sidebar's Agents heading, further down the Merged sidebar: a slow swipe at a time, not past it; back up
+        // when the list was left scrolled below it.
         for _ in 0..<6 where !(button.exists && button.isHittable) { app.swipeUp(velocity: .slow) }
+        for _ in 0..<8 where !(button.exists && button.isHittable) { app.swipeDown(velocity: .slow) }
         XCTAssertTrue(button.waitForExistence(timeout: 10), "no menu \(menu):\n\(app.debugDescription)")
         button.tap()
         let item = app.buttons[name].firstMatch
@@ -158,6 +162,45 @@ final class HubSwitchSidebarTests: XCTestCase {
         XCTAssertTrue(item.isHittable, "\(name) cannot be reached in the menu:\n\(app.debugDescription)")
         item.tap()
         sleep(2) // the new hub's lists
+    }
+
+    /// `name` picked in the open sidebar's header: the assistant switcher's hub group, or the hub menu under the plain
+    /// title of a hub without a roster (#12594).
+    @MainActor private func pickHubInSwitcher(_ name: String, _ app: XCUIApplication) {
+        // The Merged sidebar keeps where its list was scrolled to: the header is at the top.
+        // The drawer's identifier can cover the header's own on a phone (as in AssistantIdentityUITests).
+        let switcher = app.buttons.matching(NSPredicate(format: "identifier == %@ OR (identifier == %@ AND label CONTAINS %@)",
+                                                        "assistant-switcher", "assistant-sidebar", " · ")).firstMatch
+        let plain = app.descendants(matching: .any).matching(identifier: "hub.switcher").firstMatch
+        for _ in 0..<4 where !(switcher.exists && switcher.isHittable) && !(plain.exists && plain.isHittable) { app.swipeDown() }
+        let item: XCUIElement
+        if switcher.waitForExistence(timeout: 10) {
+            switcher.tap()
+            item = app.buttons["assistant-switcher-hub-\(name)"].firstMatch
+            shot(app, "switcher-\(name)-\(env["PERSONA_SCHEME"] ?? "light")")
+        } else {
+            XCTAssertTrue(plain.waitForExistence(timeout: 5), "no switcher in the sidebar's header:\n\(app.debugDescription)")
+            plain.tap()
+            item = app.buttons[name].firstMatch
+        }
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "no \(name) among the hubs:\n\(app.debugDescription)")
+        item.tap()
+        sleep(2) // the new hub's lists
+    }
+
+    /// The conversation's menu (its name in the Merged layout) is about the conversation: no hub to pick there (#12594).
+    @MainActor private func expectNoHubInConversationMenu(_ app: XCUIApplication) {
+        let button = app.descendants(matching: .any).matching(identifier: "persona-avatar").firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 10), "no conversation menu:\n\(app.debugDescription)")
+        button.tap()
+        XCTAssertTrue(app.buttons["Knowledge"].firstMatch.waitForExistence(timeout: 10)
+                      || app.buttons["知识库"].firstMatch.waitForExistence(timeout: 2), "the menu did not open:\n\(app.debugDescription)")
+        shot(app, "conversation-menu-\(env["PERSONA_SCHEME"] ?? "light")")
+        for hub in ["Home", "Work"] {
+            XCTAssertFalse(app.buttons[hub].exists, "\(hub) is still in the conversation's menu")
+        }
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)).tap() // closes the menu
+        sleep(1)
     }
 
     @MainActor private func shot(_ app: XCUIApplication, _ name: String) {

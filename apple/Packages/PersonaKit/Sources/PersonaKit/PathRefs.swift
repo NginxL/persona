@@ -171,6 +171,15 @@ public nonisolated enum PathLinkURL {
         guard let path = rest.removingPercentEncoding, !path.isEmpty else { return nil }
         return (path, line)
     }
+
+    /// A Markdown destination that names a file on the session's computer, absolute or relative to its cwd. URLs with
+    /// a scheme or a host keep their existing handling; in particular http(s), file, data and attachment URLs are not
+    /// machine paths here.
+    public static func localPath(_ url: URL) -> String? {
+        guard url.scheme == nil, url.host == nil else { return nil }
+        let path = url.path(percentEncoded: false)
+        return path.isEmpty ? nil : path
+    }
 }
 
 /// An answer's Markdown, ready to have its paths linked (`linked`): where the paths are in it, outside code blocks,

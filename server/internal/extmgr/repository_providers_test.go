@@ -132,6 +132,18 @@ func serveRepositoryProviderExtensionForTest() {
 						return "garbled", nil
 					}
 					return wire.RepoDescribeResult{Title: "Fix\tthe build", State: "merged"}, nil
+				case "pr_status":
+					var p wire.RepoPRStatusParams
+					_ = json.Unmarshal(params, &p)
+					yes := true
+					switch last(p.CanonicalURL) {
+					case "7":
+						return wire.RepoPRStatusResult{State: "merged", MergeCommit: "abc1234", HeadSha: "NOT-HEX", HeadRef: "fix/build",
+							BaseRef: "main", Author: "someone\nelse", ViewerIsAuthor: &yes}, nil
+					case "8":
+						return wire.RepoPRStatusResult{State: "draft"}, nil
+					}
+					return wire.RepoPRStatusResult{State: "open", MergeCommit: "abc1234"}, nil
 				}
 				return nil, pserve.UnknownMethod(method)
 			}}})
@@ -144,8 +156,12 @@ func repositoryProviderPackage(t *testing.T, id, out string, extra ...string) st
 	self, _ := os.Executable()
 	_ = os.MkdirAll(filepath.Join(dir, "bin"), 0o755)
 	_ = os.WriteFile(filepath.Join(dir, "bin", "code"), []byte("#!/bin/sh\nPERSONA_TEST_PLUGIN=repos exec "+self+" \"$@\"\n"), 0o755)
-	activation, fields := `"activation_events": ["on_startup"], `, ""
+	activation, fields, capabilities := `"activation_events": ["on_startup"], `, "", ""
 	for _, f := range extra {
+		if f == prStatusCapability {
+			capabilities = `, "capabilities": ["pr_status"]`
+			continue
+		}
 		if strings.HasPrefix(f, `"activation_events"`) {
 			activation = ""
 		}
@@ -154,10 +170,13 @@ func repositoryProviderPackage(t *testing.T, id, out string, extra ...string) st
 	manifest := fmt.Sprintf(`{"manifest_version": 1, "id": %q, "name": "Acme Code", "version": "1.0.0", %s%s
 		"engines": {"plugin_protocol": 1}, "runtime": {"command": {%q: "bin/code"}, "env": {"REPOS_OUT": %q}},
 		"contributes": {"repository_providers": [{"id": "acme", "name": "Acme Code", "hosts": ["code.acme.test", "ssh.acme.test"],
-			"link_kinds": [{"kind": "pull_request", "label": "MR"}]}]}}`, id, activation, fields, runtime.GOOS+"-"+runtime.GOARCH, out)
+			"link_kinds": [{"kind": "pull_request", "label": "MR"}]%s}]}}`, id, activation, fields, runtime.GOOS+"-"+runtime.GOARCH, out, capabilities)
 	_ = os.WriteFile(filepath.Join(dir, extension.ManifestFile), []byte(manifest), 0o644)
 	return dir
 }
+
+// prStatusCapability, given to repositoryProviderPackage, declares the pr_status capability on its contribution.
+const prStatusCapability = "capabilities:pr_status"
 
 // installRepositoryProvider installs acme-code and waits for its program to answer; the calls it gets go to the
 // file it returns.
@@ -623,5 +642,55 @@ func TestRepositoryHostsReservedForBuiltins(t *testing.T) {
 	slices.Sort(builtin)
 	if !slices.Equal(reserved, builtin) {
 		t.Fatalf("extension.ReservedRepositoryHosts %v, repository.BuiltinHosts %v", reserved, builtin)
+	}
+}
+
+// #11584: repo.pr_status is asked only of a contribution that declares pr_status, about a link on its hosts; its
+// answer is re-checked: a state outside the enum fails it, a value that breaks its rule is dropped.
+func TestRepositoryProviderPRStatus(t *testing.T) {
+	h, _ := extensionTestHub(t)
+	ctx := context.Background()
+	mux := h.routes()
+	out := installRepositoryProviderPackage(t, h, mux, prStatusCapability)
+	waitRepositoryProviderUp(t, h)
+	if info, ok := h.RepositoryProvider(acmeProvider); !ok || !slices.Equal(info.Capabilities, []string{"pr_status"}) {
+		t.Fatalf("listed: %+v", info)
+	}
+	got, err := h.RepositoryPRStatus(ctx, acmeProvider, "https://code.acme.test/team/ok/-/merge_requests/7")
+	yes := true
+	want := repository.ReviewStatus{State: "merged", MergeCommit: "abc1234", HeadRef: "fix/build", BaseRef: "main", ViewerIsAuthor: &yes}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("merged: %+v %v", got, err)
+	}
+	if !strings.Contains(readFile(t, out), `{"method":"pr_status","params":{"contribution":"acme","canonical_url":"https://code.acme.test/team/ok/-/merge_requests/7"}}`) {
+		t.Fatalf("what repo.pr_status was told: %s", readFile(t, out))
+	}
+	if got, err := h.RepositoryPRStatus(ctx, acmeProvider, "https://code.acme.test/team/ok/-/merge_requests/9"); err != nil ||
+		got.State != "open" || got.MergeCommit != "" {
+		t.Fatalf("open, a merge commit dropped: %+v %v", got, err)
+	}
+	_, err = h.RepositoryPRStatus(ctx, acmeProvider, "https://code.acme.test/team/ok/-/merge_requests/8")
+	if pe := providerErr(t, err); pe.Code != "failed" || !strings.Contains(pe.Why, "state is not open, closed or merged") {
+		t.Fatalf("a state outside the enum: %+v", pe)
+	}
+	sent := repoCalls(out)
+	for _, link := range []string{"https://code.other.test/team/ok/-/merge_requests/7", "https://code.acme.test/team/ok/-/merge_requests/7?private_token=x"} {
+		if _, err := h.RepositoryPRStatus(ctx, acmeProvider, link); providerErr(t, err).Code != "failed" {
+			t.Fatalf("%s: %v", link, err)
+		}
+	}
+	if repoCalls(out) != sent {
+		t.Fatal("a link off its hosts was sent")
+	}
+}
+
+// Without the capability repo.pr_status is never asked.
+func TestRepositoryProviderPRStatusNeedsTheCapability(t *testing.T) {
+	h, _ := extensionTestHub(t)
+	out := installRepositoryProvider(t, h, h.routes())
+	sent := repoCalls(out)
+	_, err := h.RepositoryPRStatus(context.Background(), acmeProvider, "https://code.acme.test/team/ok/-/merge_requests/7")
+	if pe := providerErr(t, err); pe.Code != "failed" || !strings.Contains(pe.Why, "does not read pull request states") || repoCalls(out) != sent {
+		t.Fatalf("asked without the capability: %+v", pe)
 	}
 }

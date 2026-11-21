@@ -1,5 +1,7 @@
 {
   "extra_images": "additional images",
+  "image_too_large": "an image too large to scale down",
+  "image_link": "Image: {alt} {url}",
   "unnamed": "unnamed",
   "unsupported_file": "file “{name}”",
   "not_sent": "Not sent: {error}",
@@ -7,6 +9,7 @@
   "help": "What you say here goes to Persona's main chat, and answers come back here.\n/new start a new chat (you can put the first message right after it)\n/main back to the main chat\n/stop stop the current turn\n/status where messages go and how many answers are pending\n/help these commands\nWhen an agent asks you something or needs approval, just reply with a number or text.",
   "now_to_main": "Messages now go to the main chat.",
   "next_is_new": "OK, your next message starts a new chat. /main goes back to the main chat.",
+  "thread_next_is_new": "OK, your next message in this thread starts a new chat.",
   "not_stopped": "Couldn't stop it: {error}",
   "nothing_running": "Nothing is in progress.",
   "stopped": "Stopped.",

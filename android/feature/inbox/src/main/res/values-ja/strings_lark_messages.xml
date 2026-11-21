@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 設定 › コネクタ › Lark › ホームにメッセージを表示：オプションの全チャットページ。 -->
+<resources>
+    <string name="inbox_lark_messages_title">メッセージ</string>
+    <string name="inbox_lark_messages_loading">Larkのチャットを読み込んでいます</string>
+    <string name="inbox_lark_messages_empty_title">チャットはまだありません</string>
+    <string name="inbox_lark_messages_empty_text">Larkの個人チャットとグループチャットがここに表示されます。</string>
+    <string name="inbox_lark_messages_load_failed">Larkのチャットを読み込めません：%1$s</string>
+    <string name="inbox_lark_messages_unavailable">この接続ではメッセージを表示できません。</string>
+    <string name="inbox_lark_messages_preview_mine">自分：%1$s</string>
+    <string name="inbox_lark_messages_preview_sender">%1$s：%2$s</string>
+</resources>

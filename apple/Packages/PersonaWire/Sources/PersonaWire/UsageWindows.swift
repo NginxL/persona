@@ -147,6 +147,12 @@ public nonisolated enum UsageWindows {
         return Pace(expected: expected, state: diff > paceTolerance ? .over : diff < -paceTolerance ? .under : .on)
     }
 
+    /// The pace of one of an account's windows, as the cards show it. An out-of-date reading says nothing about how fast it
+    /// is being used now, so a stale account has none (#12411): its numbers and reset stay, faded and dated.
+    public static func pace(_ w: UsageWindow, stale: Bool, now: Date = .now) -> Pace? {
+        stale ? nil : pace(w, now: now)
+    }
+
     public static func paceLabel(_ s: PaceState) -> String {
         switch s {
         case .over: String(localized: "Ahead of pace")

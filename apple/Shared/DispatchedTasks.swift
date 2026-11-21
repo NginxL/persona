@@ -6,8 +6,9 @@ nonisolated enum DispatchedTasks {
     struct Entry: Identifiable, Equatable, Sendable {
         var id: String
         var todoID: String?
+        var detailTodoID: String? { todoID.flatMap { $0.isEmpty ? nil : $0 } }
         var title: String
-        /// How the Agent came to the task (`task` items' `wake`): created, active or resumed; nil reads as created.
+        /// How the hand-off came about: active or resumed from a task item, continuation from a plan, or new (nil).
         var wake: String? = nil
         /// Why a plan's task did not start, before there is a to-do to say so.
         var error: String? = nil
@@ -75,9 +76,10 @@ nonisolated enum DispatchedTasks {
             guard let ref = item.ref, let plan = plans[ref] ?? item.plan,
                   plan.conversation == item.conversation, plan.state == .started else { return nil }
             return plan.tasks.enumerated().map { index, task in
-                // A plan's tasks are New. A later `task` item for one of them adds no card, so its wake cannot change this.
                 Entry(id: "plan:\(plan.id):\(index)", todoID: task.todoID,
-                      title: task.todoID.flatMap(titleOf) ?? task.title, wake: nil, error: task.error, conversation: item.conversation)
+                      title: task.todoID.flatMap(titleOf) ?? task.title,
+                      wake: task.continues?.isEmpty == false ? "continuation" : nil,
+                      error: task.error, conversation: item.conversation)
             }
         case .task:
             guard let id = item.ref else { return [] }

@@ -14,6 +14,7 @@ import { Button, toast } from "../../ui/atoms";
 import { AcceptRow } from "./Brief";
 import { BriefingMark } from "./BriefingMark";
 import { DecisionRow } from "./DecisionRow";
+import { ExpiredQuestion } from "./ExpiredQuestion";
 import { FailedTaskRow } from "./FailedTaskRow";
 import RuleSuggestionLine from "./RuleSuggestionLine";
 import type { RuleCard } from "../../lib/rule-suggestion";
@@ -91,6 +92,7 @@ export function TaskDecision({ todo, rowKey, hideTitle = false }: { todo: Todo; 
   // row (#5802; always mounted here), answered through the to-do's manager as the row's own answers are
   // (kept by the decision's round: what Always made is not said under the to-do's next decision)
   const rule = { id: todo.id + (ask?.asked_at ?? ""), suggestion: ask?.suggestion, headers: { [MANAGER_HEADER]: manager } };
+  if (ask?.questions?.length) return <ExpiredQuestion key={ask.asked_at} todo={todo} ask={ask} rowKey={rowKey} />;
   if (ask && askOptions(ask).length) return <><DecisionRow todo={todo} ask={ask} rowKey={rowKey} hideTitle={hideTitle} admission={admission} onBusyChange={setBusy} blocked={busy} footer={controls} /><RuleSuggestionLine of={rule} /></>;
   return <><div data-needs-row={rowKey} className="flex min-w-0 flex-col gap-1.5 rounded-control bg-field px-3 py-2.5">
     {ask ? <><AcceptRow stacked hideTitle={hideTitle} admission={admission} onBusyChange={setBusy} blocked={busy} secondary={<span data-decision-actions className="contents">{buttons}</span>} row={askRow(todo, ask)} />{ask.for_briefing && <BriefingMark />}</> : <>

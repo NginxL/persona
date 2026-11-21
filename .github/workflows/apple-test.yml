@@ -12,7 +12,7 @@ on:
       lane:
         description: Apple platform lane
         type: choice
-        options: [ios]
+        options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-ipad-diagnostic]
         default: ios
         required: true
 permissions:
@@ -23,7 +23,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   apple:
-    name: iOS, Watch and HTML tests (Xcode 26.0)
+    if: inputs.lane != 'ios18'
+    name: ${{ inputs.lane == 'packages' && 'Native package tests (Xcode 26.0)' || inputs.lane == 'ios-build' && 'Unsigned iOS and Watch build (Xcode 26.0)' || inputs.lane == 'ios-focused' && 'Focused iOS and About tests (Xcode 26.0)' || inputs.lane == 'ios-regressions' && 'iOS stack and Live Activity regressions (Xcode 26.0)' || inputs.lane == 'ios-ipad-diagnostic' && 'Regular iPad app-host launch diagnostics (Xcode 26.0)' || 'iOS, Watch and HTML tests (Xcode 26.0)' }}
     runs-on: macos-26
     timeout-minutes: 120
     env:
@@ -55,11 +56,53 @@ jobs:
         env:
           CI_APPLE_DIAGNOSTICS: ${{ runner.temp }}/persona-apple-diagnostics-${{ inputs.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: scripts/ci/apple.sh "$APPLE_CI_LANE"
-      - name: Upload Apple failure diagnostics
-        if: failure()
+      - name: Upload regular iPad diagnostic evidence
+        if: always() && inputs.lane == 'ios-ipad-diagnostic'
         uses: actions/upload-artifact@v4
         with:
           name: apple-${{ inputs.lane }}-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/persona-apple-diagnostics-${{ inputs.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload Apple failure diagnostics
+        if: failure() && inputs.lane != 'ios-ipad-diagnostic'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-${{ inputs.lane }}-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/persona-apple-diagnostics-${{ inputs.lane }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
+  ios18:
+    if: github.event_name == 'workflow_dispatch' && inputs.lane == 'ios18'
+    name: iOS 18.6 compatibility (Xcode 26.3)
+    runs-on: macos-15
+    timeout-minutes: 150
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      CI_SPM_CACHE: ${{ github.workspace }}/.ci-cache/spm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Select compatibility toolchain
+        run: |
+          source scripts/ci/common.sh
+          ci_run 'Select system Xcode 26.3' 60 sudo xcode-select --switch "$DEVELOPER_DIR"
+          ci_run 'Initialize Xcode 26.3 platform services' 900 sudo env DEVELOPER_DIR="$DEVELOPER_DIR" xcodebuild -runFirstLaunch
+      - name: Install project generation tools
+        run: brew install xcodegen
+      - name: Run iOS 18.6 simulator suite
+        env:
+          CI_APPLE_DIAGNOSTICS: ${{ runner.temp }}/persona-ios18-diagnostics
+        run: scripts/ci/apple.sh ios18
+      - name: Upload compatibility failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-ios18-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/persona-ios18-diagnostics
           if-no-files-found: warn
           retention-days: 7

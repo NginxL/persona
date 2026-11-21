@@ -63,8 +63,8 @@ func TestSupervisedDoneAfterTheUsersOwnCheck(t *testing.T) {
 	}
 }
 
-// A judgment that fails is asked once more; failing again (or unsure), the supervisor hears the hub could not tell,
-// never that the agent stopped short.
+// A transient judgment failure is asked again inline. A valid unsure verdict still tells the supervisor the hub could
+// not tell, never that the agent stopped short.
 func TestSupervisedUnjudgedIsNotStoppedShort(t *testing.T) {
 	fastJudgeRetry(t)
 	s, f, todo := newSupervisedService(t)
@@ -82,14 +82,14 @@ func TestSupervisedUnjudgedIsNotStoppedShort(t *testing.T) {
 		t.Fatalf("not waiting for review: %+v", v)
 	}
 
-	// More work, and the judge keeps failing.
-	f.judge = ""
+	// More work, and this time the judge returns a valid unsure verdict.
+	f.judge = `{"verdict":"unsure","reason":"证据不足"}`
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "又改了一处", 0)
 	waitFor(t, "the second message", func() bool { return len(f.notices()) == 2 })
 	n := entryLine(f.notices()[1])
-	if !strings.Contains(n, "Agent 停下了，hub 没判断出来是不是做完了（不是说没做完）（判定模型出错）") || strings.Contains(n, "停下了，但没做完") {
-		t.Fatalf("after failures:\n%s", n)
+	if !strings.Contains(n, "Agent 停下了，hub 没判断出来是不是做完了（不是说没做完）（看不出做没做完：证据不足）") || strings.Contains(n, "停下了，但没做完") {
+		t.Fatalf("after an unsure judgment:\n%s", n)
 	}
 }
 

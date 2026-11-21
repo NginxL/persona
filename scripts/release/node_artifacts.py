@@ -12,6 +12,31 @@ import subprocess
 PLATFORMS = {'linux-amd64', 'darwin-arm64'}
 
 
+def node_files(manifest):
+    """Yield each program, platform and descriptor, including legacy personad-only releases."""
+    for platform, artifact in manifest['files'].items():
+        yield 'personad', platform, artifact
+    for program, files in manifest.get('nodes', {}).items():
+        for platform, artifact in files.items():
+            yield program, platform, artifact
+
+
+def validate_node_manifest(manifest):
+    version = manifest.get('version', '')
+    commit = manifest.get('commit', '')
+    if (not isinstance(version, str) or not re.fullmatch(r'master-[0-9a-f]{12}-[0-9]{12}', version)
+            or not isinstance(commit, str) or not re.fullmatch(r'[0-9a-f]{40}', commit)
+            or version != f"master-{commit[:12]}-{manifest.get('build')}"):
+        raise ValueError('Invalid node release identity')
+    if set(manifest.get('files', {})) != PLATFORMS or manifest.get('programs'):
+        raise ValueError('Unexpected node platform or program')
+    if 'nodes' in manifest:
+        nodes = manifest['nodes']
+        if (not isinstance(nodes, dict) or set(nodes) != {'persona-node'}
+                or not isinstance(nodes['persona-node'], dict) or set(nodes['persona-node']) != PLATFORMS):
+            raise ValueError('Unexpected node platform or program')
+
+
 def digest(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -25,14 +50,7 @@ def node_manifest(artifact_dir, hub_manifest):
     for key in ('version', 'build', 'commit'):
         if manifest.get(key) != hub_manifest.get(key):
             raise ValueError('Node source differs from the Hub release')
-    if set(manifest.get('files', {})) != PLATFORMS or manifest.get('programs') or manifest.get('nodes'):
-        raise ValueError('Unexpected node platform or program')
-    if not re.fullmatch(r'master-[0-9a-f]{12}-[0-9]{12}', manifest['version']):
-        raise ValueError('Invalid node version')
-    if not re.fullmatch(r'[0-9a-f]{40}', manifest['commit']):
-        raise ValueError('Invalid node source')
-    if manifest['version'] != f"master-{manifest['commit'][:12]}-{manifest['build']}":
-        raise ValueError('Node version is not bound to its source and build')
+    validate_node_manifest(manifest)
     if manifest['files']['linux-amd64'] != hub_manifest['files']['linux-amd64']:
         raise ValueError('Linux node must be the verified Hub binary')
     return manifest
@@ -53,7 +71,7 @@ def verify_archive(directory, artifact):
     return source
 
 
-def verify_binary(path, platform, manifest):
+def verify_binary(path, platform, manifest, program='personad'):
     """Read the executable header and inline Go build info without executing foreign code."""
     data = Path(path).read_bytes()
     if platform == 'linux-amd64':
@@ -91,9 +109,29 @@ def verify_binary(path, platform, manifest):
     system, architecture = platform.split('-')
     expected = {'GOOS': system, 'GOARCH': architecture, 'CGO_ENABLED': '0',
                 'vcs.revision': manifest['commit'], 'vcs.modified': 'false'}
-    if (not lines or lines[0] != 'path\tgithub.com/nwverse/persona/server/cmd/personad'
+    if (not lines or lines[0] != f'path\tgithub.com/nwverse/persona/server/cmd/{program}'
             or any(settings.get(key) != value for key, value in expected.items())):
         raise ValueError('Node source or build platform mismatch')
+
+
+def verify_installed_nodes(directory, manifest):
+    if not stat.S_ISDIR(directory.lstat().st_mode):
+        raise ValueError('Node release must be a non-symlink directory')
+    expected = {'manifest.json'}
+    for program, platform, artifact in node_files(manifest):
+        binary = directory / f'{program}-{platform}'
+        sidecar = binary.with_suffix('.version')
+        expected.update((binary.name, sidecar.name))
+        if not stat.S_ISREG(binary.lstat().st_mode) or not stat.S_ISREG(sidecar.lstat().st_mode):
+            raise ValueError('Node binary and version must be regular non-symlink files')
+        if sidecar.read_text().strip() != manifest['version']:
+            raise ValueError('Node version sidecar changed')
+        if digest(binary) != artifact['binary_sha256']:
+            raise ValueError('Node binary checksum changed')
+        verify_binary(binary, platform, manifest, program)
+    if ({entry.name for entry in directory.iterdir()} != expected
+            or not stat.S_ISREG((directory / 'manifest.json').lstat().st_mode)):
+        raise ValueError('Unexpected immutable node release contents')
 
 
 def managed_nodes(root):
@@ -104,24 +142,23 @@ def managed_nodes(root):
         return True
     if not pointer.is_symlink():
         return False
-    directory = pointer.resolve(strict=True)
-    if directory.parent != (root / 'releases/nodes').resolve():
-        return False
-    manifest = json.loads((directory / 'manifest.json').read_text())
-    if manifest.get('version') != directory.name or set(manifest.get('files', {})) != PLATFORMS:
-        return False
-    for platform, artifact in manifest['files'].items():
-        binary = directory / ('personad-' + platform)
-        if (directory / (binary.name + '.version')).read_text().strip() != manifest['version']:
+    try:
+        directory = pointer.resolve(strict=True)
+        if directory.parent != (root / 'releases/nodes').resolve():
             return False
-        if digest(binary) != artifact['binary_sha256']:
+        manifest = json.loads((directory / 'manifest.json').read_text())
+        validate_node_manifest(manifest)
+        if manifest['version'] != directory.name:
             return False
-        verify_binary(binary, platform, manifest)
+        verify_installed_nodes(directory, manifest)
+    except (OSError, ValueError, KeyError):
+        return False
     return True
 
 
 def prepare_nodes(root, staged, manifest):
     root, staged = Path(root), Path(staged)
+    validate_node_manifest(manifest)
     if not managed_nodes(root):
         raise RuntimeError('Unmanaged node package directory must remain isolated')
     parent = root / 'releases/nodes'
@@ -135,21 +172,15 @@ def prepare_nodes(root, staged, manifest):
     if destination.exists():
         if json.loads((destination / 'manifest.json').read_text()) != manifest:
             raise ValueError('Immutable node manifest changed')
-        for platform, artifact in manifest['files'].items():
-            binary = destination / ('personad-' + platform)
-            if (destination / (binary.name + '.version')).read_text().strip() != manifest['version']:
-                raise ValueError('Immutable node version changed')
-            verify_binary(binary, platform, manifest)
-            if digest(binary) != artifact['binary_sha256']:
-                raise ValueError('Immutable node binary changed')
+        verify_installed_nodes(destination, manifest)
     else:
         if temporary.exists():
             shutil.rmtree(temporary)
         temporary.mkdir(mode=0o700)
         try:
-            for platform, artifact in manifest['files'].items():
+            for program, platform, artifact in node_files(manifest):
                 source = verify_archive(staged, artifact)
-                binary = temporary / ('personad-' + platform)
+                binary = temporary / f'{program}-{platform}'
                 with gzip.open(source, 'rb') as reader, binary.open('wb') as writer:
                     shutil.copyfileobj(reader, writer)
                     writer.flush()
@@ -157,10 +188,10 @@ def prepare_nodes(root, staged, manifest):
                 if digest(binary) != artifact['binary_sha256']:
                     raise ValueError('Extracted node binary checksum mismatch')
                 binary.chmod(0o755)
-                verify_binary(binary, platform, manifest)
+                verify_binary(binary, platform, manifest, program)
                 if platform == 'linux-amd64':
                     checked = json.loads(subprocess.check_output([str(binary), 'node-update-check'], timeout=20))
-                    expected = dict(version=manifest['version'], os='linux', arch='amd64', program='personad')
+                    expected = dict(version=manifest['version'], os='linux', arch='amd64', program=program)
                     # The identity must match exactly; capabilities the node announces beside it
                     # (nodeupdate.Self, e.g. resident_handover) may grow from release to release.
                     if not isinstance(checked, dict) or {key: checked.get(key) for key in expected} != expected:
@@ -201,13 +232,7 @@ def activate_nodes(root, destination, manifest, health):
         raise ValueError('Invalid prepared node directory')
     if json.loads((destination / 'manifest.json').read_text()) != manifest:
         raise ValueError('Prepared node manifest changed')
-    for platform, artifact in manifest['files'].items():
-        binary = destination / ('personad-' + platform)
-        if digest(binary) != artifact['binary_sha256']:
-            raise ValueError('Prepared node binary changed')
-        if (destination / (binary.name + '.version')).read_text().strip() != manifest['version']:
-            raise ValueError('Prepared node version changed')
-        verify_binary(binary, platform, manifest)
+    verify_installed_nodes(destination, manifest)
     pointer = root / 'bin/nodes'
     next_pointer = root / 'bin/.nodes-next'
     next_pointer.unlink(missing_ok=True)

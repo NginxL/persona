@@ -7,6 +7,10 @@ import { describe, expect, it } from "vitest";
 
 const root = new URL("../../", import.meta.url);
 const dialogs = ["ProviderWizard", "ProviderImport", "ProviderPaste", "ProviderScope"];
+
+// The assertions below resolve the real lazy chunks; collection pays their cold graph evaluation once, outside each
+// test's unchanged deadline, instead of timing two sequential imports under the complete parallel suite.
+await Promise.all([import("./ProviderWizard"), import("./ProviderImport")]);
 const staticImport = new RegExp(`^import\\s+(?!type\\b)[^;]*from\\s+["'][./]*(?:views/)?(?:settings/)?(?:${dialogs.join("|")})["']`, "m");
 
 function sources(dir: URL): string[] {

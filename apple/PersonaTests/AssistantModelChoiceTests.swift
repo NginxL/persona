@@ -432,4 +432,36 @@ struct AssistantModelChoiceTests {
         #expect(model.retained("xhigh", source: fast) == "xhigh")
         #expect(hub.sent("GET", "/api/v1/machines/box/launchers/fast/models").first?.query == ["purpose": "assistant"])
     }
+    @Test func mainCatalogChangesOnlyItsDefaultAndEffort() {
+        let shared = response(launchers: [Launcher(name: "claude")],
+                              default: def(launcher: "claude", model: "shared", effort: "low"))
+        let own = response(launchers: [Launcher(name: "not-an-eligible-launcher")],
+                           default: def(launcher: "claude", model: "main", effort: "high"))
+        let merged = AssistantModelChoice.mainCatalog(shared: shared, own: own)
+        #expect(merged.launchers.map(\.name) == ["claude"])
+        #expect(shared.default?.model == "shared")
+        let effective = AssistantModelChoice.effective(launcher: "claude", model: "running", effort: "low", pick: nil, response: merged)
+        #expect(effective.model == "main" && effective.effort == "high")
+        let picked = AssistantModelChoice.effective(launcher: "claude", model: "running", effort: "low",
+            pick: ModelPick(launcher: "claude", model: "picked", effort: "medium"), response: merged)
+        #expect(picked.model == "picked" && picked.effort == "medium")
+        let legacy = AssistantModelChoice.mainCatalog(shared: shared, own: response())
+        #expect(legacy.default?.model == "shared")
+    }
+
+    @Test func mainCatalogCacheCannotReplaceNewConversationDefaults() {
+        let shared = AppModel.AssistantLauncherScope(machine: MachineRef(id: "box"), manager: "assistant")
+        let main = AppModel.AssistantLauncherScope(machine: MachineRef(id: "box"), manager: "assistant", main: true)
+        #expect(shared != main)
+        #expect(Set([shared, main]).count == 2)
+    }
+
+    @Test func mainCatalogTransportUsesTheIndependentPurpose() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/machines/box/launchers", json: #"{"launchers":[],"default":{"provider":"launcher.claude","model":"main-model","effort":"high"}}"#)
+        let result = try await hub.client.mainAssistantLaunchers(machine: "box")
+        #expect(result.default?.model == "main-model")
+        #expect(hub.sent("GET", "/api/v1/machines/box/launchers").first?.query == ["purpose": "assistant.main"])
+    }
+
 }

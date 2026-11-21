@@ -138,6 +138,16 @@ describe("ultracode on the plan card", () => {
     expect(sent()?.[0]?.ultracode).toBe(false);
   });
 
+  it("keeps an omitted permission omitted when starting from the lazy plan editor", async () => {
+    const proposed = plan([task(), task({ permission: "default" })]);
+    await render(<PlanCard plan={proposed} />);
+    await click(byText("改一下")[0]);
+    await click(startInDialog());
+    expect(startPlan.mock.calls[0]?.[0]).toBe(proposed);
+    expect(sent()?.[0]).not.toHaveProperty("permission");
+    expect(sent()?.[1]).toHaveProperty("permission", "default");
+  });
+
   it("does not count the card's own choice as a change to throw away in 改一下", async () => {
     const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
     await render(<PlanCard plan={plan([task()])} />);

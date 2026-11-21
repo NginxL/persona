@@ -142,13 +142,20 @@ func ParseRelayQuoteID(text string) string {
 }
 
 // ItemSource prefers explicit fields, then persisted provenance, then existing
-// injected metadata and exact legacy templates. An app's own message is never
-// text-inferred. Item.From remains separate: a peer's name is not a conversation id.
+// injected metadata and exact legacy templates. App messages with IDs accept
+// only provenance from an A2A envelope bound to that ID. Item.From is a name.
 func ItemSource(it proto.Item) *proto.MessageSource {
 	if it.Source != nil && it.Source.Kind != "" {
 		return it.Source
 	}
 	inferText := it.Role == "user" && it.Kind == proto.KindText && it.ClientMsgID == "" && it.From == ""
+	if it.Role == "user" && it.Kind == proto.KindText && it.From == "" && strings.HasPrefix(it.ClientMsgID, proto.A2ADeliveryPrefix) && RelayMessageID(it.Text) == it.ClientMsgID {
+		// A2A's envelope binds the persisted source to the delivery ID. The
+		// owner-authored sentinel blocks a pasted envelope from qualifying.
+		if source, found := sourceMetadata(it.Text); found && source != nil && source.Kind == proto.SourceConversation {
+			return source
+		}
+	}
 	if inferText {
 		if source, found := sourceMetadata(it.Text); found {
 			return source

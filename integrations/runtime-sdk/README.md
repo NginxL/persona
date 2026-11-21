@@ -10,7 +10,7 @@
 | 文件 | 内容 |
 | --- | --- |
 | `index.js` | 入口：`createRuntime`（driver + 选项；返回的 `rt` 还有 `recent()` / `touched()` 挑要列的会话）和 item 的工具（`page` 分页、`appToolName` 工具名、`light`、`clipInput`、`snippet`、`summaryOf`、`interactionId`） |
-| `lib/runtime.js` | 连接 / 重连 / `runtime.hello`、列表推送、watch 补发和连续性、逐字节流、问手机、「谁先回答」 |
+| `lib/runtime.js` | 连接 / 重连 / `runtime.hello`、列表推送、watch 补发和连续性、逐字节流、问手机、「谁先回答」、逐请求 token 用量与可选订阅额度窗口上报 |
 | `lib/history.js` | 按时间段列会话（`listHistory`）：窗口（`active_at` → `updated_at` → `started_at`）、排序、分页和游标；`rt.history()` / `historyPage` 用它（`docs/integrations/runtimes.md`「History」） |
 | `lib/items.js` | 页里的长度上限、截断说明、稳定的交互 id |
 | `lib/wire.js` | 和 `server/internal/rpc` 同一种 JSON 行 RPC |

@@ -161,6 +161,17 @@ func TestCodexOnTheMachineIsALauncher(t *testing.T) {
 	}
 }
 
+func TestCodexLauncherAliasProvenance(t *testing.T) {
+	plain := launcherBegin + "\x1d\x1d/usr/local/bin/codex\n" + launcherEnd
+	if names := codexAliasNames(plain); len(names) != 0 {
+		t.Fatalf("plain Codex aliases = %v, want none", names)
+	}
+	noOpAlias := launcherBegin + "\x1dcodex\x1fcodex\x1f\x1e\x1d/usr/local/bin/codex\n" + launcherEnd
+	if names := codexAliasNames(noOpAlias); !names["codex"] {
+		t.Fatalf("configured no-op Codex alias lost its provenance: %v", names)
+	}
+}
+
 // The parser on its own: separators, env flags, a wrapper with nothing after it.
 func TestParseAliasLaunchers(t *testing.T) {
 	rec := func(words ...string) string { return strings.Join(words, "\x1f") + "\x1f\x1e" }
@@ -251,6 +262,9 @@ func TestMergeLaunchersLeavesLauncherDefaultModelsEmpty(t *testing.T) {
 	}
 	if got := models["cx-explicit"].Model; got != "gpt-explicit" {
 		t.Errorf("explicit model = %q, want gpt-explicit", got)
+	}
+	if l := models[traexAgent]; l.Agent != traexAgent || l.DisplayName != "TRAE CLI" {
+		t.Errorf("TRAE CLI launcher kind or display name changed: %+v", l)
 	}
 }
 

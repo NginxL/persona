@@ -33,7 +33,10 @@ nonisolated struct IPhoneSetupComputer: Identifiable, Hashable, Sendable {
     var helperInstalled: Bool { iphone?.installed == true }
     /// The computer said it has no developer disk image (no Xcode); nil when it didn't say.
     var noXcode: Bool { iphone?.ddiPresent == false }
-    func job(_ kind: String) -> ComputerJob? { iphone?.job.flatMap { $0.kind == kind ? $0 : nil } }
+    func job(_ kind: String, for device: String? = nil) -> ComputerJob? {
+        guard let job = iphone?.job, job.kind == kind, device == nil || job.device == device else { return nil }
+        return job
+    }
 }
 
 /// What the setup knows now.
@@ -58,7 +61,9 @@ nonisolated enum IPhoneSetupDevPhase: Equatable, Sendable {
     /// On, but the developer disk image isn't there: Prepare (or the computer does it again by itself).
     case prepare(auto: Bool)
     /// The computer is preparing it.
-    case preparing
+    case preparing(step: String?)
+    /// The last Prepare for this iPhone failed, with the computer's reason when available.
+    case prepareFailed(reason: String?, developerModeOn: Bool)
     /// Something else stops it, in the computer's words.
     case problem(String)
     case done
@@ -107,8 +112,13 @@ nonisolated enum IPhoneSetupFlow {
 
     static func devPhase(_ i: IPhoneSetupInput) -> IPhoneSetupDevPhase {
         guard let d = device(i), d.paired else { return .turnOn }
-        if computer(i)?.job("prepare")?.running == true { return .preparing }
-        if d.developerMode == false || d.code == "developer_mode_off" { return .turnOn }
+        let job = computer(i)?.job("prepare", for: d.id)
+        if let job, job.running { return .preparing(step: job.step) }
+        let developerModeOn = d.developerMode != false && d.code != "developer_mode_off"
+        if !d.ready, let job, job.state == "failed" {
+            return .prepareFailed(reason: job.error, developerModeOn: developerModeOn)
+        }
+        if !developerModeOn { return .turnOn }
         if d.code == "ddi_not_mounted" { return .prepare(auto: d.autoPrepare) }
         if d.connected || d.ready { return .done }
         if d.code == nil || d.code == "connecting" { return .connecting }
@@ -133,7 +143,7 @@ nonisolated enum IPhoneSetupFlow {
             switch devPhase(i) {
             case .done: return .done
             case .connecting, .preparing, .prepare(auto: true): return .working
-            case .turnOn, .prepare(auto: false), .problem: return .needsYou
+            case .turnOn, .prepare(auto: false), .prepareFailed, .problem: return .needsYou
             }
         case .allow:
             return i.me?.consented == true ? .done : .needsYou

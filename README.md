@@ -70,7 +70,7 @@ Then install what you need, for example:
 
 ## How it works
 
-You run a small hub on an always-on machine; your devices talk only to it, and it reaches each of your computers. Agents run in herdr, Orca, Herdr App, Paseo or Cindy, or through a runtime integration. Engine and runtime capabilities vary; Cindy's read-only database fallback needs the host API for sending and interruption. Your data stays on your own hardware.
+You run a small hub on an always-on machine; your devices talk only to it, and it reaches each of your computers. Agents run in herdr, Orca, Herdr App, Paseo, Cindy or T3 Code, or through a runtime integration. Engine and runtime capabilities vary; Cindy's read-only database fallback needs the host API for sending and interruption. Your data stays on your own hardware.
 [Architecture](docs/server/architecture.md) · [Network and security](docs/operations/network.md)
 
 ## Get started

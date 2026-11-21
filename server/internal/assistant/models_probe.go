@@ -296,16 +296,27 @@ func (t probeTarget) endpoint(path string) string {
 // official origin, not under its /anthropic Messages base (https://api-docs.deepseek.com/api/list-models/).
 // Only its known HTTPS bases qualify; custom gateway prefixes and authorities stay untouched.
 func (t probeTarget) modelsEndpoint() string {
-	u, err := url.Parse(t.base)
-	if err == nil && u.Scheme == "https" && u.User == nil && u.RawQuery == "" && u.Fragment == "" &&
-		(strings.EqualFold(u.Host, "api.deepseek.com") || strings.EqualFold(u.Host, "api.deepseek.com:443")) {
-		switch u.EscapedPath() {
-		case "", "/v1", "/anthropic", "/anthropic/v1":
-			u.Path, u.RawPath = "/models", ""
-			return u.String()
-		}
+	if u, ok := officialDeepSeekURL(t.base); ok {
+		u.Path, u.RawPath = "/models", ""
+		return u.String()
 	}
 	return t.endpoint("models")
+}
+
+// officialDeepSeekURL parses base when it is one of the official DeepSeek API bases: HTTPS, the provider's own host
+// (with no user info, query or fragment) and a path Persona accepts for it. Only these bases may be read at the
+// provider's own routes (/models, /user/balance); a gateway or a lookalike host is never sent the launcher's key there.
+func officialDeepSeekURL(base string) (*url.URL, bool) {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
+		(!strings.EqualFold(u.Host, "api.deepseek.com") && !strings.EqualFold(u.Host, "api.deepseek.com:443")) {
+		return nil, false
+	}
+	switch u.EscapedPath() {
+	case "", "/v1", "/anthropic", "/anthropic/v1":
+		return u, true
+	}
+	return nil, false
 }
 
 // send sends one request under t.auth. Under auto it goes with Bearer and, when the gateway refuses the key, once

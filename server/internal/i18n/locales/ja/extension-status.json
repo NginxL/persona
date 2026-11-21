@@ -44,6 +44,10 @@
   "schema_max_items": "{count}項目以内にしてください",
   "schema_item": "{count}番目の項目：{err}",
   "schema_duplicate": "{count}番目の項目が重複しています",
+  "schema_entry_id": "保存済みエントリにはホストが割り当てた有効なIDが必要です",
+  "schema_entry_id_duplicate": "このエントリIDはすでに使用されています",
+  "entry_address_required": "シークレットを設定する前に、このエントリの有効なアドレスを保存してください",
+  "entry_untitled": "項目 {count}",
   "schema_minimum": "{min}以上にしてください",
   "schema_maximum": "{max}以下にしてください",
   "schema_min_length": "{count}文字以上必要です",
@@ -112,5 +116,8 @@
   "secret_not_reference": "参照ではありません（scheme://… の形式）",
   "secret_own_scheme": "拡張機能は自分の {scheme} 参照を自分のシークレットにできません",
   "secret_no_provider": "{scheme} 参照の値を提供するオンの拡張機能がありません。先にインストールするかオンにしてください",
-  "secret_value_or_reference": "値か参照のどちらか一方を指定してください"
+  "secret_value_or_reference": "値か参照のどちらか一方を指定してください",
+  "plan_transaction": "データベースはインストール計画全体をアトミックにコミットできません",
+  "entry_migration_moved": "移行プレビュー後に固定設定またはシークレットが変更されました。もう一度プレビューしてください",
+  "saved_config_json": "保存済みの設定は有効な JSON ではありません"
 }

@@ -11,17 +11,25 @@ const (
 	// EngineTern is Tern, Stencil's multiplexing terminal, through its `tern` command line (node/hosttern.go,
 	// docs/integrations/engines.md "Tern").
 	EngineTern = "tern"
+	// EngineRex is Rex, a multiplexing terminal, through its `rex` command line and control API (node/hostrex.go,
+	// docs/integrations/engines.md "Rex").
+	EngineRex = "rex"
 	// EnginePaseo is not a terminal: the Paseo daemon's agents, through its runtime (node/runtimecontrol.go,
 	// docs/integrations/paseo.md). New sessions and sessions to continue go to Paseo.
 	EnginePaseo = "paseo"
 	// EngineCindy is Cindy's agents, through its runtime bridge (node/cindybridge.go, docs/integrations/engines.md).
 	EngineCindy = "cindy"
+	// EngineT3Code is T3 Code's threads, through its runtime bridge to the local T3 server (node/t3codebridge.go,
+	// docs/integrations/engines.md "T3 Code").
+	EngineT3Code = "t3code"
 )
 
-// RuntimeEngine: engine is one that is a runtime, not a terminal (Paseo, Cindy): its own providers start every session
-// that opens in it. Whether it runs only those (a launcher it lacks gets one of the same kind, or a refusal) its node
-// says per start host (launchers.list's host_runtime, #8140).
-func RuntimeEngine(engine string) bool { return engine == EnginePaseo || engine == EngineCindy }
+// RuntimeEngine: engine is one that is a runtime, not a terminal (Paseo, Cindy, T3 Code): its own providers start every
+// session that opens in it. Whether it runs only those (a launcher it lacks gets one of the same kind, or a refusal) its
+// node says per start host (launchers.list's host_runtime, #8140).
+func RuntimeEngine(engine string) bool {
+	return engine == EnginePaseo || engine == EngineCindy || engine == EngineT3Code
+}
 
 // EngineNames are the engines a machine may use, with the names the app shows.
 var EngineNames = map[string]string{
@@ -30,8 +38,10 @@ var EngineNames = map[string]string{
 	EngineHerdrBoth: "herdr + Herdr App",
 	EngineOrca:      "Orca",
 	EngineTern:      "Tern",
+	EngineRex:       "Rex",
 	EnginePaseo:     "Paseo",
 	EngineCindy:     "Cindy",
+	EngineT3Code:    "T3 Code",
 }
 
 // Engine is one engine as found on a machine: Available when its socket is reachable (herdr: or its binary is there).

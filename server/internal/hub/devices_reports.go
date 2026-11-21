@@ -50,7 +50,7 @@ func (h *Hub) startDevices(ctx context.Context) {
 			m.engineHosts = &c
 		}
 		if w, ok := saved.Machines[mc.ID]; ok && (w.Until.IsZero() || w.Until.After(time.Now())) {
-			m.info, m.sessions, m.warmUntil = w.Info, w.Sessions, until
+			m.info, m.sessions, m.listedOnce, m.warmUntil = w.Info, w.Sessions, true, until
 			if len(w.Archived) > 0 {
 				m.archived, m.archivedAt, m.archivedBy = w.Archived, archivedIndex(w.Archived), w.ArchivedBy
 			}
@@ -236,6 +236,39 @@ func (h *Hub) awaitManagerFor(ctx context.Context, owner string, limit time.Dura
 // machineOwner: another manager's, and a mesh member's from any manager but the carrier, are dropped). The apps get
 // the managers' machines grouped: devicesOwner's first, then the others' by id.
 func (h *Hub) applyDeviceStatesFrom(owner string, st devicewire.States) {
+	// A transport alias cannot take a configured or another manager's identity.
+	// The manager owns all session resolution; this only retains a bus destination.
+	validAliases := map[string]bool{}
+	for _, state := range st.Machines {
+		id, parent := state.Machine.ID, state.TransportFor
+		if id == "" || parent == "" || id == parent || h.entryOwner(parent) != owner {
+			continue
+		}
+		if h.knownEntry(id) != nil && h.entryOwner(id) != owner {
+			continue
+		}
+		h.devices.mu.Lock()
+		if h.devices.transportOwners == nil {
+			h.devices.transportOwners = map[string]string{}
+		}
+		old := h.devices.transportOwners[id]
+		if old == "" || old == owner {
+			h.devices.transportOwners[id] = owner
+			validAliases[id] = true
+		}
+		h.devices.mu.Unlock()
+	}
+
+	// Reports are complete snapshots. Dropped logical roots must release their
+	// transport ownership, so a later manager cannot inherit a stale alias.
+	h.devices.mu.Lock()
+	for id, aliasOwner := range h.devices.transportOwners {
+		if aliasOwner == owner && !validAliases[id] {
+			delete(h.devices.transportOwners, id)
+		}
+	}
+	h.devices.mu.Unlock()
+
 	now := time.Now()
 	type change struct {
 		m              *Machine
@@ -257,7 +290,7 @@ func (h *Hub) applyDeviceStatesFrom(owner string, st devicewire.States) {
 		// Only its manager reports a machine (ownership.go): hub.json's or one a manager keeps, its owner's, derived or
 		// not (another one is letting it go, or claims what is not its own); any other (a mesh member's), the
 		// carrier's only.
-		if known := h.knownEntry(id) != nil; known && h.entryOwner(id) != owner || !known && owner != devicesOwner {
+		if known := h.knownEntry(id) != nil; known && h.entryOwner(id) != owner || !known && owner != devicesOwner && !validAliases[id] {
 			continue
 		}
 		// What it is called and how it is reached: hub.json's entry says for one of this hub's own in hub.json (the

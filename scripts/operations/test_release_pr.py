@@ -148,6 +148,20 @@ class ReleasePRTests(unittest.TestCase):
             data = release.verify_artifacts(plan_path, "nwverse/persona", "beta", COMMIT, (android,))
             self.assertEqual(len(data["artifacts"]), 9)
             self.assertIn("android.json", {item["name"] for item in data["artifacts"]})
+            # A platform job sees the CLI/Web install.sh in its download directory as well as in the plan. Presenting
+            # the same bytes again is idempotent, not an ownership conflict; changed bytes still fail closed.
+            repeated = root / "repeated"
+            repeated.mkdir()
+            for item in data["artifacts"]:
+                target = repeated / item["name"]
+                target.write_bytes(Path(item["path"]).read_bytes())
+            count = len(data["artifacts"])
+            self.assertEqual(len(release.verify_artifacts(plan_path, "nwverse/persona", "beta", COMMIT, (repeated,))["artifacts"]), count)
+            (repeated / "install.sh").write_text("different bytes")
+            with self.assertRaises(release.ReleaseError):
+                release.verify_artifacts(plan_path, "nwverse/persona", "beta", COMMIT, (repeated,))
+            (repeated / "install.sh").write_text("install.sh")
+            self.assertEqual(len(release.verify_artifacts(plan_path, "nwverse/persona", "beta", COMMIT, (repeated,))["artifacts"]), count)
             (downloads / "personad-linux-amd64.gz").write_bytes(b"changed")
             with self.assertRaises(release.ReleaseError):
                 release.verify_artifacts(plan_path, "nwverse/persona", "beta", COMMIT)

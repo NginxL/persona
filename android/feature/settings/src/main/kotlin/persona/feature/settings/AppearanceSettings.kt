@@ -62,6 +62,8 @@ fun AppearanceSettings(modifier: Modifier = Modifier, agentsDisplay: AgentListDi
     val glass by store.glass.collectAsState()
     val palette = PersonaTheme.palette
     Column(modifier.fillMaxWidth()) {
+        SidebarOptions(store)
+        Spacer(Modifier.height(Tokens.Space.l))
         Text(stringResource(R.string.settings_style_intro), style = PersonaTheme.type.callout, color = palette.ink2)
         Spacer(Modifier.height(Tokens.Space.l))
         AppStyle.entries.forEach { style ->
@@ -87,6 +89,21 @@ fun AppearanceSettings(modifier: Modifier = Modifier, agentsDisplay: AgentListDi
         // Glass draws the Agents list in the chosen row style (#4338 A9); Brief and Board keep Compact and Detailed (decision 8).
         if (current == AppStyle.Glass && agentsDisplay != null) AgentsListLayout(agentsDisplay)
     }
+}
+
+@Composable
+private fun SidebarOptions(store: AppStyleStore) {
+    val current by store.sidebar.collectAsState()
+    JSectionHeader(stringResource(R.string.settings_sidebar))
+    JSegmented(
+        listOf(
+            JSegment(stringResource(R.string.settings_sidebar_separate)),
+            JSegment(stringResource(R.string.settings_sidebar_merged)),
+        ),
+        SidebarLayout.entries.indexOf(current),
+        { store.setSidebar(SidebarLayout.entries[it]) },
+        modifier = Modifier.testTag("settings-sidebar-layout"),
+    )
 }
 
 /**

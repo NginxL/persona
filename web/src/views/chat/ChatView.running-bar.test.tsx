@@ -7,6 +7,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Item, Session } from "../../lib/types";
+import { initI18n } from "../../i18n";
+
+await initI18n("zh-Hans");
 
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
@@ -214,5 +217,60 @@ describe("a Persona conversation on the generic session route says its foregroun
     act(() => root.render(<ChatView mid="hub" sid="c1" />));
     await flush();
     expect(dockBar()).not.toBeNull();
+  });
+});
+
+describe("Agent chats never render duplicate competing Working… timers (#12380)", () => {
+  const workClocks = () => host.querySelectorAll("[data-work-elapsed]");
+  const dockClocks = () => host.querySelectorAll("[data-running-elapsed]");
+
+  it("renders only the dock status bar timer before any tool steps arrive after launch handoff", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Agent", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z", assistant: false } as Session;
+    transcript.items = [{ id: "u1#0", seq: 1, role: "user", kind: "text", text: "Fix the bug", ts: "2026-11-13T01:00:00Z" }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(dockBar()).not.toBeNull();
+    expect(dockClocks()).toHaveLength(1);
+    expect(liveWorkLine()).toBeNull();
+    expect(workClocks()).toHaveLength(0);
+  });
+
+  it("keeps the expandable live work summary when tool steps exist without rendering a second elapsed timer", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Agent", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z", assistant: false } as Session;
+    transcript.items = [
+      { id: "u1#0", seq: 1, role: "user", kind: "text", text: "Fix the bug", ts: "2026-11-13T01:00:00Z" },
+      { id: "t1#0", seq: 2, role: "assistant", kind: "tool_use", tool_name: "Bash", tool_use_id: "call-1", tool_input: { command: "git status" }, ts: "2026-11-13T01:00:01Z" },
+      { id: "t1-r#0", seq: 3, role: "user", kind: "tool_result", tool_use_id: "call-1", text: "clean", ts: "2026-11-13T01:00:02Z" },
+    ];
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(dockBar()).not.toBeNull();
+    expect(dockBar()?.querySelector("[data-running-verb]")?.textContent).toBe("正在工作…");
+    expect(dockClocks()).toHaveLength(1);
+    expect(liveWorkLine()).not.toBeNull();
+    expect(liveWorkLine()?.querySelector<HTMLButtonElement>(":scope > button")?.getAttribute("aria-expanded")).toBe("false");
+    expect(workClocks()).toHaveLength(0);
+  });
+
+  it("keeps the live work line above batched streamed text in an Agent chat with only one elapsed timer", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Agent", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z", assistant: false } as Session;
+    transcript.items = [{ id: "u1#0", seq: 1, role: "user", kind: "text", text: "Fix the bug", ts: "2026-11-13T01:00:00Z" }];
+    transcript.streaming = "Investigating now.";
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    expect(dockBar()).not.toBeNull();
+    expect(dockClocks()).toHaveLength(1);
+    expect(liveWorkLine()).not.toBeNull();
+    expect(workClocks()).toHaveLength(0);
+  });
+
+  it("still shows the in-stream elapsed timer in Persona chats where the dock bar is hidden", async () => {
+    captured.session = { machine_id: "hub", session_id: "c1", title: "Persona", cwd: "/code", status: "working", state: "working", state_since: "2026-11-13T01:00:01Z", assistant: true } as Session;
+    transcript.items = [{ id: "u1#0", seq: 1, role: "user", kind: "text", text: "What is next?", ts: "2026-11-13T01:00:00Z" }];
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant />));
+    await flush();
+    expect(dockBar()).toBeNull();
+    expect(liveWorkLine()).not.toBeNull();
+    expect(workClocks()).toHaveLength(1);
   });
 });

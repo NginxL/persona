@@ -27,11 +27,11 @@ final class MachinePagesTests: XCTestCase {
         super.tearDown()
     }
 
-    private func launch(_ args: [String]) {
+    private func launch(_ args: [String], machine: String = "macbook") {
         app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         // Nothing kept from an earlier run: the last dev chat (reopened at launch), New Chat's last machine and launcher. The argument domain wins over what the app saves, so only for values the test never changes.
-        app.launchArguments = ["-pairURL", pair, "-dev.openChat", "", "-newChat.machine", "macbook", "-launcher.macbook", ""] + args
+        app.launchArguments = ["-pairURL", pair, "-dev.openChat", "", "-newChat.machine", machine, "-launcher.\(machine)", ""] + args
         app.launchPinned()
     }
 
@@ -430,5 +430,63 @@ final class MachinePagesTests: XCTestCase {
         seeChatNamed("README")
         see(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "README")).firstMatch, "the first message, already in the thread")
         shot("new-chat-codex-started")
+    }
+
+    /// A discovered Traex launcher is not Claude Code: a remembered Plan Only and Claude's effort / ultracode stay out
+    /// of its form and start. Its nonempty first message goes with one synchronous start, never as a second message.
+    @MainActor func testNewTraexSessionStartsWithItsFirstMessage() throws {
+        let variants = [("light", "default", [String]()),
+                        ("dark", "default", [String]()),
+                        ("light", "largest", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]),
+                        ("dark", "largest", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])]
+        for (scheme, size, sizeArgs) in variants {
+            _ = mock("reset") // reset clears STARTED, not SENT; each variant also baselines SENT below.
+            launch(["-tab", "dev", "-cwd.server", "/home/me/code/persona", "-mode.server", "plan",
+                    "-ui.scheme", scheme] + sizeArgs, machine: "server")
+            see(app.buttons["新建会话"], "新建会话", timeout: 15).tap()
+            see(app.buttons["newChat.launcher"], "launcher row").tap()
+            see(app.navigationBars["启动器"], "launcher picker")
+            let traexRow = see(button("traex"), "the discovered Traex launcher")
+            for _ in 0..<4 where !traexRow.isHittable { app.swipeUp() }
+            XCTAssertTrue(traexRow.isHittable, "the discovered Traex row is on screen")
+            traexRow.tap()
+            wait("Traex launcher picked") { app.buttons["newChat.launcher"].label.contains("traex") }
+            let loading = app.descendants(matching: .any)["newChat.model.loading"].firstMatch
+            XCTAssertTrue(loading.waitForNonExistence(timeout: 10), "Traex's model list finishes loading")
+            XCTAssertFalse(app.staticTexts["权限与思考"].exists, "Claude Code's modes are not offered for Traex")
+            XCTAssertFalse(button("权限模式").exists, "no Claude permission-mode picker for Traex")
+            XCTAssertFalse(button("思考强度").exists, "no Claude thinking-effort picker for Traex")
+            XCTAssertFalse(app.switches["newChat.ultracode"].exists, "no Claude ultracode switch for Traex")
+
+            let prompt = app.textViews["newChat.prompt"].exists ? app.textViews["newChat.prompt"] : app.textFields["newChat.prompt"]
+            for _ in 0..<6 where !prompt.isHittable { app.swipeUp() }
+            see(prompt, "the first message field").tap()
+            let typed = "Traex AC4 \(scheme) \(size)"
+            prompt.typeText(typed)
+            let tag = "\(scheme)-\(size)"
+            shot("new-chat-traex-" + tag)
+            let start = see(button("开始对话"), "开始对话")
+            XCTAssertTrue(start.isEnabled)
+            let sentBefore = ((mock("sent")["sent"] as? [[String: Any]]) ?? []).count
+            start.tap()
+            wait("POST /api/v1/sessions sent") { !((mock("started")["started"] as? [[String: Any]]) ?? []).isEmpty }
+            let starts = (mock("started")["started"] as? [[String: Any]]) ?? []
+            XCTAssertEqual(starts.count, 1, "exactly one Traex session start")
+            let body = starts.first ?? [:]
+            XCTAssertEqual(body["machine_id"] as? String, "server")
+            XCTAssertEqual(body["launcher"] as? String, "traex")
+            XCTAssertEqual(body["agent_type"] as? String, "traex")
+            XCTAssertEqual(body["prompt"] as? String, typed, "the first message goes with the start, as typed")
+            XCTAssertNil(body["async"], "the start is synchronous, with no async true")
+            XCTAssertNil(body["permission_mode"], "remembered Claude Plan Only does not reach Traex")
+            XCTAssertNil(body["effort"])
+            XCTAssertNil(body["ultracode"])
+            XCTAssertFalse(app.navigationBars["新对话"].waitForExistence(timeout: 3), "the sheet closes on start")
+            seeChatNamed(typed)
+            shot("new-chat-traex-started-" + tag)
+            let newSends = (((mock("sent")["sent"] as? [[String: Any]]) ?? []).dropFirst(sentBefore))
+            XCTAssertFalse(newSends.contains { ($0["text"] as? String) == typed },
+                           "the prompt was not also sent as an ordinary message")
+        }
     }
 }

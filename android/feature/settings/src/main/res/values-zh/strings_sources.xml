@@ -107,6 +107,9 @@
     <string name="settings_src_lark_quarantined">无法打开，请在飞书网关里重试或移除</string>
     <string name="settings_src_signed_in">已登录</string>
     <string name="settings_src_lark_accounts_caption">已登录的账号都会收进收件箱，「消息」页可以切换账号。/agent、助手和知识库使用默认账号；在飞书网关里添加或退出账号。</string>
+    <string name="settings_src_lark_accounts_caption_default">已登录的账号都会收进收件箱。「消息」、/agent、助手和知识库使用默认账号；在飞书网关里添加或退出账号。</string>
+    <string name="settings_src_lark_home_messages">首页显示消息</string>
+    <string name="settings_src_lark_home_messages_detail">在侧边栏增加「消息」，查看全部私聊和群聊。与收件箱共用账号和聊天记录；只对这个设备生效。</string>
     <string name="settings_src_lark_uses_header">Persona 用飞书做什么</string>
     <string name="settings_src_lark_use_inbox">收件箱</string>
     <string name="settings_src_lark_use_inbox_detail">私聊、@我、群消息和云文档里提到你的地方，AI 先分拣、起草回复</string>

@@ -27,6 +27,7 @@ spec/
     graph-layout/     an extension graph's layout, reading order and folds, checked by the web, iOS, Android and the hub
     input-clip/       the whole-input bound after the hub and runtime SDK's two string passes
     attention/        Persona Link's "Needs you" summary against the web badge
+    counts/           every place a count is drawn, the count it draws, and how the clients' replays agree
     entries/          the Assistant's two composer entries, Needs you and In progress
     needs-you/        the Agents tab's Needs you: one row per waiting session, what its header, filter and badge count
     triage/           the To-dos page's sections (status SOP), checked by the web app and the hub
@@ -73,6 +74,7 @@ spec/
 | review | [README](fixtures/review/README.md): the node's real `git.review` answers, empty `header` and base `hash` left out, written by the node's test and decoded by iOS (#8733) |
 | comments | [README](fixtures/comments/README.md): the `> Comment N` / `Code comment N` / `Element comment N` blocks a message leads with, written and read back by the web app and the iOS app (#151) |
 | attention | [README](fixtures/attention/README.md): Persona Link's "Needs you" summary counts what the web app's badge counts, checked by Go and the web app |
+| counts | [README](fixtures/counts/README.md): the surface table, every place a count is drawn on each client, the count it draws and whether drawing the manager's view would show today's number, held to the code by `scripts/test/test_counts_surfaces.py`; and the agreement report, which compares what the iOS and Android needs-you replays count (`scripts/test/counts_agreement.py`, #11900) |
 | session-search | [README](fixtures/session-search/README.md): ranked runtime-Agent search, explicit query operators and shared local/server matching (#7624) |
 | chat-export | [README](fixtures/chat-export/README.md): a conversation exported as Markdown (#7375): who wrote each part, merged replies, work steps on and off, cut text and fences, written by the web app |
 | entries | [README](fixtures/entries/README.md): which of the Assistant's two composer entries (Needs you, In progress) each task, Agent, plan and message card goes to, checked by the web app and Android (#3387) |

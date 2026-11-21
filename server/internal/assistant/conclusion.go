@@ -60,16 +60,30 @@ func askSummary(l i18n.Lang, a *acceptAsk) string {
 	return a.Changed
 }
 
+// checkOptionTaken says the owner answered a, a recurring check's decision, with one of its options or its
+// recommendation, which went to the task's supervisor (checkDecided). Their own words went to its Agent, as any
+// decision's do (answerDecisionTextLocked).
+func checkOptionTaken(a *acceptAsk) bool {
+	return a.Check != "" &&
+		(a.Chosen == "" || slices.ContainsFunc(a.Options, func(o DecisionOption) bool { return o.Label == a.Chosen }))
+}
+
 // acceptedNote is what the bot answers under a card the owner passed.
 func acceptedNote(l i18n.Lang, a *acceptAsk) string {
 	switch {
+	case a.OutsideID != "" && !a.WithdrawnAt.IsZero():
+		return i18n.T(l, "assistant-reports.outside_withdrawn")
+	case a.OutsideID != "" && a.ByDefault:
+		return i18n.T(l, "assistant-reports.outside_answered_default")
+	case a.OutsideID != "":
+		return i18n.T(l, "assistant-reports.outside_answered")
 	case decideAsk(a) && a.AgentReply != nil && a.AgentReply.Handled:
 		return i18n.T(l, "assistant-reports.decision_handled_in_agent")
 	case decideAsk(a) && a.ByDefault:
 		return i18n.T(l, "assistant-reports.verdict_taken_default")
-	case decideAsk(a) && a.Check != "" && a.Chosen != "": // a check's decision: it went to the supervisor (checkDecided)
+	case decideAsk(a) && checkOptionTaken(a) && a.Chosen != "": // a check's option went to the supervisor
 		return i18n.T(l, "assistant-reports.decision_chosen_supervisor", i18n.Args{"option": a.Chosen})
-	case decideAsk(a) && a.Check != "" && a.Response == "":
+	case decideAsk(a) && checkOptionTaken(a) && a.Response == "": // its OK: to the supervisor, not the Agent
 		return i18n.T(l, "assistant-reports.verdict_taken_supervisor")
 	case decideAsk(a) && a.Chosen != "":
 		return i18n.T(l, "assistant-reports.decision_chosen_noted", i18n.Args{"option": a.Chosen})
@@ -357,7 +371,7 @@ func (s *Service) takeRecommendation(ctx context.Context, id string, a acceptAsk
 		row.Reason, row.Source = defaultReason(l, s.location(ctx), a.Deadline), db.DecisionAgent
 	}
 	var sendErr error
-	if a.Check == "" {
+	if a.Check == "" && a.OutsideID == "" {
 		if _, err := s.relayToTask(ctx, t.Origin, id, msg, func(cur Todo) bool {
 			return cur.DoneAt == nil && !acceptAskStale(&a, cur)
 		}); err != nil {
@@ -381,8 +395,10 @@ func (s *Service) takeRecommendation(ctx context.Context, id string, a acceptAsk
 		}
 	}
 	switch {
+	case a.OutsideID != "":
+		// An outside caller polls the answer; there is no Agent or supervisor to relay to.
 	case a.Check != "":
-		s.checkDecided(ctx, t, &a, a.Recommend)
+		s.checkDecided(ctx, t, &a, a.Recommend, false)
 	case sendErr != nil:
 		return s.decisionNotDelivered(ctx, id, a.AskedAt, a.Recommend, sendErr), nil
 	default:

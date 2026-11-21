@@ -202,6 +202,8 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 		resp = n.handleAsk(ctx, req)
 	case "notify": // personad notify (scriptcli.go)
 		resp = n.handleNotify(ctx, req)
+	case assistantwire.MethodDecisionRaise, assistantwire.MethodDecisionGet, assistantwire.MethodDecisionWithdraw:
+		resp = n.handleDecision(ctx, req) // personad decision: non-blocking, never spooled
 	case "launcher.env": // personad launch <name>
 		resp = n.launcherEnvFor(req)
 	case "launcher.pi": // pi's Persona extension: the providers pi can use here (pi_providers.go)
@@ -209,9 +211,13 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 	case "secret.env": // personad launch --ticket (secretenv.go)
 		resp = n.secretEnvFor(req)
 	case "mcp.tools":
+		if req.A2AToken != "" {
+			resp = n.scopedA2AMCP(ctx, req)
+			break
+		}
 		var res map[string]any
 		// The assistant's only when the node says so too (clicall.go mcpSession).
-		session, assistant := n.mcpSession(c, req)
+		session, assistant, rt := n.mcpSession(c, req)
 		if session == "" && !assistant {
 			session = n.paneCaller(req.Pane) // an agent's: the hub tells a task leader's tools from any other's by it
 		}
@@ -229,21 +235,51 @@ func (n *Node) serveSock(ctx context.Context, c net.Conn) {
 			if res == nil {
 				res = map[string]any{}
 			}
+			// A runtime's assistant conversation (Antigravity) lists its tools here, through `personad mcp`, not on the
+			// runtime socket: the command gates' tools are its own, as there (runtimehost.go). Claude Code's assistant
+			// runs those commands with Bash, through its hook. Only a full list: an unchanged one keeps what was sent.
+			// shortcut: a gate that comes or goes while the hub's tools stay the same shows at their next change.
+			if tools, ok := res["tools"].([]any); ok && rt != nil && !guest && req.ToolSet == "" {
+				for _, g := range n.gateTools() {
+					tools = append(tools, g)
+				}
+				res["tools"] = tools
+			}
 			res["session"] = session
 			resp = res
 		}
 	case "cli.call": // personad tg: the node, not the caller, says whether it is the assistant (clicall.go)
 		resp = n.cliCall(ctx, c, req)
 	case "mcp.call":
-		var res proto.ToolResult
-		session, assistant := n.mcpSession(c, req)
-		sid := n.mcpCaller(req.Name, session, req.Pane, assistant)
-		if req.Name == toolMailSaveAttachment { // writes on this machine (mailattachment.go)
-			resp = n.saveMailAttachment(ctx, req.Args, sid, assistant, req.Guest || n.guestOf(sid) != nil)
+		if req.A2AToken != "" {
+			resp = n.scopedA2AMCP(ctx, req)
 			break
 		}
+		var res proto.ToolResult
+		session, assistant, rt := n.mcpSession(c, req)
+		sid := n.mcpCaller(req.Name, session, req.Pane, assistant)
+		if assistantwire.IsA2ATool(req.Name) {
+			sid, assistant = n.a2aCaller(c, req, sid)
+			if sid == "" {
+				resp = proto.TextResult("A2A requires a verified local session", true)
+				break
+			}
+		}
+		guest := req.Guest || n.guestOf(sid) != nil
+		if req.Name == toolMailSaveAttachment { // writes on this machine (mailattachment.go)
+			resp = n.saveMailAttachment(ctx, req.Args, sid, assistant, guest)
+			break
+		}
+		// A command gate's tool runs here for one of the runtime's assistant conversations only, as on the runtime
+		// socket (runtimehost.go): through the gate (larkCheck), then the skill's script.
+		if rt != nil && !guest && req.ToolSet == "" && n.runtimeAssistantChat(rt, sid) && n.runtimeWorkerCaller(c, rt, sid) {
+			if g := n.gateTool(req.Name); g != nil {
+				resp = n.assistantGateTool(ctx, g, sid, req.Args)
+				break
+			}
+		}
 		params := map[string]any{"name": req.Name, "args": req.Args, "session_id": sid,
-			"assistant": assistant, "guest": req.Guest || n.guestOf(sid) != nil}
+			"assistant": assistant, "guest": guest}
 		n.putSourcePermission(c, params, sid, req.Name, req.Args)
 		if origin := n.assistantOrigin(sid); origin != "" {
 			params["origin"] = origin
@@ -707,6 +743,8 @@ func paneKindOK(n *Node, pane string) bool {
 		return n.hostEnabled(proto.EngineOrca)
 	case host.Tern:
 		return n.hostEnabled(proto.EngineTern)
+	case host.Rex:
+		return n.hostEnabled(proto.EngineRex)
 	}
 	return true
 }
@@ -951,7 +989,7 @@ func toolSummary(name string, input json.RawMessage) string {
 // leader's task_plan and task_review (assistant/task_leader.go) and task_spawn. The manager's come from the list it
 // reads itself, so a tool it adds there gets its caller here too (#9089: the repository tools were added to one list
 // only, and every agent's call of them reached the hub with no session).
-var callerTools = slices.Concat(assistantwire.AgentToolNames, []string{"dispatch_start", "dispatch_read", "task_plan", "task_review", "task_spawn"})
+var callerTools = slices.Concat(assistantwire.AgentToolNames, assistantwire.A2AToolNames, []string{"dispatch_start", "dispatch_read", "task_plan", "task_review", "task_spawn"})
 
 // mcpCaller is the session an MCP call of tool name goes to the hub with: the one it names, else, for an agent's
 // tools that need to know whose call it is (callerTools), the session its pane runs. The rest go on as before, with

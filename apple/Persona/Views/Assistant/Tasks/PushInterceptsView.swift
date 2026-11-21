@@ -209,6 +209,8 @@ private struct PushInterceptRow: View {
     let item: PushInterceptItem
     var onOpen: () -> Void
     @Environment(\.openLink) private var openLink
+    /// The conversation's stack: a session it opens is pushed on it, with Back to the conversation (#12006).
+    @Environment(\.pushInboxChat) private var pushChat
     private var destination: PushInterceptDestination? {
         PushInterceptsLogic.destination(item.record, knownTodoIDs: Set(TasksStore.shared.todos.keys))
     }
@@ -261,7 +263,8 @@ private struct PushInterceptRow: View {
         case .todo(let id):
             TasksStore.shared.detailTask = id
         case .session(let group, let machine, let session):
-            AppModel.shared.open(SessionKey(group: group, machineID: machine, sessionID: session))
+            AppModel.shared.openInPage(SessionKey(group: group, machineID: machine, sessionID: session),
+                                       push: conversationAgentPush(pushChat))
         case .url(let url):
             openLink?(url)
         }

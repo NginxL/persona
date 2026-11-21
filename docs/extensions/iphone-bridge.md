@@ -150,9 +150,9 @@ sent to the phone: an invalid one never leaves half a gesture.
 | `timeout` | `timeout_ms` passed |
 | `trust_pending`, `not_found` | `pair` only: tap Trust on the phone and retry; no such phone on USB |
 | `ddi_missing` | `mount_ddi`: no developer disk image in the directory (Xcode brings one; or pass `ddi_dir`) |
-| `ddi_unsupported_device` | `mount_ddi`: the image has no build for this phone's board and chip; a newer Xcode may |
+| `ddi_unsupported_device` | `mount_ddi`: the directory has neither a cryptex build this phone takes (iOS 27 and later) nor a build for its board and chip; a newer Xcode may |
 | `tss_failed` | `mount_ddi`: Apple's signing server could not be reached or gave no ticket |
-| `mount_failed` | `mount_ddi`: the phone refused the image, or accepted it without listing it as mounted |
+| `mount_failed` | `mount_ddi`: the phone refused the image or the cryptex, or accepted it without listing it as mounted |
 | `internal` | Anything else, including a panic in the bridge or a library it uses: every command catches it and fails as above, exit code 1, `message` saying what panicked and where (`the bridge failed unexpectedly: … (idevice-0.1.68/src/…:518)`), never exit code 101 with a backtrace |
 
 ## Coordinates
@@ -193,6 +193,13 @@ ready event.
   older iOS has no remote input. For each `false`, `notes` gives the reason with an error code: `developer_mode_off`,
   `ddi_not_mounted`, `unsupported` (for `input`: the iOS version). A listed service can still fail when used; the operation's error says so.
 - `ddi_mounted`: whether the developer services are listed at all; `null` when Developer Mode is off, since then nothing is listed either way.
+- The developer services come with the disk image, and a session reads the service directory when it connects. While they aren't listed,
+  `device_info` reads the directory again (at most every 5 seconds), so an image mounted after the session started, by Xcode or by another
+  session's `mount_ddi`, can show up in this one too. A cryptex install resets the phone's service directory connections (on iOS 27.2.1,
+  Xcode's was torn down when this bridge installed the image). So when the
+  directory can't be read again, or still doesn't list the services although the phone has the image (cryptexd or the image mounter says
+  so), the session can't reach them: `device_info` answers `disconnected`, the node connects again, and the new session lists them
+  (#12171). Before that, a long-running `serve` kept saying `ddi_not_mounted` until it was restarted.
 
 ### `screenshot`
 
@@ -299,29 +306,50 @@ lists never answered on iOS 18.7.3, so the bridge doesn't use them.) The app ope
 ### `mount_ddi`
 
 `{ "ddi_dir": "<folder>", "force": false }`, both optional. The developer services behind `screenshot`, input and the app operations are
-listed only while the phone has the personalized developer disk image mounted (`device_info`: `ddi_mounted`, and `ddi_not_mounted` in
-`notes`). This mounts it, **only when asked**: no other operation mounts it on its own. The node offers it to the phone's owner, never to
-the assistant: the command `personad iphone mount-ddi <udid> [--ddi-dir <dir>] [--force]` ([iphone-pairing.md](iphone-pairing.md)), and
-the app's Prepare, after which the node mounts it again by itself whenever that phone comes back without it (#8199, [iphone-pairing.md](iphone-pairing.md), "Preparing the phone").
+listed only while the phone has the developer disk image mounted (`device_info`: `ddi_mounted`, and `ddi_not_mounted` in `notes`). This
+mounts it, **only when asked**: no other operation mounts it on its own. The node offers it to the phone's owner, never to the assistant:
+the command `personad iphone mount-ddi <udid> [--ddi-dir <dir>] [--force]` ([iphone-pairing.md](iphone-pairing.md)), and the app's
+Prepare, after which the node mounts it again by itself whenever that phone comes back without it (#8199, [iphone-pairing.md](iphone-pairing.md), "Preparing the phone").
 
-1. Already mounted (and not `force`): `{"mounted": true, "already": true}`, nothing else happens.
+The image goes on the way Xcode puts it there (#12171):
+
+- **iOS 27 and later, as a cryptex** through the phone's `cryptexd` (`com.apple.security.cryptexd.remote`), when the phone offers it:
+  the manifest's **cryptex build**, the one build identity whose variant ends in `Developer Disk Image Cryptex`. It is the same for
+  every phone, so a phone newer than the folder's per-device builds takes it too: Xcode 27.2's per-device builds stop at chip `0x8150`,
+  and an iPhone19,4 (chip `0x8160`) failed with `ddi_unsupported_device` before this, while Xcode mounted the image on it.
+- **Before iOS 27, as a personalized image** through the image mounter: the build for the phone's board and chip. An iOS 27 phone gets
+  this too when the folder has no cryptex build (an older Xcode).
+
+1. Already mounted (and not `force`): the image mounter lists a personalized image, or cryptexd lists the developer disk image cryptex
+   (`com.apple.MobileAsset.DDI`, also when Xcode installed it): `{"mounted": true, "already": true}`. If this session doesn't list the
+   developer services yet (the image came after it connected), the service directory is read again as in step 7; nothing else happens.
 2. Developer Mode off: `developer_mode_off`.
 3. The image comes from `ddi_dir`, else `$PERSONA_IPHONE_DDI_DIR`, else Xcode's `/Library/Developer/DeveloperDiskImages/iOS_DDI/Restore`.
-   Nothing is downloaded. From its `BuildManifest.plist` the bridge picks the build for the phone's board and chip, and reads the
-   image and trust cache it names (paths must stay inside the folder). None there: `ddi_missing`; no build for this phone:
-   `ddi_unsupported_device`.
-4. The ticket: the phone's own for this image if it has one, else one from Apple's signing server (TSS). A failure there is
-   `tss_failed`, and nothing is uploaded.
-5. Upload, mount, then check the phone lists it: `{"mounted": true, "already": false, "image": "<file>", "ticket": "phone" | "apple",
-   "services_refreshed": true}`. A refusal is `mount_failed` (or `locked`, `developer_mode_off`).
-6. The service directory is read again so this session sees the developer services. If that fails, the mount still stands and is
-   reported with `"services_refreshed": false`; the next request then answers `disconnected` and the node connects again.
+   Nothing is downloaded. From its `BuildManifest.plist` the bridge picks the cryptex build and reads its four payloads
+   (`Cryptex1,GenericDmg`, `Cryptex1,GenericTrustCache`, `Cryptex1,CryptexInfoPlist`, `Cryptex1,GenericVolume`), or the build for the
+   phone's board and chip and the image and trust cache it names. Paths must stay inside the folder. None there: `ddi_missing`; nothing
+   this phone takes: `ddi_unsupported_device`.
+4. Cryptex only: a locked phone is `locked` before anything is sent, as Xcode checks too (lockdown's `PasswordProtected`, `true` while
+   the phone wants its passcode). A locked iOS 27.2.1 phone never answered the install, and its cryptexd then answered no other request
+   either until the phone was unlocked; every cryptexd lookup (installed cryptexes, identifiers, nonce) therefore gives up after 5 seconds
+   with `locked`. A phone that locks itself during the install (Auto-Lock) leaves it waiting the same way, see "Open questions".
+5. The ticket. Cryptex: always from Apple's signing server (TSS), for the cryptex build, this phone's chip ID and ECID
+   (`Cryptex1,UDID`) and a nonce from cryptexd. Personalized image: the phone's own for this image if it has one, else one from Apple's
+   signing server. A failure there is `tss_failed`, and nothing is uploaded.
+6. Install (cryptexd's `install`, the five payloads with the ticket) or upload and mount, then check the phone lists it:
+   `{"mounted": true, "already": false, "kind": "cryptex" | "personalized", "image": "<file>", "ticket": "phone" | "apple",
+   "services_refreshed": true}`. A refusal is `mount_failed` (or `locked`, `developer_mode_off`). With `force` while the cryptex was
+   installed (iOS 27.2.1), cryptexd refused it at once: `invalid asset: ginf`, so `mount_failed`.
+7. The service directory is read again so this session sees the developer services. If they still aren't listed, the mount stands and
+   is reported with `"services_refreshed": false`; the next request then answers `disconnected` and the node connects again.
 
 **The signing request**: the library sends it to `http://gs.apple.com/TSS/controller?action=2`, **plain HTTP**: it hard-codes the
-address and keeps the request body to itself, so the bridge cannot send it over HTTPS without changing the library. The request
-carries the phone's board and chip IDs, its **ECID** (unique chip ID), the nonce the phone generated for this image, and the hashes of
-the image and trust cache. The ECID crosses the network **in clear text**. The bridge writes none of this to disk or to its output.
-Unlock the phone and keep it awake while mounting. Takes up to a couple of minutes (the image is about 17 MB through the tunnel).
+address and keeps the request body to itself, so the bridge cannot send it over HTTPS without changing the library. For a personalized
+image the request carries the phone's board and chip IDs, its **ECID** (unique chip ID), the nonce the phone generated for this image,
+and the hashes of the image and trust cache; for the cryptex, the cryptex build's identity, the phone's chip ID and ECID, cryptexd's
+nonce, and the hashes of the cryptex's info, trust cache and volume. Either way the ECID crosses the network **in clear text**. The
+bridge writes none of this to disk or to its output. Unlock the phone and keep it awake while mounting. Takes up to a couple of minutes
+(the image is about 17 MB through the tunnel).
 
 On the simulator backend, `unsupported`: a simulator has its developer services already.
 
@@ -482,7 +510,9 @@ phone has run against one only where the table says so:
 | `match` against a real advertisement | checked on that iPhone against its `_remotepairing._tcp` advertisement on the USB network interface (port 49152, TXT `identifier`, `authTag`, `ver`, `minVer`, `flags`): it answered `true`. An advertisement over Wi-Fi not verified |
 | `reveal-developer-mode` (AMFI) | **not verified on a real device**: no phone with the switch hidden was at hand |
 | `ax_tree` | `unsupported` |
-| `mount_ddi` (build selection, the phone's ticket or TSS, upload, mount, service directory again) | checked on the iOS 18.7.3 iPhone: mounted in 3.3 s, then `already: true`; `device_info` showed `ddi_mounted: true` and the developer services. The ticket's source (the phone's own or Apple's signing server) was not recorded: no `--force` remount was run. **Not verified on iOS 27**: that phone's image was mounted by Xcode's tools beforehand |
+| `mount_ddi` (build selection, the phone's ticket or TSS, upload, mount, service directory again) | checked on the iOS 18.7.3 iPhone: mounted in 3.3 s, then `already: true`; `device_info` showed `ddi_mounted: true` and the developer services. The ticket's source (the phone's own or Apple's signing server) was not recorded: no `--force` remount was run |
+| `mount_ddi` as a cryptex (#12171) | checked on iOS 27.2.1 (iPhone19,4, chip `0x8160`, which Xcode 27.2's per-device builds don't list): the image Xcode had installed counted as mounted (`already: true` in 0.2 s, where the bridge before this failed with `ddi_unsupported_device`); installed from scratch in 3.9 s with a ticket from Apple's signing server (Xcode, trying at the same moment, failed with "remote device not connected" and then found this image installed); a locked phone with an install pending answered `locked` within 6 s, where it hung for minutes before; `PasswordProtected` was `true` locked and `false` unlocked. The personalized image on iOS 27: not verified, that phone has no per-device build |
+| `device_info` after an image mounted outside the session (#12171) | on iOS 27.2.1, a session opened before another session installed the image went on answering `ddi_not_mounted` with the first version of this change, which only read the directory again; in a second run, with the phone locked, such a session's read failed with a reset connection. Answering `disconnected` there, and the node's new session then listing the services: **not verified on the phone yet** |
 | Simulator backend: pair, `device_info`, `screenshot`, apps, `ax_tree` (with a system alert), tap, `keys` (ASCII and Chinese), swipe, `button home`, `serve`, runner cleanup after exit and after `kill -9` | checked on an iOS 27.2 simulator (Xcode 27.2) |
 
 ## Open questions
@@ -490,7 +520,11 @@ phone has run against one only where the table says so:
 - **Accessibility tree**: needs a client for the phone's accessibility inspector service; to be built and tested with a phone.
 - **Text beyond ASCII**: the key channel cannot type it. The phone's pasteboard service plus a paste shortcut might, at the cost of the
   user's clipboard; not done.
-- **Locked screen**: no service found yet that reports it.
+- **Locked screen**: lockdown's `PasswordProtected` followed it on iOS 27.2.1 (`true` while the phone wanted its passcode, as CoreDevice's
+  lock check reads it), and `mount_ddi` checks it before a cryptex install; `device_info` still reports `locked: null`, older iOS not tried.
+- **Keeping the phone awake while it installs the image**: Xcode holds a power assertion on the phone while it mounts; the library has no
+  client for that, so a phone that locks itself during a cryptex install leaves the install unanswered and `mount_ddi` ends with
+  `timeout`. On iOS 27.2.1 cryptexd answered again once the phone was unlocked; whether the waiting install then completes was not seen.
 - **Typing with a non-English input method**: `keys` sends hardware keyboard events, which the phone's current input method interprets
   (a Chinese keyboard composes). A reliable way to type plain text regardless (switching the input method, or the pasteboard plus a paste
   shortcut) is not known yet; the bridge doesn't try.

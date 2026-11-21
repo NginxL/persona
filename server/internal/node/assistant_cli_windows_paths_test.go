@@ -112,7 +112,10 @@ func TestCodexAssistantCommandWindowsPathsUseForwardSlashes(t *testing.T) {
 func TestAgentModelsCommandWindowsPathsUseForwardSlashes(t *testing.T) {
 	const bin = `C:\Program Files\Persona\personad.exe`
 	n := windowsScriptNode(t, bin, "box")
-	cmd, err := n.agentModelsCommand(context.Background(), "bash", "box", "codex", t.TempDir())
+	if _, err := interactiveShell(); err != nil {
+		t.Skip(err)
+	}
+	cmd, err := n.agentModelsCommand(context.Background(), "box", "codex", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +127,7 @@ func TestAgentModelsCommandWindowsPathsUseForwardSlashes(t *testing.T) {
 
 	start := `C:\Users\Example User\.claude-work`
 	n.claudeStartDir.Store(&start)
-	cmd, err = n.agentModelsCommand(context.Background(), "bash", "claude", "claude", t.TempDir())
+	cmd, err = n.agentModelsCommand(context.Background(), "claude", "claude", t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

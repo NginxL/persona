@@ -175,6 +175,14 @@ describe("useTeamReveal on the lead's page", () => {
     expect(getPanel()).toEqual({ kind: "team", mid: "mac", sid: "lead", worker: "mate" });
   });
 
+  it("opens an explicit worker message before the lead's rollup arrives", async () => {
+    await render(lead(0));
+    await act(async () => void askTeamWorker("mac", "lead", "mate", "saved-item"));
+    expect(getPanel()).toEqual({ kind: "team", mid: "mac", sid: "lead", worker: "mate", at: "saved-item" });
+    await act(async () => void askTeamWorker("mac", "lead", "mate", "another-item"));
+    expect(getPanel()).toEqual({ kind: "team", mid: "mac", sid: "lead", worker: "mate", at: "another-item" });
+  });
+
   it("does nothing in a worker's own conversation or a session without workers", async () => {
     await render(lead(2), false);
     expect(getPanel()).toBeNull();

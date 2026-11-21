@@ -1,0 +1,32 @@
+タスク：Fix the landscape crash
+
+ユーザーの最初の依頼：
+The login page crashes in landscape on iPad; fix it and add a test.
+
+目標：No crash in landscape
+
+承認の基準：
+- No crash in landscape
+- A regression test
+
+途中で変わった範囲：
+- Dropped the iPad mini layout（理由：The owner said it is not sold any more）
+
+レビュー（古い順）：
+- rework · 1 回目：Still crashes; reproduce on the stock simulator
+  - 未達：No crash in landscape（Not reproducible on the slim simulator）
+- accepted：Checked
+
+ユーザーが途中で答えた質問：
+- Which simulator? → The stock one
+
+終了時の各基準の結果：
+- No crash in landscape：met（Screenshot test passes）
+
+見積もり 30 分、実際 95 分
+
+Agent の最後の返信：
+Fixed: the page used a fixed width.
+
+このプロジェクトに記録済みの教訓：
+- [lesson-1] missing_context：Use the stock simulator for layout bugs.

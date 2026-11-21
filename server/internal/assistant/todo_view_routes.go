@@ -168,7 +168,8 @@ func (s *Service) viewedTodoRuns(ctx context.Context, id string) (listedTodo, []
 func (s *Service) todoViewRoutes() {
 	// GET /api/v1/todos/{id}: one to-do as GET /api/v1/todos lists it, its view included, and what the paper shows of
 	// its history (todoItemDetail; an extension's token as todoTimelineOf reads it) → {"todo": row, "rounds",
-	// "rounds_total", "recap"?, "results"?}; an unknown id 404 todo_not_found.
+	// "rounds_total", "recap"?, "results"?}; an unknown id 404 todo_not_found, as is one an extension is not shown
+	// (todoScoped).
 	s.handle("GET /api/v1/todos/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if err := s.ensureTodosLoaded(r.Context()); err != nil {

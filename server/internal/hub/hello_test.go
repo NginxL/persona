@@ -87,7 +87,7 @@ func TestHelloCompatibility(t *testing.T) {
 		t.Fatal("public_url without one configured")
 	}
 	// The existing iOS Envelope must not see a new value under an already typed key.
-	for _, key := range []string{"hub_id", "endpoints", "tls_port", "fp", "public_url", proto.FeatureMessageSendState} {
+	for _, key := range []string{"hub_id", "endpoints", "tls_port", "fp", "public_url", "push_grading", proto.FeatureMessageSendState} {
 		if slices.Contains(iosEnvelopeKeys, key) {
 			t.Fatalf("new hello field collides with iOS Envelope: %s", key)
 		}

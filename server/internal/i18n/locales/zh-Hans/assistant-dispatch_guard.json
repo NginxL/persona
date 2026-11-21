@@ -1,3 +1,14 @@
 {
-  "refused": "当前对话的 dispatch 防护已拒绝这次操作。"
+  "refused": "当前对话的 dispatch 防护已拒绝这次操作。",
+  "invalid_json": "dispatch guard 请求必须只包含一个合法 JSON 值，不能有未知字段或重复字段。",
+  "required": "必须提供对象形式的 dispatch_guard。",
+  "targets_required": "除非明确关闭，否则必须提供 dispatch_guard.targets。",
+  "targets_null": "dispatch_guard.targets 必须是数组，不能是 null。",
+  "enabled_required": "targets 非空时必须提供 dispatch_guard.enabled。",
+  "duplicate_key": "JSON 字段重复：{key}。",
+  "invalid_policy": "dispatch guard 策略无效。",
+  "read_failed": "无法读取 dispatch guard。",
+  "save_failed": "无法保存 dispatch guard。",
+  "read_only_get": "只读角色不能读取 dispatch guard。",
+  "read_only_write": "只读角色不能修改 dispatch guard。"
 }

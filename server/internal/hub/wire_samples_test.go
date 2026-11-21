@@ -555,16 +555,21 @@ type wireAdder func(string, string, string, string, json.RawMessage, map[string]
 // wireNode exercises the real RPC consumer without launching a node or opening a network connection.
 func wireNode(t *testing.T, reply func(json.RawMessage) any) *Machine {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	h2nR, h2nW := io.Pipe()
-	n2hR, n2hW := io.Pipe()
-	hp, np := rpc.New("h", h2nW), rpc.New("n", n2hW)
-	np.OnRequest = func(_ context.Context, method string, p json.RawMessage) (any, error) {
+	return wireNodeRPC(t, func(_ context.Context, method string, p json.RawMessage) (any, error) {
 		if method != "session.items" {
 			return nil, fmt.Errorf("unexpected method: %s", method)
 		}
 		return reply(p), nil
-	}
+	})
+}
+
+func wireNodeRPC(t *testing.T, reply rpc.Handler) *Machine {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	h2nR, h2nW := io.Pipe()
+	n2hR, n2hW := io.Pipe()
+	hp, np := rpc.New("h", h2nW), rpc.New("n", n2hW)
+	np.OnRequest = reply
 	done := make(chan struct{}, 2)
 	go func() { defer func() { done <- struct{}{} }(); _ = hp.Serve(ctx, n2hR) }()
 	go func() { defer func() { done <- struct{}{} }(); _ = np.Serve(ctx, h2nR) }()

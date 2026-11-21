@@ -1,5 +1,5 @@
 {
-  "invalid_type": "The type must be relay or generic",
+  "invalid_type": "The type must be relay, relay_key or generic",
   "invalid_url": "The address must look like http(s)://host[:port][/path]; don't put the key in it",
   "invalid_name": "The name can't be empty, is at most 40 characters and has no line breaks",
   "invalid_key": "The key can't contain whitespace or control characters and is at most 512 characters",
@@ -7,5 +7,6 @@
   "invalid_poll": "The polling interval is 1 to 1440 minutes",
   "too_many": "At most {n} sources",
   "not_found": "No such source",
-  "busy": "The previous test is still running, try again shortly"
+  "busy": "The previous test is still running, try again shortly",
+  "invalid_providers": "The providers to hide must be names such as codex or claude (at most 16)"
 }

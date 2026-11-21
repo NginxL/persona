@@ -1,4 +1,4 @@
-Bring an archived Persona conversation back into the sidebar's list (find it with conversations_list and include_archived).
+Bring an archived Persona conversation back into the sidebar's list (find it with conversations_list and include_archived).{{template "shared/mcp_language" .}}
 
 ```json
 {

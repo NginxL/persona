@@ -86,7 +86,7 @@ func dialAssistantWithStore(t *testing.T, h *Hub, url string, schedule bool, sto
 	}
 	bh := assistant.NewBusHub(o)
 	mgr, _ := managerDBOf(t, h) // taken now: a call of the assistant's that outlives the test never falls back to h.store
-	svc := assistant.New(assistant.Options{Hub: bh, Logf: logf, Devices: o.Devices, Store: func() assistant.Store {
+	svc := assistant.New(assistant.Options{Hub: bh, Logf: o.Logf, Devices: o.Devices, Store: func() assistant.Store {
 		switch {
 		case store != nil:
 			return store

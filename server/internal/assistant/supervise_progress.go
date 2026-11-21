@@ -49,20 +49,21 @@ func spinAfter(expect int) time.Duration {
 
 // spinWatch is what the hub saw of one agent since its last progress.
 type spinWatch struct {
-	since    time.Time // the stretch began: when the agent was first seen, or its last progress
-	lastCall time.Time // the latest tool call's ActivityAt
-	seen     time.Time // when the agent was last observed
-	calls    int       // tool calls seen in the stretch
-	waits    int       // of them, waits or repeats
-	lines    map[string]int
-	plan     bool // a plan was seen: planDone and planCur hold
-	planDone int
-	planCur  string
-	step     int // the latest step its reports named
+	since      time.Time // the stretch began: when the agent was first seen, or its last progress
+	progressAt time.Time // the last real progress or message, unlike since, never merely the first observation
+	lastCall   time.Time // the latest tool call's ActivityAt
+	seen       time.Time // when the agent was last observed
+	calls      int       // tool calls seen in the stretch
+	waits      int       // of them, waits or repeats
+	lines      map[string]int
+	plan       bool // a plan was seen: planDone and planCur hold
+	planDone   int
+	planCur    string
+	step       int // the latest step its reports named
 }
 
 func (w *spinWatch) restart(now time.Time) {
-	w.since, w.calls, w.waits, w.lines = now, 0, 0, nil
+	w.since, w.progressAt, w.calls, w.waits, w.lines = now, now, 0, 0, nil
 }
 
 type progressBook struct {

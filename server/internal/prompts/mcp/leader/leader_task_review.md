@@ -1,4 +1,4 @@
-Close, send back or hand up one of the worker tasks you handed out with task_plan. You get this tool only as a task leader, and it reaches your own direct workers only (any other task is refused). accepted: the work meets its done_when (you checked the evidence): the task closes. With a nonempty current done_when, accepted requires exactly one check per current criterion, each met=true with nonblank evidence. Missing, duplicate, unknown or unmet checks and blank evidence are refused before any review or completion is written. cancelled and workers without done_when keep their existing behavior. rework: say what is missing (note, or checks that are not met): it goes to the worker as a message, at most two rounds, after which it goes up as a decision. needs_user: only for a decision that is not yours: reason says what to decide and recommend what you would pick; it goes to whoever handed you your task, and nothing is shown to the user from here. cancelled: not to be done: the task closes and its agent is closed. A worker's supervision message tells you when one needs this.
+Close, send back or hand up one of the worker tasks you handed out with task_plan. You get this tool only as a task leader, and it reaches your own direct workers only (any other task is refused). accepted: the work meets its done_when (you checked the evidence): the task closes. With a nonempty current done_when, accepted requires exactly one check per current criterion, each met=true with nonblank evidence. Missing, duplicate, unknown or unmet checks and blank evidence are refused before any review or completion is written. cancelled and workers without done_when keep their existing behavior. rework: say what is missing (note, or checks that are not met): stalled/low-ROI churn (repeated_error, low_roi_edge, or omitted rework_kind) caps at 2 rounds, while external_input/substantive_new cap at 10 total, after which it goes up as a decision; prefer accepted with a brief note over low-ROI edge cases once core criteria are met. needs_user: only for a decision that is not yours: reason says what to decide and recommend what you would pick; it goes to whoever handed you your task, and nothing is shown to the user from here. cancelled: not to be done: the task closes and its agent is closed. A worker's supervision message tells you when one needs this.{{template "shared/mcp_language" .}}
 
 ```json
 {
@@ -16,6 +16,11 @@ Close, send back or hand up one of the worker tasks you handed out with task_pla
     "verdict": {
       "type": "string",
       "enum": ["accepted", "rework", "needs_user", "cancelled"]
+    },
+    "rework_kind": {
+      "type": "string",
+      "enum": ["external_input", "substantive_new", "repeated_error", "low_roi_edge"],
+      "description": "rework, optional: external_input (external review/conflict/owner input; skips 2-round stalled cap), substantive_new (prior gap fixed, new defect found; resets stalled cap), repeated_error/low_roi_edge (default when omitted; cap 2 stalled, 10 total)"
     },
     "note": {
       "type": "string",

@@ -159,11 +159,14 @@ describe("handing a meeting to an Agent on the web (#8852)", () => {
 });
 
 describe("the page's hand-off row (#8852)", () => {
-  it("opens the Agent's conversation after a hand-off went", async () => {
+  it("opens the Agent's conversation after a hand-off went, as a drill-down from the meeting's page (#12055)", async () => {
+    history.replaceState(null, "", `/kb/recordings/${ID}`);
     await act(() => root.render(<RecordingHandoffRow handoff={handoff()} />));
     expect(host.textContent).toContain('Handed to "Website redesign"');
     await act(async () => button("Open").click());
-    expect(navigate).toHaveBeenCalledWith({ name: "session", mid: "mac", sid: "site" });
+    // the Agent's entry names the meeting: its page offers the way back, and the sidebar keeps Knowledge lit
+    expect(navigate).toHaveBeenCalledWith({ name: "session", mid: "mac", sid: "site" }, false, { handoff: { path: `/kb/recordings/${ID}` } });
+    history.replaceState(null, "", "/");
   });
 
   it("says why one didn't go, with Retry only while another can be made", async () => {

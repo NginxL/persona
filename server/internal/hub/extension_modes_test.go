@@ -95,9 +95,16 @@ func TestAnExtensionChangesThePermissionModeOfItsOwnConversationsOnly(t *testing
 	}, Profile: &assistantwire.Profile{MachineID: "mb", Main: "b4"}}, &res); err != nil {
 		t.Fatal(err)
 	}
+	// Controls need the conversation in its machine's list (extensionControllable): the fleet lists all four.
+	var listed []proto.Session
+	for _, id := range []string{"b1", "b2", "b3", "b4"} {
+		listed = append(listed, proto.Session{MachineID: "mb", SessionID: id, Cwd: "/work/project"})
+	}
+	h.takeFleetSessions(assistantwire.FleetSessions{MachineID: "mb", Sessions: listed})
 	eventually(t, 5*time.Second, "B's conversations", func() bool {
 		_, v := h.conversation("b1")
-		return v.OpenedBy == "bx" && h.mainOf("mb", "b4")
+		_, listed := h.localMachine("mb").session("b4")
+		return v.OpenedBy == "bx" && h.mainOf("mb", "b4") && listed
 	})
 	for _, ix := range []proto.Interaction{
 		{ID: "plan_own", MachineID: "mb", SessionID: "b1", Kind: proto.IxPlan},

@@ -18,7 +18,7 @@ type readinessSuccess struct {
 }
 
 func (s *Service) readinessModelScope(ctx context.Context, launcher string) (ModelBinding, string) {
-	binding, err := s.resolveModel(ctx, "assistant")
+	binding, err := s.resolveModel(ctx, purposeMain)
 	if err != nil || binding.Provider != launcherProvider(launcher) {
 		return ModelBinding{}, ""
 	}
@@ -83,7 +83,7 @@ func (s *Service) rememberMainReadinessSuccess(ctx context.Context, machine stri
 	if machine != v.MachineID || sess.SessionID == "" || sess.SessionID != v.Main {
 		return
 	}
-	launcher := s.launcherNow(ctx)
+	launcher := s.mainLauncherNow(ctx)
 	binding, fingerprint := s.readinessModelScope(ctx, launcher)
 	if s.readinessReplySucceeded(ctx, machine, launcher, sess, binding, fingerprint, s.readinessRecordNow(ctx).Success) {
 		s.keepReadinessSuccess(ctx, readinessSuccess{Machine: machine, Launcher: launcher,

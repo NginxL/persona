@@ -73,6 +73,7 @@ export function todoChipState(o: { toStart: boolean; status: string; done: boole
   todo?: { done_at?: string | null; supervision?: Supervision } }): string | undefined {
   if (o.toStart) return t("assistant-tasks.plan_waiting");
   const review = o.todo ? reviewState(o.todo) : "";
+  if (review === "user_check") return t("assistant-tasks.review_user_check");
   if (review === "accepted" || o.status === "accepted") return t("assistant-tasks.review_accepted");
   if (review === "cancelled" || o.status === "cancelled") return t("assistant-tasks.review_cancelled");
   if (o.done || o.status === "done") return stateName("done");

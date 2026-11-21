@@ -121,6 +121,7 @@ type Limits struct{ FrameBytes, ConcurrentRequests, PendingCalls int }
 
 type Peer struct {
 	Limits       Limits
+	ReadLimit    int  // optional inbound message budget, in bytes; Limits.FrameBytes takes precedence
 	TrackReplies bool // enable AfterReply hooks for a resident's drain boundary
 	prefix       string
 	w            io.Writer
@@ -314,9 +315,12 @@ func (p *Peer) Serve(ctx context.Context, r io.Reader) error {
 		}
 		p.mu.Unlock()
 	}
-	maximum := 64 * 1024 * 1024
+	maximum := p.ReadLimit
 	if p.Limits.FrameBytes > 0 {
 		maximum = p.Limits.FrameBytes
+	}
+	if maximum <= 0 {
+		maximum = 64 << 20
 	}
 	act := &readActivity{r: r}
 	lr := newLineReader(act, maximum)

@@ -15,9 +15,27 @@ scripts suites named after a changed script or importing it, the suites a dedica
 --all runs every check and does not read the table.
 """
 import fnmatch
+import json
+from pathlib import Path
 import posixpath
 import re
 import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _counts_table_files(root=ROOT):
+    """Every file the counts surface table names (spec/fixtures/counts/surfaces.json, #11900): each surface's code and
+    tests, and a hub-fed surface's fallback. Its guard reads them all, so a rename in any of them runs it. Read on each
+    run, so a new row needs no edit here; a missing or unreadable table names none, and its own rule still runs the
+    guard."""
+    try:
+        rows = json.loads((root / "spec/fixtures/counts/surfaces.json").read_text(encoding="utf-8"))["surfaces"]
+        files = {entry["file"] for row in rows for key in ("code", "tests") for entry in row.get(key, ())}
+        files |= {row["view"]["fallback"]["file"] for row in rows if isinstance(row.get("view"), dict)}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return ()
+    return tuple(sorted(path for path in files if isinstance(path, str) and path))
 
 # What each check is; check-fast.sh's plan_changes turns each one into the jobs it schedules. A check with a / in it is
 # a scripts/**/test_*.py suite, run from its own directory as CI's Scripts tests job does (script_test_add: one that
@@ -107,6 +125,11 @@ TABLE = (
                               "scripts/test/test_doc_sections.py", "scripts/test/test_doc_wire.py")),
         (("server/internal/proto/*", "server/internal/hub/*", "server/internal/extension/*",
           "schema/extension/manifest.schema.json"), ("scripts/test/test_doc_wire.py",)),
+    ),
+    # AGENTS.md is CLAUDE.md through a symlink (#12723): the test reads how git records both, so either one's change
+    # runs it, on top of the doc suites above.
+    (
+        (("AGENTS.md", "CLAUDE.md"), ("scripts/test/test_agents_md.py",)),
     ),
     # Most section names test_doc_sections.py checks sit in code comments under its SOURCE_DIRS (about a second).
     (
@@ -219,6 +242,13 @@ TABLE = (
           "spec/fixtures/agent-names/*", "schema/wire/todo-view.schema.json", "server/internal/assistant/todos.go",
           "server/internal/assistant/todo_ask.go", "scripts/test/test_wire_schema.py",
           "scripts/test/test_extension_schema.py"), ("scripts/test/test_todo_fixtures.py",)),
+    ),
+    # The counts surface table (#11900): its guard reads the table, its README, the needs-you cases its replays report
+    # on, the plan's decisions and every file the table names; the lane differ's tests read the table and those cases.
+    (
+        (("spec/fixtures/counts/*", "spec/fixtures/needs-you/*"),
+         ("scripts/test/test_counts_surfaces.py", "scripts/test/test_counts_agreement.py")),
+        (("docs/plans/plan-derived-counts.md", *_counts_table_files()), ("scripts/test/test_counts_surfaces.py",)),
     ),
 )
 

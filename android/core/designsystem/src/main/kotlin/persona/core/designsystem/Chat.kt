@@ -117,8 +117,9 @@ fun ChatTopBar(
         }
     }
     val leading = resolveDetailLeading(LocalSplitDetail.current, onBack)
+    val rootLeading = LocalRootLeading.current.takeIf { LocalIsSidebarRoot.current }
     val back: @Composable () -> Unit = {
-        when (leading) {
+        if (rootLeading != null) rootLeading() else when (leading) {
             is DetailLeading.ShowList -> JIconButton(persona.core.designsystem.icons.PersonaIcons.sidebar, stringResource(R.string.designsystem_sidebar), leading.onClick)
             is DetailLeading.Back -> JIconButton(if (style == AppStyle.Glass) PhIcons.CaretLeft else PhIcons.ArrowLeft, stringResource(R.string.designsystem_back), leading.onClick)
             DetailLeading.Hidden -> Spacer(Modifier.width(if (style == AppStyle.Brief) Tokens.Space.s else Tokens.Space.sm))

@@ -72,8 +72,8 @@ data class ExtensionManifest(
      */
     @SerialName("extension_pack") val extensionPack: List<ExtensionPackMember>? = null,
     /**
-     * The configuration's JSON Schema, in the subset every app draws as a form (docs "Configuration: the form
-     * subset").
+     * The configuration's JSON Schema, in the settings-form subset (docs "Configuration: the form subset"). Capable
+     * clients draw declared entry lists after opting in; other clients receive compatibility projections.
      */
     val configuration: JsonElement? = null,
     val secrets: List<ExtensionSecretSpec>? = null,
@@ -396,6 +396,7 @@ data class ExtensionContributes(
     val browser: List<ExtensionNamedItem>? = null,
     val iphone: List<ExtensionNamedItem>? = null,
     val quota: List<ExtensionQuotaItem>? = null,
+    val usage: List<ExtensionUsageItem>? = null,
     val providers: List<ExtensionProviderItem>? = null,
     val api: List<ExtensionAPIItem>? = null,
     val assistant: List<ExtensionAssistantItem>? = null,
@@ -431,6 +432,7 @@ private data class ExtensionContributesKnown(
     val browser: List<ExtensionNamedItem>? = null,
     val iphone: List<ExtensionNamedItem>? = null,
     val quota: List<ExtensionQuotaItem>? = null,
+    val usage: List<ExtensionUsageItem>? = null,
     val providers: List<ExtensionProviderItem>? = null,
     val api: List<ExtensionAPIItem>? = null,
     val assistant: List<ExtensionAssistantItem>? = null,
@@ -456,7 +458,7 @@ private data class ExtensionContributesKnown(
 
 object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
     private val known = ExtensionContributesKnown.serializer()
-    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging")
+    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging")
     override val descriptor: SerialDescriptor = known.descriptor
 
     override fun deserialize(decoder: Decoder): ExtensionContributes {
@@ -473,6 +475,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             browser = fields.browser,
             iphone = fields.iphone,
             quota = fields.quota,
+            usage = fields.usage,
             providers = fields.providers,
             api = fields.api,
             assistant = fields.assistant,
@@ -509,6 +512,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             browser = value.browser,
             iphone = value.iphone,
             quota = value.quota,
+            usage = value.usage,
             providers = value.providers,
             api = value.api,
             assistant = value.assistant,
@@ -853,7 +857,20 @@ data class ExtensionRepositoryProviderItem(
      * the kinds stay issue and pull_request.
      */
     @SerialName("link_kinds") val linkKinds: List<ExtensionRepositoryLinkLabel>? = null,
+    /**
+     * What else the program answers (#11584): pr_status, the state of a pull request for delivery checks
+     * (repo.pr_status). Without it the manager reads repo.describe's state. Each at most once.
+     */
+    val capabilities: List<String>? = null,
 )
+
+/**
+ * A repository provider's optional answer: pr_status (repo.pr_status).
+ */
+object ExtensionRepositoryCapability {
+    const val PR_STATUS = "pr_status"
+    val ALL = listOf("pr_status")
+}
 
 /**
  * The word a repository provider shows for one kind of its links (MR for a pull_request).
@@ -973,6 +990,13 @@ data class ExtensionNamedItem(
 
 @Serializable
 data class ExtensionQuotaItem(
+    val id: String = "",
+    val name: String = "",
+    val hosts: List<String>? = null,
+)
+
+@Serializable
+data class ExtensionUsageItem(
     val id: String = "",
     val name: String = "",
     val hosts: List<String>? = null,
@@ -1132,6 +1156,11 @@ data class ExtensionChannelItem(
 @Serializable
 data class ExtensionChannelCapabilities(
     @SerialName("images_in") val imagesIn: Boolean? = null,
+    /**
+     * It can send pictures: the hub puts an answer's pictures in channel.send's images instead of leaving them as
+     * Markdown in the text.
+     */
+    @SerialName("images_out") val imagesOut: Boolean? = null,
     @SerialName("files_in") val filesIn: Boolean? = null,
     @SerialName("voice_in") val voiceIn: Boolean? = null,
     val format: String? = null,
@@ -2311,8 +2340,8 @@ sealed interface ExtensionComponent {
     data class Unknown(override val type: String, val raw: JsonObject = JsonObject(emptyMap())) : ExtensionComponent
 
     companion object {
-        val TYPES = listOf("text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel", "graph")
-        val SINCE = mapOf("text" to 1, "metric" to 1, "progress" to 1, "row" to 1, "button" to 1, "link" to 1, "field" to 1, "divider" to 1, "chart" to 2, "stat_grid" to 2, "segmented" to 2, "markdown" to 3, "table" to 3, "empty" to 3, "loading" to 3, "html" to 4, "header" to 4, "breadcrumb" to 4, "file_tree" to 4, "code" to 4, "diff" to 4, "comment_thread" to 4, "composer" to 4, "image" to 6, "grid" to 6, "carousel" to 6, "graph" to 10)
+        val TYPES = listOf("text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel", "graph", "scene")
+        val SINCE = mapOf("text" to 1, "metric" to 1, "progress" to 1, "row" to 1, "button" to 1, "link" to 1, "field" to 1, "divider" to 1, "chart" to 2, "stat_grid" to 2, "segmented" to 2, "markdown" to 3, "table" to 3, "empty" to 3, "loading" to 3, "html" to 4, "header" to 4, "breadcrumb" to 4, "file_tree" to 4, "code" to 4, "diff" to 4, "comment_thread" to 4, "composer" to 4, "image" to 6, "grid" to 6, "carousel" to 6, "graph" to 10, "scene" to 11)
     }
 }
 
@@ -2353,6 +2382,7 @@ object ExtensionComponentSerializer : KSerializer<ExtensionComponent> {
                 "grid" -> input.json.decodeFromJsonElement(ExtensionGridComponent.serializer(), obj)
                 "carousel" -> input.json.decodeFromJsonElement(ExtensionCarouselComponent.serializer(), obj)
                 "graph" -> input.json.decodeFromJsonElement(ExtensionGraphComponent.serializer(), obj)
+                "scene" -> input.json.decodeFromJsonElement(ExtensionSceneComponent.serializer(), obj)
                 else -> ExtensionComponent.Unknown(tag, obj)
             }
         } catch (_: SerializationException) {
@@ -2392,6 +2422,7 @@ object ExtensionComponentSerializer : KSerializer<ExtensionComponent> {
             is ExtensionGridComponent -> output.json.encodeToJsonElement(ExtensionGridComponent.serializer(), value) as JsonObject
             is ExtensionCarouselComponent -> output.json.encodeToJsonElement(ExtensionCarouselComponent.serializer(), value) as JsonObject
             is ExtensionGraphComponent -> output.json.encodeToJsonElement(ExtensionGraphComponent.serializer(), value) as JsonObject
+            is ExtensionSceneComponent -> output.json.encodeToJsonElement(ExtensionSceneComponent.serializer(), value) as JsonObject
             is ExtensionComponent.Unknown -> value.raw
         }
         output.encodeJsonElement(JsonObject(obj + ("type" to JsonPrimitive(value.type))))
@@ -2955,6 +2986,224 @@ object ExtensionGraphDirection {
     const val RIGHT = "right"
     const val DOWN = "down"
     val ALL = listOf("right", "down")
+}
+
+/**
+ * A small 3D model the person can turn, zoom and tap (UI version 11): a home with its rooms and furniture as simple
+ * shapes, each device pinned where it is with its state, and a light in the model for lamps that are on. The app
+ * builds it with its own engine; the extension sends shapes, never a model file or code. Metres; plan coordinates [x,
+ * y] with x east and y north, heights up from the floor; angles in degrees counter-clockwise from +x seen from above.
+ * Each pin counts as a component of the page; a view has at most one scene. In a card it is a still preview that
+ * opens full screen. An older app gets the poster as an image, or without one a row per pin.
+ */
+@Serializable
+data class ExtensionSceneComponent(
+    override val type: String = "scene",
+    /**
+     * Keeps the person's camera across redraws of the page.
+     */
+    val key: String? = null,
+    /**
+     * What the model shows, in a sentence: read out first, and shown when it cannot be drawn.
+     */
+    val alt: String = "",
+    val caption: String? = null,
+    /**
+     * A picture of the model for an older app (an image in its place) and for share as image. Without it an older app
+     * gets a row per pin.
+     */
+    val poster: ExtensionImageSource? = null,
+    val camera: ExtensionSceneCamera? = null,
+    val shapes: List<ExtensionSceneShape> = emptyList(),
+    val labels: List<ExtensionSceneLabel>? = null,
+    val pins: List<ExtensionScenePin>? = null,
+) : ExtensionComponent
+
+/**
+ * Where the model is first seen from (UI version 11), orthographic, around the centre of the shapes' bounding box.
+ * Each field has its default when absent.
+ */
+@Serializable
+data class ExtensionSceneCamera(
+    /**
+     * The camera's direction from the centre, in degrees counter-clockwise from +x (east): 225 (the default) stands
+     * south-west, looking north-east.
+     */
+    val yaw: Double? = null,
+    /**
+     * Degrees above the floor plane: 35 by default, 90 straight down.
+     */
+    val pitch: Double? = null,
+    /**
+     * 1 (the default) fits the shapes' bounding box in the view; 2 draws it twice as large.
+     */
+    val zoom: Double? = null,
+)
+
+/**
+ * One shape of a scene (UI version 11), told apart by kind: a box, a cylinder or a prism, standing from bottom to top
+ * (metres above the floor, at least 0.005 apart). Without color, the material's own.
+ */
+@Serializable(with = ExtensionSceneShapeSerializer::class)
+sealed interface ExtensionSceneShape {
+    val kind: String
+
+    /** A kind this app does not know, or a variant it could not read: skipped when drawn. */
+    data class Unknown(override val kind: String, val raw: JsonObject = JsonObject(emptyMap())) : ExtensionSceneShape
+
+    companion object {
+        val KINDS = listOf("box", "cylinder", "prism")
+    }
+}
+
+object ExtensionSceneShapeSerializer : KSerializer<ExtensionSceneShape> {
+    override val descriptor: SerialDescriptor = JsonElement.serializer().descriptor
+
+    override fun deserialize(decoder: Decoder): ExtensionSceneShape {
+        val input = decoder as? JsonDecoder ?: throw SerializationException("ExtensionSceneShape needs JSON")
+        val obj = input.decodeJsonElement() as? JsonObject
+            ?: return ExtensionSceneShape.Unknown("")
+        val tag = (obj["kind"] as? JsonPrimitive)?.contentOrNull ?: ""
+        return try {
+            when (tag) {
+                "box" -> input.json.decodeFromJsonElement(ExtensionSceneBox.serializer(), obj)
+                "cylinder" -> input.json.decodeFromJsonElement(ExtensionSceneCylinder.serializer(), obj)
+                "prism" -> input.json.decodeFromJsonElement(ExtensionScenePrism.serializer(), obj)
+                else -> ExtensionSceneShape.Unknown(tag, obj)
+            }
+        } catch (_: SerializationException) {
+            ExtensionSceneShape.Unknown(tag, obj)
+        } catch (_: IllegalArgumentException) {
+            ExtensionSceneShape.Unknown(tag, obj)
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: ExtensionSceneShape) {
+        val output = encoder as? JsonEncoder ?: throw SerializationException("ExtensionSceneShape needs JSON")
+        val obj = when (value) {
+            is ExtensionSceneBox -> output.json.encodeToJsonElement(ExtensionSceneBox.serializer(), value) as JsonObject
+            is ExtensionSceneCylinder -> output.json.encodeToJsonElement(ExtensionSceneCylinder.serializer(), value) as JsonObject
+            is ExtensionScenePrism -> output.json.encodeToJsonElement(ExtensionScenePrism.serializer(), value) as JsonObject
+            is ExtensionSceneShape.Unknown -> value.raw
+        }
+        output.encodeJsonElement(JsonObject(obj + ("kind" to JsonPrimitive(value.kind))))
+    }
+}
+
+/**
+ * A box (UI version 11): at yaw 0, size[0] along +x and size[1] along +y. round rounds its corners seen from above
+ * (at most half the smaller size); the app bevels its upright edges no more than half its height.
+ */
+@Serializable
+data class ExtensionSceneBox(
+    override val kind: String = "box",
+    val center: List<Double> = emptyList(),
+    val size: List<Double> = emptyList(),
+    val yaw: Double? = null,
+    val round: Double? = null,
+    val bottom: Double = 0.0,
+    val top: Double = 0.0,
+    val color: String? = null,
+    val material: String? = null,
+) : ExtensionSceneShape
+
+/**
+ * An upright cylinder (UI version 11): a round table's top, a stool, a lamp's stem.
+ */
+@Serializable
+data class ExtensionSceneCylinder(
+    override val kind: String = "cylinder",
+    val center: List<Double> = emptyList(),
+    val radius: Double = 0.0,
+    val bottom: Double = 0.0,
+    val top: Double = 0.0,
+    val color: String? = null,
+    val material: String? = null,
+) : ExtensionSceneShape
+
+/**
+ * A floor plan's polygon raised from bottom to top (UI version 11): a room's floor, an L-shaped counter. The hub
+ * refuses a polygon that is not simple: a point twice, an edge shorter than 0.005, an edge folding back, edges that
+ * touch, an area under 0.0001.
+ */
+@Serializable
+data class ExtensionScenePrism(
+    override val kind: String = "prism",
+    val points: List<List<Double>> = emptyList(),
+    val bottom: Double = 0.0,
+    val top: Double = 0.0,
+    val color: String? = null,
+    val material: String? = null,
+) : ExtensionSceneShape
+
+/**
+ * How a shape's surface looks (UI version 11): matte (the default), glass (see-through), metal, screen (dark and
+ * glossy), tile and wood (the app's own pattern, in metres, in the shape's color).
+ */
+object ExtensionSceneMaterial {
+    const val MATTE = "matte"
+    const val GLASS = "glass"
+    const val METAL = "metal"
+    const val SCREEN = "screen"
+    const val TILE = "tile"
+    const val WOOD = "wood"
+    val ALL = listOf("matte", "glass", "metal", "screen", "tile", "wood")
+}
+
+/**
+ * A quiet name on the floor (UI version 11): a room's. Not tappable and not a component of the page; read out after
+ * alt.
+ */
+@Serializable
+data class ExtensionSceneLabel(
+    val text: String = "",
+    val at: List<Double> = emptyList(),
+    val height: Double? = null,
+)
+
+/**
+ * A device in the model (UI version 11): a pin at its place with its label and state, in tone's role color or color's
+ * named color (never both); with light on, the model lights up around it. Tapping it does its action, as a tile's.
+ * state is required when a tone other than neutral, a color or a light that is on says something, so it never rides
+ * on color or light alone. A scene has at most 16 pins with a light on.
+ */
+@Serializable
+data class ExtensionScenePin(
+    val id: String = "",
+    val at: List<Double> = emptyList(),
+    /**
+     * Metres above the floor: a ceiling lamp's 2.4, an AC's 2.2. 0 when absent.
+     */
+    val height: Double? = null,
+    val label: String = "",
+    /**
+     * In plain words: On, Off, 26 °C.
+     */
+    val state: String? = null,
+    val icon: String? = null,
+    val tone: String? = null,
+    val color: String? = null,
+    val light: ExtensionSceneLight? = null,
+    val action: ExtensionAction? = null,
+)
+
+/**
+ * A lamp's light (UI version 11): when on, the model is lit around the pin, warm or cool. Off (the default) adds no
+ * light.
+ */
+@Serializable
+data class ExtensionSceneLight(
+    val on: Boolean? = null,
+    val warmth: String? = null,
+)
+
+/**
+ * warm (the default): a lamp's yellow light; cool: a white one.
+ */
+object ExtensionSceneWarmth {
+    const val WARM = "warm"
+    const val COOL = "cool"
+    val ALL = listOf("warm", "cool")
 }
 
 /**

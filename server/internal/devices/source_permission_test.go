@@ -55,6 +55,9 @@ func TestSourcePermissionUsesReservedDeliveryOnlyForNewNodes(t *testing.T) {
 	old := &testNode{}
 	connectedMachine(t, d, "modern", modern)
 	connectedMachine(t, d, "old", old)
+	if calls := modern.seen("node.info"); len(calls) == 0 || !strings.Contains(calls[0], `"manager_features":["source_permissions_v1"]`) {
+		t.Fatalf("initial capability announcement: %v", calls)
+	}
 	proof := proto.SourcePermission{At: time.Now(), Session: "sender", Generation: "generation", Class: "bypass", Digest: strings.Repeat("a", 64)}
 	ctx := devicewire.WithSourcePermission(context.Background(), proof)
 	raw := json.RawMessage(`{"session_id":"target","text":"hi","SOURCE_PERMISSION":{},"from_mode":"bypass","OWNER_INPUT":true}`)

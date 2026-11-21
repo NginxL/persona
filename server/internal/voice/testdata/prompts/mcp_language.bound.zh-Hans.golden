@@ -1,0 +1,59 @@
+[
+  {
+    "type": "function",
+    "name": "search_knowledge",
+    "description": "搜索用户的知识库（聊天记录归档、人、群、项目、文档、会议的摘要、录过的会的纪要）。返回匹配的行，按时间从新到旧。关键词用空格分开，每个词都要命中；用人名、项目名、群名这类具体的词。问以前开过的会（定了什么、谁做什么、还有什么没定）时给 kind=recordings，用会的标题或会上说过的词找。",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "关键词，空格分隔"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "projects",
+            "chats",
+            "people",
+            "docs",
+            "meetings",
+            "events",
+            "recordings",
+            "topics"
+          ],
+          "description": "只搜这一类：recordings 录过的会（纪要和还留着的转写），meetings 日历上的会，projects 项目，chats 群和聊天记录，people 人，docs 文档，events 事件，topics 知识点。不给就全搜"
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "name": "list_agents",
+    "description": "列出用户各台电脑上的编程 Agent（Claude Code / Codex）：在哪台机器、标题、状态（需要你处理 / 工作中 / 完成未看 / 空闲）、最后说的话。",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "type": "function",
+    "name": "delegate_task",
+    "description": "把一件事交给这次通话绑定的对话去做（是谁见 instructions 里「绑定的对话」）：调用时立刻发出去，不复述、不等确认，所以拿不准用户是不是要它做就先问一句。调用不会马上返回：告诉用户一声交给它了，然后照常聊；它这一轮做完，这次调用的结果就是它的回答（可能要几分钟），那时再告诉用户。task 第一句就是要做的事，写成一句完整的指令（它看不到这次语音的上下文）。问它在干什么、到哪了，task 用「状态：」开头（不会发给它，结果是它现在的状态）；用户明确要它停下，用「停止：」开头；用户在回答它问的问题，用「回答：」开头。",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "task"
+      ],
+      "properties": {
+        "task": {
+          "type": "string",
+          "description": "要它做的事，完整的一句或几句话；或者「状态：」「停止：」「回答：」开头的一句"
+        }
+      }
+    }
+  }
+]

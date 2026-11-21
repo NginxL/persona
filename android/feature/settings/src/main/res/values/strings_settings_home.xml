@@ -22,7 +22,7 @@
     <string name="settings_search_extensions_aliases">extension plugin marketplace</string>
     <string name="settings_search_about_aliases">app version check update APK install</string>
     <string name="settings_search_connection_aliases">Hub server status diagnostics network pairing address</string>
-    <string name="settings_search_appearance_aliases">style theme color dark light density compact margins</string>
+    <string name="settings_search_appearance_aliases">style theme color dark light density compact margins appearance sidebar separate merged</string>
     <string name="settings_model_add_provider">Add provider</string>
     <string name="settings_model_how_runs">How models run</string>
     <string name="settings_model_how_runs_detail">Manage credentials and how each provider connects in Model providers. Changing a model does not change your interface or enabled features.</string>

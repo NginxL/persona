@@ -1,0 +1,12 @@
+{
+  "arrange_title": "チャットの並べ替え",
+  "arrange_hint": "ハンドルをドラッグするか、上へ／下へを使います。順序はほかのデバイスにも同期されます。",
+  "arrange_done": "完了",
+  "drag_conversation": "ドラッグして並べ替え",
+  "move_up": "「{title}」を上へ",
+  "move_down": "「{title}」を下へ",
+  "order_reset": "アクティビティ時刻順に戻す",
+  "order_reset_done": "アクティビティ時刻順に戻しました",
+  "order_undo_stale": "新しい並べ替えがあるため、元に戻しませんでした",
+  "order_save_failed": "チャットの順序を保存できませんでした：{error}"
+}

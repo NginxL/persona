@@ -38,19 +38,19 @@ func (s *Service) idleCloseAfter(ctx context.Context) time.Duration {
 // old until its first step lands, so the idle time counts from the later of the two.
 type idleSeen map[[2]string]time.Time
 
-// openTaskOf reports whether key works for an open task, and when that task was last touched.
-func (s *Service) openTaskOf(key [2]string) (open bool, touched time.Time) {
+// openTaskOf reports key's open task, its last activity, and whether personal verification still protects it.
+func (s *Service) openTaskOf(key [2]string) (open bool, touched time.Time, userCheck bool) {
 	s.todos.mu.RLock()
 	defer s.todos.mu.RUnlock()
 	id, ok := s.todos.activeBySession[key]
 	if !ok {
-		return false, time.Time{}
+		return false, time.Time{}, false
 	}
 	t := s.todos.todos[id]
 	if t == nil {
-		return true, time.Time{}
+		return true, time.Time{}, false
 	}
-	return true, t.UpdatedAt
+	return true, t.UpdatedAt, t.Supervision.state(*t) == reviewUserCheck
 }
 
 // idleCloseable says whether c, first seen running at since, may be closed for being idle.
@@ -101,8 +101,8 @@ func (s *Service) closeIdleAgents(ctx context.Context, refused taskCloseRefused,
 				seen[key] = now
 				since = now
 			}
-			open, touched := s.openTaskOf(key)
-			if !idleCloseable(c, since, now, idle, open, touched) {
+			open, touched, userCheck := s.openTaskOf(key)
+			if userCheck || !idleCloseable(c, since, now, idle, open, touched) {
 				continue
 			}
 			if r, ok := refused[key]; ok && r.updated.Equal(c.UpdatedAt) && now.Sub(r.at) < taskCloseRetry {

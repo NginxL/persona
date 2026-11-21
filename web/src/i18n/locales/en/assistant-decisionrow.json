@@ -25,5 +25,6 @@
   "confirm": "Confirm: {option}",
   "dialog_open": "A dialog is blocking the Agent's terminal: “{dialog}”. Deal with it there, then answer again.",
   "dialog_open_unnamed": "A dialog is blocking the Agent's terminal. Deal with it there, then answer again.",
-  "open_terminal": "Open terminal"
+  "open_terminal": "Open terminal",
+  "answer_recorded": "Answer recorded."
 }

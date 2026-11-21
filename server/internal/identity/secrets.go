@@ -20,10 +20,23 @@ import (
 var DataSecrets = []string{"hub.json", "link.json", "tailcat.json", "tailcat-hub.json", "daemons.json", "manager.json", "apns",
 	"relay.json", "relay.secret", "relay-tunnel.token", "devices.json", "mail_accounts.json"}
 
+// dataCredentialExtensions is the single extension source for the regular expression and its glob equivalent.
+var dataCredentialExtensions = []string{"key", "p8", "pem", "crt", "token", "secret", "password"}
+
 // DataCredentialPattern matches the end of a credential file's name, backups included (secret.key, secret.key.bak,
 // handles.key~, the APNs .p8, relay-tunnel.token, a .password file): a regular expression both Go's regexp and
 // sandbox-exec's read the same way.
-const DataCredentialPattern = `\.(key|p8|pem|crt|token|secret|password)([.~-][^/]*)?$`
+var DataCredentialPattern = `\.(` + strings.Join(dataCredentialExtensions, "|") + `)([.~-][^/]*)?$`
+
+// DataCredentialGlobs is DataCredentialPattern expressed as basename globs for permission-rule engines. The three
+// backup forms mirror the pattern's dot, tilde and dash suffix; a final * may be empty.
+func DataCredentialGlobs() []string {
+	var globs []string
+	for _, ext := range dataCredentialExtensions {
+		globs = append(globs, "*."+ext, "*."+ext+".*", "*."+ext+"~*", "*."+ext+"-*")
+	}
+	return globs
+}
 
 // credentialExt compiles the shared pattern when a name first needs matching.
 var credentialExt = lazyre.New(DataCredentialPattern)

@@ -35,16 +35,17 @@ import (
 
 // echoRecord is one send the node ties to the transcript: expected while Line is "", found after.
 type echoRecord struct {
-	SessionID   string    `json:"session_id"`
-	ClientMsgID string    `json:"client_msg_id"`
-	Text        string    `json:"text,omitempty"`    // the start of what was typed (echoTextLen runes)
-	Literal     string    `json:"literal,omitempty"` // its raw start when clipping a text-only send left Text empty
-	Images      int       `json:"images,omitempty"`
-	SentAt      time.Time `json:"sent_at"`
-	AfterSeq    int       `json:"after_seq"`          // the session's last item before it was typed (counted in In)
-	Line        string    `json:"line,omitempty"`     // the line found: its items' id before "#" (one of In's)
-	History     string    `json:"history,omitempty"`  // the transcript version AfterSeq counts in
-	Accepted    bool      `json:"accepted,omitempty"` // acknowledged by the send path, including queued input
+	SessionID   string               `json:"session_id"`
+	ClientMsgID string               `json:"client_msg_id"`
+	Source      *proto.MessageSource `json:"source,omitempty"`
+	Text        string               `json:"text,omitempty"`    // the start of what was typed (echoTextLen runes)
+	Literal     string               `json:"literal,omitempty"` // its raw start when clipping a text-only send left Text empty
+	Images      int                  `json:"images,omitempty"`
+	SentAt      time.Time            `json:"sent_at"`
+	AfterSeq    int                  `json:"after_seq"`          // the session's last item before it was typed (counted in In)
+	Line        string               `json:"line,omitempty"`     // the line found: its items' id before "#" (one of In's)
+	History     string               `json:"history,omitempty"`  // the transcript version AfterSeq counts in
+	Accepted    bool                 `json:"accepted,omitempty"` // acknowledged by the send path, including queued input
 	// In is where AfterSeq and Line count: echoInTranscript or echoInRuntime. A record sent after nothing (a start's
 	// first message) or handed back by a hub from before #8358 has none: it is looked for and tagged wherever the
 	// items come from, as before, and counts where it is found from then on.
@@ -291,13 +292,17 @@ func (l *echoLog) match(id, in string, items []proto.Item) []echoRecord {
 // changes).
 func (l *echoLog) tag(id, in string, items []proto.Item) []proto.Item {
 	l.mu.Lock()
-	var byLine map[string]string
+	type metadata struct {
+		id     string
+		source *proto.MessageSource
+	}
+	var byLine map[string]metadata
 	for _, r := range l.recs[id] {
 		if r.foundIn(in) {
 			if byLine == nil {
-				byLine = map[string]string{}
+				byLine = map[string]metadata{}
 			}
-			byLine[r.Line] = r.ClientMsgID
+			byLine[r.Line] = metadata{r.ClientMsgID, r.Source}
 		}
 	}
 	l.mu.Unlock()
@@ -306,14 +311,21 @@ func (l *echoLog) tag(id, in string, items []proto.Item) []proto.Item {
 	}
 	var out []proto.Item
 	for i, it := range items {
-		c, ok := byLine[echoLineKey(it.ID)]
-		if !ok || it.ClientMsgID == c {
+		r, ok := byLine[echoLineKey(it.ID)]
+		if !ok {
+			continue
+		}
+		source := it.Source
+		if it.Role == "user" && r.source != nil && (source == nil || *source != *r.source) {
+			source = r.source
+		}
+		if it.ClientMsgID == r.id && it.Source == source {
 			continue
 		}
 		if out == nil {
 			out = slices.Clone(items)
 		}
-		out[i].ClientMsgID = c
+		out[i].ClientMsgID, out[i].Source = r.id, source
 	}
 	if out == nil {
 		return items
@@ -520,10 +532,10 @@ func (n *Node) echoBase(id string) echoAfter {
 // a watch that pushed it before the send returned sent it without its client_msg_id, never to carry it in a push
 // again (the app's bubble then waited for a page).
 func (n *Node) sendEchoed(id, clientMsgID, text string, images int, after echoAfter, send func() error) error {
-	return n.sendWithEcho(id, clientMsgID, text, images, after, nil, send)
+	return n.sendWithEcho(id, clientMsgID, text, images, after, nil, nil, send)
 }
 
-func (n *Node) sendWithEcho(id, clientMsgID, text string, images int, after echoAfter, retry *echoRecord, send func() error) error {
+func (n *Node) sendWithEcho(id, clientMsgID, text string, images int, after echoAfter, source *proto.MessageSource, retry *echoRecord, send func() error) error {
 	if clientMsgID == "" {
 		return send()
 	}
@@ -532,7 +544,10 @@ func (n *Node) sendWithEcho(id, clientMsgID, text string, images int, after echo
 			return nil // a restored transcript receipt proves this continuation arrived
 		}
 	}
-	r := echoRecord{SessionID: id, ClientMsgID: clientMsgID, Text: text, Images: images, SentAt: time.Now(), AfterSeq: after.seq, In: after.in, History: after.history}
+	if retry != nil && source == nil {
+		source = retry.Source
+	}
+	r := echoRecord{SessionID: id, ClientMsgID: clientMsgID, Text: text, Source: source, Images: images, SentAt: time.Now(), AfterSeq: after.seq, In: after.in, History: after.history}
 	fresh := true
 	if retry == nil {
 		fresh = n.echoes.expect(r)
@@ -662,7 +677,7 @@ func (n *Node) sendUnseen(ctx context.Context, id, text string, images []proto.I
 	if check.state != proto.EchoKnownUnseen || !check.record.SentAt.Equal(previous.SentAt) {
 		return echoUnconfirmed()
 	}
-	return n.sendWithEcho(id, opts.ClientMsgID, text, len(images), check.after, &check.record, func() error {
+	return n.sendWithEcho(id, opts.ClientMsgID, text, len(images), check.after, nil, &check.record, func() error {
 		return n.sendLocked(ctx, id, text, images, opts)
 	})
 }
@@ -730,7 +745,7 @@ func (n *Node) echoedRaw(id string, raw json.RawMessage, field string) json.RawM
 		n.notifyEcho(r)
 	}
 	tagged := n.echoes.tag(id, echoInRuntime, items)
-	if tagged[0].ClientMsgID == items[0].ClientMsgID && slices.Equal(echoIDs(tagged), echoIDs(items)) {
+	if &tagged[0] == &items[0] {
 		return raw // nothing changed
 	}
 	b, err := json.Marshal(tagged)
@@ -741,14 +756,6 @@ func (n *Node) echoedRaw(id string, raw json.RawMessage, field string) json.RawM
 	out, err := json.Marshal(batch)
 	if err != nil {
 		return raw
-	}
-	return out
-}
-
-func echoIDs(items []proto.Item) []string {
-	out := make([]string, len(items))
-	for i, it := range items {
-		out[i] = it.ClientMsgID
 	}
 	return out
 }

@@ -231,10 +231,18 @@ func (s *Service) interactionPlace(ix proto.Interaction) (reply string, to feish
 }
 
 // interactionRuns are the runs that decide where ix's card goes: the latest asked in the owner's DM and the latest
-// asked in a topic, of the conversation it belongs to (either may be nil).
+// asked in a topic, of the conversation it belongs to (either may be nil). While a /read of the conversation goes on,
+// the card may be that run's, and a /read's group gets its answer and nothing else: the card goes to the owner's DM,
+// so no topic is returned either (another topic's run of the same conversation would take the /read's question into
+// its group, and a line in that topic would point at a card it has nothing to do with).
 func (s *Service) interactionRuns(ix proto.Interaction) (private, topic *channel.Run) {
+	read := false
 	for _, r := range s.channelRuns(channel.Feishu) {
 		if r.MachineID != ix.MachineID || r.SessionID != ix.SessionID {
+			continue
+		}
+		if readRun(s.runExts(&r, readChatKey)) {
+			read = true
 			continue
 		}
 		if runTo(s.runExts(&r, "chat", "thread")).ChatID == "" {
@@ -244,6 +252,9 @@ func (s *Service) interactionRuns(ix proto.Interaction) (private, topic *channel
 		} else if topic == nil || !r.Started.Before(topic.Started) {
 			topic = &r
 		}
+	}
+	if read {
+		topic = nil
 	}
 	return private, topic
 }
@@ -581,7 +592,10 @@ func (s *Service) interactionCard(ctx context.Context, ix proto.Interaction) *fe
 		}
 		c.Markdown(b.String())
 		if sum := strings.TrimSpace(ix.Summary); sum != "" {
-			c.Markdown("```\n" + strings.ReplaceAll(clip(sum, 2500), "```", "'''") + "\n```")
+			if !ownerActionProposal(ix) {
+				sum = clip(sum, 2500)
+			}
+			c.Markdown("```\n" + strings.ReplaceAll(sum, "```", "'''") + "\n```")
 		} else if in := proto.RedactArgs(ix.ToolInput); in != "" { // a credential's value never goes to the chat (#4734)
 			c.Markdown("```json\n" + strings.ReplaceAll(clip(in, 2500), "```", "'''") + "\n```")
 		}

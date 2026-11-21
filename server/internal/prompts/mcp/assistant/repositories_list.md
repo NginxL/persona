@@ -1,4 +1,4 @@
-Search this assistant's saved names, aliases, full paths and purposes to resolve repository identity; use repository_get for useful details. The user's explicit repository URL or path takes precedence. References are not authorization or an allowlist; never infer a machine or local checkout path. Returns saved metadata and verified_at only: no remote, source, clone or permission checks. Non-repository tasks need no lookup; this is not a mandatory dispatch preflight.
+Search this assistant's saved names, aliases, full paths and purposes to resolve repository identity; use repository_get for useful details. The user's explicit repository URL or path takes precedence. References are not authorization or an allowlist; never infer a machine or local checkout path. Returns saved metadata and verified_at only: no remote, source, clone or permission checks. Non-repository tasks need no lookup; this is not a mandatory dispatch preflight.{{template "shared/mcp_language" .}}
 
 ```json
 {

@@ -143,6 +143,9 @@ struct PushInterceptsTests {
         #expect(!model.enabled && model.failed)
     }
 
+    // The held answer belongs to the refresh that started first, whose ticket is 1, so the model must drop it once the
+    // second refresh (ticket 2) has read the rows. Two concurrent refreshes do not order their `intercepts` calls, so the
+    // second refresh starts only after the first one is holding its answer (#10289).
     @Test func lateResponseCannotOverwriteNewerRead() async {
         // The model keeps only records from the local day of `.now` (#7953): both sit on today, whenever this runs.
         let today = { (hour: Int) in
@@ -150,16 +153,19 @@ struct PushInterceptsTests {
         }
         let old = response([record(today(11), title: "Old")])
         let new = response([record(today(12), title: "New")])
-        let counter = LockedCounter()
+        let reads = LockedCounter()
+        let (started, readStarted) = AsyncStream<Void>.makeStream()
+        let (finish, readFinished) = AsyncStream<Void>.makeStream()
         let model = PushInterceptsModel(mode: { LnModeResponse(enabled: true) }, intercepts: {
-            if counter.next() == 1 {
-                try? await Task.sleep(for: .milliseconds(150))
-                return old
-            }
-            return new
+            guard reads.next() == 1 else { return new }
+            readStarted.yield()
+            for await _ in finish { break }
+            return old
         })
         async let first: Void = model.refresh()
+        for await _ in started { break }
         await model.refresh()
+        readFinished.yield()
         await first
         #expect(model.groups.p1.first?.summaries.first == "New")
     }

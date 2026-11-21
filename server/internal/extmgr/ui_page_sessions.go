@@ -475,8 +475,9 @@ func (h *Manager) uiStream(ctx context.Context, call extwire.UIStreamCall) (json
 }
 
 // streamEventKey is the key the source registered event's callback under: a graph node's action is registered under
-// its graph's key (the SDK lowers every node callback with the graph), while the row an older stream's client pressed
-// carries the graph's `key/id`. Action ids are unique within a stream view, so the first node match is the one.
+// its graph's key (the SDK lowers every node callback with the graph), and a scene pin's under its scene's, while the
+// row an older stream's client pressed carries the graph's or the scene's `key/id`. Action ids are unique within a
+// stream view, so the first node or pin match is the one.
 func streamEventKey(native json.RawMessage, event wire.UIStreamEvent) string {
 	if len(native) == 0 {
 		return event.Key
@@ -488,11 +489,16 @@ func streamEventKey(native json.RawMessage, event wire.UIStreamEvent) string {
 	for i := range view.Sections {
 		for j := range view.Sections[i].Items {
 			e := &view.Sections[i].Items[j]
-			if e.Type != wire.ComponentGraph {
+			if e.Type != wire.ComponentGraph && e.Type != wire.ComponentScene {
 				continue
 			}
 			for k := range e.Nodes {
 				if a := e.Nodes[k].Action; a != nil && a.ID == event.Action {
+					return e.Key
+				}
+			}
+			for k := range e.Pins {
+				if a := e.Pins[k].Action; a != nil && a.ID == event.Action {
 					return e.Key
 				}
 			}

@@ -1,14 +1,20 @@
 package assistant
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
+	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/channel"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -623,5 +629,61 @@ func TestChannelReceiveAcknowledgesBeforeBusyMainTurnAndFolds(t *testing.T) {
 	s.finishChannelRun(&runs[0], &channel.Result{Answer: "one answer"})
 	if len(*sent) != 1 || (*sent)[0]["reply_to"] != "m2" {
 		t.Fatalf("busy main answers: %+v", *sent)
+	}
+}
+
+// A picture over the per-image limit (a photo sent as the original) reaches the conversation scaled down to fit,
+// instead of being dropped as "additional images"; one that can't be decoded is named as too large (#11985).
+func TestChannelReceiveScalesDownALargePicture(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 1100, 1100))
+	r := rand.New(rand.NewPCG(3, 4))
+	for i := range img.Pix {
+		img.Pix[i] = byte(r.Uint32())
+	}
+	for i := 3; i < len(img.Pix); i += 4 { // opaque: it comes back as a JPEG
+		img.Pix[i] = 0xff
+	}
+	var big bytes.Buffer
+	if err := png.Encode(&big, img); err != nil {
+		t.Fatal(err)
+	}
+	if big.Len() <= channel.ImageMost {
+		t.Fatalf("the source is only %d bytes", big.Len())
+	}
+	s, f, _, _ := newTextAskService(t)
+	f.mu.Lock()
+	f.hello.Locale = "zh-Hans"
+	f.mu.Unlock()
+	s.channelReceive("examplechat", channel.Message{ID: "m_big", Text: "看看这张图", Images: []channel.Blob{
+		{MIME: "image/png", Data: big.Bytes()},
+		{MIME: "image/png", Data: bytes.Repeat([]byte("x"), channel.ImageMost+1)},
+	}}, "")
+	var p struct {
+		Text   string        `json:"text"`
+		Images []proto.Image `json:"images"`
+	}
+	f.mu.Lock()
+	for _, c := range f.calls {
+		if c.Method == DeviceSessionSendOnce {
+			_ = json.Unmarshal(c.Params, &p)
+		}
+	}
+	f.mu.Unlock()
+	if len(p.Images) != 1 || p.Images[0].Mime != "image/jpeg" {
+		t.Fatalf("sent %d images, the first %q", len(p.Images), func() string {
+			if len(p.Images) == 0 {
+				return ""
+			}
+			return p.Images[0].Mime
+		}())
+	}
+	data, err := base64.StdEncoding.DecodeString(p.Images[0].Data)
+	if err != nil || len(data) > channel.ImageMost {
+		t.Fatalf("sent %d bytes: %v", len(data), err)
+	}
+	tooLarge := i18n.T(i18n.Lang("zh-Hans"), "assistant-channels_plugin.image_too_large")
+	extra := i18n.T(i18n.Lang("zh-Hans"), "assistant-channels_plugin.extra_images")
+	if !strings.Contains(p.Text, tooLarge) || strings.Contains(p.Text, extra) {
+		t.Fatalf("sent text %q", p.Text)
 	}
 }

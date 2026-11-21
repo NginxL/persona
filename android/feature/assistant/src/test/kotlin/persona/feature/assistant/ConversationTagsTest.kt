@@ -5,6 +5,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 import persona.core.contracts.Session
+import persona.core.contracts.api.ConversationTagFilters
 import persona.core.contracts.api.AssistantSearchAnswer
 import persona.core.contracts.api.AssistantSearchResult
 import persona.core.contracts.api.AssistantSnapshot
@@ -45,6 +46,21 @@ class ConversationTagsTest {
         assertSame(chats, chats.withConversationTag(null))
         assertSame(chats, chats.withConversationTag(""))
         assertEquals(emptyList<String>(), inUseConversationTags(listOf(untagged, untagged.copy(tags = null))))
+    }
+
+    @Test fun filterEntriesKeepAutomaticFallbackSeparateFromCustomOrderAndEmpty() {
+        val automatic = listOf("Planning", "Travel")
+        assertEquals(automatic, conversationTagFilterEntries(automatic, ConversationTagFilters.Unsupported))
+        assertEquals(automatic, conversationTagFilterEntries(automatic, ConversationTagFilters(null)))
+        assertEquals(listOf("unused", "Planning"), conversationTagFilterEntries(
+            automatic, ConversationTagFilters(listOf("unused", "Planning"))))
+        assertEquals(emptyList<String>(), conversationTagFilterEntries(automatic, ConversationTagFilters(emptyList())))
+    }
+
+    @Test fun filterValidationAllowsFiftyEntriesButRejectsTheFiftyFirst() {
+        assertNull(conversationTagFiltersProblem((1..50).map { "tag-$it" }))
+        assertEquals(ConversationTagProblem.TooMany, conversationTagFiltersProblem((1..51).map { "tag-$it" }))
+        assertEquals(ConversationTagProblem.TooLong, conversationTagFiltersProblem(listOf("📚".repeat(33))))
     }
 
     @Test fun tagAndTextSearchIntersectAcrossMainRecentAndAllChats() {

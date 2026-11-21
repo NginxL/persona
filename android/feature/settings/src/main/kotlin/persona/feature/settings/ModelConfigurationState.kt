@@ -62,9 +62,12 @@ internal fun providerOptions(res: Resources, purpose: ModelPurpose, providers: L
             .takeIf { chosen.isNotEmpty() && candidates.none { it.id == chosen } })
 }
 
-/** Effort is a field of launchers and of Responses APIs; a Messages API provider has none to set. */
+/** Effort is a field of launchers, Responses APIs, and Chat APIs marked chat_effort; a Messages API provider has none to set. */
 internal fun showsEffort(purpose: ModelPurpose, provider: ModelProvider?): Boolean =
-    purpose.supports("effort") && (agentsOverride(purpose) || !(provider?.kind == "api" && provider.api != "responses"))
+    purpose.supports("effort") && (
+        agentsOverride(purpose) ||
+            !(provider?.kind == "api" && provider.api != "responses" && !(provider.api == "chat" && provider.chatEffort))
+        )
 
 internal data class ModelCatalogState(
     val catalog: ModelCatalog? = null,

@@ -1,7 +1,12 @@
 package persona.core.contracts.api
 
 import persona.core.contracts.CoreText
+import persona.core.contracts.PaseoAgent
 import persona.core.contracts.Session
+import persona.core.contracts.TraeCliDisplayName
+import persona.core.contracts.isTraeCliId
+import persona.core.contracts.isTraeCliLabel
+import persona.core.contracts.unknownAgentName
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.KeepGeneratedSerializer
@@ -38,6 +43,9 @@ interface AgentCreationService {
      * list a while, [refresh] asks the CLI again. Null from hubs without the list (404).
      */
     suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean = false): LauncherModels? = null
+    /** A new start's host may offer or lock a different model from the machine's default host. */
+    suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean, host: String?): LauncherModels? =
+        launcherModels(machineId, launcher, refresh)
 
     /**
      * What [cwd] is in Git terms (`POST …/worktree/status`, docs/protocol/protocol.md): null when the computer can't say
@@ -145,6 +153,8 @@ data class LauncherModels(
     val models: List<AgentModel> = emptyList(),
     /** Why a model picked here would not reach the agent (the launcher passes its own --model); null: it would. */
     val locked: String? = null,
+    /** The node accepts a per-start model on this launcher and host. Absent on older nodes. */
+    @SerialName("supports_start_model") val supportsStartModel: Boolean = false,
 )
 
 @Serializable
@@ -204,9 +214,11 @@ data class AgentLauncher(
      * an Allow everything. Null for Claude Code's launchers, which take its five, and for every other one, which takes none.
      */
     @SerialName("permission_modes") val permissionModes: List<String>? = null,
+    /** Where the computer found the launcher, for example path, zshrc, or a managed provider. */
+    val source: String? = null,
 ) {
     /** What people read for it: its display name, else its startup name (the web's `providerTitle`). */
-    val title: String get() = displayName?.trim()?.takeIf(String::isNotEmpty) ?: name
+    val title: String get() = launcherTitle(name, agentType, displayName?.trim()?.takeIf(String::isNotEmpty), baseUrl, source)
 }
 
 /**
@@ -286,7 +298,21 @@ data class UnavailableLauncher(
     val code: String = "",
     val reason: String = "",
 ) {
-    val title: String get() = displayName?.trim()?.takeIf(String::isNotEmpty) ?: name
+    val title: String get() = launcherTitle(name, agent, displayName?.trim()?.takeIf(String::isNotEmpty))
+}
+
+internal fun launcherTitle(
+    name: String, agent: String?, displayName: String?, baseUrl: String? = null, source: String? = null,
+): String {
+    // Older hubs identify the built-in launcher by its base URL marker before supplying an agent field.
+    val legacyMachineCli = name == "traex" && baseUrl == "(traex)" &&
+        (source.isNullOrEmpty() || source == "path" || source == "zshrc" || source == "builtin")
+    return when {
+        agent == PaseoAgent && isTraeCliId(name) -> unknownAgentName(agent, displayName, name)
+        (legacyMachineCli || isTraeCliId(agent)) && isTraeCliId(name) &&
+            (displayName == null || isTraeCliLabel(displayName)) -> TraeCliDisplayName
+        else -> displayName ?: name
+    }
 }
 
 /**
@@ -336,7 +362,7 @@ data class AgentStartRequest(
     val ultracode: Boolean? = null,
     /** What the tab is named after when the first message goes as an ordinary message rather than [prompt]. */
     @SerialName("name_hint") val nameHint: String? = null,
-    /** The model picked for this start (an id of [AgentCreationService.launcherModels]); null: the default one. */
+    /** The model picked for this start, from the launcher's list or typed for omp; null follows the default. */
     val model: String? = null,
     @SerialName("todo_id") val todoId: String? = null,
     /** The engine whose workspace [workspaceId] is (a catalog row's `source`, #7259); null: the computer's default. */

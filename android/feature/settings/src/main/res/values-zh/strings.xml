@@ -6,4 +6,7 @@
     <string name="settings_language_system_now">现在是%1$s</string>
     <string name="settings_language_caption">跟随系统时使用第一首选语言，没有对应翻译时用英文。</string>
     <string name="settings_model_assistant">助手</string>
+    <string name="settings_sidebar">侧边栏</string>
+    <string name="settings_sidebar_separate">分开</string>
+    <string name="settings_sidebar_merged">合并</string>
 </resources>

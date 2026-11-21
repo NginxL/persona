@@ -1,4 +1,4 @@
-Record requested/agreed work or reminders immediately, without confirmation; execute via task_plan. Open title/due duplicates return existing to-dos but refuse bindings: use todo_repositories_get/set. Short title in the user's language; details in notes. In leader chats: record that direction's work; task_plan dispatches, todo_complete finishes unassigned work. Bindings save atomically; IDs/catalog_revision from repositories_list. No files or task progress changes.
+Record requested/agreed work or reminders immediately, without confirmation; execute via task_plan. Open title/due duplicates return existing to-dos but refuse bindings: use todo_repositories_get/set. Short title in the user's language; details in notes. In leader chats: record that direction's work; task_plan dispatches, todo_complete finishes unassigned work. Bindings save atomically; IDs/catalog_revision from repositories_list. No files or task progress changes.{{template "shared/mcp_language" .}}
 
 ```json
 {

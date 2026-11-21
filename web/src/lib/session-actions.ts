@@ -70,13 +70,14 @@ export function effortTitle(id?: string): string {
 }
 
 /** The two chips (Claude Code's TUI bottom bar). The node says where they work (`capabilities.modes`, #1843): a runtime
- *  that applies them (Orca, Antigravity), never a Claude outside Persona's terminals. An older node does not say, and the
- *  chips follow the agent: Claude Code in Persona's terminals, Antigravity; Codex, a compatible CLI and other sources not. */
+ *  that applies them (Orca, Antigravity), never a Claude outside Persona's terminals nor an agent in a terminal whose mode
+ *  is its start's (cursor, agy: the node refuses the switch). An older node does not say, and the chips follow the agent:
+ *  Claude Code in Persona's terminals, Antigravity's runtime; Codex, agy in a terminal pane and other sources not, as on
+ *  iOS and Android (`canChangeModes`). */
 export function hasModes(s: Session | undefined): boolean {
   if (!s || s.assistant) return false;
   if (typeof s.capabilities?.modes === "boolean") return s.capabilities.modes;
-  if (s.agent === "agy") return true;
-  if (s.source_kind) return false;
+  if (s.source_kind) return s.agent === "agy";
   return !s.agent || s.agent === "claude";
 }
 

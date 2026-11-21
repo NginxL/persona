@@ -70,7 +70,8 @@ and the tags collapse into one line next to the bubble, "Context · N items", fo
   After the first reply, a turn that ends without calling the tool sends nothing (whether and what to send is the Agent's call). The prompt asks it to send only meaningful progress and results.
 - **Dispatched tasks**: the extension opens the chat with `report_tasks: true`. Tasks this chat dispatches with `task_plan` / `agent_start` behave like the main chat's
   "quiet tasks" (`docs/assistant/unified-entry.md`): no separate pushes; finished, waiting for the user, interrupted, failed to start are all delivered as task notices (`Reporting` in `prompts/assistant/task_notice.md`)
-  into this /agent chat (queued after the current turn if it is busy); it then sends the result to the topic with `lark_agent_reply`.
+  into this /agent chat (queued after the current turn if it is busy); it then sends the result to the topic with `lark_agent_reply`. With `assistant.agent_tasks` on, an Agent's
+  `report_to_supervisor` also returns through this chat's notice path, without adding a supervision ledger or changing these task notices.
   The registration lives in `assistant.task_reporters` in the settings table (14 days) and survives hub restarts.
 - **Stopping (#3308)**: sending `/stop` (also `/停止`, `/停`, optionally preceded by an @mention) in the request's topic, or quoting the request (or its reply), stops that request,
   even right after it was sent while the context is still being read. Only my own messages count (as with `/agent`, the request can only be mine, so the requester is me); others' are ignored, with no "not allowed" reply (replying that to a colleague in my name would be odd).

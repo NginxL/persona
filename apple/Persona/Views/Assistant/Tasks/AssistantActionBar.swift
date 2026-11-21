@@ -175,7 +175,7 @@ nonisolated enum AssistantEntries {
         if let ask = openAsk(todo) { return !(todo.doneAt != nil && ask.outcome == "decide") }
         guard todo.doneAt == nil else { return false }
         let state = todo.supervision?.state
-        return state == "needs_user" || (state == "pending_review" && !supervisorReviewing(todo, now: now))
+        return state == "user_check" || state == "needs_user" || (state == "pending_review" && !supervisorReviewing(todo, now: now))
     }
 
     /// The task's row among the tasks in progress says its supervisor is reviewing it: nothing of it runs or asks, and

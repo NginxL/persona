@@ -25,8 +25,12 @@
   "err_profiles": "最多可创建 {max} 个模型档位。",
   "err_active": "档位 {name} 正在使用，请先切换到其他档位再删除。",
   "err_role": "更改模型档位需要完整权限。",
+  "err_active_profile_missing": "正在使用的模型档位（{profile}）已不存在：请用 model_profile_switch 切换到其他档位，或不要指定 tier。",
+  "err_no_active_profile": "当前没有正在使用的模型档位：请用 model_profile_switch 选择一个档位，或不要指定 tier。",
+  "err_tier_not_found": "正在使用的模型档位（{profile}）没有层级 {tier}；可用层级：{tiers}。",
   "err_tier_model": "预设 {tier}：{model} 不是模型 ID。须以字母或数字开头，之后只能用字母、数字和 . _ - / : @ [ ]。",
   "err_tier_description": "预设 {tier} 的说明最多 {max} 个字，且只能一行。",
   "tier_strong": "建这个档位时主对话用的模型：设计、审查和难题。",
-  "tier_standard": "建这个档位时新建 Agent 用的模型：日常编码。"
+  "tier_standard": "建这个档位时新建 Agent 用的模型：日常编码。",
+  "err_permission_mode": "{where} 的权限模式 {mode} 无效。可用值：{modes}。"
 }

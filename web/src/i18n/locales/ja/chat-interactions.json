@@ -46,6 +46,8 @@
   "edited_pending": "編集済み。許可すると編集後の本文が送信されます。",
   "always_allow": "常に許可",
   "allow": "許可",
+  "owner_reply": "「{phrase}」と返信",
+  "owner_reply_unavailable": "この完全一致の承認返信は現在利用できません",
   "have_question": "質問する",
   "field_command": "コマンド",
   "field_file": "ファイル",

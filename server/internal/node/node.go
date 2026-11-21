@@ -41,7 +41,12 @@ import (
 )
 
 type Node struct {
-	runtimeUsage runtimeUsageReports
+	segmentStarts segmentStarts
+	runtimeUsage  runtimeUsageReports
+
+	// Only the manager's initial node.info can negotiate source delivery on this connection.
+	managerInfoOnce sync.Once
+	sourceSend      atomic.Bool
 
 	// The assistant's one memory (memory_merge.go), both under memoryMu: per project key, the other profiles' notes
 	// already merged, and when a merge that failed is tried again.
@@ -95,6 +100,12 @@ type Node struct {
 
 	// doctorAt replaces the places node.doctor looks at (tests; doctor_rpc.go).
 	doctorAt func() DoctorOptions
+	// machineProcs replaces OS process/port hooks in tests (machine_procs.go).
+	machineProcs *machineProcsOps
+	// serviceRunner replaces OS command execution for machine.services* RPCs in tests.
+	serviceRunner *machineServiceRunner
+	// networkDiagAt replaces machine.network dependencies in tests (machine_network.go).
+	networkDiagAt func() machineNetworkOptions
 	// fileReadDeps replaces file.read's filesystem operations in tests.
 	fileReadDeps *fileReadDependencies
 
@@ -347,9 +358,12 @@ type Node struct {
 	secrets *secretStage
 	// gp is the proxy that adds the gates' credentials, made at its first use (gateproxy.go, #1317).
 	gp *gateProxy
-	// lark-cli (larkcligate.go): each command's risk level as lark-cli reported it, and where the binary is.
+	// lark-cli (larkcligate.go): each command's risk level as lark-cli reported it, where the binary is, and the login
+	// shell's PATH directories (larkLoginPATH, trustedPATH).
 	larkRisks    map[string]string
 	larkCLIPaths map[string]string
+	larkPATH     []string
+	larkPATHAt   time.Time
 
 	// assistantPrepared keeps each assistant directory's last prepare state (clicall.go).
 	assistantPrepared map[string]assistantPrepareState
@@ -496,6 +510,7 @@ func (n *Node) Serve(ctx context.Context, r io.Reader, w io.Writer) error {
 		n.logger.Printf("write claude config: %v", err)
 	}
 	n.peer = rpc.New("n", w)
+	n.peer.ReadLimit = nodeproto.RPCReadLimit
 	// What the node sends hides the values handed to Agent starts (secretenv.go): every line, as it goes out.
 	n.peer.LineFilter = n.handoffs().scrub.filter
 	if n.updater != nil {
@@ -763,6 +778,12 @@ func (n *Node) handle(ctx context.Context, method string, params json.RawMessage
 }
 
 func (n *Node) handleMethod(ctx context.Context, method string, params json.RawMessage) (result any, resultErr error) {
+	if strings.HasPrefix(method, "assistant.segment.") {
+		switch method {
+		case "assistant.segment.check", "assistant.segment.prepare", "assistant.segment.receipt", "assistant.segment.input", "assistant.segment.retire", "assistant.segment.restore":
+			return n.assistantSegment(ctx, method, params)
+		}
+	}
 	if verb, ok := strings.CutPrefix(method, methodGitBackendPrefix); ok {
 		return n.backendGit(ctx, verb, params)
 	}
@@ -786,6 +807,9 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 	}
 	switch method {
 	case nodeproto.SourceSend:
+		if !n.sourceSend.Load() {
+			return nil, refusal("source_permissions_not_negotiated", "The connected manager did not negotiate source permissions", nil)
+		}
 		method = "session.send"
 		ctx = withSourceDelivery(ctx, params)
 	case nodeproto.OwnerInterrupt:
@@ -798,9 +822,10 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 	if method == "session.send" || method == "codex.answer" {
 		ctx = promptLanguageContext(ctx, params)
 	}
+	if method == "sessions.history" {
+		return n.handleSessionsHistory(ctx, method, params)
+	}
 	switch method {
-	case "sessions.history": // sessions active in a time window, inactive ones too (sessions_history.go)
-		return n.sessionsHistory(ctx, params)
 	case "workspace.naming.resolve":
 		return n.resolveWorkspaceNaming(ctx, params)
 	case "session.share_projection":
@@ -821,6 +846,8 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		return n.doctor(ctx, params, false)
 	case "node.doctor.fix": // the same path as `node doctor --fix`: Persona's own generated files only
 		return n.doctor(ctx, params, true)
+	case proto.MethodMachineNetwork: // on-demand read-only network & proxy diagnostics (machine_network.go)
+		return n.machineNetwork(ctx, params)
 	case proto.MethodRoutineCheck:
 		return routineCheck(ctx, params)
 	case proto.MethodSecretRun: // the password card's commands (secretrun.go); its params never reach the decoding below
@@ -847,6 +874,22 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 	case proto.MethodMachineCleanup:
 		return machdiag.Cleanup(ctx, params)
 	}
+	switch method { // listening port inspector and process management (machine_procs.go)
+	case proto.MethodMachinePorts:
+		return n.machinePorts(ctx, params)
+	case proto.MethodMachineProcesses:
+		return n.machineProcesses(ctx, params)
+	case proto.MethodMachineProcessKill:
+		return n.machineProcessKill(ctx, params)
+	}
+	switch method { // the machine page's services and containers (machine_services.go)
+	case proto.MethodMachineServices:
+		return n.machineServices(ctx, params)
+	case proto.MethodMachineServiceLogs:
+		return n.machineServiceLogs(ctx, params)
+	case proto.MethodMachineServiceAction:
+		return n.machineServiceAction(ctx, params)
+	}
 	if method == codexTakeoverPrepare || method == codexTakeoverCommit {
 		return n.codexTakeoverCall(ctx, method, params)
 	}
@@ -866,10 +909,13 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		Prompt                  string        `json:"prompt"`
 		ResumeSessionID         string        `json:"resume_session_id"`
 		ResumeAutomatic         bool          `json:"resume_automatic"`
-		Host                    string        `json:"host"` // session.start: the enabled host to open in ("" the default host, #2576)
+		A2AWakeOnSend           bool          `json:"a2a_wake_on_send"`
+		ResumeOutsideHealth     bool          `json:"resume_outside_health"` // session.start: an extension's resume the hub does not list (resumeOutsideHealth)
+		Host                    string        `json:"host"`                  // session.start: the enabled host to open in ("" the default host, #2576)
 		TaskID                  string        `json:"task_id"`
 		WorkspaceID             string        `json:"workspace_id"`
 		WorkspaceLabel          string        `json:"workspace_label"`
+		ReopenWorktreeWorkspace bool          `json:"reopen_worktree_workspace"`
 		NameHint                string        `json:"name_hint"` // session.start: what a start whose first message goes after it is named after (claudedesktop_new.go)
 		Text                    string        `json:"text"`
 		SkillOwner              string        `json:"skill_owner"` // manager-owned identity for explicit skill selections
@@ -886,6 +932,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		Turns                   int           `json:"turns"`
 		LazyImages              bool          `json:"lazy_images"`
 		UserInputs              bool          `json:"user_inputs"`
+		StrictRead              bool          `json:"strict_read"`
 		FoldWork                bool          `json:"fold_work"`
 		FromSeq                 int           `json:"from_seq"`
 		ThroughSeq              int           `json:"through_seq"`
@@ -929,6 +976,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		ClientMsgID      string                        `json:"client_msg_id"`
 		AtItemID         string                        `json:"at_item_id"`     // session.fork: the reply to branch off at
 		Refresh          bool                          `json:"refresh"`        // launchers.models/list: ask again, not the kept list
+		CacheOnly        bool                          `json:"cache_only"`     // launchers.list: read the last completed shell discovery without waiting
 		Purpose          string                        `json:"purpose"`        // launchers.models/check: assistant runs outside the Agent engine
 		AssistantTurn    bool                          `json:"assistant_turn"` // launchers.check: shaped as an assistant turn (launchercheck_assistant.go)
 		Conversation     string                        `json:"conversation"`   // launchers.check with assistant_turn: the conversation whose profile it runs in
@@ -957,6 +1005,40 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, fmt.Errorf("bad params: %w", err)
 		}
+	}
+	if method == "session.a2a.send" {
+		// This path is called by the manager's delivery queue. The separate
+		// method prevents older nodes from ignoring the idle-only guard.
+		id := n.resolveAlias(p.SessionID)
+		if !n.a2aIdleSession(ctx, id, p.A2AWakeOnSend, true) {
+			return nil, a2aBusy()
+		}
+		return n.handleMethod(context.WithValue(ctx, a2aIdleKey{}, p.A2AWakeOnSend), "session.send", params)
+	}
+	if method == "session.a2a.wake" {
+		id := n.resolveAlias(p.SessionID)
+		cause := n.stopCause(id)
+		if cause != proto.StopIdle && cause != proto.StopRestart {
+			return nil, refusal("a2a_session_busy", "A2A can resume a session only after an idle stop or restart", nil)
+		}
+		params, err := json.Marshal(map[string]any{"resume_automatic": true, "resume_session_id": id,
+			"prompt": p.Text, "client_msg_id": p.ClientMsgID, "message_source": p.MessageSource, "supervision_instructions": p.SupervisionInstructions,
+			"origin": p.Origin, "origin_known": p.OriginKnown, "is_main": p.IsMain, "main_compact_window": p.MainCompact,
+			"claude_interactive": p.Interactive})
+		if err != nil {
+			return nil, err
+		}
+		return n.handleMethod(ctx, "session.start", params)
+	}
+	// Before anything else reads the id (a backend session's pin, an alias, a Codex thread, a runtime's session): an
+	// extension's resume of a conversation the hub does not list goes on only for one this computer has outside the
+	// health space (#10941). A refusal that holds for any id comes first (resumeHostRefusal): an engine that is away
+	// may have it, and the owner's resume is told the same, whatever the id.
+	if devicewire.IsSessionStart(method) && p.ResumeOutsideHealth && p.ResumeSessionID != "" && !n.resumeOutsideHealth(ctx, p.ResumeSessionID) {
+		if err := n.resumeHostRefusal(ctx, p.Host); err != nil {
+			return nil, err
+		}
+		return nil, resumeUnknown()
 	}
 	sessionSend := method == "session.send" || method == proto.MethodSessionSendUnseen
 	if backendLaunchFrom(ctx) == nil && (sessionSend || method == "session.start" && p.ResumeSessionID != "") {
@@ -1067,18 +1149,18 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 		case "session.keys", "session.screen", "session.screen.before", "terminal.watch", "session.close", "session.queue.edit", "session.queue.send_now", "session.rename", "assistant.send":
 			return nil, refusal("codex_read_only", "这个会话没有终端或启动器控制能力，请在原 app-server 中操作", nil)
 		case "session.modes":
-			// Its effort, on the app-server running it (codex_effort.go), or in the Codex App window that has it
-			// (codex_desktop_effort.go); nothing else.
-			if _, _, driven := n.codexEffortThread(p.SessionID); !driven {
-				if src, found := n.codexSource(p.SessionID); found && codexDesktopChat(src) {
-					return ok(n.codexDesktopModes(ctx, p.SessionID, src, p.Model, p.PermissionMode, p.Effort))
+			// Model and effort, on the app-server running it (codex_effort.go), or in the Codex App window that has it
+			// (codex_desktop_effort.go); permission modes remain on the computer.
+			if c, t, driven := n.codexEffortThread(p.SessionID); driven {
+				if p.PermissionMode != "" {
+					return nil, fmt.Errorf("Codex 的会话在手机上只能改思考强度和模型，权限模式要在电脑上改")
 				}
-				return nil, refusal("codex_read_only", "这个会话没有终端或启动器控制能力，请在原 app-server 中操作", nil)
+				return ok(n.setCodexSettings(ctx, p.SessionID, c, t, p.Model, p.Effort))
 			}
-			if p.Model != "" {
-				return nil, fmt.Errorf("Codex 的会话不支持在手机上切换模型")
+			if src, found := n.codexSource(p.SessionID); found && codexDesktopChat(src) {
+				return ok(n.codexDesktopModes(ctx, p.SessionID, src, p.Model, p.PermissionMode, p.Effort))
 			}
-			return ok(n.setModes(ctx, p.SessionID, p.PermissionMode, p.Effort))
+			return nil, refusal("codex_read_only", "这个会话没有终端或启动器控制能力，请在原 app-server 中操作", nil)
 		case "session.interrupt":
 			return ok(n.interruptCodex(ctx, p.SessionID))
 		}
@@ -1169,6 +1251,12 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 	case "ping": // the hub checking a tailcat connection is alive (its userspace TCP has no keepalive)
 		return map[string]any{}, nil
 	case "node.info":
+		n.managerInfoOnce.Do(func() {
+			var p nodeproto.NodeInfoQuery
+			if json.Unmarshal(params, &p) == nil {
+				n.sourceSend.Store(slices.Contains(p.ManagerFeatures, nodeproto.SourcePermissions))
+			}
+		})
 		return n.info(ctx), nil
 	case "herdr.server.start": // the "Start" button beside "herdr is not running" (herdrstart.go)
 		return n.startHerdrServer(ctx)
@@ -1209,6 +1297,8 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			n.runtimeHost.setOrcaBridge(n.hostEnabled(proto.EngineOrca))
 			// Cindy's agents come through its bridge (cindybridge.go).
 			n.runtimeHost.setCindyBridge(n.hostEnabled(proto.EngineCindy))
+			// T3 Code's threads come through its bridge (t3codebridge.go).
+			n.runtimeHost.setT3CodeBridge(n.hostEnabled(proto.EngineT3Code))
 		}
 		n.configured()
 		c := n.engineChoice()
@@ -1337,8 +1427,17 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 				return map[string]any{"launchers": typedLaunchers(ls), "host": p.Host, "host_runtime": true}, nil
 			}
 		}
-		ls, err := n.launchers(ctx, p.Refresh)
 		forced := p.Refresh
+		cacheOnly := p.CacheOnly && !forced && p.Host == "" && p.Source == ""
+		var ls []proto.Launcher
+		var err error
+		if cacheOnly {
+			launcherCache.Lock()
+			ls = launcherCache.list
+			launcherCache.Unlock()
+		} else {
+			ls, err = n.launchers(ctx, forced)
+		}
 		bl := n.runtimes.launchers()
 		if len(bl) > 0 {
 			// Explicit shell launchers keep their names; a discovered CLI fallback yields to its connected runtime.
@@ -1349,16 +1448,18 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 				err = nil
 			}
 		}
-		if withDesktop, added := n.withDesktopLauncher(ls); added { // Claude's desktop app (claudedesktop_new.go)
-			ls = withDesktop
-			if !forced {
-				err = nil
+		if !cacheOnly { // Desktop executable discovery can run through the login shell.
+			if withDesktop, added := n.withDesktopLauncher(ls); added { // Claude's desktop app (claudedesktop_new.go)
+				ls = withDesktop
+				if !forced {
+					err = nil
+				}
 			}
-		}
-		if withApp, added := n.withCodexAppLauncher(ls); added { // the Codex App (codexapp_new.go)
-			ls = withApp
-			if !forced {
-				err = nil
+			if withApp, added := n.withCodexAppLauncher(ls); added { // the Codex App (codexapp_new.go)
+				ls = withApp
+				if !forced {
+					err = nil
+				}
 			}
 		}
 		shell, rcFile := launcherShell()
@@ -1472,6 +1573,9 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			}
 		}
 		ctx, taskSpace := withTaskSpace(ctx, p.TaskID, p.WorkspaceID, p.WorkspaceLabel)
+		if p.ReopenWorktreeWorkspace && taskSpace == nil {
+			ctx = context.WithValue(ctx, reopenWorktreeWorkspaceKey{}, true)
+		}
 		// Optional tool waits correlate the first input through the existing echo ledger.
 		// Capture the resume boundary before launching, so an identical historical input cannot match.
 		var echoOpts sendOpts
@@ -1487,7 +1591,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 				session, _ := out["session"].(*proto.Session)
 				if resultErr == nil && session != nil {
 					r := echoRecord{SessionID: session.SessionID, ClientMsgID: echoOpts.ClientMsgID,
-						Text: rawPrompt, Images: echoImages, SentAt: sentAt, AfterSeq: after.seq, In: after.in}
+						Text: rawPrompt, Source: p.MessageSource, Images: echoImages, SentAt: sentAt, AfterSeq: after.seq, In: after.in}
 					if n.echoes.expect(r) {
 						n.notifyEcho(r)
 					}
@@ -1557,8 +1661,8 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			if kind == "" {
 				kind = launcherAgentType(p.Launcher)
 			}
-			if kind == ompAgent { // omp's own config decides, not a start's arguments (start_agent.go)
-				return nil, refusal("omp_options", ompOptionsRefusal, nil)
+			if kind == ompAgent {
+				return nil, ompOptionsRefusal(ctx)
 			}
 			if _, runtime := engineRuntimes[cmp.Or(p.Host, n.defaultKind())]; runtime { // the start's host is a runtime (Paseo)
 				kind = "runtime"
@@ -1654,6 +1758,10 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			// (launcher_switch.go): the Resume waits for it, then finds the agent running, or resumes it as it is.
 			defer n.resumeTurn(ctx, p.ResumeSessionID)() // and a switch to the other engine does not resume it beside this
 			r = n.fillResume(p.ResumeSessionID, r)       // what it ran with, for what the start leaves out (retire.go)
+			if n.startAgentType(r.launcher, p.AgentType) == ompAgent {
+				// omp restores the model from its session file. Only an explicit override should reach the refusal.
+				r.execution.Model = p.Model
+			}
 			ctx, taskSpace = withTaskSpace(ctx, r.taskID, r.workspaceID, r.workspaceLabel)
 			// The user's Resume (the only way a stopped agent runs again, #4754): in the shell it left when that is
 			// still there (stopped.go).
@@ -1870,7 +1978,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			if opts.ClientMsgID != "" {
 				after = n.echoBase(p.SessionID)
 			}
-			return n.sendEchoed(p.SessionID, opts.ClientMsgID, p.Text, len(p.Images), after, func() error { // echo.go
+			return n.sendWithEcho(p.SessionID, opts.ClientMsgID, p.Text, len(p.Images), after, p.MessageSource, nil, func() error { // echo.go
 				if n.isAssistantSession(p.SessionID) {
 					_, err := n.assistantSend(withSkillOwner(withClientMsgID(ctx, opts.ClientMsgID), p.SkillOwner), p.SessionID, "", p.Launcher, p.Text, p.Images, "", "", (modelExecution{PlanThen: p.PlanThen, Model: p.Model, Effort: p.Effort, UseEffort: p.ModelFingerprint != "", Fingerprint: p.ModelFingerprint, Runtime: n.externalRuntime(p.SessionID, p.Launcher, p.Runtime), External: p.External, IsMain: p.IsMain, MainCompactWindow: p.MainCompact, FollowsSetting: p.FollowsSetting, ConfigDir: p.ConfigDir, Origin: p.Origin, OriginKnown: p.OriginKnown, OriginDecisionRequired: true, Public: p.Public, Interject: p.Interject, Interactive: p.Interactive}).withSupervision(p.SupervisionInstructions))
 					return err
@@ -1882,7 +1990,7 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			})
 		})
 		if err != nil {
-			return ok(err)
+			return ok(withOwnerRoute(err, owner)) // ccplugin.go: an unconfirmed relay still says why it was relayed
 		}
 		res := map[string]any{"ok": true}
 		if *waits {
@@ -2180,27 +2288,55 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			ItemID string `json:"item_id"`
 		}
 		_ = json.Unmarshal(params, &a)
-		f, err := n.file(p.SessionID)
+		read := n.file
+		if p.StrictRead {
+			read = n.exportFile
+		}
+		f, err := read(p.SessionID)
 		if err != nil {
 			return nil, n.readErr(p.SessionID, err)
 		}
-		n.refresh(p.SessionID, f)
+		if p.StrictRead {
+			if err := n.refreshExport(p.SessionID, f); err != nil {
+				return nil, err
+			}
+		} else if err := n.refresh(p.SessionID, f); err != nil && proto.PositionalItemID(a.ItemID) {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, n.readErr(p.SessionID, noTranscript{p.SessionID})
+			}
+			return nil, err
+		}
 		it, err := f.Full(a.ItemID)
+		if errors.Is(err, transcript.ErrSourceChanged) {
+			return nil, &rpc.Error{Code: codeNotFound, Message: err.Error()}
+		}
 		if err != nil {
 			return nil, fmt.Errorf("session %s: %w", p.SessionID, err)
 		}
 		it.Image = nil // images come from session.image
-		return n.echoed(p.SessionID, f, []proto.Item{it})[0], nil
+		it = n.echoed(p.SessionID, f, []proto.Item{it})[0]
+		if p.StrictRead {
+			return struct {
+				proto.Item
+				StrictRead      bool `json:"strict_read"`
+				SourceTextBytes int  `json:"source_text_bytes"`
+			}{it, true, len(it.Text)}, nil
+		}
+		return it, nil
 	case "session.items":
-		f, err := n.file(p.SessionID)
+		read := n.file
+		if p.StrictRead {
+			read = n.exportFile
+		}
+		f, err := read(p.SessionID)
 		if err != nil {
-			if n.startingSession(p.SessionID) { // nothing written yet: an empty chat; else not_found with its reason
+			if !p.StrictRead && n.startingSession(p.SessionID) { // nothing written yet: an empty chat; else not_found with its reason
 				if p.UserInputs {
 					return proto.UserInputIndex{Inputs: []proto.UserInputPosition{}}, nil
 				}
 				return map[string]any{"items": []proto.Item{}, "has_more": false}, nil
 			}
-			if session, _, _ := strings.Cut(p.SessionID, subagentSep); p.BeforeSeq > 0 && !p.UserInputs && n.knownSession(session) {
+			if session, _, _ := strings.Cut(p.SessionID, subagentSep); p.BeforeSeq > 0 && !p.UserInputs && !p.StrictRead && n.knownSession(session) {
 				// An older page of a session the node knows (or of its subagent): the end of its history, as before
 				// #11388. Only the latest page says why there is none; released apps ask an older page again on an
 				// error (#11450).
@@ -2208,7 +2344,11 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			}
 			return nil, n.readErr(p.SessionID, err)
 		}
-		if err := n.refresh(p.SessionID, f); err != nil && p.UserInputs {
+		if p.StrictRead {
+			if err := n.refreshExport(p.SessionID, f); err != nil {
+				return nil, err
+			}
+		} else if err := n.refresh(p.SessionID, f); err != nil && p.UserInputs {
 			return nil, err
 		}
 		if p.UserInputs {
@@ -2251,7 +2391,11 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			return withSpan(map[string]any{"items": items(fold(page)), "has_more": more}, span, false), nil
 		}
 		page, more, span := f.Page(p.BeforeSeq, limit)
-		return withSpan(map[string]any{"items": items(fold(page)), "has_more": more}, span, false), nil
+		result := withSpan(map[string]any{"items": items(fold(page)), "has_more": more}, span, p.StrictRead)
+		if p.StrictRead {
+			result["strict_read"] = true
+		}
+		return result, nil
 	case "session.watch":
 		// The stream outlives this request: it follows the connection (rpc.ConnContext), not the reply.
 		return ok(n.watchFor(rpc.ConnContext(ctx), p.SessionID, p.SinceSeq))
@@ -2358,6 +2502,8 @@ func (n *Node) handleMethod(ctx context.Context, method string, params json.RawM
 			return nil, err
 		}
 		return n.readFileChunk(chunk)
+	case proto.MethodMachineFilesRoots, proto.MethodMachineFilesList, proto.MethodMachineFilesPreview, proto.MethodMachineFilesTail, proto.MethodMachineFilesChunk:
+		return n.handleMachineFiles(ctx, method, params)
 	case methodGitBlob:
 		var b proto.GitBlobRequest
 		if err := json.Unmarshal(params, &b); err != nil {
@@ -2651,11 +2797,17 @@ func (n *Node) sessionInfo(ctx context.Context, id string) (map[string]any, erro
 	f, err := n.file(id)
 	if err != nil {
 		if src, ok := n.codexSource(id); ok {
-			effort := ""
+			model, effort := "", ""
 			if c, t, driven := n.codexEffortThread(id); driven {
+				model = n.codexModelNow(id, c, t, "")
 				effort = n.codexEffortNow(id, c, t, "")
+			} else if codexDesktopChat(src) {
+				var row proto.Session
+				row.SessionID = id
+				n.codexDesktopEffortRow(&row, src, quickMeta{})
+				model, effort = row.Model, row.Effort
 			}
-			return map[string]any{"session_id": id, "source_kind": "codex_app_server", "source_thread_id": src.thread, "transcript_path": "", "cwd": "", "model": "", "launcher": "", "git_branch": "", "version": "", "permission_mode": "", "effort": effort, "context_tokens": 0, "output_tokens": 0, "compactions": 0, "turns": 0, "history_unavailable": true, "stop_cause": n.stopCause(id)}, nil
+			return map[string]any{"session_id": id, "source_kind": "codex_app_server", "source_thread_id": src.thread, "transcript_path": "", "cwd": "", "model": model, "launcher": "", "git_branch": "", "version": "", "permission_mode": "", "effort": effort, "context_tokens": 0, "output_tokens": 0, "compactions": 0, "turns": 0, "history_unavailable": true, "stop_cause": n.stopCause(id)}, nil
 		}
 		return nil, err
 	}
@@ -2665,9 +2817,16 @@ func (n *Node) sessionInfo(ctx context.Context, id string) (map[string]any, erro
 	if st.Launcher == "" {
 		st.Launcher = n.inferLauncher(id)
 	}
+	model := n.shownModel(id, m.Model)
 	mode, effort := n.modesOf(id)
 	if c, t, driven := n.codexEffortThread(id); driven {
+		model = n.codexModelNow(id, c, t, m.Model)
 		effort = n.codexEffortNow(id, c, t, m.Effort) // what the app-server runs it with (codex_effort.go)
+	} else if src, ok := n.codexSource(id); ok && codexDesktopChat(src) {
+		var row proto.Session
+		row.SessionID, row.Model = id, m.Model
+		n.codexDesktopEffortRow(&row, src, n.metaOf(id))
+		model, effort = row.Model, row.Effort
 	}
 	if pane, err := n.paneFor(ctx, id); err == nil && !n.isAssistantSession(id) {
 		if screen, err := n.readPane(ctx, pane, "visible", 60); err == nil && tuiMode(screen) != "" {
@@ -2679,7 +2838,7 @@ func (n *Node) sessionInfo(ctx context.Context, id string) (map[string]any, erro
 		cwd = n.assistantCwd(id, f.Path, cwd) // a conversation's own, where it started (#2368)
 	}
 	return map[string]any{
-		"session_id": id, "transcript_path": f.Path, "cwd": cwd, "model": m.Model, "launcher": st.Launcher,
+		"session_id": id, "transcript_path": f.Path, "cwd": cwd, "model": model, "launcher": st.Launcher,
 		"git_branch": m.GitBranch, "version": m.Version, "permission_mode": mode, "effort": effort,
 		"context_tokens": m.ContextTokens, "output_tokens": m.OutputTokens, "compactions": m.Compactions,
 		"turns": m.Turns, "started_at": m.StartedAt, "last_activity": m.LastActivity,

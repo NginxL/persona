@@ -21,6 +21,15 @@ extension AppModel {
     /// opened from elsewhere names its own, as the top bar does.
     func assistantShownName(in key: SessionKey) -> String { otherAssistant(of: key)?.name ?? assistantShownName }
 
+    /// Whose page it is, as the Assistant chat's top bar says it (#9973) and the screenshot banner shows it (#12243):
+    /// the named manager on a hub with several, else the current assistant (with one too, as the sidebar's head shows
+    /// it), else the persona's name, "Persona" only as the last fallback. `assistantShownName` keeps the persona's
+    /// name with one assistant (the composer, calls, voice captions).
+    var assistantTitleName: String { assistantManager?.name ?? currentAssistant?.name ?? persona.name }
+
+    /// The same for conversation `key`: another assistant's conversation opened from elsewhere names its own.
+    func assistantTitleName(in key: SessionKey?) -> String { key.flatMap { otherAssistant(of: $0) }?.name ?? assistantTitleName }
+
     /// Reads group's roster again. A hub without one (404) has none; one that can't be read now keeps the last.
     func refreshManagerRoster(_ group: String) async {
         guard let api = api(group) else { return }
@@ -50,7 +59,12 @@ extension AppModel {
         guard managerRosters[group] != roster || assistantPick(in: group) != wasPick else {
             // The same roster and pick, yet what the pages list or ask may have changed: the hub answered a roster the
             // last launch kept, or that it has none (a kept pick stopped counting).
-            if group == hub?.group { followScope() }
+            if group == hub?.group {
+                followScope()
+                #if os(iOS)
+                refreshStarred(force: false)
+                #endif
+            }
             return
         }
         let was = managerRosters[group].map { shownOwner($0, group: group) }
@@ -86,7 +100,14 @@ extension AppModel {
         let now = roster.map { shownOwner($0, group: group) }
         let back = wasOffline && assistantManagerOffline == nil
         let switched = was != nil ? was != now : assistantPick(in: group) != wasPick
-        if defaultMoved || back || switched { assistantManagerChanged(switched: switched) } else { relistAssistant() }
+        if defaultMoved || back || switched {
+            assistantManagerChanged(switched: switched)
+        } else {
+            relistAssistant()
+            #if os(iOS)
+            refreshStarred(force: false)
+            #endif
+        }
     }
 
     /// The default manager's Persona settings for group while another assistant is current (`assistantByGroup`), unless

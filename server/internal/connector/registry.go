@@ -12,7 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -326,6 +328,8 @@ func (r *Registry) ToolsFor(ctx context.Context, agents bool) []proto.Tool {
 		m := c.Manifest()
 		for _, t := range owned(c, allTools(c)) {
 			if m.ForAgents(t.Name) == agents && m.Listed(t.Name) {
+				localized := prompts.LocalizeTool(prompts.MCPTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema}, string(i18n.From(ctx)))
+				t.Description, t.InputSchema = localized.Description, localized.InputSchema
 				out = append(out, t)
 			}
 		}

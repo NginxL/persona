@@ -24,7 +24,7 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic|heif|avif|tiff?|svg)$/i;
 
 function inputPath(use: Item): string | undefined {
   const i = use.tool_input ?? {};
-  for (const k of ["file_path", "path", "image_path", "filepath"]) {
+  for (const k of ["file_path", "path", "Path", "image_path", "filepath"]) {
     const v = i[k];
     if (typeof v === "string" && v.trim()) return v.trim();
   }
@@ -42,7 +42,7 @@ export function sourceOf(tool: string): TurnImage["source"] {
 }
 
 function labelOf(source: TurnImage["source"], tool: string, path: string | undefined, machine: string | undefined): string {
-  if (path) return path.split("/").pop() || path;
+  if (path) return path.split(/[\\/]/).pop() || path;
   const where = machine ? ` · ${machine}` : "";
   if (source === "screenshot") return t("lib-turn-images.screenshot") + where;
   if (source === "browser") return t("lib-turn-images.browser_screenshot") + where;

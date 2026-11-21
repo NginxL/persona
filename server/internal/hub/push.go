@@ -85,17 +85,17 @@ type Pusher struct {
 	// and mu, never by a push.
 	prefsEdit sync.Mutex
 
-	// lnMu guards the low-distraction mode state (lnmode.go): the cached switch, the per-key push times for the
+	// gradingMu guards the low-distraction mode state (push_grading.go): the cached switch, the per-key push times for the
 	// 12-hour rule, the held-push list and the delivered-push counts.
-	lnMu         sync.Mutex
-	lnCached     *bool
-	lnCachedAt   time.Time
-	lnRefreshing bool
-	lnVersion    uint64 // bumped by setLnMode, so a refresh that read before it does not undo it
-	lnLastPush   map[string]time.Time
-	intercepts   []pushIntercept
-	sent         []pushSent
-	lnDirty      bool // the held-push list changed since the last save
+	gradingMu         sync.Mutex
+	gradingCached     *bool
+	gradingCachedAt   time.Time
+	gradingRefreshing bool
+	gradingVersion    uint64 // bumped by setPushGrading, so a refresh that read before it does not undo it
+	gradingLastAlert  map[string]time.Time
+	intercepts        []heldPushRecord
+	sent              []pushSent
+	heldDirty         bool // the held-push list changed since the last save
 	// sentPending are the delivered pushes not yet appended to the store's record (pushSentStore); sentPrunedAt is
 	// when its last sweep ran.
 	sentPending  []pushSent
@@ -106,7 +106,7 @@ type Pusher struct {
 	sentMirrorDue  bool
 	sentMirroredAt time.Time
 	sentMirrorMu   sync.Mutex
-	lnWriting      bool // the one saver goroutine is running
+	gradingWriting bool // the one saver goroutine is running
 }
 
 // deviceStoreTimeout: how long a device row write may take before it gives up (the pool has no statement_timeout).
@@ -131,7 +131,7 @@ func newPusher(dir string, store Store, logf func(string, ...any)) *Pusher {
 		}
 		cancel()
 	}
-	p.loadLnState() // the grading switch and held pushes survive restarts (hub_settings), whether or not APNs is configured
+	p.loadPushGradingState() // the grading switch and held pushes survive restarts (hub_settings), whether or not APNs is configured
 	b, err := os.ReadFile(filepath.Join(dir, "apns.json"))
 	if err != nil {
 		logf("push: no %s, pushing through each phone's relay (docs/operations/push-relay.md)", filepath.Join(dir, "apns.json"))

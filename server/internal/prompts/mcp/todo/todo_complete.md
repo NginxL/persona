@@ -1,4 +1,4 @@
-Mark one of the user's Persona to-dos done, when the user says it is done (or asks you to close it). The user's own to-do is closed at once. A task's, or one agents work on, is confirmed on the phone first, because closing it also closes its agents once they are idle; if the user declines, nothing changes. A concern is not closed with this: report its outcome with concern_report.
+Mark one of the user's Persona to-dos done, when the user says it is done (or asks you to close it). The user's own to-do is closed at once. A task's, or one agents work on, is confirmed on the phone first, because closing it also closes its agents once they are idle; if the user declines, nothing changes. A concern is not closed with this: report its outcome with concern_report.{{template "shared/mcp_language" .}}
 
 ```json
 {

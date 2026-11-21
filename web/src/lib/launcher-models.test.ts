@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   customModel, defaultDetail, defaultLabel, effortChoices, effortRule, fitEffort, followedBinding, forgetCustomModel, launcherAgent, launcherModels, listedModel, listedModes, modelDetail,
-  modelName, modelRows, pickerLauncher, machineLaunchers, providerModels, startPicks, takesEffort, takesTypedModel, tierLeftOut, typedModelOffered, withoutCustom,
+  modelName, modelRows, nativeOmpStart, pickerLauncher, machineLaunchers, providerModels, startPicks, takesEffort, takesTypedModel, tierLeftOut, typedModelOffered, withoutCustom,
   type AgentModel, type LauncherModels,
 } from "./launcher-models";
 
@@ -275,6 +275,24 @@ describe("手动输入的模型 ID（#1644）", () => {
     expect(startPicks({ agent: "claude", list: null, model: "acme/coder-9", effort: "" })).toEqual({});
     expect(startPicks({ agent: "traex", list: undefined, model: "acme/coder-9", effort: "" })).toEqual({});
     expect(startPicks({ agent: "claude", list: typed, model: "vendor/model-x", effort: "" })).toEqual({ model: "vendor/model-x" });
+  });
+
+  it("offers a typed omp model only for a new, unlocked start", () => {
+    const list = { agent: "omp", models: [], supports_start_model: true };
+    const pick = { agent: "omp", model: "openai/gpt-5.2", effort: "high", nativeOmp: nativeOmpStart("omp", { name: "omp" }, "herdr") };
+    expect(typedModelOffered("omp", list)).toBe(false);
+    expect(startPicks({ ...pick, list })).toEqual({ model: pick.model });
+    expect(startPicks({ ...pick, list, model: "opus" })).toEqual({ model: "opus" });
+    expect(nativeOmpStart("omp", { name: "alias" }, "herdr")).toBe(false);
+    expect(nativeOmpStart("omp", { name: "omp", source: "paseo" }, "herdr")).toBe(false);
+    expect(nativeOmpStart("omp", { name: "omp" }, "herdr-core")).toBe(false);
+    expect(nativeOmpStart("codex", { name: "omp" }, "herdr")).toBe(false);
+    expect(startPicks({ ...pick, list: { ...list, locked: "Launcher fixes its model" } })).toEqual({});
+    expect(startPicks({ ...pick, list: null })).toEqual({});
+    expect(startPicks({ ...pick, list: undefined })).toEqual({});
+    expect(startPicks({ ...pick, list: { agent: "omp", models: [{ id: pick.model, name: "Listed" }] } })).toEqual({});
+    expect(startPicks({ ...pick, list: { ...list, supports_start_model: false } })).toEqual({});
+    expect(startPicks({ ...pick, list, model: "two words" })).toEqual({});
   });
 
   it("a typed ID's efforts aren't known: all of them", () => {

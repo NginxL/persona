@@ -666,6 +666,10 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 				s.Status = proto.StatusDone // as a loaded idle thread on an app-server (codex_remote.go)
 			}
 			s.ReadOnlyReason = holder + " 正在运行，但未提供共享入口；只能同步本地历史"
+		} else if m.turnOpen && !m.turnClosed && !m.turnActivityAt.IsZero() && time.Since(m.turnActivityAt) < codexFreshWorking && time.Since(m.turnActivityAt) >= -5*time.Minute {
+			// liveRollouts refreshes every 30s; when a rollout is actively writing an open turn between scans or on
+			// hosts where lsof misses it, keep StatusWorking instead of misreporting it as stopped (#12389).
+			s.Status = proto.StatusWorking
 		}
 		if c, t, err := n.codexOwner(id); err == nil {
 			elsewhere = true
@@ -685,6 +689,10 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			}
 			if t.model != "" {
 				s.Model = t.model
+			}
+			if cOwner, tOwner, driven := n.codexEffortThread(id); driven {
+				s.Model = n.codexModelNow(id, cOwner, tOwner, s.Model)
+				s.Capabilities.Model = proto.Bool(true)
 			}
 			s.Capabilities.Send, s.Capabilities.Attach = t.parent == "", t.parent == ""
 			s.Capabilities.Approve, s.Capabilities.Interrupt = t.joined, t.turn != "" && t.parent == ""
@@ -738,7 +746,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 				adopted = append(adopted, adoption{len(out), s.ParentThreadID, root})
 			}
 		}
-		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && n.codexResumableIn(context.Background(), id, pass) {
+		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && s.Status == proto.StatusOffline && n.codexResumableIn(context.Background(), id, pass) {
 			// Nothing has it open: a stopped agent, read-only like any (stopped.go, #4754); its terminal page's Resume
 			// brings it back in a new tab (session.start, codex_resume.go).
 			s.Capabilities.Terminal = true
@@ -746,7 +754,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			s.Capabilities.StopCause = n.stopCause(id)
 		}
 		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && !n.codexBlocked(id) {
-			s.Capabilities.Takeover = n.codexTakeoverRow(id, src, m, liveRollouts[id] != "")
+			s.Capabilities.Takeover = n.codexTakeoverRow(id, src, m, liveRollouts[id] != "" || s.Status == proto.StatusWorking)
 		}
 		if n.codexBlocked(id) {
 			markCodexConflict(&s)

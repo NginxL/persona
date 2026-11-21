@@ -1,5 +1,6 @@
 package persona.core.contracts.api
 
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 
 /** Same request ownership used by connector pages and model configuration. */
@@ -9,6 +10,8 @@ internal class ManagerProviderSetup(private val source: ProviderSetup, manager: 
     override val builtinPresets get() = source.builtinPresets
     override val launcherScope get() = source.launcherScope
     override val launcherImportParse get() = source.launcherImportParse
+    // Provider discovery performs manager-owned extension requests; collect that upstream work under the same owner.
+    override val secretReferencesAvailable get() = source.secretReferencesAvailable.flowOn(owner)
     override fun forManager(manager: String) = source.forManager(manager)
     override fun ownsMachine(id: String) = source.ownsMachine(id)
     override suspend fun presets() = withContext(owner) { source.presets() }

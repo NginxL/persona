@@ -3,6 +3,10 @@
 // not there once the hub has said which pages there are, and Settings › General › Start page lists the pages, saves a
 // choice to the hub and says why a chosen page does not open.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../ui/atoms", async (original) => ({ ...(await original<typeof import("../ui/atoms")>()), toast: vi.fn() }));
+import { toast } from "../ui/atoms";
+import { ApiError, errorText } from "../lib/api";
+import { t } from "../i18n";
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
@@ -34,6 +38,7 @@ const otherPlace = { extension: "example-notes", extension_name: "Notes", id: "n
 let places: unknown[];
 let navigation: { start?: string } | "missing";
 let puts: unknown[];
+let starredIndex: Promise<number> | undefined;
 let host: HTMLDivElement;
 let unmount = () => {};
 
@@ -45,11 +50,16 @@ beforeEach(() => {
   places = [todayPlace, otherPlace];
   navigation = {};
   puts = [];
+  starredIndex = undefined;
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
       const url = new URL(String(input), location.href);
+      if (url.pathname === "/api/v1/assistant/starred") {
+        const status = starredIndex ? await starredIndex : 404;
+        return Response.json(status === 200 ? { refs: [], can_write: true } : { error: "starred index unavailable" }, { status });
+      }
       if (url.pathname === "/api/v1/extensions/-/ui") return Response.json({ ui: places });
       if (url.pathname === "/api/v1/navigation") {
         if (navigation === "missing") return Response.json({ error: "not found" }, { status: 404 });
@@ -138,6 +148,25 @@ describe("opening on a page that is not there", { timeout: 30_000 }, () => {
     expect(location.pathname).toBe("/inbox");
   });
 
+  it.each([200, 404, 500])("settles a Starred start page only after a definitive index answer (HTTP %i)", async (status) => {
+    let resolve = (_status: number) => {};
+    starredIndex = new Promise<number>((done) => { resolve = done; });
+    const { hello, flush } = await open("starred", "sidebar", ["starred_messages"]);
+    await hello();
+    await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).includes("/assistant/starred?index=1"))).toBe(true));
+    expect(location.pathname).toBe("/starred");
+    resolve(status);
+    await flush();
+    expect(location.pathname).toBe(status === 404 ? "/" : "/starred");
+    expect(localStorage.getItem("persona.startPage")).toBe("starred");
+  });
+
+  it("gives way when the hub does not advertise Starred", async () => {
+    const { hello } = await open("starred", "sidebar", []);
+    await hello();
+    expect(location.pathname).toBe("/");
+  });
+
   it("keeps a built-in page, which is always there", async () => {
     const { hello } = await open("routines", "sidebar");
     expect(location.pathname).toBe("/routines");
@@ -173,6 +202,21 @@ describe("Settings › General › Start page", { timeout: 30_000 }, () => {
     expect(puts).toEqual([{ start: TODAY }]);
     expect(page.startPage()).toBe(TODAY);
     expect(select().value).toBe(TODAY);
+  });
+
+  it("puts the previous choice back and reports a refused save", async () => {
+    navigation = { start: "home" };
+    const { hello, act, page } = await open("home", "settings");
+    await hello();
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ error: "database down" }, { status: 503 }));
+    act(() => {
+      select().value = TODAY;
+      select().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    const error = new ApiError(503, "database down", { error: "database down" });
+    await vi.waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith(t("settings.start_page_failed", { error: errorText(error) }), "error"));
+    expect(page.startPage()).toBe("home");
+    expect(select().value).toBe("home");
   });
 
   it("says why a chosen page does not open, and keeps it chosen", async () => {

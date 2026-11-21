@@ -16,12 +16,12 @@ func TestLeaderToolWatchDoesNotCacheStateReadFailure(t *testing.T) {
 	ctx := context.Background()
 	cursor, _ := s.mcpChanges.snapshot()
 	s.mcpChanges.notify()
-	ft.st.failSetting = errors.New("database down")
+	ft.st.setFailSetting(errors.New("database down"))
 	failed := s.sessionMCPToolsSince(ctx, "mac", "leader", false, false, cursor)
 	if failed["error"] == nil || failed["revision"] != nil || failed["tools"] != nil {
 		t.Fatalf("failed state read became a cacheable empty list: %+v", failed)
 	}
-	ft.st.failSetting = nil
+	ft.st.setFailSetting(nil)
 	// No further task-link change: retrying the unconsumed cursor must recover.
 	recovered := s.sessionMCPToolsSince(ctx, "mac", "leader", false, false, cursor)
 	if recovered["error"] != nil || recovered["revision"] == nil || recovered["unchanged"] == true {

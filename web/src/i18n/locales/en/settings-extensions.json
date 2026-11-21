@@ -154,5 +154,15 @@
   "rule_remove": "Remove",
   "rule_remove_title": "Remove this rule?",
   "rule_remove_body": "The next time {launcher} on {machine} asks for it, you approve it again.",
-  "rule_removed": "Rule removed"
+  "rule_removed": "Rule removed",
+  "entry_untitled": "Entry {count}",
+  "entry_save_before_secret": "Save this entry before setting its secret.",
+  "entry_secret": "Secret",
+  "entry_remove": "Remove {entry}",
+  "entry_add": "Add entry",
+  "entry_editor_hint": "Each entry has its own secret, stored separately and never shown again.",
+  "entry_rebind_hint": "Saving a changed address clears that entry's secret.",
+  "entry_remove_title": "Remove “{entry}”?",
+  "entry_remove_body": "The entry and its saved secret are deleted when you save.",
+  "entry_remove_confirm": "Remove entry"
 }

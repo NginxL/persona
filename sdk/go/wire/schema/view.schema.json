@@ -117,7 +117,8 @@
         {"$ref": "#/$defs/ImageComponent"},
         {"$ref": "#/$defs/GridComponent"},
         {"$ref": "#/$defs/CarouselComponent"},
-        {"$ref": "#/$defs/GraphComponent"}
+        {"$ref": "#/$defs/GraphComponent"},
+        {"$ref": "#/$defs/SceneComponent"}
       ]
     },
     "TextComponent": {
@@ -560,6 +561,121 @@
     },
     "GraphLayout": {"description": "tree (the default): every node has at most one parent, children under it, a parent centred over its children. layered: a node may have several parents; each node sits one layer past its furthest parent (a plan whose steps wait for several others).", "type": "string", "enum": ["tree", "layered"]},
     "GraphDirection": {"description": "right (the default): roots at the start, children after them, so a wide fan-out reads down the screen like an outline. down: roots at the top, children below.", "type": "string", "enum": ["right", "down"]},
+    "SceneComponent": {
+      "description": "A small 3D model the person can turn, zoom and tap (UI version 11): a home with its rooms and furniture as simple shapes, each device pinned where it is with its state, and a light in the model for lamps that are on. The app builds it with its own engine; the extension sends shapes, never a model file or code. Metres; plan coordinates [x, y] with x east and y north, heights up from the floor; angles in degrees counter-clockwise from +x seen from above. Each pin counts as a component of the page; a view has at most one scene. In a card it is a still preview that opens full screen. An older app gets the poster as an image, or without one a row per pin.",
+      "type": "object", "x-since": 11,
+      "properties": {
+        "type": {"const": "scene"},
+        "key": {"type": "string", "maxLength": 128, "description": "Keeps the person's camera across redraws of the page."},
+        "alt": {"type": "string", "minLength": 1, "maxLength": 200, "description": "What the model shows, in a sentence: read out first, and shown when it cannot be drawn."},
+        "caption": {"type": "string", "maxLength": 2000},
+        "poster": {"$ref": "#/$defs/ImageSource", "description": "A picture of the model for an older app (an image in its place) and for share as image. Without it an older app gets a row per pin."},
+        "camera": {"$ref": "#/$defs/SceneCamera"},
+        "shapes": {"type": "array", "minItems": 1, "maxItems": 500, "items": {"$ref": "#/$defs/SceneShape"}},
+        "labels": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/SceneLabel"}},
+        "pins": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/ScenePin"}}
+      },
+      "required": ["type", "alt", "shapes"]
+    },
+    "SceneCamera": {
+      "description": "Where the model is first seen from (UI version 11), orthographic, around the centre of the shapes' bounding box. Each field has its default when absent.",
+      "type": "object",
+      "properties": {
+        "yaw": {"type": "number", "minimum": -360, "maximum": 360, "x-go-pointer": true, "description": "The camera's direction from the centre, in degrees counter-clockwise from +x (east): 225 (the default) stands south-west, looking north-east."},
+        "pitch": {"type": "number", "minimum": 10, "maximum": 90, "x-go-pointer": true, "description": "Degrees above the floor plane: 35 by default, 90 straight down."},
+        "zoom": {"type": "number", "minimum": 0.5, "maximum": 4, "x-go-pointer": true, "description": "1 (the default) fits the shapes' bounding box in the view; 2 draws it twice as large."}
+      }
+    },
+    "SceneShape": {
+      "description": "One shape of a scene (UI version 11), told apart by kind: a box, a cylinder or a prism, standing from bottom to top (metres above the floor, at least 0.005 apart). Without color, the material's own.",
+      "x-discriminator": "kind",
+      "oneOf": [
+        {"$ref": "#/$defs/SceneBox"},
+        {"$ref": "#/$defs/SceneCylinder"},
+        {"$ref": "#/$defs/ScenePrism"}
+      ]
+    },
+    "SceneBox": {
+      "description": "A box (UI version 11): at yaw 0, size[0] along +x and size[1] along +y. round rounds its corners seen from above (at most half the smaller size); the app bevels its upright edges no more than half its height.",
+      "type": "object",
+      "properties": {
+        "kind": {"const": "box"},
+        "center": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -500, "maximum": 500}},
+        "size": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0.01, "maximum": 1000}},
+        "yaw": {"type": "number", "minimum": -360, "maximum": 360, "x-go-pointer": true},
+        "round": {"type": "number", "minimum": 0, "maximum": 500, "x-go-pointer": true},
+        "bottom": {"type": "number", "minimum": -500, "maximum": 500, "x-go-pointer": true},
+        "top": {"type": "number", "minimum": -500, "maximum": 500, "x-go-pointer": true},
+        "color": {"$ref": "#/$defs/SceneColor"},
+        "material": {"$ref": "#/$defs/SceneMaterial"}
+      },
+      "required": ["kind", "center", "size", "bottom", "top"]
+    },
+    "SceneCylinder": {
+      "description": "An upright cylinder (UI version 11): a round table's top, a stool, a lamp's stem.",
+      "type": "object",
+      "properties": {
+        "kind": {"const": "cylinder"},
+        "center": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -500, "maximum": 500}},
+        "radius": {"type": "number", "minimum": 0.01, "maximum": 500},
+        "bottom": {"type": "number", "minimum": -500, "maximum": 500, "x-go-pointer": true},
+        "top": {"type": "number", "minimum": -500, "maximum": 500, "x-go-pointer": true},
+        "color": {"$ref": "#/$defs/SceneColor"},
+        "material": {"$ref": "#/$defs/SceneMaterial"}
+      },
+      "required": ["kind", "center", "radius", "bottom", "top"]
+    },
+    "ScenePrism": {
+      "description": "A floor plan's polygon raised from bottom to top (UI version 11): a room's floor, an L-shaped counter. The hub refuses a polygon that is not simple: a point twice, an edge shorter than 0.005, an edge folding back, edges that touch, an area under 0.0001.",
+      "type": "object",
+      "properties": {
+        "kind": {"const": "prism"},
+        "points": {"type": "array", "minItems": 3, "maxItems": 64, "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -500, "maximum": 500}}},
+        "bottom": {"type": "number", "minimum": -500, "maximum": 500, "x-go-pointer": true},
+        "top": {"type": "number", "minimum": -500, "maximum": 500, "x-go-pointer": true},
+        "color": {"$ref": "#/$defs/SceneColor"},
+        "material": {"$ref": "#/$defs/SceneMaterial"}
+      },
+      "required": ["kind", "points", "bottom", "top"]
+    },
+    "SceneColor": {"description": "A shape's own color, #RRGGBB in sRGB (UI version 11). A scene's shapes are content, like a picture's pixels: their colors are the extension's. Pins and every control around the model keep the app's colors.", "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+    "SceneMaterial": {"description": "How a shape's surface looks (UI version 11): matte (the default), glass (see-through), metal, screen (dark and glossy), tile and wood (the app's own pattern, in metres, in the shape's color).", "type": "string", "enum": ["matte", "glass", "metal", "screen", "tile", "wood"]},
+    "SceneLabel": {
+      "description": "A quiet name on the floor (UI version 11): a room's. Not tappable and not a component of the page; read out after alt.",
+      "type": "object",
+      "properties": {
+        "text": {"type": "string", "minLength": 1, "maxLength": 40},
+        "at": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -500, "maximum": 500}},
+        "height": {"type": "number", "minimum": 0, "maximum": 500, "x-go-pointer": true}
+      },
+      "required": ["text", "at"]
+    },
+    "ScenePin": {
+      "description": "A device in the model (UI version 11): a pin at its place with its label and state, in tone's role color or color's named color (never both); with light on, the model lights up around it. Tapping it does its action, as a tile's. state is required when a tone other than neutral, a color or a light that is on says something, so it never rides on color or light alone. A scene has at most 16 pins with a light on.",
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "at": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -500, "maximum": 500}},
+        "height": {"type": "number", "minimum": 0, "maximum": 500, "x-go-pointer": true, "description": "Metres above the floor: a ceiling lamp's 2.4, an AC's 2.2. 0 when absent."},
+        "label": {"type": "string", "minLength": 1, "maxLength": 80},
+        "state": {"type": "string", "maxLength": 40, "description": "In plain words: On, Off, 26 °C."},
+        "icon": {"$ref": "#/$defs/NavIcon"},
+        "tone": {"$ref": "#/$defs/Tone"},
+        "color": {"$ref": "#/$defs/Color"},
+        "light": {"$ref": "#/$defs/SceneLight"},
+        "action": {"$ref": "#/$defs/Action"}
+      },
+      "required": ["id", "at", "label"]
+    },
+    "SceneLight": {
+      "description": "A lamp's light (UI version 11): when on, the model is lit around the pin, warm or cool. Off (the default) adds no light.",
+      "type": "object",
+      "properties": {
+        "on": {"type": "boolean"},
+        "warmth": {"$ref": "#/$defs/SceneWarmth"}
+      }
+    },
+    "SceneWarmth": {"description": "warm (the default): a lamp's yellow light; cool: a white one.", "type": "string", "enum": ["warm", "cool"]},
     "ImageSource": {
       "description": "Where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref the extension serves itself (ui.image) through the hub; exactly one. path is written by the hub only, for a ref: its own address, which the app loads with its device credentials. An extension that writes path is refused.",
       "type": "object",

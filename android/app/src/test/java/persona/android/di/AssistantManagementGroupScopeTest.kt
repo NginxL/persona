@@ -18,6 +18,10 @@ class AssistantManagementGroupScopeTest {
         override suspend fun config() = AssistantConfig(machineId = "pro").also { calls += "$manager config" }
         override suspend fun updateConfig(update: AssistantConfigUpdate) =
             AssistantConfig(machineId = requireNotNull(update.machineId)).also { calls += "$manager update ${update.machineId}" }
+        override suspend fun mainAssistantLauncherList(machineId: String, refresh: Boolean) =
+            AssistantLaunchers(default = LauncherDefault(provider = "main-engine", model = "main-model", effort = "high")).also {
+                calls += "$manager main $machineId $refresh"
+            }
         override suspend fun endConversation(session: SessionKey) { calls += "$manager close ${session.machineId}/${session.sessionId}" }
         override suspend fun runTask(id: String) = SessionKey("pro", id).also { calls += "$manager run $id" }
         override suspend fun tasks() = emptyList<ScheduledTask>()
@@ -48,6 +52,19 @@ class AssistantManagementGroupScopeTest {
         assertEquals(SessionKey("pro~g0a1b2c3d", "task"), work.runTask("task"))
         grouped.warm()
         assertEquals(listOf("work config", "work update pro", "work close pro/main", "work run task", "unbound warm"), calls)
+    }
+
+    @Test fun mainCatalogPreservesManagerMachineAndRefreshAcrossGroupRouting() = runBlocking {
+        val calls = mutableListOf<String>()
+        val work = Management(calls).inGroup(GroupNames("g0a1b2c3d")).forManager("work")
+        val catalog = work.mainAssistantLauncherList("pro~g0a1b2c3d", refresh = true)
+        assertEquals(LauncherDefault("main-engine", "main-model", "high"), catalog.default)
+        assertEquals(listOf("work main pro true"), calls)
+    }
+
+    @Test fun theRoutedManagementForwardsTheIndependentMainCatalog() {
+        val routed = Class.forName("persona.android.di.RoutedAssistantManagement")
+        assertTrue(routed.declaredMethods.any { it.name == "mainAssistantLauncherList" })
     }
 
     @Test fun rebindingDefaultPreservesGroupAndPrimaryGroupRemainsIdentity() = runBlocking {

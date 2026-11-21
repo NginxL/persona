@@ -19,6 +19,8 @@ func TestStopCauseJSONAndResumeEligibility(t *testing.T) {
 		{name: "restart", cause: StopRestart, eligible: true},
 		{name: "resume failed", cause: StopResumeFailed, eligible: true},
 		{name: "compact failed", cause: StopCompactFailed, eligible: true},
+		{name: "gateway quota", cause: StopUsageLimit, eligible: true},
+		{name: "gateway capacity", cause: StopTransientError, eligible: true},
 		{name: "exit", cause: StopExit},
 		{name: "future", cause: StopCause("future_cause")},
 	}

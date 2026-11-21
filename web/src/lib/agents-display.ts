@@ -78,11 +78,17 @@ export function retryAgentsDisplay(): Promise<void> {
   return state.change === undefined ? refreshAgentsDisplay() : saveAgentsDisplay(state.change);
 }
 
+// A session-list refresh also refreshes display settings. Rows subscribe to
+// the choice they use so a fresh answer or error with the same choice does not
+// redraw them.
+const botmuxHidden = () => state.value?.show_botmux !== true;
+const herdrTabName = () => state.value?.use_herdr_tab_name === true;
+
 export function useBotmuxHidden(): boolean {
   // An unavailable preference might hide these sessions. Keep the last acknowledged choice.
-  return useAgentsDisplay().value?.show_botmux !== true;
+  return useSyncExternalStore(subscribe, botmuxHidden, botmuxHidden);
 }
 
 export function useHerdrTabName(): boolean {
-  return useAgentsDisplay().value?.use_herdr_tab_name === true;
+  return useSyncExternalStore(subscribe, herdrTabName, herdrTabName);
 }

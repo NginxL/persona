@@ -202,6 +202,7 @@ func (f *meshNode) handle(method string, params json.RawMessage) (any, error) {
 		SessionID string `json:"session_id"`
 		AfterSeq  *int   `json:"after_seq"`
 		Text      string `json:"text"`
+		ClientID  string `json:"client_msg_id"`
 	}
 	_ = json.Unmarshal(params, &p)
 	f.mu.Lock()
@@ -224,6 +225,11 @@ func (f *meshNode) handle(method string, params json.RawMessage) (any, error) {
 		return map[string]any{}, nil
 	case "session.send":
 		f.sent = append(f.sent, p.Text)
+		return map[string]any{"delivered": "yes"}, nil
+	case "session.a2a.send":
+		f.sent = append(f.sent, p.Text)
+		items := f.items[p.SessionID]
+		f.items[p.SessionID] = append(items, proto.Item{Seq: len(items) + 1, Role: "user", Kind: proto.KindText, Text: p.Text, ClientMsgID: p.ClientID})
 		return map[string]any{"delivered": "yes"}, nil
 	case "terminal.watch":
 		var c struct {

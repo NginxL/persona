@@ -1,0 +1,9 @@
+{
+  "err_input": "This message could not be saved. Open the conversation and try again.",
+  "err_text": "Only messages with text can be starred.",
+  "err_read_only": "This device can only view starred messages.",
+  "err_store": "Starred messages are temporarily unavailable.",
+  "err_limit": "You can keep up to {max} starred messages. Remove one to make room.",
+  "err_conflict": "Starred messages changed on another device. Try again.",
+  "err_backup_input": "This file is not a valid Persona starred messages backup."
+}

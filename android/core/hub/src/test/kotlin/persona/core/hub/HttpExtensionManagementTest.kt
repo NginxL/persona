@@ -128,6 +128,39 @@ class HttpExtensionManagementTest {
         }
     }
 
+    @Test fun savesAnExplicitReferenceAndRemovesAConfirmedHandoffRule() = withHub { server, api ->
+        server.enqueue(MockResponse().setBody(detail))
+        api.setSecretReference("example-notes", "api_key", "op://Dev/Notes/new")
+        server.takeRequest().let {
+            assertEquals("PUT", it.method)
+            assertEquals("/api/v1/plugins/example-notes/-/secrets/api_key", it.path)
+            assertEquals("""{"reference":"op://Dev/Notes/new"}""", it.body.readUtf8())
+        }
+        server.enqueue(MockResponse().setBody(detail))
+        api.removeHandoffRule("example-vault", "0123456789abcdef")
+        server.takeRequest().let {
+            assertEquals("DELETE", it.method)
+            assertEquals("/api/v1/plugins/example-vault/-/handoff-rules/0123456789abcdef", it.path)
+        }
+        assertTrue(runCatching { api.removeHandoffRule("example-vault", "../bad") }.exceptionOrNull() is IllegalArgumentException)
+    }
+
+    @Test fun modernRoutesSaveAReferenceAndRemoveAHandoffRule() = withHub(legacy = false) { server, api ->
+        server.enqueue(MockResponse().setBody(detail))
+        api.setSecretReference("example-notes", "api_key", "op://Dev/Notes/new")
+        server.takeRequest().let {
+            assertEquals("PUT", it.method)
+            assertEquals("/api/v1/extensions/example-notes/-/secrets/api_key", it.path)
+            assertEquals("""{"reference":"op://Dev/Notes/new"}""", it.body.readUtf8())
+        }
+        server.enqueue(MockResponse().setBody(detail))
+        api.removeHandoffRule("example-vault", "0123456789abcdef")
+        server.takeRequest().let {
+            assertEquals("DELETE", it.method)
+            assertEquals("/api/v1/extensions/example-vault/-/handoff-rules/0123456789abcdef", it.path)
+        }
+    }
+
     // What the phone says of itself in every view's context; a fixed one so the bodies are exact.
     private val device = ExtensionUiContext(tz = "Asia/Shanghai", locale = "zh-Hans-CN", platform = "android", uiVersion = 2)
     private val deviceJson = """"tz":"Asia/Shanghai","locale":"zh-Hans-CN","platform":"android","ui_version":2"""

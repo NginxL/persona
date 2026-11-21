@@ -137,6 +137,8 @@ type ProviderInfo struct {
 	Hosts     []string    `json:"hosts"`
 	State     string      `json:"state"`
 	LinkKinds []LinkLabel `json:"link_kinds,omitempty"`
+	// Capabilities are an extension provider's optional answers (pr_status: repo.pr_status, #11584).
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type Parsed struct {

@@ -52,8 +52,15 @@ class TasksStorePushInterceptsTest {
         override suspend fun retryTask(todoId: String): Todo = error("unused")
         override suspend fun removeTask(todoId: String) = Unit
         override suspend fun route(conversation: String, todoId: String, text: String): FeedItem = error("unused")
-        override suspend fun today(conversation: String): FeedItem = error("unused")
-        override suspend fun mainConversation(): String? = null
+        val todayCalls = java.util.concurrent.atomic.AtomicInteger(0)
+        var todayGate: CompletableDeferred<Unit>? = null
+        var mainId: String? = "main"
+        override suspend fun today(conversation: String): FeedItem {
+            todayCalls.incrementAndGet()
+            todayGate?.await()
+            return FeedItem("today-$conversation", conversation = conversation, kind = "today", ref = "2026-11-14")
+        }
+        override suspend fun mainConversation(): String? = mainId
         override suspend fun inboxReply(itemId: String, text: String, card: String?) = Unit
     }
 
@@ -127,5 +134,39 @@ class TasksStorePushInterceptsTest {
         first.join()
         assertFalse(store.heldPushesLoading.value)
         scope.cancel()
+    }
+
+    @Test fun concurrentLoadTodayDeduplicatesWithoutRaceAndClearsInFlightOnCancellation() = runBlocking {
+        val api = Api(false, emptyList())
+        val gate = CompletableDeferred<Unit>()
+        api.todayGate = gate
+        val workerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val store = TasksStore(api, Connection(), workerScope, clock = Clock.fixed(now, ZoneId.of("Asia/Shanghai")))
+        try {
+            val callers = (0 until 64).map { idx ->
+                launch(Dispatchers.Default) {
+                    store.loadToday("conv-${idx % 16}")
+                    store.loadTodayIfMain("main")
+                }
+            }
+            callers.forEach { it.join() }
+            gate.complete(Unit)
+            val deadline = System.nanoTime() + 5_000_000_000L
+            while (store.feeds.value.size < 17 && System.nanoTime() < deadline) yield()
+            // 16 distinct conv-* + 1 "main", each asked once despite 64 concurrent callers across worker threads
+            assertEquals(17, api.todayCalls.get())
+            assertEquals(17, store.feeds.value.size)
+        } finally {
+            workerScope.cancel()
+        }
+
+        val cancelGate = CompletableDeferred<Unit>()
+        api.todayGate = cancelGate
+        val cancelScope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val cancellingStore = TasksStore(api, Connection(), cancelScope, clock = Clock.fixed(now, ZoneId.of("Asia/Shanghai")))
+        cancellingStore.loadToday("cancelled-conv")
+        assertEquals(18, api.todayCalls.get())
+        cancelScope.cancel()
+        assertTrue(cancelGate.isActive)
     }
 }

@@ -16,6 +16,8 @@
     <string name="phonetools_source_device_detail">システム、バッテリー、ストレージ、ネットワーク</string>
     <string name="phonetools_source_notifications">通知</string>
     <string name="phonetools_source_notifications_detail">ローカル通知を送信し、Personaの現在の通知を確認</string>
+    <string name="phonetools_source_calls">電話</string>
+    <string name="phonetools_source_calls_detail">確認後にダイヤラーを開きます。自動では発信しません</string>
     <string name="phonetools_status_unavailable">利用不可</string>
     <string name="phonetools_status_granted">許可済み</string>
     <string name="phonetools_status_partial">一部許可</string>
@@ -45,6 +47,7 @@
     <string name="phonetools_deny">拒否</string>
     <string name="phonetools_confirm_channel">スマートフォンの操作の確認</string>
     <string name="phonetools_confirm_notification">スマートフォンの操作を確認してください</string>
+    <string name="phonetools_call_start">%1$s に発信</string>
     <string name="phonetools_messages_channel">Claudeからの通知</string>
     <string name="phonetools_calendar_new">新しい予定「%1$s」</string>
     <string name="phonetools_calendar_all_day">%1$s（終日）</string>

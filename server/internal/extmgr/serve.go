@@ -23,6 +23,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extension/uistream"
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -699,6 +700,12 @@ func (h *Manager) AgentTools(ctx context.Context, assistant bool) (agents, assis
 		assistantOnly = append(assistantOnly, h.iphoneTools()...)
 		assistantOnly = append(assistantOnly, h.subscriptionTools()...)
 		assistantOnly = append(assistantOnly, h.connectors.ToolsFor(ctx, false)...)
+	}
+	for _, list := range [][]proto.Tool{agents, assistantOnly} {
+		for i, t := range list {
+			localized := prompts.LocalizeTool(prompts.MCPTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema}, string(i18n.From(ctx)))
+			list[i].Description, list[i].InputSchema = localized.Description, localized.InputSchema
+		}
 	}
 	return agents, assistantOnly
 }

@@ -71,6 +71,10 @@ func (s *Service) FeishuMessage(ctx context.Context, p FeishuMessage) error {
 			s.feishuElsewhere(ev, st) // the owner's "@bot /ai …" from a group that is not opted in (feishu_elsewhere.go)
 			return
 		}
+		if p.From == FeishuFromRead {
+			s.feishuRead(ev, st) // the owner's "@bot /read …" from a group (feishu_read.go)
+			return
+		}
 		s.feishuMessage(ev, st, p.Action)
 	}()
 	return nil
@@ -108,6 +112,9 @@ func (s *Service) feishuMessage(ev feishubot.MessageEvent, st FeishuStatus, acti
 	}
 	if !content.Forward && s.acceptReply(ctx, msg.MessageID, content.Text, len(content.Media) > 0, msg.ParentID, msg.RootID) {
 		return // about a "Please verify" card (acceptance_reply.go)
+	}
+	if !content.Forward && len(content.Media) == 0 && s.botApproveOwnerAction(ctx, ev, content.Text, action) {
+		return // an exact direct reply to an owner-action proposal (owner_action_reply.go)
 	}
 	if !content.Forward && len(content.Media) == 0 && s.botAnswerQuestion(ctx, msg.MessageID, content.Text, action, msg.RootID, msg.ParentID) {
 		return // the answer to the card waiting in this topic (feishu_text_answer.go)
@@ -242,9 +249,6 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 		}
 	}
 	to := topic.target()
-	s.fbot.mu.Lock()
-	_, ours := s.fbot.st.Threads[msg.ParentID]
-	s.fbot.mu.Unlock()
 	// The media to pass on: this message's own, then the pictures and files of the message it quotes (the owner
 	// replies to a picture to ask about it), each downloaded with the message it is in.
 	type botMedia struct {
@@ -256,7 +260,7 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 	for _, md := range content.Media {
 		media = append(media, botMedia{of: msg.MessageID, Media: md})
 	}
-	if msg.ParentID != "" && !ours && topic == nil {
+	if msg.ParentID != "" && topic == nil {
 		var quoted []feishubot.Media
 		in.Quote, quoted = s.botQuote(ctx, msg.ParentID, lang)
 		for _, md := range quoted {
@@ -334,13 +338,28 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 		}()
 	}
 
-	run := &channel.Run{ID: "fb_" + msg.MessageID, Channel: channel.Feishu, ReplyTo: msg.MessageID, Started: time.Now().UTC(), Label: rt.label,
-		Probe: botProbe(content.Text, in), Ext: map[string]string{}}
+	ext := map[string]string{}
+	if topic != nil {
+		ext["chat"], ext["thread"] = topic.Chat, topic.Thread
+	}
+	if err := s.startBotRun(ctx, rt, t, msg.MessageID, text, images, botProbe(content.Text, in), reaction, ext); err != nil {
+		return err
+	}
+	started = true
+	return nil
+}
+
+// startBotRun sends text (with its pictures) for the owner's message messageID into the target's conversation, or
+// starts one, and starts the run that answers it. ext are the run's channel values besides the reaction (where the
+// answer goes: runTo).
+func (s *Service) startBotRun(ctx context.Context, rt resolvedTarget, t botTarget, messageID, text string, images []proto.Image, probe, reaction string, ext map[string]string) error {
+	run := &channel.Run{ID: "fb_" + messageID, Channel: channel.Feishu, ReplyTo: messageID, Started: time.Now().UTC(), Label: rt.label,
+		Probe: probe, Ext: ext}
+	if run.Ext == nil {
+		run.Ext = map[string]string{}
+	}
 	if reaction != "" {
 		run.Ext["reaction"] = reaction
-	}
-	if topic != nil {
-		run.Ext["chat"], run.Ext["thread"] = topic.Chat, topic.Thread
 	}
 	if rt.isNew {
 		sess, err := s.Start(ctx, StartParams{Text: text, Images: images, Main: rt.main, Origin: OriginChannel, OriginRef: channel.Feishu})
@@ -358,7 +377,7 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 			run.TargetKind = targetPersona
 		}
 		run.Base = s.lastSeq(ctx, rt.machine, sid)
-		id := channel.ClientMsgID(channel.Feishu, msg.MessageID)
+		id := channel.ClientMsgID(channel.Feishu, messageID)
 		run.MsgIDs = []string{id}
 		p := map[string]any{"session_id": sid, "text": text, "client_msg_id": id}
 		if len(images) > 0 {
@@ -366,6 +385,7 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 		}
 		if !t.agent() {
 			s.UserSpoke(ctx, SessionRef{MachineID: rt.machine, SessionID: sid})
+			var err error
 			if p, err = s.SendParams(ctx, SendParams{MachineID: rt.machine, SessionID: sid, Params: p}); err != nil {
 				return err
 			}
@@ -374,7 +394,6 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 			return err
 		}
 	}
-	started = true
 	s.startChannelRun(run)
 	return nil
 }
@@ -407,7 +426,7 @@ func (s *Service) botQuote(ctx context.Context, id string, lang i18n.Lang) (*pro
 	if c.Text == "" {
 		c.Text = "[" + it.MsgType + "]"
 	}
-	return &prompts.BotQuote{Who: who, Text: clip(c.Text, 4000)}, c.Media
+	return &prompts.BotQuote{ID: id, Who: who, Text: clip(c.Text, 4000)}, c.Media
 }
 
 // botForward reads a merged forward: one line per message, oldest first.

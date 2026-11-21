@@ -159,6 +159,31 @@ func anySearch(targets []string, values ...string) bool {
 	}
 	return false
 }
+
+// The exact TRAE selectors name two different harnesses. All other harness queries still match names and IDs by substring.
+func matchesHarness(targets []string, id, label string) bool {
+	if len(targets) == 0 {
+		return true
+	}
+	for _, target := range targets {
+		switch target {
+		case "trae":
+			if id == "trae" {
+				return true
+			}
+		case "traex", "traecli", "trae-cli":
+			if id == "traex" {
+				return true
+			}
+		default:
+			if strings.Contains(id, target) || strings.Contains(label, target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func normalizedDocument(d SearchDocument) SearchDocument {
 	d.Title = strings.ToLower(d.Title)
 	d.Project = strings.ToLower(d.Project)
@@ -314,7 +339,7 @@ func (i *Index) searchResult(o Options, decoded map[*record]decodedDocument) (*r
 			state = rd.doc.State
 		}
 		name := strings.ToLower(ctx.MachineNames[row.item.Machine])
-		if !anySearch(q.machines, strings.ToLower(row.item.Machine), name) || !anySearch(q.projects, rd.lower.Project, rd.lower.Cwd) || !anySearch(q.harnesses, rd.lower.Harness, rd.lower.HarnessLabel) || !anySearch(q.models, rd.lower.Model) || (len(q.states) > 0 && !slices.Contains(q.states, state)) || (q.pinned && !ctx.Pinned[rowID]) || (q.errors && !rd.doc.HasErrors && state != "needs_you" && !ctx.Errors[rowID]) {
+		if !anySearch(q.machines, strings.ToLower(row.item.Machine), name) || !anySearch(q.projects, rd.lower.Project, rd.lower.Cwd) || !matchesHarness(q.harnesses, rd.lower.Harness, rd.lower.HarnessLabel) || !anySearch(q.models, rd.lower.Model) || (len(q.states) > 0 && !slices.Contains(q.states, state)) || (q.pinned && !ctx.Pinned[rowID]) || (q.errors && !rd.doc.HasErrors && state != "needs_you" && !ctx.Errors[rowID]) {
 			return nil
 		}
 		activeAt := record.item.UpdatedAt // when the text searched was written: a side's own time

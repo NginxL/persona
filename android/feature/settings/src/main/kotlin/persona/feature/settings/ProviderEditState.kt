@@ -123,6 +123,7 @@ internal fun providerDraftOf(l: HubLauncher): NewProviderDraft {
         proxyMode = mode, proxy = l.proxy.orEmpty(), noProxy = if (mode == ProxyMode.Direct) "" else noProxy,
         viaMachine = l.viaMachine.orEmpty(),
         customModel = l.customModel.orEmpty(), customModelName = l.customModelName.orEmpty(), customModelDescription = l.customModelDescription.orEmpty(),
+        apiKeyByReference = l.keyReference != null,
     )
 }
 
@@ -170,7 +171,8 @@ internal fun providerUpdate(d: NewProviderDraft, old: HubLauncher, scope: ScopeF
         args = if (api) emptyList() else d.argumentValues(),
         auth = if (openAi) "api_key" else d.auth,
         agent = d.agent.takeIf { !api && it.isNotBlank() && it != "claude" },
-        apiKey = d.apiKey.trim().takeIf { it.isNotEmpty() },
+        apiKey = d.apiKey.trim().takeIf { !d.apiKeyByReference && it.isNotEmpty() },
+        apiKeyReference = d.apiKey.trim().takeIf { d.apiKeyByReference && it.isNotEmpty() },
         // The models are compared as a whole: a model's own window or thinking level changing is a change of the list.
         models = now.models.takeIf { it != before.models },
         opusModel = changed { it.opus }, sonnetModel = changed { it.sonnet }, haikuModel = changed { it.haiku }, fableModel = changed { it.fable },
@@ -179,7 +181,8 @@ internal fun providerUpdate(d: NewProviderDraft, old: HubLauncher, scope: ScopeF
         proxy = changed { it.proxy }, noProxy = changed { it.noProxy },
         timeoutMs = changed { it.timeout }, compactWindow = changed { it.compact }, maxContext = changed { it.maxContext },
         effort = changed { it.effort },
-        share = scope.share, scopeMachines = scope.scopeMachines, delivery = scope.delivery, ownService = scope.ownService, machineKeys = scope.machineKeys,
+        share = scope.share, scopeMachines = scope.scopeMachines, delivery = scope.delivery, ownService = scope.ownService,
+        machineKeys = scope.machineKeys, machineKeyReferences = scope.machineKeyReferences,
         viaMachine = d.viaMachine.takeIf { api && it != old.viaMachine.orEmpty() },
     )
 }
@@ -203,7 +206,8 @@ internal fun NewProvider.withExtras(d: NewProviderDraft, scope: ScopeFields): Ne
         proxy = e.proxy.set().takeIf { launch }, noProxy = e.noProxy.set().takeIf { launch },
         timeoutMs = e.timeout.set().takeIf { launch }, compactWindow = e.compact.set().takeIf { launch }, maxContext = e.maxContext.set().takeIf { launch },
         effort = e.effort.set().takeIf { launch },
-        share = scope.share, scopeMachines = scope.scopeMachines, delivery = scope.delivery, ownService = scope.ownService, machineKeys = scope.machineKeys,
+        share = scope.share, scopeMachines = scope.scopeMachines, delivery = scope.delivery, ownService = scope.ownService,
+        machineKeys = scope.machineKeys, machineKeyReferences = scope.machineKeyReferences,
     )
 }
 

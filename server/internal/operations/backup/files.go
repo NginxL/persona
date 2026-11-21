@@ -18,7 +18,7 @@ var optionalRootFiles = []string{
 	"tailcat.json", "link.json", "daemons.json", "docker/db-password",
 }
 
-var optionalRuntimeDirectories = []string{"extensions", "skills", "hub.machines_kept"}
+var optionalRuntimeDirectories = []string{"extensions", "skills", "hub.machines_kept", "tls"}
 
 // userContentDirectories hold the owner's files (installed extensions and
 // skills), copied in full like the knowledge base: a name such as yarn.lock or

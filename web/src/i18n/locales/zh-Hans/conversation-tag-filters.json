@@ -1,0 +1,12 @@
+{
+  "customize": "自定义标签过滤…",
+  "placeholder": "输入精确标签",
+  "add": "添加过滤",
+  "remove": "移除过滤「{tag}」",
+  "reset": "恢复全部在用标签",
+  "done": "完成",
+  "empty": "没有标签过滤项",
+  "too_long": "标签最多 {max} 个字符。",
+  "count_limit": "最多保留 {max} 个标签过滤项。",
+  "save_failed": "没能保存标签过滤：{error}"
+}

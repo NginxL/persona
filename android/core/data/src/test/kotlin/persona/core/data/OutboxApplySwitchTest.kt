@@ -59,6 +59,17 @@ class OutboxApplySwitchTest {
         sender.close()
     }
 
+    @Test fun theDatabaseKeepsUnknownProvenanceAndRejectsAChangedDuplicate() = runTest {
+        val store = RoomOutboxStore(database, scope)
+        val entry = OutboxEntry("shared", session, "shared text", createdAt = 1, via = "future-source")
+        store.enqueue(entry)
+        assertEquals("future-source", RoomOutboxStore(database, scope).entries.first().single().via)
+        val changed = runCatching { store.enqueue(entry.copy(via = "other-source")) }.exceptionOrNull()
+        assertTrue(changed is IllegalArgumentException)
+        assertTrue(changed?.message?.contains("Operation id reused with different parameters") == true)
+
+    }
+
     @Test fun onlyThatMessageGoesWithApplySwitch() = runTest {
         val hub = Hub(online = false)
         val sender = OutboxMessageSender(scope, MemoryOutboxStore(), hub, backgroundScope)

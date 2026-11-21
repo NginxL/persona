@@ -31,6 +31,9 @@ func TestClientPaneSourceCases(t *testing.T) {
 	if got := Of(proto.Session{Host: "cindy"}); got != "desktop" {
 		t.Fatalf("cindy origin=%q, want desktop", got)
 	}
+	if got := Of(proto.Session{Host: "t3code"}); got != "desktop" {
+		t.Fatalf("t3code origin=%q, want desktop", got)
+	}
 }
 
 // ChatBridge is every pane Of calls "feishu", and a terminal pane of the herdr session a chat bridge runs its agents in

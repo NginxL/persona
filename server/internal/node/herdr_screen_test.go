@@ -262,7 +262,7 @@ func TestHerdrModesRefusals(t *testing.T) {
 			t.Errorf("%s: queued effort reply = %v, %v", id, reply, err)
 		}
 	}
-	if err := setModes(t, n, sidC, "plan", ""); err == nil || !strings.Contains(err.Error(), "Codex / TRAEX") {
+	if err := setModes(t, n, sidC, "plan", ""); err == nil || !strings.Contains(err.Error(), "Codex / TRAE CLI") {
 		t.Errorf("codex: %v", err)
 	}
 	if err := setModes(t, n, sidA, "sideways", ""); err == nil {

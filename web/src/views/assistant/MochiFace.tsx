@@ -1,8 +1,9 @@
 // Mochi, the default persona (docs/apple/persona.md "Built-in drawing"): the app icon's white blob waving on its paper disc (a dark
 // disc in the dark), outlined in ink, with its orange cheek. The same drawing as the app's PersonaFace (Mochi), in the
 // icon's 1024 px coordinates moved into the disc, so the two stay one picture. It keeps the icon's colors (the
-// --mochi-* tokens in styles.css), not the page's accent. Each state reads from its first frame alone; the motion runs
-// in face-motion.ts (Web Animations) and stops with reduced motion.
+// --mochi-* tokens in styles.css), not the page's accent; asleep (offline) it turns gray with its eyes shut
+// (--mochi-sleep-*), its outline and shadow from their own tokens so the dark disc keeps its ink edge (#12090). Each
+// state reads from its first frame alone; the motion runs in face-motion.ts (Web Animations) and stops with reduced motion.
 import { useId } from "react";
 import type { PersonaState } from "../../lib/persona";
 import { cx } from "../../ui/atoms";
@@ -68,8 +69,8 @@ export function MochiFace({ size, state = "idle", className }: { size: number; s
         )}
         <g className={state === "needs_you" ? "mochi-rock" : undefined} style={{ transformOrigin: PIVOT }}>
           <g transform={INTO_DISC}>
-            <ellipse cx="490" cy="800" rx="265" ry="19" fill="var(--mochi-shadow)" filter={`url(#${id}s)`} />
-            <path d={BODY} fill={`url(#${id}b)`} stroke={offline ? "var(--mochi-sleep-ink)" : "var(--mochi-outline)"} strokeWidth={stroke} strokeLinejoin="round" />
+            <ellipse cx="490" cy="800" rx="265" ry="19" fill={offline ? "var(--mochi-sleep-shadow)" : "var(--mochi-shadow)"} filter={`url(#${id}s)`} />
+            <path d={BODY} fill={`url(#${id}b)`} stroke={offline ? "var(--mochi-sleep-outline)" : "var(--mochi-outline)"} strokeWidth={stroke} strokeLinejoin="round" />
             <ellipse cx="312" cy="556" rx={37 * k} ry={33.3 * k} fill={offline ? "var(--mochi-sleep-cheek)" : "var(--mochi-cheek)"} />
             {!compact && <path d={GLOSS} fill="none" stroke="#fff" strokeWidth={stroke * 0.6} strokeLinecap="round" />}
             {!compact &&

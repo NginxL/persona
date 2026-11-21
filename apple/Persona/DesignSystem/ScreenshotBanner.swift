@@ -41,9 +41,12 @@ extension View {
 struct ScreenshotBannerContent: View {
     /// The row the lockup stands in: from the top by `top`, `height` tall; nil centres it in the whole banner.
     var row: (top: CGFloat, height: CGFloat)?
+    /// The name the page's bar says (the Assistant chat's, with another assistant's conversation its own); nil: whose
+    /// page it is (`AppModel.assistantTitleName`, #12243).
+    var name: String? = nil
 
     var body: some View {
-        PersonaBrandLockup(size: .banner)
+        PersonaBrandLockup(size: .banner, name: name)
             .padding(.horizontal, Theme.Space.l)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: row?.height)

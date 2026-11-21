@@ -311,7 +311,7 @@ struct UserBubble: View, Equatable {
         }
         .lookUpFiles(d.asked)
         .frame(maxWidth: .infinity, alignment: .trailing)
-        .messageActionBar(id: item.id, text: shown, isUser: true, date: item.ts)
+        .messageActionBar(id: item.id, text: shown, isUser: true, date: item.ts, starItem: item)
     }
 }
 
@@ -368,7 +368,7 @@ struct PeerMessage: View {
             .padding(.trailing, Theme.Space.xxl)
             .chatPinned(pinKey)
             .messageLongPress(id: item.id) { card }
-            .messageActionBar(id: item.id, text: item.text ?? "", isUser: false, date: item.ts, from: from)
+            .messageActionBar(id: item.id, text: item.text ?? "", isUser: false, date: item.ts, from: from, starItem: item)
     }
 
     /// The message in its card (also what a long press lifts).
@@ -763,7 +763,7 @@ struct AssistantText: View, Equatable {
         // A single line break is one, as in the terminal and Claude's web chat (#2088): not a space.
         .markdownSoftBreakMode(.lineBreak)
         .lookUpFiles(d.asked)
-        .messageActionBar(id: item.id, text: item.text ?? "", isUser: false, date: item.ts)
+        .messageActionBar(id: item.id, text: item.text ?? "", isUser: false, date: item.ts, starItem: item)
         #if os(macOS)
         // Under an answer, while the pointer is over it: Copy, and Quote where the chat quotes (#2113). Not under an
         // agent's words between its steps (`quiet`).

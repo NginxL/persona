@@ -61,7 +61,11 @@ func (t PlanTask) linkSource() (source, via string) {
 // linkPlanAgent links the agent just started for plan task t to its todo.
 func (s *Service) linkPlanAgent(ctx context.Context, t PlanTask, mid, sid string, allowDone bool) error {
 	source, via := t.linkSource()
-	return s.linkTodoAgentWithSourceAllowingDone(ctx, t.TodoID, mid, sid, t.Title, t.Cwd, t.startedAgent, "", source, via, allowDone)
+	err := s.linkTodoAgentWithSourceAllowingDone(ctx, t.TodoID, mid, sid, t.Title, t.Cwd, t.startedAgent, "", source, via, allowDone)
+	if err == nil && !allowDone {
+		s.estimateAdmitted(ctx, t, mid, sid)
+	}
+	return err
 }
 
 // leaderTask is the open task agent machine/session leads, with the agent's own row; false for any other agent.
@@ -211,7 +215,7 @@ func (s *Service) runtimeLeaderTools(ctx context.Context, machine, session strin
 			return nil
 		}
 	}
-	return leaderToolList()
+	return localizedMCPTools(leaderToolList(), s.toolLanguage(ctx))
 }
 
 // leaderTools are the tools only a task leader's agent gets, on top of any agent's: none for any other agent.
@@ -220,7 +224,7 @@ func (s *Service) leaderTools(ctx context.Context, machine, session string) []pr
 		return nil
 	}
 	if _, _, ok := s.leaderTask(ctx, machine, session); ok {
-		return leaderToolList()
+		return localizedMCPTools(leaderToolList(), s.toolLanguage(ctx))
 	}
 	if revision, _ := ctx.Value(revisionDiscoveryKey{}).(bool); revision {
 		return nil // a revision-aware peer recovers through its cursor, never through the legacy startup wait
@@ -237,7 +241,7 @@ func (s *Service) leaderTools(ctx context.Context, machine, session string) []pr
 		case <-time.After(100 * time.Millisecond):
 		}
 		if _, _, ok := s.leaderTask(ctx, machine, session); ok {
-			return leaderToolList()
+			return localizedMCPTools(leaderToolList(), s.toolLanguage(ctx))
 		}
 	}
 	return nil
@@ -267,11 +271,12 @@ type leaderScope struct {
 	agent TodoAgent
 }
 
-// leaderTaskIn is a worker task as a task leader may plan it: nothing else (no todo_id, role, attachments, project,
-// user_requested…) is read, an unknown field is refused.
+// leaderTaskIn is a worker task as a task leader may plan it: nothing else (no todo_id, attachments, project,
+// user_requested…) is read, an unknown field is refused. Every new worker declares role "worker".
 type leaderTaskIn struct {
 	Title         string   `json:"title"`
 	Prompt        string   `json:"prompt"`
+	Role          string   `json:"role"`
 	Machine       string   `json:"machine"`
 	MachinePolicy string   `json:"machine_policy"`
 	Cwd           string   `json:"cwd"`
@@ -296,12 +301,12 @@ func (l *leaderScope) workerTasks(args json.RawMessage) ([]PlanTask, error) {
 	dec := json.NewDecoder(bytes.NewReader(args))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&in); err != nil {
-		return nil, fmt.Errorf("a task leader's task_plan takes only the fields its schema lists; todo_id, role, attachments and "+
+		return nil, fmt.Errorf("a task leader's task_plan takes only the fields its schema lists; todo_id, attachments and "+
 			"any other are refused, and workers can only be new tasks beneath your own task (%v)", err)
 	}
 	out := make([]PlanTask, 0, len(in.Tasks))
 	for _, t := range in.Tasks {
-		pt := PlanTask{Title: t.Title, Prompt: t.Prompt, Machine: t.Machine, MachinePolicy: t.MachinePolicy, Cwd: t.Cwd,
+		pt := PlanTask{Title: t.Title, Prompt: t.Prompt, Role: t.Role, Machine: t.Machine, MachinePolicy: t.MachinePolicy, Cwd: t.Cwd,
 			Launcher: t.Launcher, Model: t.Model, Tier: t.Tier, Effort: t.Effort, Speed: t.Speed, Permission: t.Permission, Readonly: t.Readonly,
 			DoneWhen: t.DoneWhen, Goal: t.Goal, ExpectMinutes: t.ExpectMinutes, Why: t.Why, Parent: l.task.ID, Project: l.task.Project}
 		if strings.TrimSpace(pt.Machine) == "" {
@@ -654,12 +659,13 @@ func (s *Service) leaderTaskReview(ctx context.Context, machine, session string,
 // and no other task is reachable: it is the leader's direct worker (its ledger names this leader) or nothing.
 func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.RawMessage) (string, error) {
 	var a struct {
-		TodoID    string        `json:"todo_id"`
-		Verdict   string        `json:"verdict"`
-		Checks    []ReviewCheck `json:"checks"`
-		Note      string        `json:"note"`
-		Reason    string        `json:"reason"`
-		Recommend string        `json:"recommend"`
+		TodoID     string        `json:"todo_id"`
+		Verdict    string        `json:"verdict"`
+		ReworkKind string        `json:"rework_kind"`
+		Checks     []ReviewCheck `json:"checks"`
+		Note       string        `json:"note"`
+		Reason     string        `json:"reason"`
+		Recommend  string        `json:"recommend"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(args))
 	dec.DisallowUnknownFields()
@@ -667,10 +673,17 @@ func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.Ra
 		return "", fmt.Errorf("a task leader's task_review takes only the fields its schema lists (%v)", err)
 	}
 	a.Note = strings.TrimSpace(a.Note)
+	a.ReworkKind = strings.TrimSpace(a.ReworkKind)
 	switch a.Verdict {
 	case reviewAccepted, reviewRework, reviewNeedsUser, reviewCancelled:
 	default:
 		return "", errors.New("verdict must be accepted, rework, needs_user or cancelled")
+	}
+	if a.ReworkKind != "" && a.Verdict != reviewRework {
+		return "", errors.New("rework_kind applies to rework only")
+	}
+	if !validReworkKind(a.ReworkKind) {
+		return "", errors.New("rework_kind must be external_input, substantive_new, repeated_error or low_roi_edge")
 	}
 	if a.Verdict == reviewRework && a.Note == "" && !slices.ContainsFunc(a.Checks, func(c ReviewCheck) bool { return !c.Met }) {
 		return "", errors.New("rework: say what is missing (a check that is not met, or note)")
@@ -699,7 +712,8 @@ func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.Ra
 			checks = append(checks, c)
 		}
 	}
-	verdict, note, over := a.Verdict, clip(a.Note, 2000), false
+	verdict, note := a.Verdict, clip(a.Note, 2000)
+	over, overSafetyCap, overCount := false, false, 0
 	var criteriaErr error
 	v, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
 		if verdict == reviewAccepted {
@@ -707,13 +721,15 @@ func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.Ra
 				return false
 			}
 		}
-		if verdict == reviewRework && v.Round >= maxReworkRounds {
-			verdict, over = reviewNeedsUser, true
+		if verdict == reviewRework {
+			if blocked, safetyCap, count := v.reworkBlocked(a.ReworkKind); blocked {
+				verdict, over, overSafetyCap, overCount = reviewNeedsUser, true, safetyCap, count
+			}
 		}
 		r := TaskReview{At: time.Now().UTC(), Verdict: verdict, Checks: checks, Note: note}
 		if verdict == reviewRework {
-			v.Round++
-			r.Round = v.Round
+			round, stalled := v.applyReworkAccounting(a.ReworkKind)
+			r.Round, r.ReworkKind, r.StalledReworkRounds = round, a.ReworkKind, stalled
 		}
 		v.State = verdict
 		v.Reviews = append(v.Reviews, r)
@@ -740,7 +756,7 @@ func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.Ra
 	b := &s.supervise
 	b.mu.Lock()
 	b.init()
-	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigOrphaned, sigEstimateDue} {
+	for _, k := range []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigTimedOut, sigOrphaned, sigEstimateDue} {
 		delete(b.pending, t.ID+"|"+k) // reviewed: what waited is answered
 	}
 	b.mu.Unlock()
@@ -770,24 +786,42 @@ func (s *Service) leaderReview(ctx context.Context, lead TodoAgent, args json.Ra
 		return fmt.Sprintf("Worker task %s is accepted and closed; its agent is stopped once it stays still (its terminal stays).", t.ID), nil
 	case reviewNeedsUser:
 		why := cmp.Or(clip(oneLine(a.Reason), 200), clip(oneLine(note), 200))
+		n := cmp.Or(overCount, maxReworkRounds)
 		if over && a.Reason == "" {
-			why = fmt.Sprintf("sent back %d times already, still short: %s", maxReworkRounds, clip(oneLine(note), 160))
+			why = fmt.Sprintf("sent back %d times already, still short: %s", n, clip(oneLine(note), 160))
 		}
 		s.signal(superviseSignal{Todo: t.ID, Kind: sigDecide, To: up, Key: fmt.Sprintf("decide@%d@%s", v.Round, time.Now().UTC().Format(time.RFC3339Nano)),
 			Detail: why, Ask: clip(oneLine(a.Recommend), 200)})
 		if over {
+			if overSafetyCap {
+				return fmt.Sprintf("Worker task %s was sent back %d times already (overall rework safety cap %d): it now waits for a decision, which went up to whoever handed "+
+					"you your task. Review it again once the answer reaches you.", t.ID, n, maxTotalReworkRounds), nil
+			}
 			return fmt.Sprintf("Worker task %s was sent back %d times already: it now waits for a decision, which went up to whoever handed "+
-				"you your task. Review it again once the answer reaches you.", t.ID, maxReworkRounds), nil
+				"you your task. Review it again once the answer reaches you.", t.ID, n), nil
 		}
 		return fmt.Sprintf("Worker task %s waits for a decision, which went up to whoever handed you your task. You are told what "+
 			"they decide; no card went to the user.", t.ID), nil
 	}
-	text := prompts.RenderSuperviseRework(prompts.SuperviseRework{Round: v.Round, Max: maxReworkRounds, Checks: reworkChecks(checks), Note: note})
+	displayMax := maxTotalReworkRounds
+	if isStalledReworkKind(a.ReworkKind) && v.Round <= maxReworkRounds {
+		displayMax = maxReworkRounds
+	}
+	text := prompts.RenderSuperviseRework(prompts.SuperviseRework{Round: v.Round, Max: displayMax, Checks: reworkChecks(checks), Note: note})
 	sent, err := s.sendToTask(ctx, t, text)
 	if err != nil {
 		return "", fmt.Errorf("recorded rework round %d, but sending it to the worker failed: %v", v.Round, err)
 	}
-	return fmt.Sprintf("Rework round %d of %d: %s. Its next stop comes back to you as a supervision message.", v.Round, maxReworkRounds, sent), nil
+	stalled := v.stalledReworkRounds()
+	if isStalledReworkKind(a.ReworkKind) && v.Round == stalled {
+		return fmt.Sprintf("Rework round %d of %d: %s. Its next stop comes back to you as a supervision message.", v.Round, maxReworkRounds, sent), nil
+	}
+	if a.ReworkKind != "" {
+		return fmt.Sprintf("Rework round %d of %d (%s; stalled/low-ROI %d of %d): %s. Its next stop comes back to you as a supervision message.",
+			v.Round, maxTotalReworkRounds, a.ReworkKind, stalled, maxReworkRounds, sent), nil
+	}
+	return fmt.Sprintf("Rework round %d of %d (stalled/low-ROI %d of %d): %s. Its next stop comes back to you as a supervision message.",
+		v.Round, maxTotalReworkRounds, stalled, maxReworkRounds, sent), nil
 }
 
 // agentSupervisedSession: the open task agent machine/session works for is supervised by a task leader's agent.

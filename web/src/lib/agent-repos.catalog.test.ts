@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { buildRepoMachineTree, hasWorkspacePin, sessionWorkspace, showsWorktreeLevel, type RepoCatalogOptions, type RepoWorktree } from "./agent-repos";
-import { repoMachinesByUpdate } from "./agent-sort";
 import type { HostWorkspace } from "./workspace-catalog";
 import type { Machine, Session } from "./types";
 
@@ -43,9 +42,6 @@ describe("catalog-backed By repo projection", () => {
     expect(parent.workspace?.pinned_at).toBeUndefined();
     expect(parent.children.map((w) => w.workspace?.source_id)).toEqual(["pinned-child", "ordinary-child"]);
     expect(tree[0].repos[0].worktrees[1].workspace?.source_id).toBe("main");
-    const updated = repoMachinesByUpdate(tree);
-    expect(updated[0].repos.map((r) => r.name)).toEqual(["Zeta", "Alpha"]);
-    expect(updated[0].repos[0].worktrees[0].children.map((w) => w.workspace?.source_id)).toEqual(["pinned-child", "ordinary-child"]);
     expect(rows([], options(catalog, { search: "ordinary" })).map((w) => w.workspace?.source_id))
       .toEqual(["ordinary", "parent", "ordinary-child"]);
   });

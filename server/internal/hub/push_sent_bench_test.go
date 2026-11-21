@@ -45,9 +45,9 @@ func BenchmarkPushRecordSent(b *testing.B) {
 		b.Fatal(err)
 	}
 	p := newPusher(b.TempDir(), database, b.Logf)
-	p.lnMu.Lock()
+	p.gradingMu.Lock()
 	loaded := len(p.sent)
-	p.lnMu.Unlock()
+	p.gradingMu.Unlock()
 	if loaded != pushSentMax {
 		b.Fatalf("loaded %d delivered pushes, want %d", loaded, pushSentMax)
 	}

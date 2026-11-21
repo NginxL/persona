@@ -53,10 +53,17 @@ if args[:2] == ["api", "graphql"]:
     with open(log_path, "a") as log:
         log.write(json.dumps(entry) + "\n")
     sys.exit(0)
-if args[:1] == ["api"] and len(args) > 1 and any(args[1].endswith(suffix) for suffix in ("/comments", "/reviews", "/commits")) and "--input" not in args:
+if args[:2] == ["api", "user"]:
+    print("watcher-self")
+    entry["returncode"] = 0
+    with open(log_path, "a") as log:
+        log.write(json.dumps(entry) + "\n")
+    sys.exit(0)
+if args[:1] == ["api"] and len(args) > 1 and any(args[1].split("?", 1)[0].endswith(suffix) for suffix in ("/comments", "/reviews", "/commits")) and "--input" not in args:
+    api_path = args[1].split("?", 1)[0]
     records = {"issues/7/comments": state.get("comments", []), "pulls/7/comments": state.get("review_comments", []),
-               "pulls/7/reviews": state.get("reviews", []), "pulls/7/commits": state.get("commits", [])}[args[1].split("repos/example/one/", 1)[1]]
-    print("\n".join(json.dumps(record) for record in records))
+               "pulls/7/reviews": state.get("reviews", []), "pulls/7/commits": state.get("commits", [])}[api_path.split("repos/example/one/", 1)[1]]
+    print(json.dumps(records))
     entry["returncode"] = 0
     with open(log_path, "a") as log:
         log.write(json.dumps(entry) + "\n")
@@ -263,6 +270,44 @@ class WatcherIntegrationTests(unittest.TestCase):
         calls = self.run_watch()
         self.assertFalse(any(call.get("review") for call in calls))
         self.assertFalse(any(call.get("argv", [])[:2] == ["pr", "merge"] for call in calls))
+
+    def enable_human_reviews(self):
+        config = json.loads(self.config_path.read_text())
+        config["repositories"][0]["respect_human_reviews"] = True
+        self.config_path.write_text(json.dumps(config))
+
+    def put_review(self, state_name, login="maintainer", user_type="User"):
+        state = json.loads(self.state_path.read_text())
+        state["reviews"] = [{"id": 9, "state": state_name, "commit_id": self.head,
+                            "submitted_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "user": {"login": login, "type": user_type}}]
+        self.state_path.write_text(json.dumps(state))
+
+    def test_human_approval_merges_without_invoking_the_reviewer_or_posting(self):
+        self.enable_human_reviews()
+        self.put_review("APPROVED")
+        calls = self.run_watch()
+        self.assertEqual(json.loads(self.state_path.read_text())["pr"]["state"], "MERGED")
+        self.assertFalse(any("reviewer" in call for call in calls))
+        self.assertFalse(any(call.get("argv", [])[:2] in (["pr", "review"], ["pr", "comment"])
+                             for call in calls))
+
+    def test_human_change_request_does_not_review_or_merge(self):
+        self.enable_human_reviews()
+        self.put_review("CHANGES_REQUESTED")
+        calls = self.run_watch()
+        self.assertEqual(json.loads(self.state_path.read_text())["pr"]["state"], "OPEN")
+        self.assertFalse(any("reviewer" in call for call in calls))
+        self.assertFalse(any(call.get("argv", [])[:2] == ["pr", "merge"] for call in calls))
+        self.assertFalse(any(call.get("argv", [])[:2] in (["pr", "review"], ["pr", "comment"])
+                             for call in calls))
+
+    def test_bot_approval_is_ignored_and_the_normal_review_runs(self):
+        self.enable_human_reviews()
+        self.put_review("APPROVED", login="ci-bot", user_type="Bot")
+        calls = self.run_watch()
+        self.assertTrue(any("reviewer" in call for call in calls))
+        self.assertEqual(json.loads(self.state_path.read_text())["pr"]["state"], "MERGED")
 
 
 if __name__ == "__main__":

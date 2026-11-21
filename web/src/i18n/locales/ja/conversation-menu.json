@@ -23,5 +23,6 @@
   "make_leader_confirm": "常駐にする（確認）",
   "make_leader_confirm_detail": "このチャットは常駐に移り、「最近」には出なくなります。",
   "end_leader_confirm": "常駐をやめる（確認）",
-  "end_leader_confirm_detail": "チャットは「最近」に戻ります。進行中のタスクはメインチャットの監督に戻り、終了や削除はされません。"
+  "end_leader_confirm_detail": "チャットは「最近」に戻ります。進行中のタスクはメインチャットの監督に戻り、終了や削除はされません。",
+  "arrange_chats": "並べ替え"
 }

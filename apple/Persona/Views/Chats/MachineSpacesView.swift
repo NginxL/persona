@@ -47,7 +47,7 @@ struct MachineSpacesView: View {
             if groups.isEmpty {
                 Section {
                     EmptyStateView(symbol: machine?.symbol ?? Theme.Icon.machine, title: String(localized: "No agents running [Machine Spaces View e5db75]"),
-                                   message: machine?.online == false ? String(localized: "This machine is offline.") : String(localized: "Start Claude, Codex, or TRAEX in herdr on this machine and it shows up here."))
+                                   message: machine?.online == false ? String(localized: "This machine is offline.") : String(localized: "Start Claude, Codex, or TRAE CLI in herdr on this machine and it shows up here."))
                 }
                 .listRowBackground(Color.clear)
             }

@@ -179,7 +179,7 @@ class RealInboxRepository(
                                 if (draft.text.isNotBlank() && restored.outbox.none { it.request.clientId == draft.clientId }) {
                                     restored = restored.enqueue(InboxPendingReply(
                                         ReplyTarget.Lark("thread:${key.removePrefix("lark:thread-pending:")}"),
-                                        ReplyRequest(draft.text, draft.clientId), state = "unknown"))
+                                        ReplyRequest(draft.text, draft.clientId, mentions = draft.mentions), state = "unknown"))
                                 }
                             }
                             restored
@@ -594,19 +594,21 @@ class RealInboxRepository(
         val transport = requireTransport()
         val document = journal.read(transport.scope)
         // A reply refused because its mail target changed must be confirmed again under a new identifier.
-        fun restored(text: String, clientId: String) =
-            if (document.outbox.any { it.request.clientId == clientId && it.state == "target_changed" }) ReplyDraft(text)
-            else ReplyDraft(text, clientId)
-        return document.drafts[target.storageKey()]?.let { restored(it.text, it.clientId).copy(ai = it.ai) }
+        fun restored(text: String, clientId: String, mentions: List<LarkMention>) =
+            if (document.outbox.any { it.request.clientId == clientId && it.state == "target_changed" })
+                ReplyDraft(text, mentions = mentions)
+            else ReplyDraft(text, clientId, mentions = mentions)
+        return document.drafts[target.storageKey()]?.let { restored(it.text, it.clientId, it.mentions).copy(ai = it.ai) }
             ?: document.outbox.lastOrNull { it.target == target && it.state != "sent" }?.let {
-                restored(it.request.text, it.request.clientId)
+                restored(it.request.text, it.request.clientId, it.request.mentions)
             }
     }
     override suspend fun saveDraft(target: ReplyTarget, draft: ReplyDraft) {
         val transport = requireTransport()
         val version = refreshLock.withLock { (target as? ReplyTarget.Inbox)?.let { versions[it.itemId] } }
         val saved = journal.update(transport.scope) {
-            it.copy(drafts = it.drafts + (target.storageKey() to InboxStoredDraft(draft.text, draft.clientId, version, draft.ai)))
+            it.copy(drafts = it.drafts + (target.storageKey() to
+                InboxStoredDraft(draft.text, draft.clientId, version, draft.ai, draft.mentions)))
         }
         if (owns(transport)) publishLocal(saved)
     }
@@ -918,7 +920,7 @@ class RealInboxRepository(
             else if (mailTarget != null && actualTarget is ReplyTarget.Inbox)
                 asItem(replied) { transport.replyMail(InboxItemKey.hubId(actualTarget.itemId), request.text, request.clientId, mailTarget) }
             else named { transport.reply((actualTarget as? ReplyTarget.Inbox)?.itemId?.let(InboxItemKey::hubId),
-                (actualTarget as? ReplyTarget.Lark)?.feedId, request.text, request.clientId) }
+                (actualTarget as? ReplyTarget.Lark)?.feedId, request.text, request.clientId, request.mentions) }
             val result = response.obj("message") ?: response
             if (response.string("state") in setOf("pending", "unknown") || result.string("state") in setOf("pending", "unknown")) {
                 val uncertain = journal.update(transport.scope) { it.transition(request.clientId, "unknown") }

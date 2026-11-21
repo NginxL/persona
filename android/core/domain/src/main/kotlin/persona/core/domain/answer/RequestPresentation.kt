@@ -26,7 +26,9 @@ fun Interaction.requestSourceLabel(): CoreText? = listOfNotNull(
  * offers it ("Always allow this session"), and another agent's card (Codex, a compatible CLI, a runtime's) only when
  * its TUI names what it would allow ([Interaction.alwaysLabel]), as on iOS and the web.
  */
-val Interaction.offersAlways: Boolean get() = alwaysHonored ?: (!fromOtherAgent || !alwaysLabel.isNullOrBlank())
+val Interaction.offersAlways: Boolean
+    get() = if (isSecretHandoff) !alwaysLabel.isNullOrBlank() && secretHandoff?.variables?.isNotEmpty() == true
+    else alwaysHonored ?: (!fromOtherAgent || !alwaysLabel.isNullOrBlank())
 
 /**
  * A permission card that needs its fields filled in (a password) before it can be allowed, so no quick answer
@@ -34,18 +36,20 @@ val Interaction.offersAlways: Boolean get() = alwaysHonored ?: (!fromOtherAgent 
  * card in its conversation: a password card's ([Interaction.isSecretRun], #1137) own Run (#1581), any other card's
  * fields form ([hasFieldsForm], #4641).
  */
-val Interaction.needsFieldValues: Boolean get() = kind == "permission" && (isSecretRun || fields.orEmpty().any { !it.optional })
+val Interaction.needsFieldValues: Boolean
+    get() = kind == "permission" && (isSecretRun || isSecretHandoff || fields.orEmpty().any { !it.optional })
 
 /**
  * A permission card that declares fields, other than a password card: in its conversation it is a form, one field per
  * declared field (secret ones masked), answered with Deny or Fill In & Allow and never Always (#4641, as iOS
  * `PermissionInputForm`; docs/protocol/protocol.md "Permission cards that need filling in").
  */
-val Interaction.hasFieldsForm: Boolean get() = kind == "permission" && !isSecretRun && !fields.isNullOrEmpty()
+val Interaction.hasFieldsForm: Boolean
+    get() = kind == "permission" && !isSecretRun && !isSecretHandoff && !fields.isNullOrEmpty()
 
 /** The button for it: Claude's "Always allow this session", another agent's "Always allow" (what it allows is shown beside it). */
 val Interaction.alwaysActionLabel: CoreText
-    get() = CoreText.of(if (!fromOtherAgent) Key.AlwaysAllowSession else Key.AlwaysAgree)
+    get() = CoreText.of(if (!fromOtherAgent && !isSecretHandoff) Key.AlwaysAllowSession else Key.AlwaysAgree)
 
 /** Describe the remembered rule, retaining the scope supplied by other agents. */
 val Interaction.alwaysScopeDetail: CoreText?

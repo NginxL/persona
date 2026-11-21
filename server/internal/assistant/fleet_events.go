@@ -14,7 +14,7 @@ import (
 
 // NodeEvent takes a node's event before the hub does (devices.Options.Event); false: the hub does not get it (the
 // manager tells it what follows instead).
-func (s *Service) NodeEvent(machine, event string, params json.RawMessage) bool {
+func (s *Service) nodeEvent(machine, event string, params json.RawMessage) bool {
 	if event == "launchers.changed" {
 		s.launchersChanged(machine)
 		return false
@@ -105,7 +105,7 @@ func (s *Service) NodeEvent(machine, event string, params json.RawMessage) bool 
 }
 
 // NodeRequest answers what of a node's requests is the manager's (devices.Options.Answer, with NodeAnswer's).
-func (s *Service) NodeRequest(ctx context.Context, machine, method string, params json.RawMessage) (any, bool, error) {
+func (s *Service) nodeRequest(ctx context.Context, machine, method string, params json.RawMessage) (any, bool, error) {
 	if err := s.conversationParamsAvailable(ctx, machine, params); err != nil {
 		return nil, true, err
 	}

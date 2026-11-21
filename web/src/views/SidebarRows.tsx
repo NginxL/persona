@@ -29,13 +29,14 @@ import { UltraMark } from "./chat/Ultracode";
 import { contextMenuProps } from "../ui/context-menu";
 import type { MenuAt } from "../ui/menu-model";
 import { rowDetail, useAgentDetails } from "../lib/context-usage";
-import { SessionMark } from "../ui/AgentMark";
+import { AgentMark, SessionMark } from "../ui/AgentMark";
 import { AgentAvatar } from "./agents/AgentAvatar";
 import { useFolded } from "../lib/use-folded";
 import { ariaKeyshortcuts, formatChord } from "../lib/shortcuts";
 import { PagedSessionList } from "./agents/PagedSessionList";
 import { runtimeIdentity } from "../lib/runtime-list";
 import { heldSeen } from "../lib/seen-outbox";
+import { heldLaunchWorking, launchForSession } from "../lib/launch-handoff";
 import { runningChildren } from "../lib/child-sessions";
 import { childCards, foldedRow } from "../lib/folded-rows";
 import { countSides } from "../lib/side-fold";
@@ -125,11 +126,11 @@ export function SubHeading({ label, folded, onToggle, help }: { label: string; f
   );
 }
 
-type NavRowProps = { onMenu?: (at: MenuAt, el: HTMLElement, button: boolean) => void; menuLabel?: string; k: string; reg: RegFn; hover: (k: string | null) => void; active: boolean; to: Route; go: GoFn; icon: IconName; label: string; badge?: number | string; badgeTone?: keyof typeof BADGE_CLASS; /** Spoken for the badge in place of its digits (NavPage). */ badgeLabel?: string; hint?: string; hintCount?: { n: number; label: string }; title?: string; /** A state shown as a dot before the hint ("Automatic"'s rows: some run). */ dot?: AgentState; /** A page's icon color (NavPage.color, #10822). */ color?: UIColor };
+type NavRowProps = { onMenu?: (at: MenuAt, el: HTMLElement, button: boolean) => void; menuLabel?: string; k: string; reg: RegFn; hover: (k: string | null) => void; active: boolean; to: Route; go: GoFn; icon: IconName; /** Engine mark ID shown in place of `icon` (e.g. a starting agent placeholder's resolved engine). */ agent?: string; label: string; badge?: number | string; badgeTone?: keyof typeof BADGE_CLASS; /** Spoken for the badge in place of its digits (NavPage). */ badgeLabel?: string; hint?: string; hintCount?: { n: number; label: string }; title?: string; /** A state shown as a dot before the hint ("Automatic"'s rows: some run). */ dot?: AgentState; /** A page's icon color (NavPage.color, #10822). */ color?: UIColor };
 
 // The pages take nothing from the sessions, yet every sessions push re-renders the sidebar: memoized like SessionRow
 // (sameProps), a page row renders again only when its own props change (a badge, the highlight).
-export const NavRow = memo(function NavRow({ k, reg, hover, active, to, go, icon, label, badge, badgeTone, badgeLabel, hint, hintCount, title, onMenu, menuLabel, dot, color }: NavRowProps) {
+export const NavRow = memo(function NavRow({ k, reg, hover, active, to, go, icon, agent, label, badge, badgeTone, badgeLabel, hint, hintCount, title, onMenu, menuLabel, dot, color }: NavRowProps) {
   // one ref for the row's life, so a re-render does not let go of it and register it again (useGlide's reg)
   const ref = useMemo(() => reg(k), [reg, k]);
   const link = (
@@ -146,7 +147,7 @@ export const NavRow = memo(function NavRow({ k, reg, hover, active, to, go, icon
       className={cx("relative z-10 flex w-full items-center gap-2 rounded-[7px] px-2 sidebar-row transition-transform duration-150 active:scale-[0.98] [@media(pointer:coarse)]:min-h-11", active && CURRENT_ROW)}
     >
       <span className={active ? "text-ink" : "text-ink-3"} style={pageIconStyle(color, active)}>
-        <Icon name={icon} size={14} stroke={1.8} />
+        {agent ? <AgentMark agent={agent} size={14} decorative /> : <Icon name={icon} size={14} stroke={1.8} />}
       </span>
       <span className={cx("min-w-0 flex-1 truncate text-[13px]", active ? "font-medium text-ink" : "text-ink-2")}>{label}</span>
       {dot && <StatusMark state={dot} size="sm" />}
@@ -256,9 +257,11 @@ export const SessionRow = memo(function SessionRow({ s: row, k, reg, hover, acti
   const justAnswered = useStore((st) => lastAnsweredAt(st.answered, given.machine_id, given.session_id));
   const pending = useStore((st) => answerPending(st.answered, given.machine_id, given.session_id));
   // seen on this page and not yet recorded by the hub (lib/seen-outbox.ts): the paged list's rows come from the list
-  // itself, not the store, so the row holds it seen too
+  // itself, not the store, so the row holds it seen too; newly launched first-turn sessions stay working across handoff (#12380)
   const seenMark = useStore((st) => st.seen[runtimeIdentity(given)]);
-  const s = heldSeen(answeredSession(given, Boolean(ix), justAnswered, pending), seenMark, Date.now());
+  const launch = useStore((st) => launchForSession(st.launches, given));
+  const nowHandoff = Date.now();
+  const s = heldLaunchWorking(heldSeen(answeredSession(given, Boolean(ix), justAnswered, pending), seenMark, nowHandoff), launch, nowHandoff);
   const preferTab = useHerdrTabName();
   const title = sessionTitle(s, preferTab);
   const titleDetail = sessionTitleDetail(s, preferTab);

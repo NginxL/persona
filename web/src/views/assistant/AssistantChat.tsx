@@ -7,7 +7,7 @@ import { api, errorText } from "../../lib/api";
 import { assistantInfoText, conversationKey, effectiveLauncher, shortModel, usePickedLauncher } from "../../lib/assistant-chat";
 import { isBackgroundSupervisor } from "../../lib/background-supervisor";
 import { COMPACT_FEATURE, compactBody, compactionView, compactPath, NEW_MAIN_FEATURE, type CompactionView } from "../../lib/compaction";
-import { runtimeFallbackText } from "../../lib/model-config";
+import { runtimeFallbackText } from "../../lib/runtime-fallback";
 import { personaState } from "../../lib/persona";
 import { conversationPage } from "../../lib/conversation-page";
 import { lazyPage } from "../../lib/lazy-page";

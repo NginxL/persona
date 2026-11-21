@@ -150,6 +150,11 @@ func Check(ctx context.Context, url string) error {
 	return nil
 }
 
+// BackendPIDs are the server process ids of this pool's open connections. A
+// process that must tell its own sessions from another writer's (the hub,
+// quiescing its own writers for a snapshot) passes them as the ones to ignore.
+func (d *DB) BackendPIDs() []int32 { return d.pids.list() }
+
 // appName is the application_name a part's connections give Postgres, so a part can tell the other's connections
 // (and ones of a build from before, which give none) on a database they share (managerdb.go).
 func appName(sets Sets) string {
@@ -536,7 +541,8 @@ func (d *DB) TruncateForTest(ctx context.Context) error {
 		"device_tokens", "live_activities", "phone_tools", "phone_write_queue", "node_sessions", "mail_accounts", "interactions",
 		"settings", "inbox_items", "kb_entities", "connector_secrets", "machine_systems", "machine_metrics", "sent_messages",
 		"todos", "todo_agents", "deleted_request_gates", "assistant_always", "machine_trust", "hub_settings", "manager_outbox", "handed_over",
-		"machine_audit", "sent_as_user", "session_work_events", "hub_push_sent", "urgent_calls", "model_usage"})
+		"machine_audit", "sent_as_user", "session_work_events", "hub_push_sent", "urgent_calls", "model_usage", "conversation_histories",
+		"assistant_conversation_spaces", "logical_conversations", "conversation_segment_closures", "conversation_prepared_candidates"})
 	if err != nil {
 		return err
 	}

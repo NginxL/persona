@@ -1,5 +1,4 @@
-import { lazy, Suspense, useState } from "react";
-import { useCanDeleteConversation } from "../lib/conversation-delete";
+import { lazy, Suspense } from "react";
 // A Persona conversation's menu in the sidebar (the iOS sidebar's long press, Android's drawer): "设为常驻" / "取消常驻",
 // "Rename…", "Archive", "Copy session ID", then "End…" while it runs. The main conversation is never a lead, renamed or
 // archived; the background supervisor (#5082, lib/background-supervisor.ts) is built in and only has "Copy session ID".
@@ -9,8 +8,7 @@ import { api, enc, errorText, sessionPath } from "../lib/api";
 import { sessionTitle } from "../lib/format";
 import { refreshAssistant } from "../lib/store";
 import type { Session } from "../lib/types";
-import { copyText, Dialog, Loading, Menu, toast, type MenuItem, type ToastAction } from "../ui/atoms";
-import type { MenuAt } from "../ui/menu-model";
+import { copyText, Dialog, Loading, toast, type MenuItem, type ToastAction } from "../ui/atoms";
 import { t } from "../i18n";
 
 /** What the hub does for the menu; tests swap it. */
@@ -152,16 +150,6 @@ export function conversationMenuItems(s: Session, o: { main: boolean; leader?: b
       : []),
   ];
 }
-
-/** The menu of a row (`at`: where a right click opened it; without it, beside `anchor`). */
-export function ConversationRowMenu({ s, main, leader, builtIn, anchor, at, onClose }: { s: Session; main: boolean; leader?: boolean; builtIn?: boolean; anchor: HTMLElement; at?: MenuAt; onClose: () => void }) {
-  const p = at ?? { anchor };
-  const canDelete = useCanDeleteConversation(s, main, builtIn);
-  const [deleting, setDeleting] = useState(false);
-  if (deleting) return <ConversationDeleteConfirmation s={s} onClose={onClose} />;
-  return <Menu anchor={p.anchor ?? null} point={p.point} onClose={onClose} align="right" width={200} items={conversationMenuItems(s, { main, leader, builtIn, canDelete, onDelete: () => setDeleting(true) })} />;
-}
-
 
 const DeleteConversationDialog = lazy(() => import("./DeleteConversationDialog").then((m) => ({ default: m.DeleteConversationDialog })));
 

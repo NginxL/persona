@@ -25,7 +25,23 @@ describe("a failed start's reason", () => {
     expect(startFailurePlain("  ")).toBeUndefined();
     expect(startFailureRowLine("exit status 1")).toBe(t("assistant-tasks.start_failed_details"));
     expect(startFailureRowLine("rpc: connection closed")).toBe(t("assistant-tasks.start_cause_connection_lost"));
-    expect(startFailureCardLine("rpc: connection closed")).toBe(t("assistant-tasks.start_failed", { error: t("assistant-tasks.start_cause_connection_lost") }));
-    expect(startFailureCardLine("exit status 1")).toBe(t("assistant-tasks.start_failed_details"));
+    expect(startFailureCardLine("rpc: connection closed", false)).toBe(t("assistant-tasks.start_failed", { error: t("assistant-tasks.start_cause_connection_lost") }));
+    expect(startFailureCardLine("exit status 1", true)).toBe(t("assistant-tasks.start_failed_details"));
+    expect(startFailureCardLine("exit status 1", false)).toBe(t("assistant-tasks.start_failed_short"));
+  });
+
+  it("uses the continuation cause without displaying the internal prefix", () => {
+    const stop = "continues: cannot stop agent timeout-computer/session on to-do prior-task:";
+    const confirm = "continues: cannot confirm agent example-computer/session stopped:";
+    const reasons = [
+      "Close the previous session, then try again.",
+      "请先关闭之前的会话，然后重试。", // i18n-ignore: synthetic hub text
+      "前の会話を閉じてからやり直してください。", // i18n-ignore: synthetic hub text
+    ];
+    for (const reason of reasons) expect(startFailurePlain(`${stop} ${reason}`)).toBe(reason);
+    expect(startFailurePlain(`${confirm} rpc: connection closed`)).toBe(t("assistant-tasks.start_cause_connection_lost"));
+    expect(startFailurePlain(`${confirm} its computer is unavailable`)).toBe(t("assistant-tasks.start_cause_offline"));
+    expect(startFailurePlain(`${stop} exit status 1`)).toBeUndefined();
+    expect(startFailurePlain("continues: unrecognized wrapper with 内部 ID")).toBeUndefined(); // i18n-ignore: synthetic hub text
   });
 });

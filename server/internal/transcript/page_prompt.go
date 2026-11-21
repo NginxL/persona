@@ -5,6 +5,9 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+// IsPagePrompt shares PageTurns' user-question boundary with durable history readers.
+func IsPagePrompt(it proto.Item) bool { return pagePrompt(it) }
+
 // pagePrompt counts a user question, not a model turn awakened by Persona. The
 // hub adds injected metadata after paging, so older transcripts need the same
 // template recognition here. Explicit user/session provenance protects quoted

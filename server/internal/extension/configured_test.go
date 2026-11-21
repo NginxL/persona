@@ -364,8 +364,9 @@ func TestSettingsCheckSettingsMoved(t *testing.T) {
 	r.SettingsCheck = func(ctx context.Context, p *Extension, config json.RawMessage, secrets map[string]string) error {
 		if !moved && secrets["api_key"] == "key-checked-slowly" {
 			moved = true
+			live := r.Get(p.Record.ID)
 			r.mu.Lock()
-			p.Record.Config = json.RawMessage(`{"base_url":"https://other.example.com"}`) // saved by someone else meanwhile
+			live.Record.Config = json.RawMessage(`{"base_url":"https://other.example.com"}`) // saved by someone else meanwhile
 			r.mu.Unlock()
 		}
 		return nil

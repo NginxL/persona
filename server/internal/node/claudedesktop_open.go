@@ -73,6 +73,7 @@ func (n *Node) sendThroughDesktopApp(ctx context.Context, id, text string, image
 				if _, err := os.Stat(p.socket); err == nil {
 					if cur != id {
 						log.Printf("send %s: the desktop app went on in %s", id, cur)
+						n.transferDesktopSettings(id, cur)
 					}
 					return n.sendOpened(ctx, cur, text, images)
 				}
@@ -114,4 +115,23 @@ func (n *Node) desktopTranscript(local, id string) string {
 		}
 	}
 	return id
+}
+
+func (n *Node) transferDesktopSettings(oldID, newID string) {
+	if oldID == "" || newID == "" || oldID == newID {
+		return
+	}
+	n.ccPlugins.moveQueuedSettings(oldID, newID)
+	n.mu.Lock()
+	if m, ok := n.modes[oldID]; ok {
+		cur := n.modes[newID]
+		if m.Model != nil {
+			cur.Model = m.Model
+		}
+		if m.Effort != "" {
+			cur.Effort, cur.EffortAt = m.Effort, m.EffortAt
+		}
+		n.modes[newID] = cur
+	}
+	n.mu.Unlock()
 }

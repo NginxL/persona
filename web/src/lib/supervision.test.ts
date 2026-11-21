@@ -6,6 +6,13 @@ const base: Todo = { id: "todo_1", title: "部署 hub", created_at: "2026-11-05T
 const sup = (s: Partial<Supervision>): Supervision => ({ supervisor: "main", done_when: ["PR 合并到 master", "截图贴进 PR"], ...s });
 
 describe("supervision", () => {
+  it("clears pending review after completion and restores it when reopened", () => {
+    const supervision = sup({ state: "pending_review" });
+    expect(reviewState({ ...base, supervision })).toBe("pending_review");
+    expect(reviewState({ ...base, supervision, done_at: "2026-11-12T09:00:00Z" })).toBe("");
+    expect(reviewState({ ...base, supervision, done_at: null })).toBe("pending_review");
+  });
+
   it("uses live per-criterion state ahead of stale reviews, in done_when order", () => {
     const s = sup({
       criteria: [

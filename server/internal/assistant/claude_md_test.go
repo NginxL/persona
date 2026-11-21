@@ -163,7 +163,7 @@ func TestGoldenMainHandoff(t *testing.T) {
 }
 
 // The CLAUDE.md asks for the user's language (docs/protocol/i18n.md); zh-Hans, or a hub that says none, keeps it as it was.
-func TestAssistantClaudeMDLanguage(t *testing.T) {
+func TestGoldenAssistantClaudeMDLanguage(t *testing.T) {
 	ctx := context.Background()
 	f := claudeMDHub(Device{ID: "server", Name: "服务器", Kind: "local"})
 	s := newTestService(t, f)
@@ -182,6 +182,9 @@ func TestAssistantClaudeMDLanguage(t *testing.T) {
 		if !strings.Contains(got, want) || strings.Contains(got, "；用中文。") {
 			t.Fatalf("%s: no %q", locale, want)
 		}
+		// The header contains both the response language and the relay acknowledgement rule.
+		header, _, _ := strings.Cut(got, "\n## ")
+		golden(t, "assistant_relay_instructions."+locale, strings.TrimSpace(header))
 	}
 }
 

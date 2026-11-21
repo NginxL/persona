@@ -80,9 +80,10 @@ export function openStartPage() {
 }
 
 /** Whether the start page `key` is gone, `listed` saying whether the sidebar lists it now: undefined while that can't be
- *  told yet (the hub has not answered which extension pages there are, or whether the workflow board is on). */
-export function startPageGone(key: string, listed: boolean, known: { extensions: boolean; board: boolean }): boolean | undefined {
+ *  told from the extension list, workflow board setting, or Starred index. */
+export function startPageGone(key: string, listed: boolean, known: { extensions: boolean; board: boolean; starred: boolean }): boolean | undefined {
   if (listed) return false;
+  if (key === "starred") return known.starred || undefined;
   return (key.startsWith("p:") ? known.extensions : key !== "workspace-board" || known.board) ? true : undefined;
 }
 
@@ -100,7 +101,7 @@ export const useExtensionPagesKnown = () => useSyncExternalStore(subscribe, () =
 
 /** In the sidebar's pages (useNavPages, always drawn): once it can be told whether the page this load opened on is there,
  *  one that is not opens the main chat in its place, unless the user has gone elsewhere since. */
-export function useStartPageCheck(listed: (key: string) => boolean, extensionPages: readonly unknown[], boardKnown: boolean) {
+export function useStartPageCheck(listed: (key: string) => boolean, extensionPages: readonly unknown[], boardKnown: boolean, starredKnown: boolean) {
   const online = useStore((s) => s.conn === "online");
   const slots = useStore((s) => hasSlots(s.features));
   // this list as it was at the first render after the hello: each caller's own, as each memoizes its list
@@ -113,11 +114,30 @@ export function useStartPageCheck(listed: (key: string) => boolean, extensionPag
       changed();
     }
     if (!opened) return;
-    const gone = startPageGone(opened.key, listed(opened.key), { extensions: answered || !slots, board: boardKnown });
+    const gone = startPageGone(opened.key, listed(opened.key), { extensions: answered || !slots, board: boardKnown, starred: starredKnown });
     if (gone === undefined) return;
     if (gone && location.pathname === opened.path) navigate({ name: "persona" }, true);
     opened = null;
   });
+}
+
+/** Saves `key` ("" for the main chat) locally, then to the hub. A hub without the route keeps it here; any other
+ *  refusal restores the previous choice and is returned for the caller to report. Kept with the navigation state,
+ *  not with the Settings page's larger UI graph or its error strings. */
+export async function saveStartPage(key: string): Promise<unknown | undefined> {
+  const was = startPage();
+  keepStartPage(key);
+  if (startPageSynced() === false) return; // this browser only
+  try {
+    const r = await api<{ start?: string }>("/navigation", { method: "PUT", json: { start: key } });
+    noteStartPageSynced();
+    if (startPage() === key) keepStartPage(r.start ?? key);
+  } catch (e) {
+    noteStartPageSynced(e);
+    if (startPageSynced() === false) return;
+    if (startPage() === key) keepStartPage(was);
+    return e;
+  }
 }
 
 // The sidebar's arrangement (lib/sidebar-pages.ts) goes the same way: each change made here is sent; while one is on its

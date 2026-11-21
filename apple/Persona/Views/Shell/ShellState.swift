@@ -155,6 +155,9 @@ import SwiftUI
 /// Pages the Assistant page pushes for the shell.
 enum ShellPage: Hashable, Sendable {
     case newConversation, profile, inbox, todos, routines, knowledge, machines, health
+    #if os(iOS)
+    case starred
+    #endif
     /// Recordings (meeting recordings started from the drawer, a Control, Siri…; docs/apple/recording.md): this device's.
     case recordings
     /// An extension's main-navigation page (nav_page) from the drawer.
@@ -168,6 +171,9 @@ enum ShellPage: Hashable, Sendable {
 /// Every place the sidebar opens is one, so what it pushes by value is part of the path it keeps (`ShellPlaces`).
 enum ShellRoute: Hashable, Sendable {
     case inbox, todos, machines, profile, routines, knowledge, recordings
+    #if os(iOS)
+    case starred
+    #endif
     case extensionPage(ExtensionNavRoute)
 }
 

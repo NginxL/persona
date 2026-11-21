@@ -20,6 +20,21 @@ type UsageWindow struct {
 	// Model names the one model this window measures, for an allowance a provider keeps per model next to the plan's
 	// own (#2595); empty for the plan's window. Such a window never identifies an account.
 	Model string `json:"model,omitempty"`
+	// Group, Title and Note are set by a usage extension (docs/extensions/extensions.md "Usage"; docs/server/usage-windows.md
+	// "Usage extensions"): windows next to each other with the same Group are drawn as one group, Title is the row's own
+	// name and Note a short remark under it, all in the language the hub asked in. Plain text, no colour or icon.
+	// Without a Group a window is drawn as it always was; a client that does not know these fields ignores them.
+	Group string `json:"group,omitempty"`
+	Title string `json:"title,omitempty"`
+	Note  string `json:"note,omitempty"`
+}
+
+// UsageBalance is a prepaid account's remaining amount as its provider reports it (#11825), for a provider that has
+// no rate-limit window to draw (the official DeepSeek launcher's GET /user/balance). Amount is the provider's own
+// decimal string, kept exactly as sent ("12.34") and never recomputed into a percentage; Currency is its code ("CNY").
+type UsageBalance struct {
+	Amount   string `json:"amount"`
+	Currency string `json:"currency"`
 }
 
 // UsageAccount is one subscription account as one source saw it (a node's answer) or as the hub merged it.
@@ -29,8 +44,16 @@ type UsageAccount struct {
 	Provider string `json:"provider"`       // codex | claude
 	Name     string `json:"name"`           // "Codex Pro", "Claude"
 	Plan     string `json:"plan,omitempty"` // as the source calls it ("pro")
-	// Windows are ordered shortest first.
+	// Headline and Notice are set by a usage extension: a line of its own under the account's name (what the pool is
+	// doing) and a line of explanation when it has no numbers to draw. Plain text in the language the hub asked in.
+	Headline string `json:"headline,omitempty"`
+	Notice   string `json:"notice,omitempty"`
+	// Windows are ordered shortest first. Empty for an account whose provider reports only a balance.
 	Windows []UsageWindow `json:"windows"`
+	// Balance is the remaining prepaid amount, when the provider reports one instead of rate-limit windows. The
+	// account's SampledAt, Stale, StaleAt and Problem apply to it as they do to windows. A genuine zero is a Balance
+	// with amount "0.00"; a failed read is Problem with the previous Balance kept, or no Balance at all.
+	Balance *UsageBalance `json:"balance,omitempty"`
 	// SampledAt is when the source wrote the newest of these numbers (not when we read them).
 	SampledAt time.Time `json:"sampled_at"`
 	// Stale: the sample is older than the collector's schedule allows (its source has not been written to for a
@@ -59,6 +82,9 @@ type UsageAccount struct {
 	Ref string `json:"-"`
 	// CodexAccountKey is the node's digest of the upstream account ID, used only by the usage manager.
 	CodexAccountKey string `json:"-"`
+	// Pass: a usage extension's row (usagesource.FromExtension), drawn exactly as the extension sent it and never merged
+	// with the accounts the computers and the other gateways report. Hub-internal.
+	Pass bool `json:"-"`
 	// Origin distinguishes unidentified sources. On a machine it uses the machine ID and source digest or legacy
 	// answer position. On a gateway it uses the reference or a gateway-scoped position. It stays in the usage manager.
 	Origin string `json:"-"`

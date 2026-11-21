@@ -1,3 +1,14 @@
 {
-  "refused": "この会話の dispatch ガードにより拒否されました。"
+  "refused": "この会話の dispatch ガードにより拒否されました。",
+  "invalid_json": "dispatch guard リクエストには、未知または重複したフィールドのない有効な JSON 値を 1 つだけ指定してください。",
+  "required": "dispatch_guard はオブジェクトで指定してください。",
+  "targets_required": "明示的に無効化する場合を除き、dispatch_guard.targets は必須です。",
+  "targets_null": "dispatch_guard.targets は null ではなく配列で指定してください。",
+  "enabled_required": "targets が空でない場合は dispatch_guard.enabled が必須です。",
+  "duplicate_key": "JSON キーが重複しています: {key}",
+  "invalid_policy": "dispatch guard ポリシーが無効です。",
+  "read_failed": "dispatch guard を読み取れませんでした。",
+  "save_failed": "dispatch guard を保存できませんでした。",
+  "read_only_get": "読み取り専用ロールは dispatch guard を読み取れません。",
+  "read_only_write": "読み取り専用ロールは dispatch guard を変更できません。"
 }

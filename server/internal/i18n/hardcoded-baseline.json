@@ -89,7 +89,7 @@
   "internal/extension/market_git.go": 9,
   "internal/extension/nodepkg.go": 2,
   "internal/extension/package_fingerprint.go": 2,
-  "internal/extension/plan.go": 42,
+  "internal/extension/plan.go": 39,
   "internal/extension/registry_install.go": 5,
   "internal/extension/registry_preview.go": 17,
   "internal/extension/registry_settings.go": 1,

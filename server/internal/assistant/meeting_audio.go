@@ -58,6 +58,8 @@ var socketRoutes = []struct {
 	serve   func(s *Service, w http.ResponseWriter, r *http.Request)
 }{
 	{"GET /api/v1/recordings/{id}/audio", (*Service).audioSocket},
+	{assistantwire.A2ARPC, (*Service).a2aRPC},
+	{assistantwire.A2ACard, (*Service).a2aCard},
 }
 
 // ServeSocket serves the assistant's WebSocket routes (assistantwire.SocketRoutes), which the hub relays to the

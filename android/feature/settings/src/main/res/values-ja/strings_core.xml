@@ -286,7 +286,7 @@
     <string name="settings_off">オフ</string>
     <string name="settings_retry_cleanup">クリーンアップを再試行</string>
     <string name="settings_try_demo">ハブがない場合はデモを試す</string>
-    <string name="settings_style_title">UIスタイル</string>
+    <string name="settings_style_title">外観</string>
     <string name="settings_avatar_title">アバター</string>
     <string name="settings_about_persona">Personaについて</string>
     <string name="settings_phone_data_title">スマートフォンのデータ</string>

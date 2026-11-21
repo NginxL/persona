@@ -137,10 +137,13 @@ func TestExtensionTokensMayNotSendTerminalControls(t *testing.T) {
 		ID: "ask_own", MachineID: "mb", SessionID: "b1", Kind: proto.IxQuestion}}); err != nil {
 		t.Fatal(err)
 	}
+	// Controls need the conversation in its machine's list (extensionControllable).
+	h.takeFleetSessions(assistantwire.FleetSessions{MachineID: "mb", Sessions: []proto.Session{{MachineID: "mb", SessionID: "b1", Cwd: "/work/project"}}})
 	eventually(t, 5*time.Second, "B's chat and card", func() bool {
 		_, v := h.conversation("b1")
 		_, pending := h.pendingInteraction("ask_own")
-		return v.OpenedBy == "bx" && pending
+		_, listed := h.localMachine("mb").session("b1")
+		return v.OpenedBy == "bx" && pending && listed
 	})
 
 	do := func(tok, method, path, body string) (int, map[string]any) {

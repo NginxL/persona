@@ -8,7 +8,8 @@
     "repo.parse": {"from": "hub", "params": "RepoParseParams", "result": "RepoParseResult"},
     "repo.check": {"from": "hub", "params": "RepoCheckParams", "result": "Empty"},
     "repo.link": {"from": "hub", "params": "RepoLinkParams", "result": "RepoLinkResult"},
-    "repo.describe": {"from": "hub", "params": "RepoDescribeParams", "result": "RepoDescribeResult"}
+    "repo.describe": {"from": "hub", "params": "RepoDescribeParams", "result": "RepoDescribeResult"},
+    "repo.pr_status": {"from": "hub", "params": "RepoPRStatusParams", "result": "RepoPRStatusResult"}
   },
   "$defs": {
     "RepoErrorCode": {
@@ -96,6 +97,29 @@
         "state": {"type": "string", "enum": ["open", "closed", "merged"], "description": "Left out when the source has no such word for it."}
       },
       "required": ["title"]
+    },
+    "RepoPRStatusParams": {
+      "description": "repo.pr_status (optional; capabilities pr_status, #11584): where a pull request the manager has stored stands, for delivery checks and the status sweep, by its canonical address. Asked about pull_request links only, at most about once a minute each. Answer with the program's own credentials; nothing of the answer reaches a model but its state.",
+      "type": "object",
+      "properties": {
+        "contribution": {"$ref": "manifest.schema.json#/$defs/ID", "description": "The repository_providers item's id."},
+        "canonical_url": {"type": "string", "minLength": 1, "maxLength": 2048, "description": "The link's canonical_url as repo.link answered it."}
+      },
+      "required": ["contribution", "canonical_url"]
+    },
+    "RepoPRStatusResult": {
+      "description": "The pull request's state; the rest when the source says it. A value that breaks its rule is dropped, a state outside the enum fails the answer.",
+      "type": "object",
+      "properties": {
+        "state": {"type": "string", "enum": ["open", "closed", "merged"]},
+        "merge_commit": {"type": "string", "pattern": "^[0-9a-f]{7,64}$", "description": "The commit its merge made (merged only)."},
+        "head_sha": {"type": "string", "pattern": "^[0-9a-f]{7,64}$", "description": "Its head commit."},
+        "head_ref": {"type": "string", "maxLength": 255, "description": "Its source branch."},
+        "base_ref": {"type": "string", "maxLength": 255, "description": "Its target branch."},
+        "author": {"type": "string", "maxLength": 255, "description": "Who opened it, as the source names accounts."},
+        "viewer_is_author": {"type": "boolean", "x-go-pointer": true, "description": "Whether the account the program uses opened it; left out when it cannot tell."}
+      },
+      "required": ["state"]
     }
   }
 }

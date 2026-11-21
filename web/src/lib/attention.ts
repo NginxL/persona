@@ -43,7 +43,24 @@ export type AttentionEvent = { kind: "needs" | "finished"; key: string; card?: I
  * A session "Needs you" only for questions the assistant is still looking at (`interactions`, lookingOnly) counts as
  * working: the hub pushes nothing for them either, and it becomes "Needs you" here once the assistant hands one to the user.
  */
-export function detectTransitions(prev: ReadonlyMap<string, AgentState>, sessions: Session[], mutes: AgentMutes, interactions: readonly Interaction[] = []): { next: Map<string, AgentState>; events: AttentionEvent[] } {
+/** Whether an urgency level is held back (non-interrupting) while hub push grading is on. */
+export function isHeldLevel(level: string | undefined): boolean {
+  return level === "P1" || level === "P2";
+}
+
+/** Whether a "Needs you" session waits only on held (P1/P2) non-delegating cards. */
+export function heldOnlyNeeds(s: Pick<Session, "machine_id" | "session_id">, interactions: readonly Interaction[]): boolean {
+  const key = agentKey(s);
+  let sawHeld = false;
+  for (const ix of interactions) {
+    if (isDelegating(ix) || homeKey(ix) !== key) continue;
+    if (!isHeldLevel(ix.push_level)) return false;
+    sawHeld = true;
+  }
+  return sawHeld;
+}
+
+export function detectTransitions(prev: ReadonlyMap<string, AgentState>, sessions: Session[], mutes: AgentMutes, interactions: readonly Interaction[] = [], grading = false): { next: Map<string, AgentState>; events: AttentionEvent[] } {
   const next = new Map<string, AgentState>();
   const events: AttentionEvent[] = [];
   const looking = lookingOnly(interactions);
@@ -55,8 +72,9 @@ export function detectTransitions(prev: ReadonlyMap<string, AgentState>, session
     next.set(key, now);
     const was = prev.get(key);
     if (was === undefined || was === now || s.quiet) continue;
-    if (now === "needs_you") events.push({ kind: "needs", key });
-    else if (was === "working" && now === "unread" && !isMuted(s, mutes)) events.push({ kind: "finished", key });
+    if (now === "needs_you") {
+      if (!grading || !heldOnlyNeeds(s, interactions)) events.push({ kind: "needs", key });
+    } else if (was === "working" && now === "unread" && !isMuted(s, mutes) && !grading) events.push({ kind: "finished", key });
   }
   return { next, events };
 }
@@ -105,7 +123,7 @@ export const FORGET_CARD_MS = 10 * 60_000;
  * A question the assistant is still looking at is neither announced nor remembered: when it hands the same card to the
  * user, that is when it arrives.
  */
-export function detectNewCards(known: ReadonlyMap<string, number> | undefined, interactions: readonly Interaction[], was: ReadonlyMap<string, AgentState>, next: ReadonlyMap<string, AgentState>, sessions: readonly Session[], bare: ReadonlySet<string>, now: number): { ids: Map<string, number>; events: CardEvent[] } {
+export function detectNewCards(known: ReadonlyMap<string, number> | undefined, interactions: readonly Interaction[], was: ReadonlyMap<string, AgentState>, next: ReadonlyMap<string, AgentState>, sessions: readonly Session[], bare: ReadonlySet<string>, now: number, grading = false): { ids: Map<string, number>; events: CardEvent[] } {
   const ids = new Map<string, number>();
   for (const [id, at] of known ?? []) if (now - at < FORGET_CARD_MS) ids.set(id, at);
   const waiting = interactions.filter((ix) => !isDelegating(ix));
@@ -114,7 +132,7 @@ export function detectNewCards(known: ReadonlyMap<string, number> | undefined, i
   const quiet = new Set(sessions.filter((s) => s.quiet).map(agentKey));
   const first = new Map<string, Interaction>();
   for (const ix of waiting) {
-    if (known.has(ix.id)) continue;
+    if (known.has(ix.id) || (grading && isHeldLevel(ix.push_level))) continue;
     // a child session's card is announced for its parent (#5120), the session the lists show and its link opens
     const key = ix.session_id === "" ? `card:${ix.id}` : homeKey(ix);
     if (ix.session_id === "") { first.set(key, ix); continue; }

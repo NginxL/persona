@@ -12,7 +12,9 @@ import java.io.File
  */
 class OthersWaitingDotTest {
     @Test fun theOthersWaitingDotIsStill() {
-        val calls = source().lines().filter { "currentOthersWaiting.value) JStatusDot(" in it }
+        val lines = source().lines()
+        val calls = lines.indices.filter { "currentOthersWaiting.value) {" in lines[it] }
+            .map { lines.subList(it, (it + 3).coerceAtMost(lines.size)).joinToString("\n") }
         assertEquals(calls.joinToString("\n"), 1, calls.size)
         assertTrue(calls.single(), "breathes = false" in calls.single())
     }

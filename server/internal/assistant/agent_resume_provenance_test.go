@@ -18,7 +18,7 @@ func codexHistorySession(sid string, cause proto.StopCause, status string) proto
 }
 
 func TestAssistantResumeProvenanceMatrix(t *testing.T) {
-	causes := []proto.StopCause{proto.StopIdle, proto.StopTaskCompleted, proto.StopRestart}
+	causes := []proto.StopCause{proto.StopIdle, proto.StopTaskCompleted, proto.StopRestart, proto.StopUsageLimit, proto.StopTransientError}
 	for _, source := range []string{"ordinary", "codex_history"} {
 		statuses := []string{proto.StatusOffline, proto.StatusInterrupted}
 		if source == "codex_history" {

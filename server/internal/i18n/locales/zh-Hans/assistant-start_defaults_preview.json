@@ -1,0 +1,5 @@
+{
+  "field_required": "{field} 为必填项。",
+  "field_one_of": "{field} 必须是以下值之一：{values}。",
+  "field_nonnegative": "{field} 必须大于或等于 0。"
+}

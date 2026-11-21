@@ -57,10 +57,11 @@ internal fun SidebarRootsRuntime(
     showHost: (NavKey, List<NavKey>) -> Unit,
     assignPersona: (MutableList<NavKey>) -> Unit,
     onBack: () -> Unit,
+    merged: Boolean = false,
     hostContent: @Composable (hostId: String, stack: MutableList<NavKey>, hostShown: Boolean) -> Unit,
 ) {
-    LaunchedEffect(regular) {
-        window.onWidth(regular, hosts, assistantStack, pageRoots, showHost, assignPersona)
+    LaunchedEffect(regular, merged) {
+        if (regular || !merged) window.onWidth(regular, hosts, assistantStack, pageRoots, showHost, assignPersona)
     }
     // A navigate or restore pushes onto the host list without activate. Trim before the next frame
     // so that route is not composed on two hosts (docs/design/sidebar-navigation.md).
@@ -76,7 +77,7 @@ internal fun SidebarRootsRuntime(
             ShellTabLifecycle(hostShown) {
                 CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides back) {
                     PlaceRootBack(
-                        enabled = hostShown && regular && !overlayOpen && hostStack.size <= 1 &&
+                        enabled = hostShown && !overlayOpen && hostStack.size <= 1 &&
                             root != null && root != AssistantRoute,
                         onBack = onBack,
                     ) {

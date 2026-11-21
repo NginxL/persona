@@ -161,20 +161,7 @@ fun JManagerAvatar(
     val dot = if (presence) managerPresenceColor(manager) else null
     androidx.compose.foundation.layout.Box(modifier.size(size).clearAndSetSemantics {}) {
         androidx.compose.foundation.layout.Box(
-            Modifier.fillMaxSize()
-                // Its own layer, so clearing the ring leaves what is behind the avatar, not a hole through the window.
-                .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
-                .drawWithContent {
-                    drawContent()
-                    if (dot != null) {
-                        val radius = HomeTokens.assistantPresenceDot.toPx() / 2
-                        val ring = HomeTokens.assistantPresenceRing.toPx()
-                        val center = androidx.compose.ui.geometry.Offset(this.size.width - radius - ring, this.size.height - radius - ring)
-                        drawCircle(androidx.compose.ui.graphics.Color.Transparent, radius + ring, center,
-                            blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
-                        drawCircle(dot, radius, center)
-                    }
-                },
+            Modifier.fillMaxSize().avatarPresenceCutout(dot, size),
         ) {
             androidx.compose.foundation.layout.Box(
                 Modifier.fillMaxSize().clip(androidx.compose.foundation.shape.CircleShape).background(fill),
@@ -196,6 +183,25 @@ fun JManagerAvatar(
 private val AvatarPresenceCutout = Tokens.System.Light.primary.copy(alpha = 0f)
 
 /**
+ * Cuts the presence dot's ring out of the avatar's own offscreen layer so what lies behind shows through, scaling
+ * proportionally when [size] is smaller than [HomeTokens.assistantAvatar] so header avatars keep their center glyph clear.
+ */
+private fun Modifier.avatarPresenceCutout(
+    dot: androidx.compose.ui.graphics.Color?,
+    size: androidx.compose.ui.unit.Dp,
+): Modifier = if (dot == null) this else graphicsLayer {
+    compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+}.drawWithContent {
+    drawContent()
+    val scale = (size / HomeTokens.assistantAvatar).coerceIn(0f, 1f)
+    val radius = (HomeTokens.assistantPresenceDot.toPx() / 2f) * scale
+    val ring = HomeTokens.assistantPresenceRing.toPx() * scale
+    val center = androidx.compose.ui.geometry.Offset(this.size.width - radius - ring, this.size.height - radius - ring)
+    drawCircle(AvatarPresenceCutout, radius + ring, center, blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
+    drawCircle(dot, radius, center)
+}
+
+/**
  * The default assistant's head: the chosen look's face (PersonaFace), not the first-letter monogram, so changing the
  * look changes this face too — one identity with the main conversation (#6401). The presence and needs-you corner
  * marks are the same [JManagerAvatar] draws, with the ring cut out of the face's own layer.
@@ -208,19 +214,7 @@ fun JDefaultManagerFace(
     val dot = if (presence) managerPresenceColor(manager) else null
     androidx.compose.foundation.layout.Box(modifier.size(size).clearAndSetSemantics {}) {
         androidx.compose.foundation.layout.Box(
-            Modifier.fillMaxSize()
-                .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
-                .drawWithContent {
-                    drawContent()
-                    if (dot != null) {
-                        val radius = HomeTokens.assistantPresenceDot.toPx() / 2
-                        val ring = HomeTokens.assistantPresenceRing.toPx()
-                        val center = androidx.compose.ui.geometry.Offset(this.size.width - radius - ring, this.size.height - radius - ring)
-                        drawCircle(AvatarPresenceCutout, radius + ring, center,
-                            blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
-                        drawCircle(dot, radius, center)
-                    }
-                },
+            Modifier.fillMaxSize().avatarPresenceCutout(dot, size),
         ) {
             PersonaFace(PersonaState.Idle, Modifier.fillMaxSize(), size = size)
         }

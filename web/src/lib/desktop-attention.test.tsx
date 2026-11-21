@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
-vi.mock("./router", () => ({ navigate: navigateMock }));
+vi.mock("./router", async (orig) => ({ ...(await orig<typeof import("./router")>()), navigate: navigateMock }));
 
 import { useAttentionSignals } from "./attention-signals";
 import type { DesktopBridge, DesktopPresence } from "./desktop-types";
@@ -14,9 +14,14 @@ const { sendMock, connectMock, disconnectMock } = vi.hoisted(() => ({ sendMock: 
 let features: string[] = ["desktop_unregister"];
 let notifyOn = true;
 let socketOpen = true;
+let badgeCount = 0;
+let sessions: { machine_id: string; session_id: string; title: string; cwd: string; status: "working" | "needs_you" | "unread"; state: "working" | "needs_you" | "unread"; last_text?: string }[] = [];
+let interactions: Interaction[] = [];
+let pushGrading = false;
 vi.mock("./store", () => ({
-  useStore: (select: (s: { loaded: boolean; interactions: Interaction[] }) => unknown) => select({ loaded: true, interactions: [] }),
-  getState: () => ({ mutes: { spaces: [], sessions: [], allowed: [] }, interactions: [], features }),
+  useStore: (select: (s: { loaded: boolean; interactions: Interaction[]; pushGrading: boolean }) => unknown) =>
+    select({ loaded: true, interactions, pushGrading }),
+  getState: () => ({ mutes: { spaces: [], sessions: [], allowed: [] }, interactions, pushGrading, features }),
   onHello: (fn: () => void) => { hello = fn; return () => { hello = undefined; }; },
   send: sendMock, appSocketReady: () => socketOpen,
   connect: () => { socketOpen = true; connectMock(); }, disconnect: () => { socketOpen = false; disconnectMock(); },
@@ -24,7 +29,7 @@ vi.mock("./store", () => ({
   DESKTOP_UNREGISTER_FEATURE: "desktop_unregister",
   onHubEvent: () => () => {}, setHelloExtras: () => {}, sayHello: () => {},
 }));
-vi.mock("./sessions", () => ({ useCounts: () => ({ badge: 0 }), useAgentSessions: () => [] }));
+vi.mock("./sessions", () => ({ useCounts: () => ({ badge: badgeCount }), useAgentSessions: () => sessions }));
 vi.mock("./notify", async (original) => ({
   ...(await original<typeof import("./notify")>()),
   systemNotifyActive: () => notifyOn,
@@ -71,6 +76,10 @@ describe("desktop attention lifecycle", () => {
     vi.stubGlobal("window", Object.assign(window, { personaDesktop: desktopMock() }));
     hello = undefined;
     changePresence = undefined;
+    badgeCount = 0;
+    sessions = [];
+    interactions = [];
+    pushGrading = false;
     notificationListeners.clear();
     root = createRoot(document.createElement("div"));
   });
@@ -137,5 +146,46 @@ describe("desktop attention lifecycle", () => {
     expect(sendMock).toHaveBeenCalledWith({ type: "register_desktop", device_name: "Desktop" });
     await act(async () => root.unmount());
     expect(changePresence).toBeUndefined();
+  });
+  it("applies push grading to Electron Dock setBadge and desktop notifications (#11771)", async () => {
+    localStorage.setItem("persona.systemNotify", "1");
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const desktopNotify = vi.fn(() => true);
+    const bridge = desktopMock({ notify: desktopNotify });
+    Object.defineProperty(window, "personaDesktop", { value: bridge, configurable: true });
+    pushGrading = true;
+    badgeCount = 0;
+    sessions = [
+      { machine_id: "m", session_id: "a", title: "Agent A", cwd: "/p", status: "working", state: "working" },
+      { machine_id: "m", session_id: "b", title: "Agent B", cwd: "/p", status: "working", state: "working" },
+    ];
+    await act(async () => root.render(<Probe />));
+    expect(bridge.setBadge).toHaveBeenLastCalledWith(0);
+
+    // P1 card: no native popup, Mac Dock badge stays 0.
+    sessions = [
+      { machine_id: "m", session_id: "a", title: "Agent A", cwd: "/p", status: "needs_you", state: "needs_you" },
+      { machine_id: "m", session_id: "b", title: "Agent B", cwd: "/p", status: "working", state: "working" },
+    ];
+    interactions = [{ id: "ix_p1", machine_id: "m", session_id: "a", kind: "permission", summary: "grep logs", push_level: "P1" }];
+    await act(async () => root.render(<Probe />));
+    expect(desktopNotify).not.toHaveBeenCalled();
+    expect(bridge.setBadge).toHaveBeenLastCalledWith(0);
+
+    // P0 card: native popup fires and Mac Dock badge updates.
+    badgeCount = 1;
+    sessions = [
+      { machine_id: "m", session_id: "a", title: "Agent A", cwd: "/p", status: "needs_you", state: "needs_you" },
+      { machine_id: "m", session_id: "b", title: "Agent B", cwd: "/p", status: "needs_you", state: "needs_you" },
+    ];
+    interactions = [
+      ...interactions,
+      { id: "ix_p0", machine_id: "m", session_id: "b", kind: "question", summary: "Ship release?", push_level: "P0" },
+    ];
+    await act(async () => root.render(<Probe />));
+    expect(desktopNotify).toHaveBeenCalledOnce();
+    expect(bridge.setBadge).toHaveBeenLastCalledWith(1);
+    localStorage.removeItem("persona.systemNotify");
+    vi.restoreAllMocks();
   });
 });

@@ -1,5 +1,6 @@
 {
   "handoff_from": "从「{title}」跳来 · 点这里返回",
+  "handoff_previous": "返回上一页",
   "handoff_dismiss": "关闭返回提示",
   "inbox_back_title": "回到「{title}」",
   "inbox_back_generic": "回到收件箱里的这件事"

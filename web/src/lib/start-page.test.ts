@@ -2,11 +2,23 @@
 // Where the app opens (#9071, lib/start-page.ts): the main chat by default; the start page the user chose at an opening
 // of the root address only; the hub's choice read at the hello and followed on its pushes; a choice kept here handed
 // to a hub that has none; a hub without the route leaving the choice in this browser.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OverviewEntry } from "./overview-cards";
-// The modules each test loads afresh (load(), the Settings row's), transformed while the file is collected, outside the
-// test timeout (as highlight-lazy.test.tsx, #4955): a test's first load then only runs them. Transforming them inside
-// the first tests took those past 5 s on a loaded CI runner.
+
+// start-page listens to two event types. The mock below keeps that boundary without rebuilding store's entire module
+// graph on every simulated reload; the rest of start-page, sidebar-pages and overview-cards stays real.
+const hubListeners = vi.hoisted(() => new Map<string, Set<(msg: Record<string, unknown>) => void>>());
+vi.mock("./store", () => ({
+  onHubEvent: (type: string, listener: (msg: Record<string, unknown>) => void) => {
+    if (!hubListeners.has(type)) hubListeners.set(type, new Set());
+    hubListeners.get(type)!.add(listener);
+    return () => void hubListeners.get(type)?.delete(listener);
+  },
+  useStore: (select: (state: { conn: string; features: string[] }) => unknown) => select({ conn: "online", features: [] }),
+}));
+// The modules each test loads afresh (load(), the Settings row's), transformed and evaluated while the file is
+// collected, outside the test timeout (as highlight-lazy.test.tsx, #4955). Each test still resets and runs them again;
+// only the initial cold module-graph work must not consume the five-second deadline.
 import "./start-page";
 import "../views/settings/StartPage";
 vi.hoisted(() => {
@@ -29,7 +41,8 @@ class Socket {
     this.readyState = 3;
   }
   push(value: unknown) {
-    this.onmessage?.({ data: JSON.stringify(value) });
+    const message = value as Record<string, unknown>;
+    hubListeners.get(String(message.type))?.forEach((listener) => listener(message));
   }
 }
 
@@ -40,6 +53,7 @@ let puts: unknown[];
 
 beforeEach(() => {
   vi.resetModules();
+  hubListeners.clear();
   localStorage.clear();
   localStorage.setItem("persona.token", "test-token");
   history.replaceState(null, "", "/");
@@ -76,14 +90,21 @@ const flush = async () => {
 async function load(stored?: string) {
   if (stored !== undefined) localStorage.setItem("persona.startPage", stored);
   const page = await import("./start-page");
-  const store = await import("./store");
   const hello = async (extra: Record<string, unknown> = {}) => {
-    store.connect();
-    Socket.last.push({ type: "hello", features: [], ...extra });
+    const message = { type: "hello", features: [], ...extra };
+    new Socket("ws://test");
+    hubListeners.get("hello")?.forEach((listener) => listener(message));
     await flush();
   };
-  return { ...page, store, hello };
+  return { ...page, store: { disconnect: () => { Socket.last.close(); hubListeners.clear(); } }, hello };
 }
+
+// Warm the exact dynamic-import path too: static imports transform these modules, but the first full-suite call to
+// load() can still spend seconds evaluating the graph, and the two-device test calls it three times. No socket is
+// connected, no request is made and no state is asserted here; every test resets these modules before its own load.
+beforeAll(async () => {
+  await Promise.all([import("./start-page"), import("./store"), import("../views/settings/StartPage")]);
+});
 
 describe("startRoute", () => {
   it("knows the sidebar's pages and an extension's, and nothing else", async () => {
@@ -141,14 +162,17 @@ describe("opening the app", () => {
 describe("startPageGone", () => {
   it("says gone only once it can be told", async () => {
     const { startPageGone } = await load();
-    const none = { extensions: false, board: false };
-    const all = { extensions: true, board: true };
+    const none = { extensions: false, board: false, starred: false };
+    const all = { extensions: true, board: true, starred: true };
     expect(startPageGone(TODAY, true, none)).toBe(false);
     expect(startPageGone(TODAY, false, none)).toBeUndefined();
     expect(startPageGone(TODAY, false, all)).toBe(true);
-    expect(startPageGone("workspace-board", false, { extensions: true, board: false })).toBeUndefined();
+    expect(startPageGone("workspace-board", false, { ...all, board: false })).toBeUndefined();
     expect(startPageGone("workspace-board", false, all)).toBe(true);
     expect(startPageGone("messages", false, none)).toBe(true);
+    expect(startPageGone("starred", false, none)).toBeUndefined();
+    expect(startPageGone("starred", false, all)).toBe(true);
+    expect(startPageGone("starred", true, all)).toBe(false);
   });
 });
 
@@ -196,8 +220,8 @@ describe("the hub's choice", () => {
     // the laptop chooses Today
     const laptop = await load();
     await laptop.hello();
-    const { chooseStartPage } = await import("../views/settings/StartPage");
-    await chooseStartPage(TODAY);
+    const { saveStartPage } = await import("./start-page");
+    await saveStartPage(TODAY);
     expect(puts).toEqual([{ start: TODAY }]);
     laptop.store.disconnect();
     // the phone: another browser, nothing kept yet; its first opening is the main chat, and it reads the hub's choice
@@ -283,8 +307,8 @@ describe("a hub without the route", () => {
     const { hello, startPage, startPageSynced } = await load();
     await hello();
     expect(startPageSynced()).toBe(false);
-    const { chooseStartPage } = await import("../views/settings/StartPage");
-    await chooseStartPage("inbox");
+    const { saveStartPage } = await import("./start-page");
+    await saveStartPage("inbox");
     expect(startPage()).toBe("inbox");
     expect(localStorage.getItem("persona.startPage")).toBe("inbox");
     // no PUT after the hub said it has no route
@@ -300,8 +324,8 @@ describe("a hub without the route", () => {
     const { hello, startPage } = await load();
     await hello();
     vi.mocked(fetch).mockImplementationOnce(async () => Response.json({ error: "database down" }, { status: 503 }));
-    const { chooseStartPage } = await import("../views/settings/StartPage");
-    await chooseStartPage("kb");
+    const { saveStartPage } = await import("./start-page");
+    await saveStartPage("kb");
     expect(startPage()).toBe("inbox");
   });
 });

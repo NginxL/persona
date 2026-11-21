@@ -5,13 +5,14 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HubExtensionDetail } from "../../lib/extensions";
+import type { HubExtensionDetail, JsonObject } from "../../lib/extensions";
 
 const hub = vi.hoisted(() => ({ detail: null as unknown, launchers: null as null | (() => Promise<unknown>) }));
 vi.mock("../../lib/extensions", async (original) => ({
   ...(await original<typeof import("../../lib/extensions")>()),
   extensionDetail: vi.fn(() => Promise.resolve(hub.detail)),
   setExtensionConfig: vi.fn((_id: string, config: unknown) => Promise.resolve({ ...(hub.detail as object), config })),
+  setExtensionConfigPreservingEntries: vi.fn((_id: string, config: unknown) => Promise.resolve({ ...(hub.detail as object), config })),
 }));
 vi.mock("../../lib/launcher-list", async (original) => ({
   ...(await original<typeof import("../../lib/launcher-list")>()),
@@ -27,7 +28,7 @@ vi.mock("../../lib/store", async (original) => {
   return { ...real, useStore: <T,>(select: (s: ReturnType<typeof real.getState>) => T): T => select({ ...real.getState(), machines } as ReturnType<typeof real.getState>) };
 });
 vi.mock("../../ui/atoms", async (original) => ({ ...(await original<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
-import { pickerChoices, setExtensionConfig } from "../../lib/extensions";
+import { pickerChoices, setExtensionConfig, setExtensionConfigPreservingEntries } from "../../lib/extensions";
 import { Extensions } from "./Extensions";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,7 +39,7 @@ const flush = async () => {
   for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
 };
 
-const chat = (config: Record<string, string>): HubExtensionDetail => ({
+const chat = (config: JsonObject): HubExtensionDetail => ({
   id: "example-chat",
   name: "Example chat",
   kind: "process",
@@ -74,6 +75,7 @@ beforeEach(() => {
   document.body.append(host);
   root = createRoot(host);
   vi.mocked(setExtensionConfig).mockClear();
+  vi.mocked(setExtensionConfigPreservingEntries).mockClear();
 });
 afterEach(() => {
   act(() => root.unmount());
@@ -99,6 +101,22 @@ describe("machine and launcher pickers", () => {
     expect(setExtensionConfig).toHaveBeenCalledWith("example-chat", { agent_machine: "server", agent_launcher: "work_gw" });
   });
 
+  it("uses the entry-preserving write for an immediate machine switch", async () => {
+    const next = chat({ accounts: [{ _id: "entry_one", name: "One" }] });
+    next.form!.fields = [
+      { name: "agent_machines", type: "array", title: "Computers", items: { name: "", type: "string", format: "machine", os: ["linux"] } },
+      { name: "accounts", type: "array", title: "Accounts", secret: { name: "account_key", title: "Account key" }, items: { name: "", type: "object", fields: [{ name: "name", type: "string", title: "Name" }] } },
+    ];
+    next.secrets = [{ name: "entry_one", title: "Account key", set: true, list: "accounts" }];
+    hub.detail = next;
+    act(() => root.render(<Extensions open="example-chat" onOpen={() => {}} />));
+    await flush();
+    await act(async () => host.querySelector<HTMLButtonElement>('button[role="switch"][aria-label="Home server"]')!.click());
+    await flush();
+    expect(setExtensionConfigPreservingEntries).toHaveBeenCalledWith("example-chat", { agent_machines: ["server"], accounts: [{ _id: "entry_one", name: "One" }] });
+    expect(setExtensionConfig).not.toHaveBeenCalled();
+  });
+
   it("keeps a value that names no machine or launcher, to be changed", async () => {
     hub.detail = chat({ agent_machine: "old-mac", agent_launcher: "gone_gw" });
     hub.launchers = () => Promise.resolve({ launchers });
@@ -108,6 +126,22 @@ describe("machine and launcher pickers", () => {
     expect(options(select("agent_machine")!)[1]).toBe("old-mac=old-mac（找不到这台机器）");
     expect(select("agent_launcher")!.value).toBe("gone_gw");
     expect(options(select("agent_launcher")!)[1]).toBe("gone_gw=gone_gw（找不到这个启动器）");
+  });
+
+  it("loads launchers used only inside entry lists", async () => {
+    hub.detail = {
+      id: "example-chat", name: "Example chat", kind: "process", status: "running", source: "installed", enabled: true,
+      form: { fields: [{
+        name: "accounts", type: "array", title: "Accounts", secret: { name: "account_key", title: "Account key" },
+        items: { name: "", type: "object", fields: [{ name: "agent_launcher", type: "string", format: "launcher", title: "Launcher" }] },
+      }] },
+      config: { accounts: [{ _id: "entry_one", agent_launcher: "claude" }] },
+      secrets: [{ name: "entry_one", title: "Account key", set: false, list: "accounts" }],
+    };
+    hub.launchers = () => Promise.resolve({ launchers });
+    act(() => root.render(<Extensions open="example-chat" onOpen={() => {}} />));
+    await flush();
+    expect(options(select("accounts[0].agent_launcher")!)).toEqual(["=未设置", "claude=claude", "work_gw=Work gateway (work_gw)"]);
   });
 
   it("types the launcher when the hub's launchers could not be read", async () => {
@@ -126,7 +160,7 @@ describe("pickerChoices", () => {
   it("is null for other fields, and for launchers not in yet", () => {
     expect(pickerChoices({ name: "x", type: "string" }, undefined, [], [])).toBeNull();
     expect(pickerChoices({ name: "x", type: "string", format: "uri" }, undefined, [], [])).toBeNull();
-    expect(pickerChoices({ name: "x", type: "array", items: { type: "string", format: "machine" } }, undefined, [], [])).toBeNull();
+    expect(pickerChoices({ name: "x", type: "array", items: { name: "", type: "string", format: "machine" } }, undefined, [], [])).toBeNull();
     expect(pickerChoices({ name: "x", type: "string", format: "launcher" }, undefined, [], null)).toBeNull();
     expect(pickerChoices({ name: "x", type: "string", format: "machine" }, undefined, [{ id: "a", name: "A" }], null)).toEqual([{ value: "a", label: "A" }]);
   });

@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"bytes"
 	"context"
 	"time"
 
@@ -31,8 +32,8 @@ func (s *Service) syncPlanInteractions(machine string) {
 }
 
 // terminalReconciled: p is a hook's card whose tool call's end the transcript shows: a plan, or a Claude Code hook's
-// permission that names its tool call (one without an id is never guessed at; Codex's and a runtime's cards end
-// through their own sources). Callers hold s.fleet.mu.
+// permission. A permission without an id needs its exact tool input to identify a unique call; Codex's and a runtime's
+// cards end through their own sources. Callers hold s.fleet.mu.
 func terminalReconciled(p *pending) bool {
 	if p.local != nil || p.claimed {
 		return false
@@ -41,7 +42,7 @@ func terminalReconciled(p *pending) bool {
 	case proto.IxPlan:
 		return p.ix.ToolName == "ExitPlanMode"
 	case proto.IxPermission:
-		return p.ix.ToolUseID != "" && p.ix.Agent == "" && p.ix.Resumable
+		return (p.ix.ToolUseID != "" || len(p.ix.ToolInput) > 0) && p.ix.Agent == "" && p.ix.Resumable
 	}
 	return false
 }
@@ -80,25 +81,29 @@ func (s *Service) checkPlanInteraction(machine string, p *pending) {
 	}
 }
 
-// planCallFinished: items hold the result of the tool call ix asks about. PermissionRequest in some Claude Code
-// versions omits tool_use_id. In that case the call immediately preceding this hook is identified by its timestamp;
-// ambiguous calls, missing timestamps and earlier results fail closed. The result means only that the call ended
-// (approval, rejection or interruption); no resolution is invented.
+// planCallFinished: items hold the result of the tool call ix asks about, or real assistant activity after a permission
+// call whose hook was left behind. PermissionRequest in some Claude Code versions omits tool_use_id; then only a unique,
+// recent call with the same tool name and canonically identical input identifies the call. Ambiguous calls, missing
+// timestamps and earlier results fail closed. Ending or passing the call never invents an approval.
 func planCallFinished(ix proto.Interaction, items []proto.Item) bool {
-	id := ix.ToolUseID
+	id, callSeq := ix.ToolUseID, 0
 	if id == "" {
-		if ix.Kind == proto.IxPermission || ix.CreatedAt.IsZero() { // only a plan's call is guessed at
+		if ix.CreatedAt.IsZero() {
 			return false
 		}
-		for _, it := range items {
-			if it.Role != "assistant" || it.Kind != proto.KindToolUse || it.ToolName != "ExitPlanMode" || it.ToolUseID == "" ||
-				it.TS.IsZero() || it.TS.After(ix.CreatedAt) || ix.CreatedAt.Sub(it.TS) > 30*time.Second {
-				continue
+		if ix.Kind == proto.IxPermission {
+			id, callSeq = permissionCall(ix, items)
+		} else {
+			for _, it := range items {
+				if it.Role != "assistant" || it.Kind != proto.KindToolUse || it.ToolName != "ExitPlanMode" || it.ToolUseID == "" ||
+					it.TS.IsZero() || it.TS.After(ix.CreatedAt) || ix.CreatedAt.Sub(it.TS) > 30*time.Second {
+					continue
+				}
+				if id != "" && id != it.ToolUseID {
+					return false // two candidate plans: neither can be safely attributed to this hook
+				}
+				id = it.ToolUseID
 			}
-			if id != "" && id != it.ToolUseID {
-				return false // two candidate plans: neither can be safely attributed to this hook
-			}
-			id = it.ToolUseID
 		}
 	}
 	if id == "" {
@@ -109,8 +114,49 @@ func planCallFinished(ix proto.Interaction, items []proto.Item) bool {
 			!it.TS.IsZero() && !it.TS.Before(ix.CreatedAt) {
 			return true
 		}
+		if ix.Kind != proto.IxPermission || ix.ToolUseID != "" || it.Seq <= callSeq || it.Role != "assistant" ||
+			!it.TS.After(ix.CreatedAt) {
+			continue
+		}
+		switch it.Kind {
+		case proto.KindText, proto.KindThinking:
+			if it.Text != "" {
+				return true
+			}
+		case proto.KindToolUse:
+			if it.ToolUseID != "" {
+				return true
+			}
+		}
 	}
 	return false
+}
+
+// permissionCall finds the only call that can be this hook's request. Tool input, not timing alone, supplies the identity
+// PermissionRequest omitted. A repeated transcript entry with the same id is one call; two different ids are ambiguous.
+func permissionCall(ix proto.Interaction, items []proto.Item) (string, int) {
+	want, err := canonicalOwnerAction(ix.ToolInput)
+	if err != nil {
+		return "", 0
+	}
+	id, seq := "", 0
+	for _, it := range items {
+		if it.Role != "assistant" || it.Kind != proto.KindToolUse || it.ToolName != ix.ToolName || it.ToolUseID == "" ||
+			it.TS.IsZero() || it.TS.After(ix.CreatedAt) || ix.CreatedAt.Sub(it.TS) > 30*time.Second {
+			continue
+		}
+		got, err := canonicalOwnerAction(it.ToolInput)
+		if err != nil || !bytes.Equal(got, want) {
+			continue
+		}
+		if id != "" && id != it.ToolUseID {
+			return "", 0
+		}
+		if id == "" || it.Seq > seq {
+			id, seq = it.ToolUseID, it.Seq
+		}
+	}
+	return id, seq
 }
 
 func (s *Service) finishExternalPlan(p *pending) {

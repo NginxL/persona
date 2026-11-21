@@ -30,6 +30,14 @@ struct NewAgentAttachmentsTests {
         #expect(FirstMessage.text(prompt: "", contextBlock: block, paths: [], photos: 1) == block)
     }
 
+    /// #1842's text-only Traex start uses this same composition as its start prompt, not a later ordinary message.
+    @Test func aTraexTextOnlyPromptIsContextThenText() {
+        let block = "<persona-context kind=\"context\" title=\"待办 · 查启动\" url=\"\">Traex</persona-context>"
+        let first = FirstMessage.text(prompt: "  检查启动日志 \n", contextBlock: block, paths: [], photos: 0)
+        #expect(first == "\(block)\n\n检查启动日志")
+        #expect(!first.isEmpty)
+    }
+
     @Test func codexTakesNoAttachmentsAndUploadsHoldTheStart() {
         let codex = String(localized: "Codex takes no attachments")
         let uploading = String(localized: "Waiting for the files to finish uploading")

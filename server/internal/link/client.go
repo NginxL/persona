@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"os"
 	"slices"
@@ -148,6 +149,8 @@ type Options struct {
 	SSHBin           string
 	// directReady observes candidate publication in package tests; production leaves it nil.
 	directReady chan *directHandoff
+	// routeAddrs replaces the local address lookup for route memory tests.
+	routeAddrs func() ([]net.Addr, error)
 	// limiter replaces passive mode's (tests).
 	limiter *authLimiter
 }
@@ -312,15 +315,15 @@ func watchMode(ctx context.Context, path, mode string, cancel context.CancelFunc
 // runActive keeps the link to the hub up until ctx ends, starting with backoff b.
 func runActive(ctx context.Context, o Options, rep *reporter, b backoff) {
 	rep.switchTo(ModeActive)
-	// last is the kind of the link that worked last: a proxy or SSH route goes first next time (routeOrder). A new
-	// credential, tunnel or proxy setting starts over from direct.
-	var last, lastToken, lastProxy string
-	var lastSSHConfig *SSH
+	memory := routeMemory{path: o.Path, addresses: o.routeAddrs}
+	if memory.addresses == nil {
+		memory.addresses = net.InterfaceAddrs
+	}
 	for ctx.Err() == nil {
 		was := stampOf(o.Path) // a change from here on (paired again, an address added) cuts the wait below short
 		c, err := Load(o.Path)
 		if err != nil {
-			last, lastToken, lastProxy, lastSSHConfig = "", "", "", nil
+			memory.clear()
 			if errors.Is(err, os.ErrNotExist) {
 				rep.set(func(s *Status) { *s = Status{State: "unpaired"} })
 			} else {
@@ -329,15 +332,11 @@ func runActive(ctx context.Context, o Options, rep *reporter, b backoff) {
 			o.wait(ctx, time.Hour, was)
 			continue
 		}
-		if c.Token != lastToken || !c.SSH.Equal(lastSSHConfig) || c.Proxy != lastProxy {
-			last = ""
-			lastToken, lastProxy = c.Token, c.Proxy
-			lastSSHConfig = cloneSSH(c.SSH)
-		}
 		rep.set(func(s *Status) {
 			*s = Status{State: "connecting", Machine: c.Machine, HubName: c.HubName, MachineName: c.MachineName, Trust: trustOf(c),
 				Endpoints: ranked(c.Endpoints), SSH: cloneSSH(c.SSH)}
 		})
+		last := memory.beforeDial(c)
 		l, err := dialActive(ctx, c, o.SSHBin, last)
 		var end error
 		state := "waiting"
@@ -345,12 +344,11 @@ func runActive(ctx context.Context, o Options, rep *reporter, b backoff) {
 			end = err
 		} else {
 			for {
-				last = l.ep.Kind
 				start := time.Now()
 				rep.links++
 				l.gen = rep.links
 				var handoff *directHandoff
-				handoff, end = l.serve(ctx, c, o, rep)
+				handoff, end = l.serve(ctx, c, o, rep, &memory)
 				if time.Since(start) > time.Minute {
 					b = backoff{}
 				}
@@ -366,7 +364,7 @@ func runActive(ctx context.Context, o Options, rep *reporter, b backoff) {
 				// Serve the exact socket the SSH probe connected, under the configuration that validated it. A redial
 				// here would both lose that ownership and reintroduce the gap that dropped working SSH links.
 				l, c = handoff.candidate, handoff.config
-				last = ""
+				memory.clear()
 				b = backoff{}
 			}
 			// The link writes link.json itself (the hub's addresses and names): from here only a new credential or tunnel
@@ -385,7 +383,7 @@ func runActive(ctx context.Context, o Options, rep *reporter, b backoff) {
 		var reach func(context.Context) bool
 		switch {
 		case errors.Is(end, errDirectReady):
-			last = ""
+			memory.clear()
 			b, wait = backoff{}, 0
 		case errors.Is(end, errRedial), errors.Is(end, errRepaired):
 			b, wait = backoff{}, 0

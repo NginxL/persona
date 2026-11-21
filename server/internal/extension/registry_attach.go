@@ -59,13 +59,15 @@ func (r *Registry) Attach(ctx context.Context, id, source, actor string) (*Exten
 	}
 	row := old.Record
 	row.Remote = &remote
+	mutation := r.settingsWrite(id)
+	defer mutation.finish()
 	next, err := r.switchRemote(ctx, old, row)
 	if err != nil {
 		return nil, err
 	}
 	unlock()
 	r.audit(ctx, id, "attach", actor, map[string]any{"version": row.Version, "rpc_socket": remote.RPCSocket, "http_socket": remote.HTTPSocket})
-	r.changed(Change{ID: id, Kind: "attached", Old: old})
+	mutation.changed(Change{ID: id, Kind: "attached", Old: old})
 	return next, nil
 }
 
@@ -86,13 +88,15 @@ func (r *Registry) Detach(ctx context.Context, id, actor string) (*Extension, er
 	}
 	row := old.Record
 	row.Remote = nil
+	mutation := r.settingsWrite(id)
+	defer mutation.finish()
 	next, err := r.switchRemote(ctx, old, row)
 	if err != nil {
 		return nil, err
 	}
 	unlock()
 	r.audit(ctx, id, "detach", actor, map[string]any{"version": row.Version})
-	r.changed(Change{ID: id, Kind: "detached", Old: old})
+	mutation.changed(Change{ID: id, Kind: "detached", Old: old})
 	return next, nil
 }
 

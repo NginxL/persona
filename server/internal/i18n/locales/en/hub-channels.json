@@ -57,6 +57,8 @@
   "register_failed": "Lark couldn't create the app. Enter the App ID and App Secret of an app you created instead.",
   "feature_answer_new_card": "Answer as a new card",
   "feature_answer_new_card_description": "When a run finishes, its answer is sent as a new card at the bottom of the chat, so Lark notifies you, and the progress card folds up; off: the answer is written into the progress card",
+  "feature_read_group": "Read the group with /read",
+  "feature_read_group_description": "In any group the bot is in, your own \"@bot /read <task>\" reads the group's recent messages (the last 40 unless you say otherwise), with their images and files, as you, then answers under your message. Others' messages never trigger it",
   "feature_topic_cot": "Native process in topics",
   "feature_topic_cot_description": "Show a topic run's thinking and tool calls in Lark's collapsible agent message, alongside the progress card; off: keep the process in the card's folded panel"
 }

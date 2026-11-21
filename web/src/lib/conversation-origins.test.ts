@@ -110,6 +110,11 @@ describe("the sidebar's Recent (#4873, #5195)", () => {
     expect(recentConversations(list, "main", ["lead"], "bg").map((c) => c.session_id)).toEqual(["inbox", "a", "lark", "b", "wx", "e1", "e2", "never"]);
   });
 
+  it("applies the shared manual order after all existing Recent filters, keeping new rows visible", () => {
+    expect(recentConversations(list, "main", ["lead"], "bg", false, ["b", "inbox", "not-loaded"]).map((c) => c.session_id)).toEqual(["b", "inbox", "a", "lark", "wx", "e1", "e2", "never"]);
+    expect(recentConversations(list, "main", ["lead"], "bg", false, ["main", "lead", "gone"]).map((c) => c.session_id)).toEqual(["inbox", "a", "lark", "b", "wx", "e1", "e2", "never"]);
+  });
+
   it("leaves the scheduled tasks' own chats out of Recent, however new they are (#6228): they keep their entry on Scheduled Tasks and All chats", () => {
     const taskFirst = [conv("main", { updated_at: at(0) }), conv("task", { origin: "task", updated_at: at(0.1) }), conv("mine", { origin: "user", updated_at: at(1) })];
     expect(recentConversations(taskFirst, "main", []).map((c) => c.session_id)).toEqual(["mine"]);

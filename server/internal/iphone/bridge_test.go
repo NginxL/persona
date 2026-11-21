@@ -63,7 +63,10 @@ serve)
     exit 1
   fi
   echo "$@" > "$FAKE_SERVE_ARGS"
+  # FAKE_DDI_UNMOUNTED: the phone comes up without the developer disk image, and device_info says so until mount_ddi.
+  mounted=true
   if [ -n "$FAKE_DDI_UNMOUNTED" ]; then
+    mounted=false
     echo '{"event":"ready","device":{"name":"Test Phone","developer_mode":true,"ddi_mounted":false}}'
   else
     echo '{"event":"ready","device":{"name":"Test Phone"}}'
@@ -78,7 +81,12 @@ serve)
       exit 1
     fi
     if [ "$op" = "mount_ddi" ]; then
+      mounted=true
       echo '{"v":1,"id":"'"$id"'","ok":true,"op":"mount_ddi","result":{"mounted":true,"already":false,"image":"x.dmg","ticket":"apple","services_refreshed":true}}'
+      continue
+    fi
+    if [ "$op" = "device_info" ] && [ -n "$FAKE_DDI_UNMOUNTED" ]; then
+      echo '{"v":1,"id":"'"$id"'","ok":true,"op":"device_info","result":{"name":"Test Phone","developer_mode":true,"ddi_mounted":'"$mounted"'}}'
       continue
     fi
     echo '{"v":1,"id":"'"$id"'","ok":true,"op":"'"$op"'","result":{"op":"'"$op"'"}}'
@@ -472,10 +480,13 @@ func TestPrepareMountsAndThenAgainByItself(t *testing.T) {
 	if rec, _ := m.store.Load(testUDID); !rec.AutoPrepare {
 		t.Fatal("prepared, but not allowed to mount again")
 	}
-	if d := m.Devices(ctx); !d[0].AutoPrepare {
-		t.Fatalf("Devices = %+v", d[0])
+	// The phone's status says it at once: device_info is read again right after the mount, not at the next health
+	// check a minute later (#12171).
+	d := m.Devices(ctx)
+	if !d[0].AutoPrepare || !bytes.Contains(d[0].Info, []byte(`"ddi_mounted":true`)) {
+		t.Fatalf("Devices = %+v (info %s)", d[0], d[0].Info)
 	}
-	if got := ops(); got != "tap,mount_ddi" {
+	if got := ops(); got != "tap,mount_ddi,device_info" {
 		t.Fatalf("ops %s", got)
 	}
 

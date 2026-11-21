@@ -5,9 +5,9 @@
 // message, on every device), drawn at once and put back with the hub's words if it says no; following the default again
 // is a DELETE. An older hub: the pick lasts for this page and goes with each message, as before. The new-conversation
 // page: the pick goes with the conversation's start.
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n";
-import { api, errorText, sessionPath } from "../../lib/api";
+import { api, ApiError, errorText, sessionPath } from "../../lib/api";
 import { assistantPickKey, assistantSetup, ASSISTANT_START_SERVICE_TIER_FEATURE, type AssistantChat, type AssistantSetup } from "../../lib/assistant-models";
 import { assistantPanel, assistantPickOf } from "../../lib/assistant-panel";
 import { pickEffort, pickFast, pickLauncher, pickModel } from "../../lib/assistant-chat";
@@ -20,10 +20,11 @@ import { TYPED_MODELS_FEATURE } from "../../lib/model-id";
 import { providerTitle } from "../../lib/provider-names";
 import { speedStep } from "../../lib/session-panel";
 import { assistantLaunchers, forgetModel, modelList, readModels, useModelLists } from "../../lib/session-models";
-import { getSession, hubHas, upsertSession, useStore } from "../../lib/store";
+import { getSession, hubHas, refreshAssistant, upsertSession, useStore } from "../../lib/store";
 import type { ModelPick, Session } from "../../lib/types";
-import { toast } from "../../ui/atoms";
+import { Button, Dialog, toast } from "../../ui/atoms";
 import { ModelPanel } from "../../ui/model-panel/ModelPanel";
+import { ASSISTANT_SEGMENTS_FEATURE, assistantSwitchNeeded, conversationSwitchState, prepareConversationSwitch, submitConversationSwitch, type ConversationSwitchRequest } from "../../lib/conversation-switch";
 import { setServiceTier } from "./SessionDialogs";
 
 /** PUT …/model {launcher, model?, effort?, machine_id}: kept for the conversation. Drawn at once; put back, with the hub's
@@ -81,20 +82,38 @@ export function PickStrip({ chat, setup, named, onBack }: { chat: AssistantChat;
 
 export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: AssistantChat; mid: string; anchor: HTMLElement; onClose: () => void }) {
   const version = useModelLists();
+  const canSwitch = useStore((s) => hubHas(s.features, ASSISTANT_SEGMENTS_FEATURE));
+  const [switchPick, setSwitchPick] = useState<ModelPick | null>(null);
+  const [switchError, setSwitchError] = useState("");
+  const [switching, setSwitching] = useState(false);
+  const [switchUncertain, setSwitchUncertain] = useState(false);
+  const switchFlight = useRef(false);
+  const switchRequest = useRef<ConversationSwitchRequest | null>(null);
   const typed = useStore((s) => hubHas(s.features, TYPED_MODELS_FEATURE));
   const chosen = useChosenManager();
   const startServiceTier = useStore((s) => hubHas(s.features, ASSISTANT_START_SERVICE_TIER_FEATURE)) && !chosen;
   const { info } = assistantLaunchers(mid);
   const setup = assistantSetup(chat, info);
   const engine = chat.session?.agent || "claude";
+  const [supervisionRequired, setSupervisionRequired] = useState(false);
+  const roleMachine = chat.session?.machine_id;
+  const roleSession = chat.session?.session_id;
+  useEffect(() => {
+    let current = true;
+    if (!canSwitch || !roleMachine || !roleSession) return;
+    void conversationSwitchState({ machine_id: roleMachine, session_id: roleSession }).then((snapshot) => {
+      if (current) setSupervisionRequired(Boolean(snapshot.supervision_required));
+    }).catch(() => {});
+    return () => { current = false; };
+  }, [canSwitch, roleMachine, roleSession]);
   // a chat that runs keeps its engine; one whose agent isn't known is refused nothing on a guess, as on the hub
   const running = Boolean(chat.session?.agent);
   const fast = Boolean(chat.session?.service_tiers?.some((x) => x.id === "priority"));
   const fastOn = Boolean(setup.fast);
   const { providers, state } = useMemo(
-    () => assistantPanel(setup, info, (name) => modelList(mid, name, "assistant"), { typed, engine, running, starting: !chat.session && startServiceTier, fast, fastOn }),
+    () => assistantPanel(setup, info, (name) => modelList(mid, name, "assistant"), { typed, engine, running, switching: Boolean(canSwitch && chat.kept && chat.session), supervision: supervisionRequired, starting: !chat.session && startServiceTier, fast, fastOn }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `version` stands for what was read
-    [setup.provider, setup.model, setup.effort, setup.fast, info, mid, typed, engine, running, fast, fastOn, startServiceTier, version],
+    [setup.provider, setup.model, setup.effort, setup.fast, info, mid, typed, engine, running, fast, fastOn, startServiceTier, canSwitch, supervisionRequired, version],
   );
   const latest = () => (chat.session ? (getSession(chat.session.machine_id, chat.session.session_id) ?? chat.session) : undefined);
   const key = assistantPickKey(chat);
@@ -107,6 +126,15 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
   };
   const apply = async (pick: ModelPick): Promise<boolean> => {
     const s = latest();
+    const provider = providers.find((p) => p.id === pick.launcher);
+    const target = info?.launchers.find((l) => l.name === pick.launcher);
+    if (s && chat.kept && canSwitch && provider && target && assistantSwitchNeeded(s, target, provider.engine)) {
+      setSwitchPick(pick);
+      switchRequest.current = null;
+      setSwitchError("");
+      setSwitchUncertain(false);
+      return false; // Confirmation, not a model pick, owns the explicit operation.
+    }
     if (s && chat.kept) return keepPick(s, pick);
     keepHere(pick);
     // an older hub keeps the effort on the session (what the effort chip did)
@@ -181,9 +209,34 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
 
   const quotas = usePanelQuotas(mid, providers, info?.launchers);
 
-  return (
+  const confirmSwitch = async () => {
+    const session = latest();
+    if (!session || !switchPick || switchFlight.current) return;
+    switchFlight.current = true;
+    setSwitching(true);
+    setSwitchError("");
+    let submitted = false;
+    try {
+      switchRequest.current ??= await prepareConversationSwitch(session, switchPick);
+      submitted = true;
+      await submitConversationSwitch(session, switchRequest.current);
+      setSwitchPick(null);
+      toast(t("chat-modelpanel.switch_requested"));
+      void refreshAssistant().catch(() => {});
+      onClose();
+    } catch (error) {
+      const uncertain = submitted && !(error instanceof ApiError && error.body.delivered === "none");
+      setSwitchUncertain(uncertain);
+      setSwitchError(uncertain ? t("chat-modelpanel.switch_unconfirmed", { error: errorText(error) }) : errorText(error));
+    }
+    finally { switchFlight.current = false; setSwitching(false); }
+  };
+  const cancelSwitch = () => { if (!switchFlight.current) { setSwitchPick(null); switchRequest.current = null; } };
+
+  return ( <>
     <ModelPanel
       anchor={anchor}
+      held={Boolean(switchPick)}
       onClose={onClose}
       providers={providers}
       state={state}
@@ -195,5 +248,10 @@ export function AssistantModelPanel({ chat, mid, anchor, onClose }: { chat: Assi
       onForget={onForget}
       header={<PickStrip chat={chat} setup={setup} named={named} onBack={back} />}
     />
-  );
+    <Dialog open={Boolean(switchPick)} title={t("chat-modelpanel.switch_title")} onClose={cancelSwitch}
+      footer={<><Button disabled={switching} onClick={cancelSwitch}>{t(switchUncertain ? "common.close" : "common.cancel")}</Button><Button disabled={switching} busy={switching} onClick={() => void confirmSwitch()}>{t("chat-modelpanel.switch_confirm")}</Button></>}>
+      <p>{t("chat-modelpanel.switch_explanation", { name: providers.find((p) => p.id === switchPick?.launcher)?.name ?? switchPick?.launcher ?? "" })}</p>
+      {switchError && <p role="alert" className="text-red">{switchError}</p>}
+    </Dialog>
+  </> );
 }

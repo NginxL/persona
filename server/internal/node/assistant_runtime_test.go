@@ -85,6 +85,65 @@ func startedAssistant(t *testing.T, n *Node, host *fakeRuntime) string {
 	return res.SessionID
 }
 
+func TestRuntimeAssistantFirstMessageIsVerbatimWithoutAutomaticCommands(t *testing.T) {
+	for _, engine := range []string{"agy", "cursor", "dsh"} {
+		t.Run(engine, func(t *testing.T) {
+			n, hub := runtimeNode(t)
+			assistantHub(hub)
+			hello := assistantRuntimeHello()
+			hello["runtime"], hello["launcher"] = engine, engine
+			host := dialRuntime(t, n, hello)
+			id := engine + "-first-message"
+			cwd := filepath.Join(n.home, ".persona", "assistant")
+			host.answer = func(method string, _ json.RawMessage) (any, error) {
+				if method == "session.start" {
+					return map[string]any{"session": proto.Session{SessionID: id, Cwd: cwd, Status: proto.StatusIdle}}, nil
+				}
+				return map[string]bool{"ok": true}, nil
+			}
+			const first = "Check this provider's usage source.\nKeep the original configuration."
+			if _, err := nodeCall(t, n, "assistant.send", map[string]any{"launcher": engine, "cwd": cwd, "text": first}); err != nil {
+				t.Fatal(err)
+			}
+			// These transports have no compact-before-send implementation, even if a caller asks for it.
+			if compactable, why := n.compactableRuntime(id); compactable {
+				t.Fatalf("unexpected automatic compaction support: %s", why)
+			}
+			row := proto.Session{SessionID: id, Cwd: cwd, Status: proto.StatusIdle, Rev: 2, ContextTokens: 190000, ContextWindow: 200000}
+			if err := host.peer.Notify("runtime.sessions", map[string]any{"sessions": []proto.Session{row}}); err != nil {
+				t.Fatal(err)
+			}
+			waitFor(t, "nearly full runtime row", func() bool {
+				got, _, ok := n.runtimes.rowOf(id)
+				return ok && proto.ContextNearlyFull(int(got.ContextTokens), int(got.ContextWindow))
+			})
+			const next = "Continue with the same request."
+			if _, err := nodeCall(t, n, "session.send", map[string]any{"session_id": id, "text": next, "compact_if_full": true}); err != nil {
+				t.Fatal(err)
+			}
+			sends := host.got("session.send")
+			if len(sends) != 2 {
+				t.Fatalf("unexpected command or duplicate send: %s", sends)
+			}
+			for i, want := range []string{first, next} {
+				var sent struct {
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(sends[i], &sent); err != nil {
+					t.Fatal(err)
+				}
+				if sent.Text != want || strings.Contains(sent.Text, "/compact") {
+					t.Fatalf("message changed: %q, want %q", sent.Text, want)
+				}
+			}
+			starts := host.got("session.start")
+			if len(starts) != 1 || strings.Contains(string(starts[0]), `"prompt"`) || strings.Contains(string(starts[0]), "/compact") {
+				t.Fatalf("allocation sent unexpected input: %s", starts)
+			}
+		})
+	}
+}
+
 func TestRuntimeAssistantQueue(t *testing.T) {
 	n, hub := runtimeNode(t)
 	assistantHub(hub)
@@ -796,5 +855,39 @@ func TestAssistantOnARuntimeSendsASlashCommandOnItsOwn(t *testing.T) {
 	}
 	if _, ctx := sentText(6); !strings.Contains(ctx, "测试时间") {
 		t.Fatalf("a /status with a picture went without context: %q", ctx)
+	}
+}
+
+func TestAssistantRuntimeStartPropagatesPermissionMode(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+	host := dialRuntime(t, n, assistantRuntimeHello())
+	cwd := t.TempDir()
+	host.answer = func(method string, params json.RawMessage) (any, error) {
+		if method == "session.start" {
+			return map[string]any{"session": map[string]any{"session_id": "session-perm-1", "cwd": cwd, "status": "idle"}}, nil
+		}
+		return map[string]any{"ok": true}, nil
+	}
+	if _, err := nodeCall(t, n, "assistant.send", map[string]any{
+		"cwd":             cwd,
+		"launcher":        "dsh",
+		"text":            "hello",
+		"permission_mode": "acceptEdits",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	starts := host.got("session.start")
+	if len(starts) != 1 {
+		t.Fatalf("starts = %d, want 1", len(starts))
+	}
+	var start struct {
+		PermissionMode string `json:"permission_mode"`
+	}
+	if err := json.Unmarshal(starts[0], &start); err != nil {
+		t.Fatal(err)
+	}
+	if start.PermissionMode != "acceptEdits" {
+		t.Fatalf("session.start permission_mode = %q, want acceptEdits (%s)", start.PermissionMode, starts[0])
 	}
 }

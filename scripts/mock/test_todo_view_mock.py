@@ -396,6 +396,15 @@ class ViewTests(Case):
         v = self.row("t08")["view"]
         self.assertEqual((v["phase"], v["section"], v["reason"], v["seen"]), ("done", "done", "completed", True))
 
+    def test_a_finished_row_seen_a_day_ago_offers_mark_done(self):
+        self.hub.get("/mock/todo-view?seen_hours=25")
+        self.hub.call("/api/v1/todos/t07/seen", "PUT")
+        v = self.row("t07")["view"]
+        self.assertEqual((v["section"], v["reason"], v["line"]["key"]), ("todo", "finished_seen", "finished_seen"))
+        self.hub.get("/mock/reset")
+        self.hub.call("/api/v1/todos/t07/seen", "PUT")
+        self.assertEqual(self.row("t07")["view"]["reason"], "finished_recent")
+
     def test_a_parent_follows_its_steps(self):
         t02 = self.row("t02")["view"]
         self.assertEqual((t02["section"], t02["reason"], t02["line"]["args"]["step"], t02["steps"]),

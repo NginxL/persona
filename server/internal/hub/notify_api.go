@@ -227,7 +227,8 @@ func extensionNotifyIDs(manager, extension, id string) (ws, collapse string) {
 }
 
 // deliverNotify sends a validated notification to the devices that take them: the reply is {"sent":true} when a
-// recipient is selected, or {"sent":false,"reason":"muted"|"no_device"|"filtered"}. An error is the caller's
+// recipient is selected, {"sent":false,"held":true,"reason":...} when push grading holds it, or
+// {"sent":false,"reason":"muted"|"no_device"|"filtered"}. An error is the caller's
 // (a payload too large for APNs). machine is the subtitle:
 // the machine's name, "" for none. manager is whose it is (an extension's manager, a computer's for its
 // `personad notify` or for a request naming that computer): devices that turned that manager's pushes off skip it;
@@ -254,7 +255,10 @@ func (h *Hub) deliverNotify(in notifyRequest, machine, extID, manager string) (m
 	if in.ID != "" { // the caller's own id, apart from every other manager's and extension's same id
 		policy.relatedKey = "notify:" + manager + "/" + extID + "/" + in.ID
 	}
-	pushSelected, pushReachable, _ := h.push.sendFromPolicy(manager, policy, build, collapse, wants, quietNone, nil, nil)
+	pushSelected, pushReachable, heldReason := h.push.sendFromPolicy(manager, policy, build, collapse, wants, quietNone, nil, nil)
+	if heldReason != "" {
+		return map[string]any{"sent": false, "held": true, "reason": heldReason}, nil
+	}
 	ws := build
 	if id != "" {
 		// The WebSocket event carries the id itself (not the push), so an Android phone replaces the earlier alert too.

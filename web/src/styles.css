@@ -516,13 +516,20 @@ button:disabled { cursor: default; }
 .prose-j .card-ui :is(p, h1, h2, h3, h4, h5, ul, ol, li, a, code, pre, table, thead, tbody, tr, th, td, img):not(.card-ui .prose-j *) { all: revert-layer; }
 .prose-compact pre { padding: 6px 10px; font-size: 12px; line-height: 1.5; }
 
-/* Mochi, the default persona (views/assistant/MochiFace.tsx): the app icon's colors, not the page's accent. */
+/* Mochi, the default persona (views/assistant/MochiFace.tsx): the app icon's colors, not the page's accent. Asleep (offline)
+   on the dark disc it keeps the dark icon's ink outline, a lighter gray body and a lighter shadow (#12090, as on iOS): a gray
+   outline there sat halfway between the disc and the body, so the body's edge came in two small steps and looked blurred.
+   The closed eyes and the cheek keep their gray; the paper disc's asleep face is as before. */
 :root {
   --mochi-disc-top: #f4eadf; --mochi-disc-bottom: #e7d7c4; --mochi-body-top: #fff; --mochi-body-bottom: #e9e3de;
   --mochi-ink: #1d1816; --mochi-outline: #1d1816; --mochi-motion: #1d1816; --mochi-cheek: #f2703c; --mochi-shadow: rgb(0 0 0 / .14);
   --mochi-sleep-top: #d9d4d0; --mochi-sleep-bottom: #bdb6b1; --mochi-sleep-ink: #6e6763; --mochi-sleep-cheek: #a59d98; --mochi-needs-you: var(--attention);
+  --mochi-sleep-outline: #6e6763; --mochi-sleep-shadow: rgb(0 0 0 / .14);
 }
-.dark { --mochi-disc-top: #332a26; --mochi-disc-bottom: #1d1816; --mochi-outline: #0e0b0a; --mochi-motion: #d6d1cd; --mochi-shadow: rgb(0 0 0 / .45); --mochi-needs-you: var(--attention); }
+.dark {
+  --mochi-disc-top: #332a26; --mochi-disc-bottom: #1d1816; --mochi-outline: #0e0b0a; --mochi-motion: #d6d1cd; --mochi-shadow: rgb(0 0 0 / .45); --mochi-needs-you: var(--attention);
+  --mochi-sleep-top: #e2ddd9; --mochi-sleep-bottom: #c8c1bc; --mochi-sleep-outline: #0e0b0a; --mochi-sleep-shadow: rgb(0 0 0 / .3);
+}
 /* The faces' loops (.mochi-blink / -spin / -rock / -pulse) run as Web Animations (views/assistant/face-motion.ts): as CSS
    animations every cycle sent an animationiteration event to React's root listener and cost the page a style recalc and
    a layout, five faces in the persona picker kept /settings busy while idle. Here only where they turn from. */

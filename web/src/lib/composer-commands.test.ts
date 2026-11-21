@@ -19,7 +19,7 @@ describe("agentCommands", () => {
     expect(words(session({ state: "working", status: "working" }))).toEqual(["继续", "/compact", "/model", LOOP_TEXT.trim()]);
     expect(words(session({ state: "needs_you", status: "blocked" }))).toEqual(["继续", "/compact", "/model", LOOP_TEXT.trim()]);
   });
-  it("has neither for Codex, TRAEX or a runtime that cannot switch models", () => {
+  it("has neither for Codex, TRAE CLI or a runtime that cannot switch models", () => {
     for (const s of [session({ agent: "codex" }), session({ agent: "traex" }), session({ source_kind: "codex_app_server", capabilities: { send: true, terminal: true } })]) {
       const w = words(s);
       expect(w).not.toContain("/model");
@@ -138,10 +138,14 @@ describe("rankCommands", () => {
 describe("agentCommands' /permissions", () => {
   const LIST = [{ text: "/compact" }, { text: PERMISSIONS_COMMAND }];
   const has = (s?: Session) => agentCommands(LIST, s).some((c) => c.text === PERMISSIONS_COMMAND);
-  it("is listed for a running Claude Code Agent, idle or working, and Antigravity", () => {
+  it("is listed for a running Claude Code Agent, idle or working, and Antigravity's runtime", () => {
     expect(has(session({}))).toBe(true);
     expect(has(session({ state: "working", status: "working" }))).toBe(true);
-    expect(has(session({ agent: "agy" }))).toBe(true);
+    expect(has(session({ agent: "agy", source_kind: "runtime" }))).toBe(true);
+  });
+  it("is not listed for agy or cursor in a terminal pane, whose mode is their start's", () => {
+    expect(has(session({ agent: "agy" }))).toBe(false);
+    expect(has(session({ agent: "cursor" }))).toBe(false);
   });
   it("is not listed for Codex, a compatible CLI, a read-only source, an offline Agent or no session", () => {
     for (const s of [session({ agent: "codex" }), session({ agent: "traex" }), session({ source_kind: "codex_app_server", capabilities: { send: true, terminal: true } }), session({ state: "offline", status: "offline" }), session({ capabilities: { modes: false } as Session["capabilities"] }), undefined]) {

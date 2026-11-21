@@ -4,12 +4,14 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/herdr"
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -220,10 +222,29 @@ func (n *Node) quitAgentRound(ctx context.Context, id, pane string, only host.Ho
 			return true, nil
 		}
 	}
+	codexAgent := false
+	codexExtra := 0
+	if a, ok := n.agent(id); ok && a.PaneID == pane && a.Agent == "codex" {
+		codexAgent = true
+		if !requireFresh {
+			// While mid-turn on an app-server, abort the turn at the protocol level first so Ctrl+C reaches an
+			// idle composer; otherwise keep Ctrl+C-only keys (codex_waiting_test.go) and follow up within Codex's
+			// ~1s "Press Ctrl-C again to exit" window before stopWait expires it (#12389).
+			wireInterrupted := n.interruptCodexActiveTurn(ctx, id)
+			codexExtra = 1
+			if !wireInterrupted && (a.AgentStatus == proto.StatusWorking || a.AgentStatus == proto.StatusBlocked) {
+				codexExtra = 2
+			}
+		}
+	}
 	_ = n.sendKeys(ctx, pane, "ctrl+c")
 	time.Sleep(200 * time.Millisecond)
 	if err := n.sendKeys(ctx, pane, "ctrl+c"); err != nil {
 		return false, err
+	}
+	extraAt := time.Time{}
+	if codexAgent && codexExtra > 0 && stopWait >= 400*time.Millisecond {
+		extraAt = time.Now().Add(250 * time.Millisecond)
 	}
 	for deadline := time.Now().Add(stopWait); ; {
 		if err := ctx.Err(); err != nil {
@@ -236,8 +257,22 @@ func (n *Node) quitAgentRound(ctx context.Context, id, pane string, only host.Ho
 			err = n.refreshHosts(ctx)
 		}
 		if err == nil {
-			if a, ok := n.agent(id); !ok || a.PaneID != pane {
+			a, ok := n.agent(id)
+			if !ok || a.PaneID != pane {
 				return true, nil
+			}
+			// If earlier Ctrl+C presses only aborted a turn or cleared a draft, follow up with Ctrl+C while still
+			// inside Codex's short exit-confirmation window (never on non-Codex panes).
+			if codexExtra > 0 && !extraAt.IsZero() && !time.Now().Before(extraAt) {
+				codexExtra--
+				if codexExtra > 0 {
+					extraAt = time.Now().Add(250 * time.Millisecond)
+				} else {
+					extraAt = time.Time{}
+				}
+				if a.Agent == "codex" {
+					_ = n.sendKeys(ctx, pane, "ctrl+c")
+				}
 			}
 		} else if requireFresh {
 			return false, err
@@ -386,6 +421,9 @@ func (n *Node) resumeOtherWith(ctx context.Context, id string, st sessionState, 
 	return uncertain(n.resumeCodex(ctx, launch, id, st, argv, text, ws, tab))
 }
 
+// Resume already knows the thread and only waits for it to reappear in the host. A var for tests.
+var codexResumeWait = 60 * time.Second
+
 // resumeCodex runs `<launcher words> resume <id> -- <message>` (through codex-start, like a new Codex, in the thread's
 // directory) in a new tab and waits until the engine shows that Codex in it. In a pane it was given (adoptedPane: a
 // switch between engines, engine_switch.go) it runs there once its shell is at rest.
@@ -427,7 +465,7 @@ func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string,
 	}
 	defer done()
 	n.bindPane(pane, id) // the pane runs this thread (kept in its state): no guessing another rollout for it
-	wait, cancel := context.WithTimeout(ctx, codexStartWait)
+	wait, cancel := context.WithTimeout(ctx, codexResumeWait)
 	defer cancel()
 	for {
 		if err := n.refreshHosts(wait); err == nil {
@@ -485,11 +523,16 @@ func (n *Node) newTab(ctx context.Context, launch host.Launcher, cwd, ws, tabNam
 		}
 	} else {
 		created, err = createStartSlot(ctx, launch, ws, cwd, tabLabel(tabName, n.tabLabels(ctx, launch, ws)))
+		var missing *herdr.Error
+		if h, ok := launch.(*herdrHost); ok && ctx.Value(reopenWorktreeWorkspaceKey{}) == true &&
+			errors.As(err, &missing) && missing.Code == "workspace_not_found" {
+			created, err = n.reopenWorktreeTab(ctx, h, ws, cwd, tabName)
+		}
 		if err == nil {
 			if ts != nil && created != nil && created.SpaceID == "" {
 				created.SpaceID = ws
 			}
-			n.closeWorktreeShells(ctx, launch, ws, created.Pane.String()) // the Agent's tab is the worktree's tab now
+			n.closeWorktreeShells(ctx, launch, cmp.Or(created.SpaceID, ws), created.Pane.String()) // the Agent's tab is the worktree's tab now
 		}
 	}
 	if err != nil {

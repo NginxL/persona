@@ -399,6 +399,16 @@ jobs:
             printf '%s' "${!name}" | base64 --decode > "$RUNNER_TEMP/profile-$i.mobileprovision"
             cp "$RUNNER_TEMP/profile-$i.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/"
           done
+      - name: Prepare the explicitly public privacy waiver without logging private values
+        env:
+          PERSONA_PRIVACY_PUBLIC_WORDS: ${{ secrets.PERSONA_PRIVACY_PUBLIC_WORDS }}
+        run: |
+          set -euo pipefail
+          test "$PERSONA_PRIVACY_PUBLIC_WORDS" = 'chyroc'
+          umask 077
+          mkdir -p "$RUNNER_TEMP/persona-public-config/persona"
+          printf '# The public account identifier is not private; all other privacy checks remain active.\n!chyroc\n' > "$RUNNER_TEMP/persona-public-config/persona/private-words.txt"
+          printf 'XDG_CONFIG_HOME=%s\n' "$RUNNER_TEMP/persona-public-config" >> "$GITHUB_ENV"
       - name: Archive, export and upload the formal iPhone/Watch build
         env:
           RUSTUP_TOOLCHAIN: '1.98.0'
@@ -488,11 +498,11 @@ jobs:
           foreach ($path in Get-ChildItem release/downloads -File) {
             $assets += @{path=$path.FullName; name=$path.Name; sha256=(Get-FileHash $path.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
           }
-          $assets += @{path=(Resolve-Path release/downloads/persona-link-windows-amd64.verification.json).Path; name='persona-link-windows-amd64.verification.json'; sha256=(Get-FileHash release/downloads/persona-link-windows-amd64.verification.json -Algorithm SHA256).Hash.ToLowerInvariant()}
-          $assets += @{path=(Resolve-Path release/downloads/personad-windows-amd64.verification.json).Path; name='personad-windows-amd64.verification.json'; sha256=(Get-FileHash release/downloads/personad-windows-amd64.verification.json -Algorithm SHA256).Hash.ToLowerInvariant()}
-          $assets += @{path=(Resolve-Path release/downloads/persona-node-windows-amd64.verification.json).Path; name='persona-node-windows-amd64.verification.json'; sha256=(Get-FileHash release/downloads/persona-node-windows-amd64.verification.json -Algorithm SHA256).Hash.ToLowerInvariant()}
+          # windows_release.py already writes each verification JSON beside its executable. Do not add it a second time.
+          # This windows-latest runner proves amd64 only. ARM64 remains an explicit prerequisite, not a fabricated pass.
+          $architecture = if ($env:PROCESSOR_ARCHITECTURE -eq 'AMD64') { 'amd64' } elseif ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { throw 'Unsupported native Windows architecture' }
           @{commit=$plan.commit; assets=$assets} | ConvertTo-Json -Depth 5 | Set-Content release/receipt.json -NoNewline
-          python -B -c "import sys; sys.path.insert(0, 'scripts/operations'); from windows_release import check_windows_artifacts; import json; data=json.load(open('release/receipt.json')); check_windows_artifacts(data['assets'], '$($plan.version)')"
+          python -B -c "import sys; sys.path.insert(0, 'scripts/operations'); from windows_release import check_windows_artifacts; import json; data=json.load(open('release/receipt.json')); check_windows_artifacts(data['assets'], '$($plan.version)', '$architecture')"
           python scripts/operations/release_pr.py --repository '${{ github.repository }}' --channel '${{ needs.plan.outputs.channel }}' verify-artifacts --plan release/plan.json --commit '${{ needs.plan.outputs.commit }}' --add release/downloads
       - uses: actions/setup-node@v4
         with:
@@ -540,6 +550,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # The failure conclusion needs this script even when the platform gate below stops before any artifact download.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
       - name: Require every platform job to succeed before verification
         env:
           CLI_WEB: ${{ needs.cli-web.result }}
@@ -551,11 +567,6 @@ jobs:
           for result in "$CLI_WEB" "$ANDROID" "$APPLE" "$WINDOWS"; do
             test "$result" = success || { echo "A required platform failed or did not complete: $result" >&2; exit 1; }
           done
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.plan.outputs.commit }}
-          fetch-depth: 0
-          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: release-pr-plan-${{ needs.plan.outputs.pr }}

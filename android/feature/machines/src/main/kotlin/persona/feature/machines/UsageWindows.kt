@@ -35,6 +35,12 @@ internal fun pace(w: UsageWindow, now: Instant): Pace? {
     return Pace(expected, when { diff > PACE_TOLERANCE -> PaceState.Over; diff < -PACE_TOLERANCE -> PaceState.Under; else -> PaceState.On })
 }
 
+/**
+ * The pace of one of an account's windows, as its card shows it. An out-of-date reading says nothing about how fast it is
+ * being used now, so a stale account has none (#12411): its numbers and reset stay, dated.
+ */
+internal fun pace(w: UsageWindow, now: Instant, stale: Boolean): Pace? = if (stale) null else pace(w, now)
+
 /** When a window starts over: due, minutes, hours, days and hours, or a clock time when that is today. */
 internal sealed interface ResetIn {
     data object Due : ResetIn

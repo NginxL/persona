@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
@@ -19,9 +20,11 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performTouchInput
 import androidx.navigation3.runtime.NavKey
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -31,6 +34,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import persona.core.contracts.api.ConversationTagFilters
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.designsystem.AppFeedback
@@ -91,6 +95,8 @@ class ConversationTagsScreenTest {
         rule.onAllNodesWithText(title)[0].performTouchInput { longClick() }
     }
     private fun tagDraft() = rule.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("conversation-tag-draft")))
+    private fun filterDraft() = rule.onNode(hasSetTextAction() and
+        hasAnyAncestor(hasTestTag("conversation-tag-filter-draft")))
     private fun tagChip(label: String) = rule.onNode(
         hasText(label) and hasAnyAncestor(hasTestTag("conversation-tag-filter")) and hasClickAction())
 
@@ -148,6 +154,70 @@ class ConversationTagsScreenTest {
         rule.onAllNodesWithTag("conversation-tag-filter").assertCountEquals(0)
         rule.onNodeWithText("Work chat").assertExists()
         rule.onNodeWithText("Plain chat").assertExists()
+    }
+
+    @Test @Config(qualifiers = "en-w400dp-h1200dp-xhdpi")
+    fun customEmptySetDoesNotFallBackToAutomaticChipsAndCanBeAddedTo() {
+        val hub = HistoryHub(chat("main", "Main", listOf("Planning")), chat("work", "Work chat", listOf("Planning"))).apply {
+            assistant.value = assistant.value.copy(conversationTagFilters = ConversationTagFilters(emptyList()))
+        }
+        show(hub)
+
+        rule.onNodeWithText("No tag filters").assertExists()
+        tagChip("Planning").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Customize tag filters").performClick()
+        filterDraft().performTextInput("Unused")
+        rule.onNodeWithText("Add").performClick()
+        rule.waitForIdle()
+
+        assertEquals(listOf("Unused"), hub.filterWrites.single().entries)
+        tagChip("Unused").assertExists()
+        rule.onNodeWithText("No tag filters").assertDoesNotExist()
+        // A filter entry need not match any loaded conversation; it is not silently cleared.
+        tagChip("Unused").performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        assertEquals(1, hub.filterWrites.size)
+        tagChip("Unused").assertIsSelected()
+        rule.onAllNodesWithText("Main conversation").assertCountEquals(0)
+        rule.onAllNodesWithText("Work chat").assertCountEquals(0)
+    }
+
+    @Test @Config(qualifiers = "en-w400dp-h1200dp-xhdpi")
+    fun resetWritesNullAndRestoresAutomaticChipsAndRows() {
+        val hub = HistoryHub(chat("main", "Main", listOf("Planning")), chat("work", "Work chat", listOf("Planning"))).apply {
+            assistant.value = assistant.value.copy(
+                conversationTagFilters = ConversationTagFilters(listOf("Unused", "Planning")))
+        }
+        show(hub)
+        tagChip("Unused").performClick()
+        rule.onAllNodesWithText("Main conversation").assertCountEquals(0)
+
+        rule.onNodeWithContentDescription("Customize tag filters").performClick()
+        rule.onNodeWithText("Reset to automatic").performClick()
+        rule.waitForIdle()
+
+        assertEquals(null, hub.filterWrites.single().entries)
+        tagChip("Planning").assertExists()
+        rule.onAllNodesWithText("Main conversation").assertCountEquals(1)
+        rule.onNodeWithText("Done").performClick()
+        rule.onNodeWithTag("conversation-tag-filter-draft").assertDoesNotExist()
+    }
+
+    @Test @Config(qualifiers = "en-w400dp-h1200dp-xhdpi")
+    fun refusedCustomRemovalRollsBackTheChipAndReportsTheFailure() {
+        val hub = HistoryHub(chat("main", "Main", listOf("Planning"))).apply {
+            assistant.value = assistant.value.copy(
+                conversationTagFilters = ConversationTagFilters(listOf("Planning", "Unused")))
+            refuseFilterWrites = true
+        }
+        show(hub)
+        rule.onNodeWithContentDescription("Customize tag filters").performClick()
+        rule.onNodeWithContentDescription("Remove Unused").performClick()
+        rule.waitForIdle()
+
+        assertEquals(listOf("Planning"), hub.filterWrites.single().entries)
+        tagChip("Unused").assertExists()
+        assertTrue(notices.toString(), notices.any { "Tag filters unavailable" in it })
     }
 
     @Test fun theMainChatCanClearItsTags() {

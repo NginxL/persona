@@ -73,6 +73,30 @@ func pipeNode(t *testing.T, h *Hub, id string, send func(ctx context.Context) er
 
 const sendPath = "/api/v1/sessions/box/s1/messages"
 
+// An exact approval reply ends at the manager: it has no node or model delivery receipt.
+func TestOwnerApprovalReplyDoesNotReachNode(t *testing.T) {
+	var typed atomic.Int32
+	h, m, manager := undeliveredHub(t, func(context.Context) error {
+		typed.Add(1)
+		return nil
+	})
+	manager.approvalTarget = "ix_owner_batch_exact"
+	w := sendAs(h, m, `{"text":"发","client_msg_id":"approval-1","approval_reply_to":"ix_owner_batch_exact"}`)
+	var out map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || out["ok"] != true || out["approval_reply"] != true || out["interaction_id"] != manager.approvalTarget || out["delivered"] != nil {
+		t.Fatalf("approval response: %d %+v", w.Code, out)
+	}
+	if typed.Load() != 0 {
+		t.Fatalf("exact approval reached the node %d time(s)", typed.Load())
+	}
+	if kept := manager.keeps(); len(kept) != 0 {
+		t.Fatalf("exact approval was kept as an undelivered model message: %+v", kept)
+	}
+}
+
 // A retry with the same client_msg_id — the app resends what got no answer — is not typed again, also when it comes
 // while the first is still being typed.
 func TestSendRetryIsNotTypedTwice(t *testing.T) {

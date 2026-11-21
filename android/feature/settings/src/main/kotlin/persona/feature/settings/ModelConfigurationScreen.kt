@@ -55,31 +55,133 @@ private fun ModelConfigurationDetails(models: ModelConfiguration?, onBack: () ->
         return
     }
     val default = LocalManagerRoster.current?.defaultManagerId
-    val model = remember(models, owner, default) { ModelCatalogModel(models.namingOwner(owner, default)) }
+    val scopedModels = remember(models, owner, default) { models.namingOwner(owner, default) }
+    val model = remember(scopedModels) { ModelCatalogModel(scopedModels) }
+    val profilesModel = remember(scopedModels) { ModelProfilesModel(scopedModels) }
     val state by model.state.collectAsState()
+    val profilesState by profilesModel.state.collectAsState()
     val scope = rememberCoroutineScope()
+    val feedback = LocalAppFeedback.current
+    val res = LocalResources.current
     var query by remember { mutableStateOf("") }
     var advanced by rememberSaveable { mutableStateOf(false) }
+    var selectedProfileId by rememberSaveable(owner) { mutableStateOf<String?>(null) }
+    var editingProfile by rememberSaveable(owner) { mutableStateOf(false) }
+    var editRevision by rememberSaveable(owner) { mutableLongStateOf(0L) }
     // "New model provider" opens over this page (`debug.newProvider` opens it for captures).
     var adding by remember { mutableStateOf<String?>(if (providers != null) NewProviderPreview.take() else null) }
-    LaunchedEffect(model) { model.load() }
+    LaunchedEffect(model, profilesModel) {
+        launch { model.load() }
+        launch { profilesModel.load() }
+    }
     if (adding != null && providers != null) {
         NewProviderPage(providers, onBack = { adding = null }, onSaved = { adding = null; scope.launch { model.load() } },
             preferPreset = adding == "preset", manager = owner, machines = machines)
         return
     }
+    val selectedProfile = selectedProfileId?.let { id -> profilesState.view?.profiles?.firstOrNull { it.id == id } }
+    if (selectedProfile != null) {
+        if (editingProfile) {
+            ModelProfileEditorPage(
+                profile = selectedProfile,
+                revision = editRevision,
+                catalog = state.catalog,
+                busy = profilesState.busy,
+                error = profilesState.actionError ?: profilesState.error,
+                conflict = profilesState.conflict,
+                onSave = { input ->
+                    scope.launch {
+                        if (profilesModel.save(selectedProfile.id, input)) {
+                            editRevision = profilesModel.state.value.view?.revision ?: editRevision
+                            editingProfile = false
+                            feedback?.notice(res.getString(R.string.settings_model_profiles_saved))
+                            model.load()
+                        }
+                    }
+                },
+                onReload = {
+                    scope.launch {
+                        profilesModel.clearErrors()
+                        val fresh = profilesModel.load()
+                        if (fresh != null) editRevision = fresh.revision
+                    }
+                },
+                onBack = {
+                    if (!profilesState.busy) {
+                        editingProfile = false
+                        profilesModel.clearErrors()
+                    }
+                },
+            )
+        } else {
+            ModelProfileDetailPage(
+                profile = selectedProfile,
+                catalog = state.catalog,
+                busy = profilesState.busy,
+                error = profilesState.actionError ?: profilesState.error,
+                onBack = {
+                    if (!profilesState.busy) {
+                        selectedProfileId = null
+                        editingProfile = false
+                        profilesModel.clearErrors()
+                    }
+                },
+                onEdit = {
+                    profilesModel.clearErrors()
+                    editRevision = profilesState.view?.revision ?: 0L
+                    editingProfile = true
+                },
+                onApply = {
+                    scope.launch {
+                        if (profilesModel.apply(selectedProfile.id)) {
+                            selectedProfileId = null
+                            editingProfile = false
+                            feedback?.notice(res.getString(R.string.settings_model_profiles_applied, selectedProfile.displayName))
+                            model.load()
+                        }
+                    }
+                },
+            )
+        }
+        return
+    }
     val catalog = state.catalog
-    val res = LocalResources.current
     val groups = catalog?.let { modelPurposeGroups(res, it.purposes, it.providers, query) }.orEmpty()
     val detail = LocalDetailKey.current
-    JListPage(title = stringResource(R.string.settings_src_model_title), onBack = onBack, refreshing = state.loading && catalog != null, onRefresh = { scope.launch { model.load() } },
+    val refreshing = (state.loading || profilesState.loading) && (catalog != null || profilesState.view != null)
+    fun refreshAll() {
+        scope.launch {
+            launch { model.load() }
+            launch { profilesModel.load() }
+        }
+    }
+    JListPage(title = stringResource(R.string.settings_src_model_title), onBack = onBack, refreshing = refreshing, onRefresh = ::refreshAll,
         actions = {
-            JIconButton(PersonaIcons.retry, stringResource(R.string.settings_src_refresh), { scope.launch { model.load() } }, enabled = !state.loading)
+            JIconButton(PersonaIcons.retry, stringResource(R.string.settings_src_refresh), ::refreshAll, enabled = !state.loading && !profilesState.loading)
         }) {
         item("manager") { ModelConfigurationOwner(owner) }
         item("search") {
             JSearchField(query, { query = it }, stringResource(R.string.settings_src_model_search), Modifier.padding(top = Tokens.Space.s))
         }
+        modelProfilesSection(
+            res = res,
+            state = profilesState,
+            query = query,
+            onSelect = { profile ->
+                profilesModel.clearErrors()
+                selectedProfileId = profile.id
+                editingProfile = false
+            },
+            onRollback = {
+                scope.launch {
+                    if (profilesModel.rollback()) {
+                        feedback?.notice(res.getString(R.string.settings_model_profiles_rolled_back))
+                        model.load()
+                    }
+                }
+            },
+            onRetry = { scope.launch { profilesModel.load() } },
+        )
         when {
             state.unsupported -> item("unsupported") {
                 JNotice(stringResource(R.string.settings_src_model_unsupported), Modifier.padding(top = Tokens.Space.m), status = Status.NeedsYou)
@@ -158,6 +260,8 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
     val feedback = LocalAppFeedback.current
     val res = LocalResources.current
     var choosingProvider by remember { mutableStateOf(false) }
+    var choosingEffort by remember { mutableStateOf(false) }
+    var choosingPermissionMode by remember { mutableStateOf(false) }
     var pickingModel by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var requestedOpen by rememberSaveable { mutableStateOf(false) }
@@ -189,7 +293,8 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
             effective(res, purpose, state)
             extensionCandidates(state, requestedOpen, onRequested = { requestedOpen = !requestedOpen },
                 onEdit = { model.edit(state.draft.copy(candidates = it)) })
-            form(res, purpose, state, onProvider = { choosingProvider = true }, onEdit = model::edit, onRestore = { save(true) },
+            form(res, purpose, state, onProvider = { choosingProvider = true }, onEffort = { choosingEffort = true },
+                onPermissionMode = { choosingPermissionMode = true }, onEdit = model::edit, onRestore = { save(true) },
                 onPickModel = { pickingModel = true }, onRetryModels = { scope.launch { model.loadModels(refresh = true) } })
         }
         state.error?.let { error ->
@@ -225,6 +330,38 @@ private fun ModelPurposeDetails(models: ModelConfiguration?, purposeId: String, 
     } + listOfNotNull(providers?.let {
         JAction(stringResource(R.string.settings_src_provider_new_more), icon = PhIcons.Plus, separatorBefore = true, onClick = { adding = true })
     }), { choosingProvider = false }, title = stringResource(R.string.settings_src_model_provider))
+    if (choosingEffort && purpose != null) {
+        val efforts = ModelProfileRules.EFFORT_LEVELS
+        val current = state.draft.effort
+        val actions = listOf(
+            JAction(stringResource(R.string.settings_src_model_follow_default), checked = current.isEmpty(),
+                onClick = { model.edit(state.draft.copy(effort = "")) })
+        ) + efforts.map { level ->
+            JAction(effortDisplayLabel(res, level), checked = current == level,
+                onClick = { model.edit(state.draft.copy(effort = level)) })
+        } + listOfNotNull(
+            current.takeIf { it.isNotEmpty() && it !in efforts }?.let { custom ->
+                JAction(custom, checked = true, onClick = {})
+            }
+        )
+        JActionSheet(actions, { choosingEffort = false }, title = stringResource(R.string.settings_src_model_effort))
+    }
+    if (choosingPermissionMode && purpose != null) {
+        val modes = state.provider?.permissionModes?.takeIf { it.size >= 2 } ?: ModelProfileRules.PERMISSION_MODES
+        val current = state.draft.permissionMode
+        val actions = listOf(
+            JAction(stringResource(R.string.settings_src_model_follow_default), checked = current.isEmpty(),
+                onClick = { model.edit(state.draft.copy(permissionMode = "")) })
+        ) + modes.map { mode ->
+            JAction(permissionModeDisplayLabel(res, mode), checked = current == mode,
+                onClick = { model.edit(state.draft.copy(permissionMode = mode)) })
+        } + listOfNotNull(
+            current.takeIf { it.isNotEmpty() && it !in modes }?.let { custom ->
+                JAction(permissionModeDisplayLabel(res, custom), checked = true, onClick = {})
+            }
+        )
+        JActionSheet(actions, { choosingPermissionMode = false }, title = stringResource(R.string.settings_model_profiles_permission_mode))
+    }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.effective(res: Resources, purpose: ModelPurpose, state: ModelPurposeState) {
@@ -233,7 +370,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.effective(res: Resour
         R.string.settings_src_model_effective_provider to (purpose.effective.provider?.let { id -> providers.firstOrNull { it.id == id }?.displayName ?: id }
             ?: res.getString(R.string.settings_src_state_not_configured)),
         R.string.settings_src_model_effective_model to (purpose.effective.model?.takeIf { it.isNotBlank() } ?: res.getString(R.string.settings_src_model_provider_default)),
-        purpose.effective.effort?.takeIf { it.isNotBlank() }?.let { R.string.settings_src_model_effort to it },
+        purpose.effective.effort?.takeIf { it.isNotBlank() }?.let { R.string.settings_src_model_effort to effortDisplayLabel(res, it) },
+        purpose.effective.permissionMode?.takeIf { it.isNotBlank() }?.let { R.string.settings_model_profiles_permission_mode to permissionModeDisplayLabel(res, it) },
         purpose.status?.takeIf { it.isNotBlank() }?.let { R.string.settings_src_status_header to it },
     )
     item("effective-title") { JSectionHeader(stringResource(R.string.settings_src_model_effective)) }
@@ -250,6 +388,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.effective(res: Resour
 
 private fun androidx.compose.foundation.lazy.LazyListScope.form(
     res: Resources, purpose: ModelPurpose, state: ModelPurposeState, onProvider: () -> Unit,
+    onEffort: () -> Unit, onPermissionMode: () -> Unit,
     onEdit: (persona.core.contracts.api.ModelConfigurationDraft) -> Unit, onRestore: () -> Unit,
     onPickModel: () -> Unit, onRetryModels: () -> Unit,
 ) {
@@ -292,8 +431,18 @@ private fun androidx.compose.foundation.lazy.LazyListScope.form(
         }
     }
     if (showsEffort(purpose, state.provider)) item("effort") {
-        JTextField(draft.effort, { onEdit(draft.copy(effort = it)) }, Modifier.fillMaxWidth().padding(top = Tokens.Space.m), label = stringResource(R.string.settings_src_model_effort),
-            placeholder = purpose.effective.effort ?: stringResource(R.string.settings_src_model_follow_default), singleLine = true, enabled = editable)
+        val effortLabel = draft.effort.takeIf(String::isNotBlank)?.let { effortDisplayLabel(res, it) }
+            ?: stringResource(R.string.settings_src_model_follow_default)
+        JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.m)) {
+            JRow(stringResource(R.string.settings_src_model_effort), value = effortLabel, enabled = editable, onClick = onEffort)
+        }
+    }
+    if (purpose.kind == "launcher" && purpose.supports("permission_mode")) item("permission-mode") {
+        val modeLabel = draft.permissionMode.takeIf(String::isNotBlank)?.let { permissionModeDisplayLabel(res, it) }
+            ?: stringResource(R.string.settings_src_model_follow_default)
+        JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.m)) {
+            JRow(stringResource(R.string.settings_model_profiles_permission_mode), value = modeLabel, enabled = editable, onClick = onPermissionMode)
+        }
     }
     item("form-note") {
         SettingsCaption(stringResource(R.string.settings_src_model_form_note),

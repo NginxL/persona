@@ -6,7 +6,24 @@ struct MessageJump: Equatable {
     var key: SessionKey
     var item: String
     var id = UUID() // the same message linked twice still moves there again
+    #if os(iOS)
+    var starred: StarredSource? = nil
+    #endif
 }
+
+#if os(iOS)
+extension AppModel {
+    func openStarredMessage(_ star: StarredSnapshot, key: SessionKey) {
+        guard star.source.identifies(key) else { return }
+        messageJump = MessageJump(key: key, item: star.item_id, starred: star.source)
+        if star.conversation == .assistant {
+            openAssistantConversation(key, manager: star.source_manager)
+        } else {
+            open(key)
+        }
+    }
+}
+#endif
 
 /// Where a hub link leads in the app (#2696, HubPageLink): which paired group it is a page of, and the key it opens.
 extension AppModel {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -11,11 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/repository"
+	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // deliveryReviewService is a supervised task with a GitHub PR, the hub running oldHub and the forge as given, with
-// done_needs_delivery on unless off.
+// delivery_gate=live (legacy done_needs_delivery=true) unless off (delivery_gate=off).
 func deliveryReviewService(t *testing.T, forge *fakeForge, hub *runningHub, off bool) (*Service, Todo) {
 	t.Helper()
 	s, _, todo := newSupervisedService(t)
@@ -26,11 +30,24 @@ func deliveryReviewService(t *testing.T, forge *fakeForge, hub *runningHub, off 
 		s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
 	}
 	s.deploy.listPaths = []string{}
-	if !off {
+	if off {
+		setDeliveryGate(t, s, deliveryGateOff)
+	} else {
 		deliveryOn(t, s)
 	}
 	s.setTaskStage(context.Background(), todo.ID, "review", "https://github.com/o/r/pull/9")
 	return s, todo
+}
+
+func setDeliveryGate(t *testing.T, s *Service, gate string) {
+	t.Helper()
+	if _, err := s.updateSettings(context.Background(), func(v *Settings) error {
+		v.DeliveryGate = &gate
+		v.DoneNeedsDelivery = nil
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func acceptReview(s *Service, todo string, extra map[string]any) (string, error) {
@@ -292,5 +309,597 @@ func TestForgetTaskPRPersistsRemoval(t *testing.T) {
 	}
 	if current := todoNow(s, todo.ID); current.PRURL != real || slices.Contains(current.PRs, pr) {
 		t.Fatalf("task disagrees with persisted stages: %+v", current)
+	}
+}
+
+// Default delivery_gate=merged blocks unmerged PRs (guiding park) and allows merged PRs even before hub deployment.
+func TestDefaultMergedDeliveryGate(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		forge  *fakeForge
+		hub    string
+		extra  map[string]any
+		refuse string
+	}{
+		{name: "unmerged PR refused with park guidance", forge: &fakeForge{}, hub: oldHub, refuse: "not merged"},
+		{name: "merged PR accepted even when running hub does not contain it yet",
+			forge: &fakeForge{merged: true, sha: mergeSHA, contains: map[string]bool{oldHub: false}}, hub: oldHub},
+		{name: "forge error handled gracefully", forge: &fakeForge{err: errors.New("429 rate limited")}, hub: oldHub, refuse: "交付状态暂时无法验证"},
+		{name: "outcome cannot bypasses gate", forge: &fakeForge{}, hub: oldHub, extra: map[string]any{"outcome": "cannot", "reason": "做不了"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, todo := newSupervisedService(t)
+			s.deploy.forge = tc.forge
+			s.deploy.hubBuild = (&runningHub{commit: tc.hub}).build
+			s.deploy.listPaths = []string{}
+			if got := s.deliveryGate(context.Background()); got != deliveryGateMerged {
+				t.Fatalf("default delivery_gate = %q, want %q", got, deliveryGateMerged)
+			}
+			s.setTaskStage(context.Background(), todo.ID, "review", "https://github.com/o/r/pull/9")
+			res, err := acceptReview(s, todo.ID, tc.extra)
+			got := todoNow(s, todo.ID)
+			if tc.refuse == "" {
+				if err != nil {
+					t.Fatalf("refused under default merged gate: %v", err)
+				}
+				if got.DoneAt == nil {
+					t.Fatalf("not closed: %s", res)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.refuse) {
+				t.Fatalf("err = %v, want substring %q (res=%s)", err, tc.refuse, res)
+			}
+			if tc.forge.err == nil && (!strings.Contains(err.Error(), "external_event") || !strings.Contains(err.Error(), "someone_else") || !strings.Contains(err.Error(), "pr_event=terminal")) {
+				t.Fatalf("missing park guidance: %v", err)
+			}
+			if got.DoneAt != nil {
+				t.Fatalf("closed prematurely: %v", got.DoneAt)
+			}
+		})
+	}
+}
+
+// memRepoStore adds in-memory todoRepositoryStore and task_plan/feed support to memStore so repository-linked
+// delivery gate tests run without requiring PostgreSQL.
+type memRepoStore struct {
+	*memStore
+	sets         map[string]repository.TaskSet
+	plans        map[string]db.TaskPlanRow
+	todoReposErr error
+}
+
+func newMemRepoStore() *memRepoStore {
+	return &memRepoStore{memStore: &memStore{}, sets: map[string]repository.TaskSet{}, plans: map[string]db.TaskPlanRow{}}
+}
+
+func (m *memRepoStore) CreateTaskPlan(_ context.Context, row db.TaskPlanRow) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.plans[row.ID] = row
+	return nil
+}
+
+func (m *memRepoStore) TaskPlan(_ context.Context, id string) (*db.TaskPlanRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row, ok := m.plans[id]
+	if !ok {
+		return nil, nil
+	}
+	cp := row
+	return &cp, nil
+}
+
+func (m *memRepoStore) TaskPlans(_ context.Context, conv string) ([]db.TaskPlanRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []db.TaskPlanRow
+	for _, row := range m.plans {
+		if conv == "" || row.Conversation == conv {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+
+func (m *memRepoStore) TaskPlansByID(_ context.Context, ids []string) ([]db.TaskPlanRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []db.TaskPlanRow
+	for _, id := range ids {
+		if row, ok := m.plans[id]; ok {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+
+func (m *memRepoStore) UpdateTaskPlan(_ context.Context, id, from, to string, body json.RawMessage, at time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row, ok := m.plans[id]
+	if !ok || (from != "" && row.State != from) {
+		return false, nil
+	}
+	row.State, row.Tasks, row.UpdatedAt = to, body, at
+	m.plans[id] = row
+	return true, nil
+}
+
+func (m *memRepoStore) AppendFeed(context.Context, db.FeedRow) error { return nil }
+func (m *memRepoStore) Feed(context.Context, string, time.Time, int) ([]db.FeedRow, error) {
+	return nil, nil
+}
+func (m *memRepoStore) FeedItem(context.Context, string) (*db.FeedRow, error) { return nil, nil }
+func (m *memRepoStore) MarkFeedSent(context.Context, string, string, time.Time, json.RawMessage) ([]db.FeedRow, error) {
+	return nil, nil
+}
+func (m *memRepoStore) FeedByRef(context.Context, string, []string, int) ([]db.FeedRow, error) {
+	return nil, nil
+}
+
+func (m *memRepoStore) TodoRepositories(_ context.Context, id string) (repository.TaskSet, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.todoReposErr != nil {
+		return repository.TaskSet{}, m.todoReposErr
+	}
+	if set, ok := m.sets[id]; ok {
+		return set, nil
+	}
+	return repository.TaskSet{SchemaVersion: 1, TodoID: id, Repositories: []repository.TaskRepository{}}, nil
+}
+
+func (m *memRepoStore) CreateTodoWithRepositories(context.Context, db.TodoRow, repository.CreateBindings) error {
+	return nil
+}
+
+func (m *memRepoStore) SetTodoRepositories(_ context.Context, id string, in repository.SetInput) (repository.TaskSet, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur := m.sets[id]
+	cur.SchemaVersion, cur.TodoID, cur.Revision = 1, id, cur.Revision+1
+	cur.Repositories = make([]repository.TaskRepository, 0, len(in.Repositories))
+	for _, r := range in.Repositories {
+		row := repository.TaskRepository{RepoID: r.RepoID}
+		for _, l := range r.Links {
+			if l.Resolved != nil {
+				row.Links = append(row.Links, l.Resolved.Link)
+			} else if _, link, err := repository.ParseTaskLinkInput(l); err == nil {
+				row.Links = append(row.Links, link)
+			}
+		}
+		cur.Repositories = append(cur.Repositories, row)
+	}
+	m.sets[id] = cur
+	return cur, nil
+}
+
+func (m *memRepoStore) SetTodoRepositoryLinks(_ context.Context, id, repoID string, in repository.LinksInput) (repository.TaskSet, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur := m.sets[id]
+	cur.SchemaVersion, cur.TodoID, cur.Revision = 1, id, cur.Revision+1
+	var links []repository.TaskLink
+	for _, l := range in.Links {
+		if l.Resolved != nil {
+			links = append(links, l.Resolved.Link)
+		} else if _, link, err := repository.ParseTaskLinkInput(l); err == nil {
+			links = append(links, link)
+		}
+	}
+	for i := range cur.Repositories {
+		if cur.Repositories[i].RepoID == repoID {
+			cur.Repositories[i].Links = links
+			m.sets[id] = cur
+			return cur, nil
+		}
+	}
+	cur.Repositories = append(cur.Repositories, repository.TaskRepository{RepoID: repoID, Links: links})
+	m.sets[id] = cur
+	return cur, nil
+}
+
+// Under merged (default) and live, linked repository issues must be CLOSED and repository PR links must be MERGED;
+// under off, neither blocks.
+func TestDeliveryGateChecksLinkedRepositoryIssuesAndPRs(t *testing.T) {
+	linkTodo := func(t *testing.T, st *memRepoStore, todoID string, urls ...string) {
+		t.Helper()
+		var links []repository.LinkInput
+		for _, u := range urls {
+			links = append(links, repository.LinkInput{URL: u})
+		}
+		if _, err := st.SetTodoRepositoryLinks(context.Background(), todoID, "repo_o_r", repository.LinksInput{Links: links}); err != nil {
+			t.Fatalf("link todo repositories: %v", err)
+		}
+	}
+
+	t.Run("merged PR with open linked issue is refused until issue closes", func(t *testing.T) {
+		st := newMemRepoStore()
+		s, _ := newQuietServiceOn(t, st)
+		ctx := context.Background()
+		raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{
+			"title": "Fix bug #42", "prompt": "Fix issue #42",
+			"machine": "box", "cwd": "/code/app", "readonly": false, "user_requested": true, "why": "repo",
+			"done_when": []string{"PR merged and issue #42 closed"},
+		}}})
+		if _, err := s.toolTaskPlan(ctx, "conv1", raw); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "agent", func() bool { return len(onlyTodo(s).Agents) == 1 })
+		todo := onlyTodo(s)
+		linkTodo(t, st, todo.ID, "https://github.com/o/r/issues/42", "https://github.com/o/r/pull/9")
+		forge := &fakeForge{merged: true, sha: mergeSHA, issueStates: map[string]string{"o/r#42": "open"}}
+		s.deploy.forge = forge
+		s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+		s.deploy.listPaths = []string{}
+
+		checks := []ReviewCheck{{Criterion: "PR merged and issue #42 closed", Met: true, Evidence: "PR #9 merged"}}
+		_, err := acceptReview(s, todo.ID, map[string]any{"checks": checks})
+		if err == nil || !strings.Contains(err.Error(), "https://github.com/o/r/issues/42") || !strings.Contains(err.Error(), "still open") || !strings.Contains(err.Error(), "external_event") {
+			t.Fatalf("open linked issue did not block acceptance: %v", err)
+		}
+		if got := todoNow(s, todo.ID); got.DoneAt != nil {
+			t.Fatal("task closed while linked issue remained open")
+		}
+
+		// Close the issue -> now acceptance succeeds.
+		forge.mu.Lock()
+		forge.issueStates["o/r#42"] = "closed"
+		forge.mu.Unlock()
+		if _, err := acceptReview(s, todo.ID, map[string]any{"checks": checks}); err != nil {
+			t.Fatalf("closed issue still blocked acceptance: %v", err)
+		}
+		if got := todoNow(s, todo.ID); got.DoneAt == nil {
+			t.Fatal("task did not close after PR merged and issue closed")
+		}
+	})
+
+	t.Run("unmerged repository pull_request link blocks even without t.PRURL", func(t *testing.T) {
+		st := newMemRepoStore()
+		s, _ := newQuietServiceOn(t, st)
+		ctx := context.Background()
+		raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{
+			"title": "Ship fix", "prompt": "Ship fix",
+			"machine": "box", "cwd": "/code/app", "readonly": false, "user_requested": true, "why": "repo",
+			"done_when": []string{"Fix merged"},
+		}}})
+		if _, err := s.toolTaskPlan(ctx, "conv1", raw); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "agent", func() bool { return len(onlyTodo(s).Agents) == 1 })
+		todo := onlyTodo(s)
+		linkTodo(t, st, todo.ID, "https://github.com/o/r/pull/15")
+		s.deploy.forge = &fakeForge{merged: false}
+		s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+		s.deploy.listPaths = []string{}
+
+		checks := []ReviewCheck{{Criterion: "Fix merged", Met: true, Evidence: "opened PR #15"}}
+		if _, err := acceptReview(s, todo.ID, map[string]any{"checks": checks}); err == nil || !strings.Contains(err.Error(), "not merged") {
+			t.Fatalf("unmerged repository PR link did not block: %v", err)
+		}
+		setDeliveryGate(t, s, deliveryGateOff)
+		if _, err := acceptReview(s, todo.ID, map[string]any{"checks": checks}); err != nil {
+			t.Fatalf("delivery_gate=off still blocked: %v", err)
+		}
+	})
+
+	t.Run("read-only task and explicit PR-only scope are not blocked under merged, but PR-only does not override live", func(t *testing.T) {
+		st := newMemRepoStore()
+		s, _ := newQuietServiceOn(t, st)
+		ctx := context.Background()
+		// 1. Read-only task with linked open issue -> allowed under default merged.
+		rawRO, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{
+			"title": "Investigate issue #42", "prompt": "Investigate issue #42",
+			"machine": "box", "cwd": "/code/app", "readonly": true, "user_requested": true, "why": "repo",
+			"goal": "Root cause of #42",
+		}}})
+		if _, err := s.toolTaskPlan(ctx, "conv1", rawRO); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "ro agent", func() bool { return len(onlyTodo(s).Agents) == 1 })
+		roTodo := onlyTodo(s)
+		linkTodo(t, st, roTodo.ID, "https://github.com/o/r/issues/42")
+		s.deploy.forge = &fakeForge{merged: false, issueStates: map[string]string{"o/r#42": "open"}}
+		s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+		s.deploy.listPaths = []string{}
+		if _, err := acceptReview(s, roTodo.ID, map[string]any{"checks": []ReviewCheck{}}); err != nil {
+			t.Fatalf("read-only task was blocked under default merged: %v", err)
+		}
+
+		// 2. Explicit PR-only writable task -> allowed under merged, still blocked under live.
+		s2, _ := newQuietServiceOn(t, newMemRepoStore())
+		rawPROnly, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{
+			"title": "Open draft PR", "prompt": "Prepare a draft PR",
+			"machine": "box", "cwd": "/code/app", "readonly": false, "user_requested": true, "why": "repo",
+			"done_when": []string{"仅提交草稿 PR 并附测试日志"},
+		}}})
+		if _, err := s2.toolTaskPlan(ctx, "conv1", rawPROnly); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "pr-only agent", func() bool { return len(onlyTodo(s2).Agents) == 1 })
+		prOnlyTodo := onlyTodo(s2)
+		s2.setTaskStage(ctx, prOnlyTodo.ID, "review", "https://github.com/o/r/pull/21")
+		s2.deploy.forge = &fakeForge{merged: false}
+		s2.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+		s2.deploy.listPaths = []string{}
+
+		checks := []ReviewCheck{{Criterion: "仅提交草稿 PR 并附测试日志", Met: true, Evidence: "draft PR #21"}}
+		// Under live, PR-only criteria must NOT override live (#6428).
+		setDeliveryGate(t, s2, deliveryGateLive)
+		if _, err := acceptReview(s2, prOnlyTodo.ID, map[string]any{"checks": checks}); err == nil || !strings.Contains(err.Error(), "not merged") {
+			t.Fatalf("PR-only task bypassed live gate: %v", err)
+		}
+		// Under merged, explicit PR-only scope is allowed.
+		setDeliveryGate(t, s2, deliveryGateMerged)
+		if _, err := acceptReview(s2, prOnlyTodo.ID, map[string]any{"checks": checks}); err != nil {
+			t.Fatalf("explicit PR-only task was blocked under merged gate: %v", err)
+		}
+	})
+
+	t.Run("unconfigured GitHub linked issue is non-blocking under merged but fails closed under live", func(t *testing.T) {
+		st := newMemRepoStore()
+		s, _ := newQuietServiceOn(t, st)
+		ctx := context.Background()
+		raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{
+			"title": "Fix bug #42", "prompt": "Fix issue #42",
+			"machine": "box", "cwd": "/code/app", "readonly": false, "user_requested": true, "why": "repo",
+			"done_when": []string{"Issue #42 closed"},
+		}}})
+		if _, err := s.toolTaskPlan(ctx, "conv1", raw); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "agent", func() bool { return len(onlyTodo(s).Agents) == 1 })
+		todo := onlyTodo(s)
+		linkTodo(t, st, todo.ID, "https://github.com/o/r/issues/42")
+		s.deploy.forge = &fakeForge{merged: true, sha: mergeSHA, issueStateErr: fmt.Errorf("%w: no gh auth", errGitHubUnconfigured)}
+		s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+		s.deploy.listPaths = []string{}
+
+		checks := []ReviewCheck{{Criterion: "Issue #42 closed", Met: true, Evidence: "verified"}}
+		// Under live, unconfigured GitHub issue check must fail closed with delivery_verification_unavailable.
+		setDeliveryGate(t, s, deliveryGateLive)
+		if res, err := acceptReview(s, todo.ID, map[string]any{"checks": checks}); err == nil ||
+			(!strings.Contains(err.Error(), "暂时无法验证") && !strings.Contains(err.Error(), "temporarily cannot be verified")) {
+			t.Fatalf("live gate did not fail closed on unconfigured GitHub issue: res=%q err=%v", res, err)
+		}
+		if got := todoNow(s, todo.ID); got.DoneAt != nil {
+			t.Fatal("task closed under live gate despite unconfigured GitHub issue check")
+		}
+
+		// Under merged, unconfigured GitHub issue check degrades to a non-blocking reply note.
+		setDeliveryGate(t, s, deliveryGateMerged)
+		res, err := acceptReview(s, todo.ID, map[string]any{"checks": checks})
+		if err != nil {
+			t.Fatalf("merged gate blocked unconfigured GitHub issue: %v", err)
+		}
+		if !strings.Contains(res, "github.com") {
+			t.Fatalf("merged gate reply missing host-not-connected note: %q", res)
+		}
+		if got := todoNow(s, todo.ID); got.DoneAt == nil {
+			t.Fatal("task did not close under merged gate with unconfigured GitHub note")
+		}
+	})
+
+	t.Run("repository link store failure fails closed as temporary verification error", func(t *testing.T) {
+		st := newMemRepoStore()
+		s, _ := newQuietServiceOn(t, st)
+		ctx := context.Background()
+		raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{
+			"title": "Fix bug #42", "prompt": "Fix issue #42",
+			"machine": "box", "cwd": "/code/app", "readonly": false, "user_requested": true, "why": "repo",
+			"done_when": []string{"Fix merged"},
+		}}})
+		if _, err := s.toolTaskPlan(ctx, "conv1", raw); err != nil {
+			t.Fatal(err)
+		}
+		waitFor(t, "agent", func() bool { return len(onlyTodo(s).Agents) == 1 })
+		todo := onlyTodo(s)
+		s.deploy.forge = &fakeForge{merged: true, sha: mergeSHA}
+		s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+		s.deploy.listPaths = []string{}
+
+		st.mu.Lock()
+		st.todoReposErr = errors.New("db connection reset")
+		st.mu.Unlock()
+
+		checks := []ReviewCheck{{Criterion: "Fix merged", Met: true, Evidence: "merged"}}
+		res, err := acceptReview(s, todo.ID, map[string]any{"checks": checks})
+		if err == nil || !strings.Contains(err.Error(), "db connection reset") ||
+			(!strings.Contains(err.Error(), "暂时无法验证") && !strings.Contains(err.Error(), "temporarily cannot be verified")) {
+			t.Fatalf("repository store failure did not fail closed: res=%q err=%v", res, err)
+		}
+		if got := todoNow(s, todo.ID); got.DoneAt != nil {
+			t.Fatal("task closed despite repository link store failure")
+		}
+
+		// Once store recovers, acceptance succeeds.
+		st.mu.Lock()
+		st.todoReposErr = nil
+		st.mu.Unlock()
+		if _, err := acceptReview(s, todo.ID, map[string]any{"checks": checks}); err != nil {
+			t.Fatalf("acceptance failed after repository store recovery: %v", err)
+		}
+		if got := todoNow(s, todo.ID); got.DoneAt == nil {
+			t.Fatal("task did not close after repository store recovery")
+		}
+	})
+}
+
+// Three-tier delivery_gate setting works via HTTP PUT/GET and persona_settings while staying backward-compatible
+// with legacy done_needs_delivery boolean configs.
+func TestDeliveryGateSettingsAndBackwardCompat(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService(t, newFakeHub().withMachine())
+
+	// Default: delivery_gate=merged, done_needs_delivery=false.
+	if v := s.view(ctx, false); v.DeliveryGate != deliveryGateMerged || v.DoneNeedsDelivery {
+		t.Fatalf("default view = %q / %v, want merged / false", v.DeliveryGate, v.DoneNeedsDelivery)
+	}
+
+	// Legacy boolean true -> live; explicit false -> off.
+	on, off := true, false
+	if _, err := s.updateSettings(ctx, func(v *Settings) error { v.DoneNeedsDelivery = &on; v.DeliveryGate = nil; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if v := s.view(ctx, false); v.DeliveryGate != deliveryGateLive || !v.DoneNeedsDelivery {
+		t.Fatalf("legacy true view = %q / %v, want live / true", v.DeliveryGate, v.DoneNeedsDelivery)
+	}
+	if _, err := s.updateSettings(ctx, func(v *Settings) error { v.DoneNeedsDelivery = &off; v.DeliveryGate = nil; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if v := s.view(ctx, false); v.DeliveryGate != deliveryGateOff || v.DoneNeedsDelivery {
+		t.Fatalf("legacy false view = %q / %v, want off / false", v.DeliveryGate, v.DoneNeedsDelivery)
+	}
+
+	// persona_settings get/set for assistant.delivery_gate.
+	tool := func(args string) (string, bool) {
+		r := s.Tool(ctx, ToolCall{Name: "persona_settings", Arguments: json.RawMessage(args), MachineID: "server", SessionID: "c1"})
+		return r.Content[0].Text, r.IsError
+	}
+	if out, _ := tool(`{"action":"get","key":"assistant.delivery_gate"}`); out != deliveryGateOff {
+		t.Fatalf("get delivery_gate = %q, want off", out)
+	}
+	if out, isErr := tool(`{"action":"set","key":"assistant.delivery_gate","value":"invalid"}`); !isErr || !strings.Contains(out, "off, merged or live") {
+		t.Fatalf("invalid tier not refused: %v %s", isErr, out)
+	}
+	wantCard := i18n.T(i18n.Default, "assistant-settings_tool.change_delivery_gate", i18n.Args{
+		"before": i18n.T(i18n.Default, "assistant-settings_tool.delivery_gate_off"),
+		"after":  i18n.T(i18n.Default, "assistant-settings_tool.delivery_gate_merged"),
+	})
+	go func() {
+		q, ok := awaitCard(s)
+		if !ok {
+			t.Error("no approval card")
+			return
+		}
+		if q.Summary != wantCard {
+			t.Errorf("card %q, want %q", q.Summary, wantCard)
+		}
+		allow := true
+		raw, _ := json.Marshal(proto.Resolution{Allow: &allow})
+		_, _ = s.Action(ctx, Action{Op: "answer", InteractionID: q.ID, Answer: raw})
+	}()
+	if out, isErr := tool(`{"action":"set","key":"assistant.delivery_gate","value":"merged"}`); isErr || !strings.Contains(out, "assistant.delivery_gate is merged") {
+		t.Fatalf("set delivery_gate merged failed: %v %s", isErr, out)
+	}
+	if out, _ := tool(`{"action":"get","key":"assistant.delivery_gate"}`); out != deliveryGateMerged {
+		t.Fatalf("after set, get = %q, want merged", out)
+	}
+
+	// Regression: passing JSON null to legacy assistant.done_needs_delivery must be rejected, create no approval card,
+	// and keep the default merged gate unchanged.
+	if out, isErr := tool(`{"action":"set","key":"assistant.done_needs_delivery","value":null}`); !isErr || !strings.Contains(out, "value must be true or false") {
+		t.Fatalf("legacy done_needs_delivery=null not refused: %v %q", isErr, out)
+	}
+	if len(s.pendingQuestions()) != 0 {
+		t.Fatalf("legacy done_needs_delivery=null created approval card(s): %d", len(s.pendingQuestions()))
+	}
+	if v := s.view(ctx, false); v.DeliveryGate != deliveryGateMerged || v.DoneNeedsDelivery {
+		t.Fatalf("after legacy null, view = %q / %v, want merged / false", v.DeliveryGate, v.DoneNeedsDelivery)
+	}
+
+	// Regression: setting legacy assistant.done_needs_delivery=false from default merged must disable the gate (off),
+	// not return "unchanged", and clearing DeliveryGate persists the off tier.
+	approveNext := func(wantSummary string) {
+		go func() {
+			q, ok := awaitCard(s)
+			if !ok {
+				t.Error("no approval card")
+				return
+			}
+			if wantSummary != "" && q.Summary != wantSummary {
+				t.Errorf("card %q, want %q", q.Summary, wantSummary)
+			}
+			allow := true
+			raw, _ := json.Marshal(proto.Resolution{Allow: &allow})
+			_, _ = s.Action(ctx, Action{Op: "answer", InteractionID: q.ID, Answer: raw})
+		}()
+	}
+	wantMergedToOff := i18n.T(i18n.Default, "assistant-settings_tool.change_delivery_gate", i18n.Args{
+		"before": i18n.T(i18n.Default, "assistant-settings_tool.delivery_gate_merged"),
+		"after":  i18n.T(i18n.Default, "assistant-settings_tool.delivery_gate_off"),
+	})
+	approveNext(wantMergedToOff)
+	if out, isErr := tool(`{"action":"set","key":"assistant.done_needs_delivery","value":false}`); isErr || !strings.Contains(out, "assistant.done_needs_delivery is false") {
+		t.Fatalf("legacy done_needs_delivery=false from merged failed: %v %s", isErr, out)
+	}
+	if v := s.view(ctx, false); v.DeliveryGate != deliveryGateOff || v.DoneNeedsDelivery {
+		t.Fatalf("after legacy false, view = %q / %v, want off / false", v.DeliveryGate, v.DoneNeedsDelivery)
+	}
+	// Repeating false when already off reports unchanged without asking again.
+	if out, isErr := tool(`{"action":"set","key":"assistant.done_needs_delivery","value":false}`); isErr || !strings.Contains(out, "没有变化") {
+		t.Fatalf("repeat legacy false = %v %q, want unchanged", isErr, out)
+	}
+	// Legacy true transitions off -> live.
+	approveNext("")
+	if out, isErr := tool(`{"action":"set","key":"assistant.done_needs_delivery","value":true}`); isErr || !strings.Contains(out, "assistant.done_needs_delivery is true") {
+		t.Fatalf("legacy done_needs_delivery=true failed: %v %s", isErr, out)
+	}
+	if v := s.view(ctx, false); v.DeliveryGate != deliveryGateLive || !v.DoneNeedsDelivery {
+		t.Fatalf("after legacy true, view = %q / %v, want live / true", v.DeliveryGate, v.DoneNeedsDelivery)
+	}
+
+	// Repository provider non-GitHub issue check does not block when host is unknown.
+	if _, ok := repository.RemoteHost("https://github.com/o/r/issues/1"); !ok {
+		t.Fatal("expected valid host")
+	}
+}
+
+// End-to-end closeout loop: default merged gate refuses early acceptance on an open PR, supervisor parks with
+// external_event + pr_event=terminal, sweepPRStatuses wakes on merge, and final acceptance succeeds.
+func TestDefaultMergedGateParkAndWakeCloseoutLoop(t *testing.T) {
+	s, _, todo := newSupervisedService(t)
+	holdDigest(s)
+	ctx := context.Background()
+	prURL := "https://github.com/o/r/pull/9"
+	s.setTaskStage(ctx, todo.ID, "review", prURL)
+	forge := &statusForge{status: TodoPRStatus{State: "open"}}
+	s.deploy.forge = forge
+	s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+	s.deploy.listPaths = []string{}
+
+	// 1. Premature acceptance is refused under default delivery_gate=merged.
+	if _, err := acceptReview(s, todo.ID, nil); err == nil || !strings.Contains(err.Error(), "not merged") {
+		t.Fatalf("open PR was accepted prematurely: %v", err)
+	}
+
+	// 2. Supervisor parks waiting on PR terminal event.
+	parkArgs, _ := json.Marshal(map[string]any{
+		"todo_id":    todo.ID,
+		"verdict":    "parked",
+		"waiting_on": "external_event",
+		"reason":     "Waiting for PR merge: " + prURL,
+		"evidence": map[string]any{
+			"kind":     "external_event",
+			"target":   "PR #9",
+			"url":      prURL,
+			"pr_event": "terminal",
+			"wake":     "PR #9 is merged or closed",
+		},
+	})
+	if _, err := s.runTool(ctx, "server", "conv1", "task_review", parkArgs); err != nil {
+		t.Fatalf("park failed: %v", err)
+	}
+	if got := todoNow(s, todo.ID); got.Supervision == nil || got.Supervision.State != reviewParked {
+		t.Fatalf("task not parked: %+v", got.Supervision)
+	}
+
+	// 3. PR merges -> sweepPRStatuses wakes supervision to reviewPending.
+	forge.status = TodoPRStatus{State: "merged"}
+	forge.merged = true
+	forge.sha = mergeSHA
+	s.sweepPRStatuses(ctx, time.Now().Add(time.Minute))
+	if got := todoNow(s, todo.ID); got.Supervision.State != reviewPending {
+		t.Fatalf("parked PR did not wake on merge: state=%q", got.Supervision.State)
+	}
+
+	// 4. Supervisor runs final acceptance -> now succeeds and closes the todo.
+	if _, err := acceptReview(s, todo.ID, nil); err != nil {
+		t.Fatalf("acceptance after merge failed: %v", err)
+	}
+	if got := todoNow(s, todo.ID); got.DoneAt == nil {
+		t.Fatal("todo did not close after merge")
 	}
 }

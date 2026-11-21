@@ -746,6 +746,9 @@ func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Im
 	params := map[string]any{"threadId": t.id, "input": input}
 	method := "turn/start"
 	if t.status == proto.StatusWorking || t.status == proto.StatusBlocked {
+		if _, a2a := ctx.Value(a2aIdleKey{}).(bool); a2a {
+			return a2aBusy()
+		}
 		if t.turn == "" {
 			t.turn = c.activeTurn(ctx, t.id) // a turn already running when Persona joined (codex_daemon.go)
 		}
@@ -755,12 +758,16 @@ func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Im
 		method = "turn/steer"
 		params["expectedTurnId"] = t.turn
 	}
-	// An effort the phone chose that its app-server could not take on its own (codex_effort.go): a turn takes it for
-	// itself and the turns after; a steer cannot, so it waits for the next turn.
-	effort := ""
+	// Model and/or effort the phone chose that its app-server could not take on its own (codex_effort.go): a turn
+	// takes them for itself and the turns after; a steer cannot, so they wait for the next turn.
+	var pModel, pEffort string
 	if method == "turn/start" {
-		if effort = n.codexPendingEffort(id, c, t); effort != "" {
-			params["effort"] = effort
+		pModel, pEffort = n.codexPendingTurn(id, c, t)
+		if pModel != "" {
+			params["model"] = pModel
+		}
+		if pEffort != "" {
+			params["effort"] = pEffort
 		}
 	}
 	var reply struct {
@@ -770,7 +777,7 @@ func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Im
 	}
 	err = c.wire.call(ctx, method, params, &reply)
 	var re *codexError
-	if errors.As(err, &re) && effort != "" {
+	if errors.As(err, &re) && (pModel != "" || pEffort != "") {
 		// Codex refused a turn that carried the choice: drop it, so it does not fail every message after this one.
 		n.dropCodexPending(id, c.generation, t.id)
 	}
@@ -786,8 +793,8 @@ func (n *Node) sendCodex(ctx context.Context, id, text string, images []proto.Im
 	if err != nil {
 		return uncertain(err)
 	}
-	if effort != "" {
-		n.codexEffortTaken(id, c, t.id, effort)
+	if pModel != "" || pEffort != "" {
+		n.codexTurnSettingsTaken(id, c, t.id, pModel, pEffort)
 	}
 	if reply.Turn.ID != "" {
 		c.mu.Lock()
@@ -849,6 +856,42 @@ func (n *Node) interruptCodex(ctx context.Context, id string) error {
 		return refusal("codex_read_only", "没有可停止的已观察轮次", nil)
 	}
 	return c.wire.call(ctx, "turn/interrupt", map[string]any{"threadId": t.id, "turnId": t.turn}, nil)
+}
+
+// interruptCodexActiveTurn interrupts a running app-server turn without acquiring n.typing.lock, for callers like
+// quitAgent that already hold it; returns true when turn/interrupt was sent (#12389).
+func (n *Node) interruptCodexActiveTurn(ctx context.Context, id string) bool {
+	c, t, err := n.codexOwner(id)
+	if err != nil {
+		return false
+	}
+	c.mu.Lock()
+	tid, turn, parent := t.id, t.turn, t.parent
+	c.mu.Unlock()
+	if tid == "" || parent != "" {
+		return false
+	}
+	ictx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if turn == "" {
+		turn = c.activeTurn(ictx, tid)
+	}
+	if turn == "" {
+		return false
+	}
+	if c.wire.call(ictx, "turn/interrupt", map[string]any{"threadId": tid, "turnId": turn}, nil) != nil {
+		return false
+	}
+	for deadline := time.Now().Add(500 * time.Millisecond); time.Now().Before(deadline) && ctx.Err() == nil; {
+		c.mu.Lock()
+		idle := t.turn == ""
+		c.mu.Unlock()
+		if idle {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return true
 }
 
 func (c *codexRemote) message(m codexMessage) {

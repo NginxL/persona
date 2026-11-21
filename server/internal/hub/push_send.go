@@ -66,13 +66,13 @@ func pushPolicyWithSource(policy pushPolicy, payload map[string]any) pushPolicy 
 }
 
 // sendFromPolicy is sendFrom with the push's grading policy (level, related key and the held-push record's text).
-// heldReason is "" when the push went out, else why the grading filter held it (lnmode.go): a caller that answers the
+// heldReason is "" when the push went out, else why the grading filter held it (push_grading.go): a caller that answers the
 // model (the assistant's notify_user) tells it the notice reached the briefing instead of the phone.
 func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localized, collapseID string, wants func(NotifyPrefs) bool, rule quietRule, only func(Device) bool, sent func(Device)) (selected, reachable int, heldReason string) {
 	if p == nil {
 		return 0, 0, ""
 	}
-	if p.lnModeOn() { // off: nothing below runs and the push goes exactly as before
+	if p.pushGradingOn() { // off: nothing below runs and the push goes exactly as before
 		policy.manager = manager
 		payload := build(i18n.Default)
 		policy = pushPolicyWithSource(policy, payload)
@@ -88,13 +88,13 @@ func (p *Pusher) sendFromPolicy(manager string, policy pushPolicy, build localiz
 				policy.body = b
 			}
 		}
-		if allow, reason := p.applyLn(policy); !allow {
-			// Held back for every device; the selection counts as zero. The WebSocket still carries it (callers run
-			// notifyWSFrom themselves), so the app's lists and briefings keep updating.
+		if allow, reason := p.applyPushGrading(policy); !allow {
+			// Held back for every device (including WebSocket notify and Web Push, gated by callers via heldReason);
+			// state lists and held-push briefings keep updating.
 			return 0, 0, reason
 		}
 	} else {
-		// The switch is off, so applyLn never runs; the daily delivery counts still record one logical push.
+		// The switch is off, so applyPushGrading never runs; the daily delivery counts still record one logical push.
 		policy.manager = manager
 		level := policy.level
 		if level == "" {

@@ -5,6 +5,7 @@ import { api, enc } from "./api";
 import { MANAGER_HEADER } from "./manager-choice";
 import type { CandidateUpdate } from "./model-candidates";
 import { modelSummary, providerAgent, providerName, RUNTIMES, runtimeLabel, type ModelBinding, type ModelConfigurationBody, type ModelDraft, type ModelProvider, type ModelPurpose, type ModelPurposeBody } from "./model-config";
+import { listedModeOption, PERMISSION_MODES, type ModeOption } from "./session-actions";
 import type { Machine } from "./types";
 
 /** Older hubs omit launch; keep their known launcher purposes readable without using inheritance-group names. */
@@ -19,15 +20,27 @@ function executionLabel(form: string): string {
   return form === "api" ? t("settings.direct_api") : form === "plugin" ? t("settings-nav.tab_extensions") : t(`settings-modelconfiguration.${form}`);
 }
 
+/** Whether a launcher provider on an API purpose routes via model.run (CLI) rather than an HTTP Messages gateway.
+ *  A Persona-managed launcher with an empty or "messages" API always uses HTTP Messages regardless of has_key; older
+ *  hubs that omit `source` fall back to `has_key` only when `api` is omitted. */
+export function isModelRunLauncher(provider?: ModelProvider): boolean {
+  if (provider?.kind !== "launcher") return false;
+  if (provider.api === "messages") return false;
+  if (provider.source === "persona") return !!provider.api;
+  return provider.source !== undefined || !!provider.api || !provider.has_key;
+}
+
 export function executionForm(p: ModelPurpose, providers: ModelProvider[] = [], machines: Machine[] = []): { label: string; backend: string } {
   const provider = providers.find((v) => v.id === p.effective?.provider);
   const launch = purposeLaunch(p);
   const agent = providerAgent(provider, p.effective?.provider);
   let backend: string;
   if (p.kind === "plugin") backend = providerName(p.effective?.provider, providers) ?? "";
-  // A launcher picked for an API purpose runs Claude Code once per request on the main chat's computer, unless it is a
-  // managed one with a Messages gateway, called over HTTP (#5823; the hub decides by protocol, a key marks a managed one).
-  else if (p.kind === "api" && provider?.kind === "launcher" && ((provider.api && provider.api !== "messages") || !provider.has_key)) backend = "claude -p";
+  // A launcher picked for an API purpose runs its CLI once per request on the main chat's computer (model.run), unless
+  // it is a managed one with a Messages gateway, called over HTTP (#5823, #12027).
+  else if (p.kind === "api" && isModelRunLauncher(provider)) {
+    backend = agent === "codex" ? "codex exec" : agent === "agy" ? "agy -p" : "claude -p";
+  }
   else if (p.kind === "api") backend = { messages: "Messages", responses: "Responses", chat: "Chat" }[provider?.api || "messages"];
   else if (launch === "headless") {
     backend = agent === "codex" ? "codex app-server"
@@ -85,7 +98,7 @@ export function purposeGroups(purposes: ModelPurpose[], query: string, providers
 
 /** The purpose has a field of its own to write (an older hub sends a read-only use with `fields: []`). */
 function ownFields(p: ModelPurpose): boolean {
-  return (p.fields ?? []).some((field) => field === "provider" || field === "model" || field === "effort");
+  return (p.fields ?? []).some((field) => field === "provider" || field === "model" || field === "effort" || field === "permission_mode");
 }
 
 /** The category `p` is a use set apart from, told by the hub's data, not by id (#7980, docs/assistant/model-config.md
@@ -154,10 +167,36 @@ export function configDirLabel(id: string | undefined): string {
   return id === "legacy" ? t("settings-modelconfiguration.config_dir_legacy") : t("settings-modelconfiguration.config_dir_private");
 }
 
+const NO_PERMISSION_MODE_AGENTS = new Set(["omp", "traex", "pi", "cursor"]);
+
+/** Permission mode options supported by a launcher (`chosen` / `agent`); empty for agents without permission modes. */
+export function permissionModesForLauncher(chosen: ModelProvider | undefined, agent: string): ModeOption[] {
+  if (chosen?.permission_modes?.length) {
+    return chosen.permission_modes.length >= 2 ? chosen.permission_modes.map(listedModeOption) : [];
+  }
+  if (NO_PERMISSION_MODE_AGENTS.has(agent)) return [];
+  return PERMISSION_MODES;
+}
+
+/** Permission mode options supported by `chosen` / `agent` for a launcher-backed purpose; empty for direct API, plugin,
+ *  or agents without permission modes (omp, traex, pi, cursor). */
+export function permissionModesForProvider(p: ModelPurpose, chosen: ModelProvider | undefined, agent: string): ModeOption[] {
+  if (p.kind !== "launcher" || !supportsField(p, "permission_mode")) return [];
+  return permissionModesForLauncher(chosen, agent);
+}
+
 export const modelConfiguration = (manager?: string) => api<ModelConfigurationBody>("/model-config", { headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
 export function draftFor(p: ModelPurpose): ModelDraft {
   const runtime = runtimeChoices(p).length ? p.override?.runtime || p.effective?.runtime || "cli" : "";
-  const draft: ModelDraft = { provider: p.override?.provider ?? "", model: p.override?.model ?? "", effort: p.override?.effort ?? "", runtime };
+  const draft: ModelDraft = {
+    provider: p.override?.provider ?? "",
+    model: p.override?.model ?? "",
+    effort: p.override?.effort ?? "",
+    runtime,
+  };
+  if (p.kind === "launcher" && (supportsField(p, "permission_mode") || p.override?.permission_mode)) {
+    draft.permission_mode = p.override?.permission_mode ?? "";
+  }
   // Asked without the agent on purpose: seeded whatever the purpose runs on, so an editor opened on one without profiles
   // (Codex), which hides the choice, keeps the saved one for Claude Code and for its save (#4633).
   if (configDirChoices(p).length) draft.config_dir = p.override?.config_dir || p.effective?.config_dir || "private";
@@ -165,7 +204,10 @@ export function draftFor(p: ModelPurpose): ModelDraft {
 }
 
 export function chooseProvider(draft: ModelDraft, provider: string): ModelDraft {
-  return draft.provider === provider ? draft : { ...draft, provider, model: "", effort: "" };
+  if (draft.provider === provider) return draft;
+  const next: ModelDraft = { ...draft, provider, model: "", effort: "" };
+  if ("permission_mode" in draft) next.permission_mode = "";
+  return next;
 }
 
 export function supportsField(p: ModelPurpose, field: Exclude<keyof ModelDraft, "runtime" | "config_dir">): boolean {
@@ -180,7 +222,7 @@ export function agentsOverride(p: ModelPurpose): boolean {
 
 /** The binding says something of its own: the row says **Separately configured**. */
 export function overridden(b: ModelBinding): boolean {
-  return !!(b.provider || b.model || b.effort);
+  return !!(b.provider || b.model || b.effort || b.permission_mode);
 }
 
 /** A use with a record of its own under a category, told by its own data, whatever group this page lists it in and
@@ -221,10 +263,13 @@ export function effortOffered(p: ModelPurpose, chosen: ModelProvider | undefined
 
 /** What Save sends: the revision and each field the purpose takes, explicit `null` for an empty one. `effort` says
  *  whether effort is among them, by default when the hub lists it; the editor passes `effortOffered` too. */
-export function modelPatch(p: ModelPurpose, draft: ModelDraft, effort = supportsField(p, "effort")): Record<string, string | number | null> {
+export function modelPatch(p: ModelPurpose, draft: ModelDraft, effort = supportsField(p, "effort"), permissionMode = supportsField(p, "permission_mode")): Record<string, string | number | null> {
   const patch: Record<string, string | number | null> = { revision: p.revision };
   for (const field of ["provider", "model", "effort"] as const) {
     if (field === "effort" ? effort : supportsField(p, field)) patch[field] = draft[field].trim() || null;
+  }
+  if (p.kind === "launcher" && (permissionMode || (supportsField(p, "permission_mode") && p.override?.permission_mode))) {
+    patch.permission_mode = (draft.permission_mode ?? "").trim() || null;
   }
   if (runtimeChoices(p).length && draft.runtime) patch.runtime = draft.runtime;
   if (configDirChoices(p).length && draft.config_dir) patch.config_dir = draft.config_dir;
@@ -233,11 +278,14 @@ export function modelPatch(p: ModelPurpose, draft: ModelDraft, effort = supports
 
 /** What the editor's reset sends (Inherit, Follow Agents, Follow <the category>): the revision, `null` for each field
  *  the purpose takes, and the runtime and the main chat's profile it keeps (#4633). A use with a record of its own
- *  (`ownRecord`) goes back to following its category with explicit nulls for all three, whatever fields the provider
- *  in effect takes now (#7980), so an effort saved on an earlier provider goes too. */
+ *  (`ownRecord`) goes back to following its category with explicit nulls for all fields, whatever fields the provider
+ *  in effect takes now (#7980), so an effort or permission mode saved on an earlier provider goes too. */
 export function resetPatch(p: ModelPurpose, runtime = "", configDir?: string): Record<string, string | number | null> {
-  const patch = modelPatch(p, { provider: "", model: "", effort: "", runtime, config_dir: configDir });
-  return ownRecord(p) ? { ...patch, provider: null, model: null, effort: null } : patch;
+  const patch = modelPatch(p, { provider: "", model: "", effort: "", permission_mode: "", runtime, config_dir: configDir });
+  if (!ownRecord(p)) return patch;
+  const cleared: Record<string, string | number | null> = { ...patch, provider: null, model: null, effort: null };
+  if (p.kind === "launcher" && supportsField(p, "permission_mode")) cleared.permission_mode = null;
+  return cleared;
 }
 
 export function saveModelPurpose(p: ModelPurpose, patch: Record<string, string | number | null | CandidateUpdate>, manager?: string): Promise<ModelPurposeBody> {

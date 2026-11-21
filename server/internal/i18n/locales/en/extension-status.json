@@ -44,6 +44,10 @@
   "schema_max_items": "At most {count} items",
   "schema_item": "Item {count}: {err}",
   "schema_duplicate": "Item {count} is duplicated",
+  "schema_entry_id": "A saved entry needs a valid host-assigned ID",
+  "schema_entry_id_duplicate": "This entry ID is already used",
+  "entry_address_required": "Save a valid address for this entry before setting its secret",
+  "entry_untitled": "Entry {count}",
   "schema_minimum": "Must be at least {min}",
   "schema_maximum": "Must be at most {max}",
   "schema_min_length": "At least {count} characters",
@@ -112,5 +116,8 @@
   "secret_not_reference": "This is not a reference (scheme://…)",
   "secret_own_scheme": "An extension cannot take its own {scheme} references as its secrets",
   "secret_no_provider": "No extension that is on supplies {scheme} references. Install or turn one on first",
-  "secret_value_or_reference": "Give either a value or a reference, not both"
+  "secret_value_or_reference": "Give either a value or a reference, not both",
+  "plan_transaction": "The database cannot commit the whole installation plan atomically",
+  "entry_migration_moved": "The fixed configuration or secrets changed after the migration preview. Preview again",
+  "saved_config_json": "The saved configuration is not valid JSON"
 }

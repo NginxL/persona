@@ -37,6 +37,8 @@ data class OutboxEntry(
     val model: String? = null,
     /** It carries out the session's waiting launcher switch ([persona.core.contracts.api.MessageSender.sendApplyingSwitch]). */
     val applySwitch: Boolean = false,
+    /** External provenance ([persona.core.contracts.api.MessageVia]); old rows and typed messages restore null. */
+    val via: String? = null,
 ) {
     /** Journal-owned delivery evidence stays out of the public data-class and generated copy signatures. */
     internal var agentHandOff: InboxAgentHandOff? = null

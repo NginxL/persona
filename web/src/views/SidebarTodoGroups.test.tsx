@@ -65,7 +65,8 @@ describe("By to-do's rows (#6458)", () => {
     const tree = buildTodoTree(sessions, machines, todos, { spaces: [], sessions: [] }, Date.now(), { keepEmpty: true });
     show(<TodoTreeView tree={tree} machines={machines} activeKey="" {...stable} />);
     const keys = [...host.querySelectorAll("[data-tree-branch]")].map((el) => el.getAttribute("data-tree-branch"));
-    expect(keys).toEqual(["todo:ship", "todo:ci", "todo:none"]);
+    // Stable title order, not the agents' activity rank: Submit for review, Ship 1.3, then no to-do.
+    expect(keys).toEqual(["todo:ci", "todo:ship", "todo:none"]);
     for (const key of keys) {
       // a sticky group heading of the list's top level, never inside another branch
       expect(row(key!).closest("[data-sidebar-group-heading]")).not.toBeNull();

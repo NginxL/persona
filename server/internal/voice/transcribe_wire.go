@@ -26,6 +26,12 @@ const (
 // trCaptionSuffix ends the type of an interim-caption frame; the service puts its own prefix before it.
 const trCaptionSuffix = ".input_transcript.partial"
 
+// captionExtensionGranted is session.started's echo of the interim-caption grant (absent, null, false and empty are no).
+func captionExtensionGranted(extensions map[string]any) bool {
+	v, ok := extensions[trCaptionExtension]
+	return ok && v != nil && v != false && v != ""
+}
+
 // transcribeStart is a transcription session's session.start: the live dialect's, at 16 kHz, without a voice or
 // tools and without any language setting (the language is never locked: mixed speech stays mixed), with text-only
 // output unless textOnly is false (a service that refused it), and asking for interim captions when partial.
@@ -104,8 +110,7 @@ func decodeTranscribe(raw []byte) []tevent {
 	}
 	switch {
 	case f.Type == "session.started":
-		v, ok := f.Session.Extensions[trCaptionExtension]
-		granted := ok && v != nil && v != false && v != ""
+		granted := captionExtensionGranted(f.Session.Extensions)
 		e := tevent{kind: tevStarted, captions: granted, modalities: f.Session.OutputModalities}
 		if x := f.Session.ExpiresAt; x != nil && *x > 0 && *x < 1e15 {
 			at := *x

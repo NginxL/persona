@@ -3,8 +3,6 @@ package hub
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,6 +12,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -65,24 +64,23 @@ func (h *Hub) withClientOp(kind string, next http.HandlerFunc) http.HandlerFunc 
 			writeErr(w, http.StatusServiceUnavailable, errors.New("no database"))
 			return
 		}
-		target, _ := json.Marshal(map[string]string{"path": r.URL.Path, "query": r.URL.Query().Encode()})
+		target := devicewire.ClientOpTarget(r.URL.Path, r.URL.Query().Encode())
 		valid := len(bytes.TrimSpace(raw)) == 0 || json.Valid(raw)
-		canonical, _ := json.Marshal([]any{kind, json.RawMessage(target), valid, opDigestParams(kind, raw, params)})
-		sum := sha256.Sum256(canonical)
+		digest := devicewire.ClientOpDigest(kind, target, valid, opDigestParams(kind, raw, params))
 		var timing *sendTiming
 		if kind == "message" {
 			timing = &sendTiming{hub: h, id: proto.SendTraceID(id), start: started}
 			timing.mark("admission_started", true)
 		}
 		op, claimed, err := h.store.BeginClientOp(r.Context(), db.ClientOp{
-			ID: id, DeviceID: principalOf(r.Context()).ID, Kind: kind, Target: target, Digest: hex.EncodeToString(sum[:]),
+			ID: id, DeviceID: principalOf(r.Context()).ID, Kind: kind, Target: target, Digest: digest,
 		})
 		timing.mark("admission_done", err == nil && op != nil)
 		if err != nil || op == nil {
 			writeErr(w, http.StatusServiceUnavailable, errors.New("operation receipt unavailable"))
 			return
 		}
-		if op.Digest != hex.EncodeToString(sum[:]) || (principalOf(r.Context()).ID != "" && op.DeviceID != principalOf(r.Context()).ID) {
+		if op.Digest != digest || (principalOf(r.Context()).ID != "" && op.DeviceID != principalOf(r.Context()).ID) {
 			writeErrorBody(w, http.StatusConflict, map[string]any{"code": "op_id_reused"})
 			return
 		}

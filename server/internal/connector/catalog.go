@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/nwverse/persona/sdk/go/wire"
+	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -69,6 +72,8 @@ func ReadCatalog(ctx context.Context, c Connector) ([]CatalogSource, error) {
 			if !strings.HasPrefix(t.Name, c.ID()+"_") {
 				return nil, errors.New("read tool lacks its connector prefix")
 			}
+			localized := prompts.LocalizeTool(prompts.MCPTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema}, string(i18n.From(ctx)))
+			t.Description, t.InputSchema = localized.Description, localized.InputSchema
 			source.Tools = append(source.Tools, CatalogTool{Name: strings.TrimPrefix(t.Name, c.ID()+"_"),
 				Description: t.Description, InputSchema: t.InputSchema, ReadOnly: true})
 		}
@@ -82,6 +87,20 @@ func ReadCatalog(ctx context.Context, c Connector) ([]CatalogSource, error) {
 			return nil, notReadOnly()
 		}
 		return nil, err
+	}
+	// Catalogs may return shared slices. Only fixed built-in definitions are
+	// localized; authored declarations with the same name are kept intact.
+	sources = slices.Clone(sources)
+	for i := range sources {
+		sources[i].Tools = slices.Clone(sources[i].Tools)
+		for j, tool := range sources[i].Tools {
+			name := tool.Name
+			if !strings.HasPrefix(name, c.ID()+"_") {
+				name = c.ID() + "_" + name
+			}
+			localized := prompts.LocalizeTool(prompts.MCPTool{Name: name, Description: tool.Description, InputSchema: tool.InputSchema}, string(i18n.From(ctx)))
+			sources[i].Tools[j].Description, sources[i].Tools[j].InputSchema = localized.Description, localized.InputSchema
+		}
 	}
 	return sources, nil
 }

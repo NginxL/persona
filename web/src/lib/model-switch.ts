@@ -19,24 +19,32 @@ export function canSwitchModel(s: Session | undefined): boolean {
   return sessionCan(s, "send") && stateOf(s) !== "offline";
 }
 
-/** Why the model cannot be switched right now, "" when it can (the node refuses the same cases). */
+/** Why the model cannot be switched right now, "" when it can (the node refuses the same cases). Codex applies model
+ *  and effort changes to the next turn without interrupting a running one. */
 export function modelBusy(s: Session): string {
+  if (agentId(sessionAgent(s).agent) === "codex") return "";
+  if (s.capabilities?.model && !s.pane_id && (s.source_kind === "claude_desktop" || s.capabilities.plugin_input)) return "";
   const st = stateOf(s);
   return st === "working" || st === "needs_you" ? t("composer.busy") : "";
 }
 
-/** The node's name for the Codex App's launcher (#5726, server/internal/node/codexapp_new.go): its list is empty and
- *  `locked`, since the App picks a chat's model. */
+/** The node's name for the Codex App's launcher (#5726, server/internal/node/codexapp_new.go). */
 export const CODEX_APP_LAUNCHER = "codex-app";
 
+/** The node's name for the Claude Desktop launcher (server/internal/node/claudedesktop_new.go). */
+export const CLAUDE_DESKTOP_LAUNCHER = "claude-desktop";
+
 /** The launcher whose list the panel shows first: the session's own; without one, its engine's: the Codex App's for one
- *  of the App's chats (`space_kind` codex_app), plain codex for another Codex session, plain claude otherwise. A Codex
- *  session used to read Claude Code's list (#6501): its pill named Claude's default entry, "Default (recommended)", when
- *  the session reported no model, and the panel offered Claude's models as its own. */
+ *  of the App's chats (`space_kind` codex_app), plain codex for another Codex session, Claude Desktop for a desktop
+ *  session, plain claude otherwise. */
 export const sessionLauncher = (s: Partial<Pick<Session, "launcher" | "agent" | "agent_label" | "source_kind" | "agent_surface" | "space_kind">>): string => {
   if (s.launcher) return s.launcher;
-  if (agentId(sessionAgent(s).agent) !== "codex") return "claude";
-  return s.space_kind === "codex_app" ? CODEX_APP_LAUNCHER : "codex";
+  if (agentId(sessionAgent(s).agent) !== "codex") {
+    return s.source_kind === "claude_desktop" || s.space_kind === "claude_desktop" || s.agent_surface === "desktop"
+      ? CLAUDE_DESKTOP_LAUNCHER
+      : "claude";
+  }
+  return s.space_kind === "codex_app" || s.agent_surface === "desktop" ? CODEX_APP_LAUNCHER : "codex";
 };
 
 /** The id without its 1M marker, lower case: the model both spellings name. */

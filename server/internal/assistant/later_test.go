@@ -298,7 +298,7 @@ func TestLaterHandledStoreFailureIsNotHandled(t *testing.T) {
 	}
 
 	fresh := newBoardEnvOn(t, e.st)
-	e.st.failSetting = errors.New("database unavailable")
+	e.st.setFailSetting(errors.New("database unavailable"))
 	if ok, err := fresh.s.laterHandled(ctx, a.ID, e.clk.Now()); ok || err == nil {
 		t.Fatalf("not read: %v %v, want an error", ok, err)
 	}

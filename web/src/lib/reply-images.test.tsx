@@ -60,21 +60,33 @@ describe("addresses", () => {
 });
 
 // React's static renderer puts a preload link before the first image: not the plugin's.
-const html = (md: string) => renderToStaticMarkup(<ReactMarkdown rehypePlugins={[rehypeReplyImages]}>{md}</ReactMarkdown>).replace(/<link [^>]*\/>/g, "");
-const groups = (md: string) =>
-  [...html(md).matchAll(/<reply-images>(.*?)<\/reply-images>/g)].map((m) => [...m[1].matchAll(/src="([^"]+)"/g)].map((s) => s[1]));
+const html = (md: string, local = false) =>
+  renderToStaticMarkup(<ReactMarkdown rehypePlugins={[[rehypeReplyImages, { local }]]}>{md}</ReactMarkdown>).replace(/<link [^>]*\/>/g, "");
+const groups = (md: string, local = false) =>
+  [...html(md, local).matchAll(/<reply-images data-kind="(web|local)"[^>]*>(.*?)<\/reply-images>/g)].map((m) => ({
+    kind: m[1],
+    pictures: [...m[2].matchAll(/src="([^"]+)"/g)].map((s) => s[1]),
+  }));
 
 describe("lifting block pictures", () => {
   it("takes the pictures under a line of text out of its paragraph, one run", () => {
     expect(html("**Kitchen** (same post)\n![a](https://x.test/a.png)\n![b](https://x.test/b.png)\nIt has a washer.")).toBe(
-      '<p><strong>Kitchen</strong> (same post)</p><reply-images><img src="https://x.test/a.png" alt="a"/><img src="https://x.test/b.png" alt="b"/></reply-images><p>It has a washer.</p>',
+      '<p><strong>Kitchen</strong> (same post)</p><reply-images data-kind="web"><img src="https://x.test/a.png" alt="a"/><img src="https://x.test/b.png" alt="b"/></reply-images><p>It has a washer.</p>',
     );
   });
 
   it("makes one run of pictures that only blank lines keep apart, and of two on one line", () => {
     expect(groups("![a](https://x.test/a.png)\n\n![b](https://x.test/b.png) ![c](https://x.test/c.png)\n\ntext\n\n![d](https://x.test/d.png)")).toEqual([
-      ["https://x.test/a.png", "https://x.test/b.png", "https://x.test/c.png"],
-      ["https://x.test/d.png"],
+      { kind: "web", pictures: ["https://x.test/a.png", "https://x.test/b.png", "https://x.test/c.png"] },
+      { kind: "web", pictures: ["https://x.test/d.png"] },
+    ]);
+  });
+
+  it("keeps local and web pictures in separate labelled runs", () => {
+    expect(groups("![a](shot.png)\n\n![b](https://x.test/b.png)\n\n![c](other.png)", true)).toEqual([
+      { kind: "local", pictures: ["shot.png"] },
+      { kind: "web", pictures: ["https://x.test/b.png"] },
+      { kind: "local", pictures: ["other.png"] },
     ]);
   });
 
@@ -90,6 +102,6 @@ describe("lifting block pictures", () => {
 
   it("keeps a hard break a hard break around a run", () => {
     const out = html("one  \ntwo\n![a](https://x.test/a.png)\nthree  \nfour");
-    expect(out).toBe('<p>one<br/>\ntwo</p><reply-images><img src="https://x.test/a.png" alt="a"/></reply-images><p>three<br/>\nfour</p>');
+    expect(out).toBe('<p>one<br/>\ntwo</p><reply-images data-kind="web"><img src="https://x.test/a.png" alt="a"/></reply-images><p>three<br/>\nfour</p>');
   });
 });

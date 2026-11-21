@@ -67,14 +67,14 @@ func TestMeetingPurposesInTheCatalog(t *testing.T) {
 		rows[p.ID] = p
 	}
 	i := slices.Index(ids, purposeSupervise)
-	if i < 0 || i+4 > len(ids) || !slices.Equal(ids[i:i+4], []string{purposeSupervise, purposeMeetingRoom, purposeMeetingMinutes, "extension.curator"}) {
+	if i < 0 || i+5 > len(ids) || !slices.Equal(ids[i:i+5], []string{purposeSupervise, purposeMeetingRoom, purposeMeetingMinutes, purposeMain, "extension.curator"}) {
 		t.Fatalf("catalog order: %v", ids)
 	}
 	for _, c := range []struct {
 		id, kind, launch, parent, group, machine string
 		fields                                   []string
 	}{
-		{purposeMeetingRoom, "launcher", "headless", "assistant", "group_assistant", "server", []string{"provider", "model", "effort"}},
+		{purposeMeetingRoom, "launcher", "headless", "assistant", "group_assistant", "server", []string{"provider", "model", "effort", "permission_mode"}},
 		{purposeMeetingMinutes, "api", "", "kb", "group_processing", "server", purposeOf(t, s, "kb").Fields},
 	} {
 		p, own := rows[c.id], purposeOf(t, s, c.id)

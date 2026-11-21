@@ -236,7 +236,7 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
   const assistant = useStore((s) => s.assistant);
   const manager = useShownManager();
   const selectedLauncher = usePickedLauncher(NEW_CONVERSATION);
-  const mention = useMemo<MentionSource>(() => ({ self: "persona-new", files: () => [], workspaces: true,
+  const mention = useMemo<MentionSource>(() => ({ self: "persona-new", files: () => [], workspaces: true, repositories: manager,
     skills: { manager, launcher: selectedLauncher, environment: assistant?.launcher ?? "" },
   }), [manager, selectedLauncher, assistant?.launcher]);
   const persona = usePersona();
@@ -420,7 +420,7 @@ function Starter({ main, cleared, onToggleSidebar }: { main?: boolean; cleared?:
           {gate.dialog}
           {/* the box: in the page's middle, or docked at the bottom as the conversation's (ChatView's dock) while the start is on its way */}
           <div ref={box} className={docked ? "mx-auto flex w-full max-w-[880px] flex-col justify-end gap-2 px-4 pb-4 sm:px-7 [@media(max-height:500px)]:pb-2" : undefined}>
-            <Composer key={seed} blocked={offline ? undefined : gate.blocked} disabled={Boolean(offline) || Boolean(sending)} draftKey="persona-new" placeholder={offline ? offline.composer : t("personaassistant.ask_placeholder", { name: persona.name })} machineId={assistant?.machine_id} mention={mention} onSend={start} autoFocus commands={commands} trailing={assistant && !sending ? <AssistantModelPill /> : undefined} />
+            <Composer key={seed} blocked={offline ? undefined : gate.blocked} disabled={Boolean(offline) || Boolean(sending)} draftKey="persona-new" placeholder={offline ? offline.composer : t("personaassistant.ask_placeholder", { name: persona.name })} machineId={assistant?.machine_id} mention={mention} onSend={start} autoFocus commands={commands} trailing={assistant && !sending ? <AssistantModelPill mainStart={main} /> : undefined} />
           </div>
           {!docked && (
           <div className="mt-4 grid grid-cols-1 gap-1.5 sm:grid-cols-2">

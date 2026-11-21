@@ -199,6 +199,8 @@ class AssistantTest {
         assertEquals(listOf("取消常驻", "拷贝会话 ID"), labels(leader = true, live = false, act = true, end = true))
         assertEquals("the main conversation is no leader", listOf("拷贝会话 ID", "结束…"), labels(leader = false, live = true, act = false, end = true))
         assertEquals(listOf("拷贝会话 ID"), labels(leader = false, live = true, act = false, end = false))
+        assertEquals(listOf("排列对话", "拷贝会话 ID"),
+            conversationActions(resources, false, true, null, {}, null, onArrange = {}).map { it.label })
         assertTrue(conversationActions(resources, false, true, null, {}, {}).last().destructive)
         // C12 (#4339): iOS's items in iOS's order (`AssistantSidebar.row`), End… last, apart and red.
         val all = conversationActions(resources, false, true, {}, {}, {}, onArchive = {}, onRename = {}, onDiagnostics = {})
@@ -263,6 +265,25 @@ class AssistantTest {
         assertTrue("All chats still lists the task chats and everyone else", groups.others.map { it.sessionId }.containsAll(listOf("a", "b", "inbox", "task", "background")))
         assertTrue("no Recent while searching", conversationGroups(snapshot, "x", words).recent.isEmpty())
         assertTrue("only the main chat: no Recent", recentConversations(AssistantSnapshot(main.key, listOf(main))).isEmpty())
+    }
+
+    @Test fun savedOrderListsLoadedChatsFirstAndKeepsNewChatsInActivityOrder() {
+        fun chat(id: String, minutes: Long) = Session(machineId = "demo", sessionId = id,
+            updatedAt = Instant.parse("2026-11-11T12:00:00Z").minusSeconds(minutes * 60).toString())
+        val main = chat("main", 0)
+        val lead = chat("lead", 1)
+        val chats = listOf(main, lead, chat("a", 2), chat("b", 3), chat("c", 4), chat("d", 5), chat("e", 6), chat("f", 7))
+        val snapshot = AssistantSnapshot(main.key, chats, leaders = listOf("lead"),
+            conversationOrder = listOf("f", "unknown", "c", "a", "main", "lead"))
+        val groups = conversationGroups(snapshot, "", words)
+        assertEquals(listOf("f", "c", "a", "b", "d"), groups.recent.map { it.sessionId })
+        assertEquals(listOf("f", "c", "a", "b", "d", "e"), groups.others.map { it.sessionId })
+        assertEquals("Main and Directions stay fixed", listOf("lead"), groups.directions.map { it.sessionId })
+        assertEquals(main, groups.main)
+        val activity = conversationGroups(snapshot.copy(conversationOrder = emptyList()), "", words)
+        assertEquals(listOf("a", "b", "c", "d", "e"), activity.recent.map { it.sessionId })
+        assertEquals(listOf("a", "b", "c", "d", "e", "f"), activity.others.map { it.sessionId })
+        assertEquals(activity, conversationGroups(snapshot.copy(conversationOrder = null), "", words))
     }
 
     @Test fun automaticConversationOriginsHaveOneAccessibleMapping() {

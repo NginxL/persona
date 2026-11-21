@@ -124,6 +124,10 @@ func (c *conversation) nudgeDue(now time.Time) bool {
 // maybeNudge nudges the model once when it owes the user an answer and has said nothing (nudgeDue).
 func (c *conversation) maybeNudge(now time.Time) {
 	c.mu.Lock()
+	if c.dictation {
+		c.mu.Unlock()
+		return // no answer is owed in transcription-only mode
+	}
 	if !c.nudgeDue(now) {
 		c.mu.Unlock()
 		return

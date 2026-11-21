@@ -22,6 +22,14 @@ type Claim struct {
 	LeaseSeconds int    `json:"lease_seconds"`
 }
 
+type Renew struct {
+	RequestID    string `json:"request_id"`
+	Key          string `json:"key"`
+	ID           string `json:"id"`
+	Lease        string `json:"lease"`
+	LeaseSeconds int    `json:"lease_seconds"`
+}
+
 type QueueList struct {
 	Key   string `json:"key"`
 	After string `json:"after,omitempty"`
@@ -183,6 +191,36 @@ func queueCall(state *State, scope Scope, method string, params json.RawMessage,
 			if job == nil || job.State != "leased" || job.Run != scope.Run || job.Lease != replay.Job.Lease || job.LeaseUntil <= now.UnixMilli() {
 				return nil, false, ErrStale
 			}
+		}
+		return value, false, nil
+	case "storage.queue.renew":
+		var in Renew
+		if err := decode(params, &in); err != nil || in.ID == "" || len(in.ID) > 80 || in.LeaseSeconds <= 0 || time.Duration(in.LeaseSeconds) > LeaseMost/time.Second {
+			return nil, false, ErrInvalid
+		}
+		if err := allowed(scope.Granted, in.Key); err != nil {
+			return nil, false, err
+		}
+		value, changed, err := mutation(state, method, in.RequestID, in, now, func(copy *State) (any, error) {
+			job := copy.Queues[in.Key][in.ID]
+			if job == nil {
+				return nil, ErrNotFound
+			}
+			if job.State != "leased" || job.Run != scope.Run || in.Lease == "" || job.Lease != in.Lease || job.LeaseUntil <= now.UnixMilli() {
+				return nil, ErrStale
+			}
+			// A shorter renewal must not shorten the live lease it extends.
+			job.LeaseUntil = max(job.LeaseUntil, now.Add(time.Duration(in.LeaseSeconds)*time.Second).UnixMilli())
+			return map[string]string{"id": job.ID, "state": job.State}, nil
+		})
+		if err != nil || changed {
+			return value, changed, err
+		}
+		// A renewal receipt recovers its original result only while the exact
+		// lease is still live; it cannot revive an expired/deleted/replaced run.
+		job := state.Queues[in.Key][in.ID]
+		if job == nil || job.State != "leased" || job.Run != scope.Run || in.Lease == "" || job.Lease != in.Lease || job.LeaseUntil <= now.UnixMilli() {
+			return nil, false, ErrStale
 		}
 		return value, false, nil
 	case "storage.queue.retry":

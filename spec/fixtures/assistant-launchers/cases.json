@@ -30,7 +30,7 @@
           "model": "claude-sonnet-4-5"
         }
       ],
-      "assistant": ["runtime", "team-api"],
+      "assistant": ["runtime", "codex-gw", "team-api"],
       "agent_new": ["runtime", "codex-gw"]
     }
   ]

@@ -237,6 +237,9 @@ func (h *Hub) entryOwner(mid string) string {
 		if k := d.kept[mid]; k != "" { // its manager keeps it out of hub.json (machines_kept.go)
 			return k
 		}
+		if owner := d.transportOwners[mid]; owner != "" {
+			return owner
+		}
 		return devicesOwner
 	}
 	required := false

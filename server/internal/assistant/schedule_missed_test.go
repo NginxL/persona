@@ -18,6 +18,8 @@ func TestMissedRunsAcrossTodayBriefAndSnapshot(t *testing.T) {
 		{"manual busy skip then success", []ScheduleRun{{Status: runSkipped, Manual: true}, {Status: runOK}}, 0},
 		{"manual failure alone", []ScheduleRun{{Status: runFailed, Manual: true}}, 0},
 		{"manual skip alone", []ScheduleRun{{Status: runSkipped, Manual: true}}, 0},
+		{"owner skip alone", []ScheduleRun{{Status: runSkipped, OwnerSkipped: true}}, 0},
+		{"owner skip after failure", []ScheduleRun{{Status: runFailed}, {Status: runSkipped, OwnerSkipped: true}}, 1},
 		{"condition skip alone", []ScheduleRun{{Status: runSkipped, ConditionSkipped: true}}, 0},
 		{"condition skip after failure", []ScheduleRun{{Status: runFailed}, {Status: runSkipped, ConditionSkipped: true}}, 1},
 		{"retry still fails", []ScheduleRun{{Status: runFailed}, {Status: runFailed}}, 2},

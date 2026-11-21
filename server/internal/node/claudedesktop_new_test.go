@@ -332,7 +332,7 @@ func TestTheDesktopLauncherIsOfferedWhereTheAppKeepsSessions(t *testing.T) {
 		t.Fatal("not known")
 	}
 	models, err := n.launcherModels(context.Background(), "claude-desktop", "", false)
-	if err != nil || models.Agent != "claude" || len(models.Models) != 0 || models.Locked == "" {
+	if err != nil || models.Agent != "claude" || len(models.Models) != 0 || models.Locked != "" {
 		t.Fatalf("models %+v, %v", models, err)
 	}
 	if c := n.launcherCheck(context.Background(), "claude-desktop"); c.Error != desktopCheckMsg {

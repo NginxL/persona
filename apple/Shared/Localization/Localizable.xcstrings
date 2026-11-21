@@ -1,6 +1,933 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ · This Device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · This Device"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · このデバイス"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · 本机"
+          }
+        }
+      }
+    },
+    "<user>" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "<user>"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "<ユーザー名>"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "<用户名>"
+          }
+        }
+      }
+    },
+    "Card Height [Question Card]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Card Height"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カードの高さ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卡片高度"
+          }
+        }
+      }
+    },
+    "Check Status" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check Status"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状態を確認"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查状态"
+          }
+        }
+      }
+    },
+    "Checking the computer" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking the computer"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コンピューターを確認"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "检查电脑"
+          }
+        }
+      }
+    },
+    "Confirm that this computer is yours first." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm that this computer is yours first."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先に、このコンピューターがご自身のものであることを確認してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先确认这台电脑是你的。"
+          }
+        }
+      }
+    },
+    "Connected over SSH. With Persona Link, this computer connects to the hub by itself, also from other networks." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected over SSH. With Persona Link, this computer connects to the hub by itself, also from other networks."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SSHで接続しています。Persona Linkにすると、このコンピューターはほかのネットワークからでも自分でハブに接続します。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前通过 SSH 连接。改用 Persona Link 后，这台电脑会自己连上 hub，换了网络也能连。"
+          }
+        }
+      }
+    },
+    "Couldn't confirm that the switch started. If nothing changes here, try again." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't confirm that the switch started. If nothing changes here, try again."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切り替えが始まったか確認できませんでした。ここに変化がなければ、もう一度お試しください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法确认切换是否已开始。如果这里一直没有变化，请再试一次。"
+          }
+        }
+      }
+    },
+    "Couldn't send Persona Link to the computer over SSH." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't send Persona Link to the computer over SSH."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SSHでPersona Linkをコンピューターに送れませんでした。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能通过 SSH 把 Persona Link 发送到电脑上。"
+          }
+        }
+      }
+    },
+    "Couldn't switch to Persona Link. %@ It's back on SSH." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't switch to Persona Link. %@ It's back on SSH."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona Linkに切り替えられませんでした。%@SSH接続に戻っています。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能切换到 Persona Link。%@电脑已回到 SSH 连接。"
+          }
+        }
+      }
+    },
+    "Couldn't switch to Persona Link. %@ Persona couldn't confirm that the switch was undone. Check that the computer is reachable; if it isn't, reconnect it from the computer itself." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't switch to Persona Link. %@ Persona couldn't confirm that the switch was undone. Check that the computer is reachable; if it isn't, reconnect it from the computer itself."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona Linkに切り替えられませんでした。%@切り替えを元に戻せたか確認できませんでした。コンピューターに接続できるか確認し、できない場合はそのコンピューター上で接続し直してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能切换到 Persona Link。%@Persona 无法确认切换已撤销。请检查能否连上这台电脑；如果连不上，请在这台电脑上重新连接。"
+          }
+        }
+      }
+    },
+    "Current step" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current step"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在のステップ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前步骤"
+          }
+        }
+      }
+    },
+    "Installing Persona Link" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installing Persona Link"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona Linkをインストール"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装 Persona Link"
+          }
+        }
+      }
+    },
+    "Its services would stop whenever you sign out. An administrator of that computer must run %@ first." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Its services would stop whenever you sign out. An administrator of that computer must run %@ first."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サインアウトするとサービスが止まります。先にこのコンピューターの管理者が%@を実行する必要があります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "退出登录后，它的服务就会停止。需要这台电脑的管理员先运行 %@。"
+          }
+        }
+      }
+    },
+    "Persona Link couldn't be installed or paired on the computer." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona Link couldn't be installed or paired on the computer."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コンピューターにPersona Linkをインストールまたはペアリングできませんでした。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能在电脑上安装或配对 Persona Link。"
+          }
+        }
+      }
+    },
+    "Persona Link is already installed or paired on this computer. Finish setting it up there, or remove it first." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona Link is already installed or paired on this computer. Finish setting it up there, or remove it first."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このコンピューターにはすでにPersona Linkがインストールまたはペアリングされています。そちらで設定を完了するか、先に削除してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台电脑上已经安装或配对了 Persona Link。请在那台电脑上完成设置，或先把它移除。"
+          }
+        }
+      }
+    },
+    "Persona couldn't find its program on this computer in the usual place." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona couldn't find its program on this computer in the usual place."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このコンピューターの通常の場所にPersonaのプログラムが見つかりませんでした。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona 在这台电脑的常用位置找不到它的程序。"
+          }
+        }
+      }
+    },
+    "Persona installs Persona Link over the current SSH connection. The computer then connects to the hub by itself, from any network.\n\nIt disconnects once. Agents in a terminal keep running; an assistant reply being written stops. Its name, settings and history stay.\n\nIf it fails, Persona tries to put it back on SSH." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona installs Persona Link over the current SSH connection. The computer then connects to the hub by itself, from any network.\n\nIt disconnects once. Agents in a terminal keep running; an assistant reply being written stops. Its name, settings and history stay.\n\nIf it fails, Persona tries to put it back on SSH."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Personaが現在のSSH接続を使ってPersona Linkをインストールします。以後、このコンピューターはどのネットワークからでも自分でハブに接続します。\n\n一度切断されます。ターミナルのエージェントはそのまま動きますが、アシスタントが書いている返信は止まります。名前、設定、履歴は残ります。\n\n失敗した場合、PersonaはSSH接続への復旧を試みます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona 会通过现在的 SSH 连接安装 Persona Link，之后电脑会自己连上 hub，在任何网络里都能连。\n\n电脑会断开一次。终端里的 Agent 会继续运行，但助手正在写的回复会中断。名称、设置和历史记录都会保留。\n\n如果失败，Persona 会尝试恢复 SSH 连接。"
+          }
+        }
+      }
+    },
+    "Persona is updating this computer. Try again once that's done." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona is updating this computer. Try again once that's done."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Personaがこのコンピューターを更新しています。完了してからもう一度お試しください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona 正在更新这台电脑，完成后再试。"
+          }
+        }
+      }
+    },
+    "Persona restarted during the switch." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona restarted during the switch."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切り替え中にPersonaが再起動しました。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换过程中 Persona 重启了。"
+          }
+        }
+      }
+    },
+    "Persona runs from a custom location on this computer, so it can't be switched from here." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona runs from a custom location on this computer, so it can't be switched from here."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このコンピューターのPersonaはカスタムの場所で動いているため、ここからは切り替えられません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台电脑上的 Persona 装在自定义位置，不能在这里切换。"
+          }
+        }
+      }
+    },
+    "Persona's folders on this computer aren't safe to switch from here: the home folder, ~/.persona or ~/.persona/bin belongs to another user or can be changed by other users. On that computer, make them yours and writable only by you (for example: chmod go-w ~ ~/.persona ~/.persona/bin), then try again." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona's folders on this computer aren't safe to switch from here: the home folder, ~/.persona or ~/.persona/bin belongs to another user or can be changed by other users. On that computer, make them yours and writable only by you (for example: chmod go-w ~ ~/.persona ~/.persona/bin), then try again."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このコンピューターのPersonaのフォルダーは安全ではないため、ここからは切り替えられません。ホームフォルダー、~/.persona、~/.persona/bin のいずれかが別のユーザーのものか、他のユーザーが変更できます。そのコンピューターで、自分が所有し自分だけが書き込めるようにしてから（例：chmod go-w ~ ~/.persona ~/.persona/bin）、もう一度お試しください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台电脑上 Persona 的文件夹不安全，不能在这里切换：主文件夹、~/.persona 或 ~/.persona/bin 属于别的用户，或者其他用户可以改动。请在那台电脑上把它们改成属于你、只有你能写入（例如：chmod go-w ~ ~/.persona ~/.persona/bin），然后再试。"
+          }
+        }
+      }
+    },
+    "Something went wrong." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Something went wrong."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "問題が発生しました。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出了点问题。"
+          }
+        }
+      }
+    },
+    "Swipe up or down to make the card taller or shorter. Double-tap for the tallest or the default." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swipe up or down to make the card taller or shorter. Double-tap for the tallest or the default."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上下にスワイプするとカードを高くしたり低くしたりできます。ダブルタップで最大とデフォルトの高さを切り替えます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上下轻扫可以把卡片调高或调低。轻点两下在最高和默认高度之间切换。"
+          }
+        }
+      }
+    },
+    "Switch to Persona Link…" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch to Persona Link…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona Linkに切り替え…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换到 Persona Link…"
+          }
+        }
+      }
+    },
+    "Switch “%@” to Persona Link?" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch “%@” to Persona Link?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」をPersona Linkに切り替えますか？"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将「%@」切换到 Persona Link？"
+          }
+        }
+      }
+    },
+    "Switched to Persona Link. This computer now connects to the hub by itself." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switched to Persona Link. This computer now connects to the hub by itself."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona Linkに切り替えました。このコンピューターは自分でハブに接続するようになりました。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已切换到 Persona Link。这台电脑现在会自己连上 hub。"
+          }
+        }
+      }
+    },
+    "Switching from here works for Linux computers. On a Mac or Windows computer, install Persona Link on it yourself." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switching from here works for Linux computers. On a Mac or Windows computer, install Persona Link on it yourself."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ここから切り替えられるのはLinuxのコンピューターだけです。MacやWindowsのコンピューターでは、そのコンピューターにPersona Linkをご自身でインストールしてください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有 Linux 电脑可以在这里切换。Mac 或 Windows 电脑请在电脑上自行安装 Persona Link。"
+          }
+        }
+      }
+    },
+    "Switching to Persona Link…" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switching to Persona Link…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona Linkに切り替えています…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在切换到 Persona Link…"
+          }
+        }
+      }
+    },
+    "That didn't work. Putting the computer back on SSH…" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That didn't work. Putting the computer back on SSH…"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "うまくいかなかったため、SSH接続に戻しています…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有成功，正在把电脑改回 SSH 连接…"
+          }
+        }
+      }
+    },
+    "The computer didn't connect through Persona Link in time." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The computer didn't connect through Persona Link in time."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コンピューターが時間内にPersona Linkで接続しませんでした。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "电脑没有及时通过 Persona Link 连上。"
+          }
+        }
+      }
+    },
+    "The computer needs to be online to switch." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The computer needs to be online to switch."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切り替えるには、コンピューターがオンラインである必要があります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "电脑要在线才能切换。"
+          }
+        }
+      }
+    },
+    "The computer's settings changed during the switch." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The computer's settings changed during the switch."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切り替え中にコンピューターの設定が変更されました。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换过程中这台电脑的设置被改动了。"
+          }
+        }
+      }
+    },
+    "The hub didn't answer for an hour, so the switch couldn't be undone." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub didn't answer for an hour, so the switch couldn't be undone."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブが1時間応答しなかったため、切り替えを元に戻せませんでした。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 一小时内都没有应答，所以没能撤销这次切换。"
+          }
+        }
+      }
+    },
+    "The hub doesn't take Persona Link connections yet. Turn on its TLS port or give it an https address first, under Network & access on the hub's admin page." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub doesn't take Persona Link connections yet. Turn on its TLS port or give it an https address first, under Network & access on the hub's admin page."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハブはまだPersona Linkの接続を受け付けていません。先にハブの管理ページの「ネットワークとアクセス」で、TLSポートを有効にするかhttpsのアドレスを設定してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 还不接受 Persona Link 连接。请先在 hub 管理页面的「网络与访问」里开启 TLS 端口，或设置 https 地址。"
+          }
+        }
+      }
+    },
+    "The hub has no Persona Link build for this computer's system." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub has no Persona Link build for this computer's system."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このコンピューターのシステム向けのPersona Linkがハブにありません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 没有适合这台电脑系统的 Persona Link 版本。"
+          }
+        }
+      }
+    },
+    "The hub needs an update before it can switch computers." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The hub needs an update before it can switch computers."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コンピューターを切り替えるには、ハブを更新する必要があります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hub 需要更新后才能切换电脑。"
+          }
+        }
+      }
+    },
+    "This computer can't switch to Persona Link right now." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This computer can't switch to Persona Link right now."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このコンピューターは今はPersona Linkに切り替えられません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台电脑暂时不能切换到 Persona Link。"
+          }
+        }
+      }
+    },
+    "This computer has no systemd user services, which Persona Link needs to keep running." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This computer has no systemd user services, which Persona Link needs to keep running."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このコンピューターにはsystemdのユーザーサービスがありません。Persona Linkを動かし続けるために必要です。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台电脑没有 systemd 用户服务，Persona Link 需要它来保持运行。"
+          }
+        }
+      }
+    },
+    "This computer is already switching to Persona Link." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This computer is already switching to Persona Link."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このコンピューターはすでにPersona Linkへの切り替え中です。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台电脑正在切换到 Persona Link。"
+          }
+        }
+      }
+    },
+    "This device can't switch computers. Use a device with full access." : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device can't switch computers. Use a device with full access."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このデバイスではコンピューターを切り替えられません。フルアクセスのデバイスを使ってください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台设备不能切换电脑。请用有完全访问权限的设备。"
+          }
+        }
+      }
+    },
+    "Waiting for it to connect" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for it to connect"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接続を待機"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待电脑连上"
+          }
+        }
+      }
+    },
     "agentDirs.action" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -135,6 +1062,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agent 文件夹"
+          }
+        }
+      }
+    },
+    "Primary Device" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Primary Device"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メインのデバイス"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主设备"
           }
         }
       }
@@ -1679,6 +2629,75 @@
         }
       }
     },
+    "Answers [Hub Address]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Answers"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "応答あり"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有应答"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Certificate Not Trusted [Hub Address]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Certificate Not Trusted"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "証明書を信頼できません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "证书不受信任"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Couldn't Connect [Hub Address]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't Connect"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続できません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连不上"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
     "Hidden Agent Folders" : {
       "localizations" : {
         "en" : {
@@ -1766,6 +2785,52 @@
           }
         }
       }
+    },
+    "Not Tried Yet [Hub Address]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not tried yet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだ試していません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没试过"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Not Your Hub [Hub Address]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not Your Hub"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "別のハブ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不是你的 hub"
+          }
+        }
+      },
+      "extractionState" : "manual"
     },
     "Show hidden sessions" : {
       "localizations" : {
@@ -18601,6 +19666,98 @@
         }
       }
     },
+    "Allow again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow again"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许再次关联"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再リンクを許可"
+          }
+        }
+      }
+    },
+    "Allow Persona to link %@ again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Persona to link %1$@ again"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许 Persona 再次关联「%1$@」"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona に「%1$@」との再リンクを許可"
+          }
+        }
+      }
+    },
+    "Allowing a link again lets Persona make it in a future update." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allowing a link again lets Persona make it in a future update."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许后，Persona 可以在之后的更新中重新建立关联。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "許可すると、今後の更新で Persona が再びリンクできるようになります。"
+          }
+        }
+      }
+    },
+    "Also stop automatic changes to both lists" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Also stop automatic changes to both lists"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同时停止自动更新这两个列表"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "両方のリストの自動更新も停止"
+          }
+        }
+      }
+    },
     "An Agent [To-dos Line]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20136,6 +21293,29 @@
         }
       }
     },
+    "Add [To-dos New]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "追加"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加"
+          }
+        }
+      }
+    },
     "Add [Todo Decisions]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21001,6 +22181,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "追加済み"
+          }
+        }
+      }
+    },
+    "Added [To-dos Toast]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Added"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "追加しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已添加"
           }
         }
       }
@@ -22377,6 +23580,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Paseo 里的 Agent"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Agents in T3 Code" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agents in T3 Code"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "T3 Codeのエージェント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "T3 Code 里的 Agent"
           }
         }
       },
@@ -25223,6 +26449,29 @@
       },
       "extractionState" : "manual"
     },
+    "Also renames this session in Rex." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Also renames this session in Rex."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexのこのセッション名も変更します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同时改 Rex 里这个 session 的名字。"
+          }
+        }
+      }
+    },
     "Also renames this session in Tern." : {
       "localizations" : {
         "en" : {
@@ -25930,6 +27179,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agent 只在这一次运行中拿到："
+          }
+        }
+      }
+    },
+    "An Agent is waiting for your answer on this. Mark it done and stop it? [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An Agent is waiting for your answer on this. Mark it done and stop it?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentがあなたの回答を待っています。完了にして止めますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有 Agent 在等你回答。标为完成并让它停下吗？"
           }
         }
       }
@@ -27546,6 +28818,29 @@
       },
       "extractionState" : "manual"
     },
+    "Approval Phrases" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approval Phrases"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "承認フレーズ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "批准短语"
+          }
+        }
+      }
+    },
     "Approve" : {
       "localizations" : {
         "en" : {
@@ -27776,6 +29071,29 @@
       },
       "extractionState" : "manual"
     },
+    "Approve a Batch with an Exact Reply" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approve a Batch with an Exact Reply"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完全一致する返信でバッチを承認"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用精确回复批准一批操作"
+          }
+        }
+      }
+    },
     "Approve it by tapping on screen" : {
       "localizations" : {
         "en" : {
@@ -27818,6 +29136,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请在聊天里的卡片上批准。"
+          }
+        }
+      }
+    },
+    "Approve one displayed batch with an exact reply. No standing permission." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approve one displayed batch with an exact reply. No standing permission."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表示された1つのバッチを完全一致する返信で承認します。継続的な権限は付与されません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用精确回复批准当前展示的一批操作，不授予持续权限。"
           }
         }
       }
@@ -29499,6 +30840,28 @@
         }
       }
     },
+    "Assistants on %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistants on %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ のアシスタント"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 上的助手"
+          }
+        }
+      }
+    },
     "Attach Live" : {
       "localizations" : {
         "en" : {
@@ -30931,6 +32294,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "待验收"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Awaiting your verification" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Awaiting your verification"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "あなたの確認待ち"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "待你验收"
           }
         }
       },
@@ -32693,25 +34079,48 @@
         }
       }
     },
-    "Both entries and what they hold are kept. Persona will stop changing the %@ linked to “%@” and the %@ linked to “%@” on its own." : {
+    "Both entries are kept." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Both entries and what they hold are kept. Persona will stop changing the %1$@ linked to “%2$@” and the %3$@ linked to “%4$@” on its own."
+            "value" : "Both entries are kept."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "两个条目和里面的内容都会保留。之后 Persona 不会再自动更改「%2$@」关联的%1$@，以及「%4$@」关联的%3$@。"
+            "value" : "两个条目都会保留。"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "両方の項目と中身はそのまま残ります。今後 Persona は、「%2$@」に関連する%1$@と「%4$@」に関連する%3$@を自動では変更しません。"
+            "value" : "両方の項目はそのまま残ります。"
+          }
+        }
+      }
+    },
+    "Both entries are kept. Persona won’t make this link again on its own. This leaves other links free to update." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Both entries are kept. Persona won’t make this link again on its own. This leaves other links free to update."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "两个条目都会保留。Persona 不会自动重新建立这条关联。这不会影响其他关联的自动更新。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "両方の項目はそのまま残ります。Persona はこのリンクを自動では作り直しません。ほかのリンクの自動更新には影響しません。"
           }
         }
       }
@@ -34437,6 +35846,52 @@
       },
       "extractionState" : "manual"
     },
+    "Can't reach your hub · showing what was saved %@ [To-dos Offline]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can't reach your hub · showing what was saved %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハブに接続できません · %@ に保存した内容を表示しています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连不上你的 hub · 显示的是 %@ 保存的内容"
+          }
+        }
+      }
+    },
+    "Can't reach your hub · showing what was saved [To-dos Offline]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Can't reach your hub · showing what was saved"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハブに接続できません · 保存済みの内容を表示しています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连不上你的 hub · 显示的是之前保存的内容"
+          }
+        }
+      }
+    },
     "Can't tell" : {
       "localizations" : {
         "en" : {
@@ -34598,6 +36053,29 @@
       },
       "extractionState" : "manual"
     },
+    "Couldn't allow the link again: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't allow the link again: %1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法允许再次关联：%1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再リンクを許可できませんでした：%1$@"
+          }
+        }
+      }
+    },
     "Couldn't change thinking effort. Choose it again to send waiting messages." : {
       "localizations" : {
         "en" : {
@@ -34620,6 +36098,52 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Couldn't confirm the link was removed. The hub may need an update." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't confirm the link was removed. The hub may need an update."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法确认关联已移除。可能需要更新中枢。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リンクが解除されたことを確認できませんでした。ハブの更新が必要な可能性があります。"
+          }
+        }
+      }
+    },
+    "Couldn't confirm this link can be made again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't confirm this link can be made again."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法确认已允许再次关联。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再リンクが許可されたことを確認できませんでした。"
+          }
+        }
+      }
     },
     "CPU, memory and network update every 10 seconds. Charts show the last hour." : {
       "localizations" : {
@@ -48772,6 +50296,28 @@
       },
       "extractionState" : "manual"
     },
+    "Continuation [Task Handoff Badge]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continuation"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "引き継ぎ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "续接"
+          }
+        }
+      }
+    },
     "Continue" : {
       "comment" : "Slash command title: let the agent keep going",
       "localizations" : {
@@ -49255,6 +50801,29 @@
       "extractionState" : "manual"
     },
     "Copied [Selected Messages]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copied"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コピーしました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已拷贝"
+          }
+        }
+      }
+    },
+    "Copied [To-dos Toast]" : {
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -49895,6 +51464,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Copy Link [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Link"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リンクをコピー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝链接"
+          }
+        }
+      }
     },
     "Copy Link to Line" : {
       "localizations" : {
@@ -52417,6 +54009,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没取到录带：%1$@"
+          }
+        }
+      }
+    },
+    "Couldn't get this iPhone ready." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't get this iPhone ready."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneを準備できませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能准备好这台 iPhone。"
+          }
+        }
+      }
+    },
+    "Couldn't get this iPhone ready: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't get this iPhone ready: %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このiPhoneを準備できませんでした：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能准备好这台 iPhone：%1$@"
           }
         }
       }
@@ -55057,6 +56693,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没能保存你的选择：%1$@"
+          }
+        }
+      }
+    },
+    "Couldn't save your change to “%@”. [To-dos Toast]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't save your change to “%@”."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」への変更を保存できませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能保存你对“%@”的改动。"
           }
         }
       }
@@ -57793,6 +59452,29 @@
       },
       "extractionState" : "manual"
     },
+    "Date… [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Date…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日付…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日期…"
+          }
+        }
+      }
+    },
     "Day" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59379,6 +61061,29 @@
       },
       "extractionState" : "manual"
     },
+    "Delete To-Do [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete To-Do"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ToDoを削除"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除待办"
+          }
+        }
+      }
+    },
     "Delete data [Standing Authorization]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -59768,6 +61473,29 @@
       },
       "extractionState" : "manual"
     },
+    "Delete “%@”? [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete “%@”?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」を削除しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除“%@”？"
+          }
+        }
+      }
+    },
     "Deleted" : {
       "localizations" : {
         "en" : {
@@ -59790,6 +61518,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Deleted [To-dos Toast]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleted"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已删除"
+          }
+        }
+      }
     },
     "Deleted from this device. Removal from Knowledge may still be pending." : {
       "extractionState" : "manual",
@@ -59997,6 +61748,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Delete… [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除…"
+          }
+        }
+      }
     },
     "Deleting…" : {
       "extractionState" : "manual",
@@ -61509,6 +63283,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没刷新：%1$@"
+          }
+        }
+      }
+    },
+    "Didn't start." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Didn't start."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開始できませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没开起来"
           }
         }
       }
@@ -63944,6 +65740,52 @@
         }
       }
     },
+    "Done [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成"
+          }
+        }
+      }
+    },
+    "Done [To-dos Toast]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已完成"
+          }
+        }
+      }
+    },
     "Done [interrupt resolution]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -63963,6 +65805,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已完成"
+          }
+        }
+      }
+    },
+    "Done and Stop [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Done and Stop"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了にして停止"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成并停下"
           }
         }
       }
@@ -69414,6 +71279,29 @@
         }
       }
     },
+    "Exact Approval Replies" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exact Approval Replies"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完全一致する返信での承認"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "精确回复审批"
+          }
+        }
+      }
+    },
     "Example" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -73690,6 +75578,167 @@
         }
       }
     },
+    "It can't be undone anymore. [To-dos Toast]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It can't be undone anymore."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "もう取り消せません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已经没法撤销了。"
+          }
+        }
+      }
+    },
+    "It was deleted already, so it can't come back. [To-dos Toast]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It was deleted already, so it can't come back."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すでに削除されたため、元に戻せません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它已经删除了，没法恢复。"
+          }
+        }
+      }
+    },
+    "It's removed from your to-dos on every device. Work already under way on it keeps going. [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "It's removed from your to-dos on every device. Work already under way on it keeps going."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべてのデバイスのToDoから削除されます。すでに進んでいる作業は止まりません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它会从你所有设备的待办里移除。已经在进行的工作不会停下。"
+          }
+        }
+      }
+    },
+    "Mark Done [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mark Done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完了にする"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标为完成"
+          }
+        }
+      }
+    },
+    "Moved to Someday [To-dos Toast]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Moved to Someday"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「いつか」に移しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已移到以后再做"
+          }
+        }
+      }
+    },
+    "New To-Do [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "New To-Do"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新しいToDo"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建待办"
+          }
+        }
+      }
+    },
+    "No Project [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Project"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロジェクトなし"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无项目"
+          }
+        }
+      }
+    },
     "No tapes on this iPhone yet" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -73713,6 +75762,29 @@
         }
       }
     },
+    "Not done [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not done"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未完了"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未完成"
+          }
+        }
+      }
+    },
     "Not on your hub" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -73732,6 +75804,75 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不连 hub"
+          }
+        }
+      }
+    },
+    "Not on your hub yet [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not on your hub yet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだハブに保存されていません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没存到你的 hub"
+          }
+        }
+      }
+    },
+    "Not sure it was saved [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not sure it was saved"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存されたかわかりません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不确定是否已保存"
+          }
+        }
+      }
+    },
+    "Notes [To-dos New]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メモ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说明"
           }
         }
       }
@@ -73897,6 +76038,29 @@
         }
       }
     },
+    "omp takes no attachments" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "omp takes no attachments"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "omp には添付ファイルを付けられません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "omp 不能带附件"
+          }
+        }
+      }
+    },
     "On %@ [Meeting Tapes]" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -74031,6 +76195,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已过期"
+          }
+        }
+      }
+    },
+    "Persona is still working on this. Mark it done and stop? [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona is still working on this. Mark it done and stop?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Personaがまだ作業中です。完了にして止めますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 还在做这件事。标为完成并停下吗？"
           }
         }
       }
@@ -74173,6 +76360,52 @@
         }
       }
     },
+    "Persona can link these entries again" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona can link these entries again"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已允许 Persona 再次关联这两个条目"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona が両方の項目を再びリンクできるようになりました"
+          }
+        }
+      }
+    },
+    "Persona will stop changing the %@ linked to “%@” and the %@ linked to “%@” on its own." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona will stop changing the %1$@ linked to “%2$@” and the %3$@ linked to “%4$@” on its own."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "之后 Persona 不会再自动更改「%2$@」关联的%1$@，以及「%4$@」关联的%3$@。"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今後 Persona は、「%2$@」に関連する%1$@と「%4$@」に関連する%3$@を自動では変更しません。"
+          }
+        }
+      }
+    },
     "Play Sound" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -74215,6 +76448,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "优先级"
+          }
+        }
+      }
+    },
+    "Project [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Project"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プロジェクト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "项目"
           }
         }
       }
@@ -74284,6 +76540,121 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "最近动态"
+          }
+        }
+      }
+    },
+    "Remove Date [To-dos Due Sheet]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Date"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日付を削除"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除日期"
+          }
+        }
+      }
+    },
+    "Remove [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取り除く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        }
+      }
+    },
+    "Remove from Someday [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove from Someday"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「いつか」から外す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移出以后再做"
+          }
+        }
+      }
+    },
+    "Reopen [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reopen"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再開"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新打开"
+          }
+        }
+      }
+    },
+    "Removed by you" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removed by you"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你移除的关联"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解除したリンク"
           }
         }
       }
@@ -74767,6 +77138,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "终端"
+          }
+        }
+      }
+    },
+    "Off by default. An exact reply approves only the displayed original text, recipients and actions, once. Edits need fresh approval; this never creates an Always rule." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off by default. An exact reply approves only the displayed original text, recipients and actions, once. Edits need fresh approval; this never creates an Always rule."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デフォルトはオフです。完全一致する返信は、表示された元の本文・宛先・操作だけを1回承認します。変更後は再承認が必要で、「常に許可」ルールは作成されません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认关闭。精确回复只批准当前展示的原始文字、收件人和操作，且只用一次；修改后必须重新批准，绝不会生成“总是允许”规则。"
           }
         }
       }
@@ -87873,6 +90267,29 @@
       },
       "extractionState" : "manual"
     },
+    "Keep Unanswered Proposals Until Answered" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep Unanswered Proposals Until Answered"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未回答の提案を回答まで保持"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未回复的提议一直保留到处理"
+          }
+        }
+      }
+    },
     "Keep Worktree [Agent Worktree]" : {
       "localizations" : {
         "en" : {
@@ -91847,29 +94264,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "リンクを解除しました"
-          }
-        }
-      }
-    },
-    "Link removed, but checking it failed: %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Link removed, but checking it failed: %1$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已移除关联，但核对失败：%1$@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "リンクを解除しましたが、確認できませんでした：%1$@"
           }
         }
       }
@@ -118331,6 +120725,29 @@
       },
       "extractionState" : "manual"
     },
+    "One exact phrase per line. The whole reply must match. An empty list disables reply approval; ordinary Allow and Deny still work." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One exact phrase per line. The whole reply must match. An empty list disables reply approval; ordinary Allow and Deny still work."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1行に1つの完全一致フレーズを入力します。返信全体が一致する必要があります。空にすると返信承認を無効にし、通常の許可と拒否はそのまま使えます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每行一个精确短语，整条回复必须匹配。留空会关闭回复批准，普通允许和拒绝仍可使用。"
+          }
+        }
+      }
+    },
     "One line per agent: its state, title and time." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -140660,6 +143077,29 @@
       },
       "extractionState" : "manual"
     },
+    "Reply “%@” Once" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reply “%@” Once"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」と1回だけ返信"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回复“%@”，仅此一次"
+          }
+        }
+      }
+    },
     "Replying to %@" : {
       "localizations" : {
         "en" : {
@@ -145960,6 +148400,29 @@
       },
       "extractionState" : "manual"
     },
+    "Save Phrases" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save Phrases"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フレーズを保存"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存短语"
+          }
+        }
+      }
+    },
     "Save QR Code" : {
       "localizations" : {
         "en" : {
@@ -146487,6 +148950,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Saving… [To-dos List]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存中…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在保存…"
+          }
+        }
+      }
     },
     "Say a word, e.g. “Don't reply like that, ask about the time first”" : {
       "localizations" : {
@@ -158649,24 +161135,24 @@
       },
       "extractionState" : "manual"
     },
-    "Start Claude, Codex, or TRAEX in herdr on this machine and it shows up here." : {
+    "Start Claude, Codex, or TRAE CLI in herdr on this machine and it shows up here." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Start Claude, Codex, or TRAEX in herdr on this machine and it shows up here."
+            "value" : "Start Claude, Codex, or TRAE CLI in herdr on this machine and it shows up here."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このマシンのherdrでClaude、Codex、TRAEXを起動すると、ここに表示されます。"
+            "value" : "このマシンのherdrでClaude、Codex、TRAE CLIを起動すると、ここに表示されます。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在这台机器的 herdr 里启动 Claude、Codex 或 TRAEX，就会出现在这里。"
+            "value" : "在这台机器的 herdr 里启动 Claude、Codex 或 TRAE CLI，就会出现在这里。"
           }
         }
       },
@@ -164775,6 +167261,29 @@
       },
       "extractionState" : "manual"
     },
+    "Tab name (Rex tab)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tab name (Rex tab)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タブ名（Rexのタブ）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签名（Rex tab）"
+          }
+        }
+      }
+    },
     "Tab name (Tern tab)" : {
       "localizations" : {
         "en" : {
@@ -167547,6 +170056,29 @@
         }
       },
       "extractionState" : "manual"
+    },
+    "Terminals in Rex" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminals in Rex"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rexのターミナル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rex 里的终端"
+          }
+        }
+      }
     },
     "Terminals in Tern" : {
       "localizations" : {
@@ -171722,6 +174254,75 @@
         }
       }
     },
+    "The hub did not confirm these approval phrases." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The hub did not confirm these approval phrases."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハブがこれらの承認フレーズを確認しませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hub 未确认这些批准短语。"
+          }
+        }
+      }
+    },
+    "The hub did not confirm this approval setting." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The hub did not confirm this approval setting."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハブがこの承認設定を確認しませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hub 未确认这项批准设置。"
+          }
+        }
+      }
+    },
+    "The hub did not confirm this exact approval reply." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The hub did not confirm this exact approval reply."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ハブがこの完全一致承認返信を確認しませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hub 未确认这条精确批准回复。"
+          }
+        }
+      }
+    },
     "The hub didn't respond. Try again later." : {
       "localizations" : {
         "en" : {
@@ -173523,29 +176124,6 @@
         }
       },
       "extractionState" : "manual"
-    },
-    "The link is still there. The hub may need an update." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The link is still there. The hub may need an update."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "关联还在，Hub 可能需要更新。"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "リンクはまだ残っています。ハブのアップデートが必要かもしれません。"
-          }
-        }
-      }
     },
     "The machine is offline. Once it's connected you can check what this computer can do." : {
       "localizations" : {
@@ -176777,6 +179355,29 @@
       },
       "extractionState" : "manual"
     },
+    "The tab name syncs to Rex. The session name uses Claude's /rename, so claude --resume on the Mac shows it too." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The tab name syncs to Rex. The session name uses Claude's /rename, so claude --resume on the Mac shows it too."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タブ名はRexに同期されます。セッション名はClaudeの /renameを使うため、Macのclaude --resumeでも表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签名同步到 Rex；会话名用 Claude 的 /rename，Mac 上 claude --resume 也看得到。"
+          }
+        }
+      }
+    },
     "The tab name syncs to Tern. The session name uses Claude's /rename, so claude --resume on the Mac shows it too." : {
       "localizations" : {
         "en" : {
@@ -179914,6 +182515,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不能从手机上改这里。只能改个人文件夹里的文件（~/.persona 和 ~/Library 除外）。"
+          }
+        }
+      }
+    },
+    "This card did not advertise that exact reply." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This card did not advertise that exact reply."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このカードにはその完全一致返信の指定がありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张卡片没有提供该精确回复。"
           }
         }
       }
@@ -185885,6 +188509,29 @@
         }
       }
     },
+    "Title [To-dos New]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Title"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "タイトル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标题"
+          }
+        }
+      }
+    },
     "Title and Date" : {
       "localizations" : {
         "en" : {
@@ -186890,6 +189537,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "今日"
+          }
+        }
+      }
+    },
+    "Today [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今日"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天"
           }
         }
       }
@@ -189000,6 +191670,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "试了一句，没成功：%1$@"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Tried at %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tried at %1$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最終試行：%1$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次尝试：%1$@"
           }
         }
       },
@@ -191751,6 +194444,29 @@
         }
       }
     },
+    "Undo “%@” [To-dos Actions]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Undo “%@”"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「%@」を取り消す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销“%@”"
+          }
+        }
+      }
+    },
     "Undone" : {
       "localizations" : {
         "en" : {
@@ -192206,6 +194922,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "状态未知"
+          }
+        }
+      },
+      "extractionState" : "manual"
+    },
+    "Unknown [Hub Address]" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unknown"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不明"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知"
           }
         }
       },
@@ -201850,6 +204589,29 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "跑完放进收件箱"
+          }
+        }
+      }
+    },
+    "When Persona needs your phone (your location, Health, reminders), it asks this device first. If it can't be reached, another of your devices answers and Persona says which. Automatic uses the device you used most recently." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When Persona needs your phone (your location, Health, reminders), it asks this device first. If it can't be reached, another of your devices answers and Persona says which. Automatic uses the device you used most recently."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona がスマートフォンの情報（現在地、ヘルスケア、リマインダーなど）を使うときは、まずこのデバイスに問い合わせます。つながらないときはほかのデバイスが応答し、Persona がどのデバイスかを伝えます。「自動」では、最近使ったデバイスを使います。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Persona 需要用到手机（位置、健康、提醒事项等）时，先找这台设备；联系不上时，由你的其他设备回答，Persona 会说明是哪台。选「自动」时，用你最近用过的那台。"
           }
         }
       }
@@ -214624,6 +217386,29 @@
         }
       }
     },
+    "“%@” changed in the meantime, so your change wasn't saved. [To-dos Toast]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@” changed in the meantime, so your change wasn't saved."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "その間に「%@」が変更されたため、変更は保存されませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”在这期间有了变化，所以你的改动没有保存。"
+          }
+        }
+      }
+    },
     "“%@” changed on the computer" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -217164,6 +219949,370 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "完成"
+          }
+        }
+      }
+    },
+    "Couldn't Load Starred Messages" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't Load Starred Messages"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スター付きメッセージを読み込めませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载收藏消息"
+          }
+        }
+      }
+    },
+    "Couldn't check the original message. Try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't check the original message. Try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "元のメッセージを確認できませんでした。もう一度お試しください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法检查原消息，请重试。"
+          }
+        }
+      }
+    },
+    "Couldn't find the original message in the loaded chat." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't find the original message in the loaded chat."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み込んだチャットに元のメッセージが見つかりませんでした。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已加载的会话中找不到原消息。"
+          }
+        }
+      }
+    },
+    "Message unstarred" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Message unstarred"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メッセージのスターを外しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已取消收藏"
+          }
+        }
+      }
+    },
+    "No Starred Messages" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Starred Messages"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スター付きメッセージはありません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无收藏消息"
+          }
+        }
+      }
+    },
+    "Open Original" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Original"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "元のメッセージを開く"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开原消息"
+          }
+        }
+      }
+    },
+    "Saving Starred Message" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving Starred Message"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スターを更新しています"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在更新收藏"
+          }
+        }
+      }
+    },
+    "Search Starred Messages" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search Starred Messages"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スター付きメッセージを検索"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索收藏消息"
+          }
+        }
+      }
+    },
+    "Star" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Star"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スターを付ける"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收藏"
+          }
+        }
+      }
+    },
+    "Starred" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starred"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スター付き"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收藏"
+          }
+        }
+      }
+    },
+    "Starred Messages Are Unavailable" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starred Messages Are Unavailable"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スター付きメッセージを利用できません"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收藏消息不可用"
+          }
+        }
+      }
+    },
+    "The original message is unavailable." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The original message is unavailable."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "元のメッセージを利用できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原消息不可用。"
+          }
+        }
+      }
+    },
+    "Touch and hold a message to star it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touch and hold a message to star it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メッセージを長押ししてスターを付けます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "长按消息即可收藏。"
+          }
+        }
+      }
+    },
+    "Unstar" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unstar"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スターを外す"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消收藏"
+          }
+        }
+      }
+    },
+    "Update the hub to use starred messages with this assistant." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update the hub to use starred messages with this assistant."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このアシスタントでスター付きメッセージを使うには、ハブを更新してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新 Hub 后即可使用此助手的收藏消息。"
+          }
+        }
+      }
+    },
+    "%lld additional characters" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld additional character"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld additional characters"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ほか%lld文字"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另有 %lld 个字符"
           }
         }
       }

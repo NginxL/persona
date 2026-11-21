@@ -34,7 +34,7 @@ func TestTaskExecutionManagedEligibilityBeforeSend(t *testing.T) {
 			}
 			setTasks(s, Task{ID: "job", Prompt: "Check files", Repeat: repeatInterval, EveryMinutes: 30, Enabled: true, ExecutionMachineID: "remote"})
 			_, err := runNow(t, s, "job")
-			if target == "compatible" {
+			if target == "compatible" || target == "managed-codex" {
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -9,9 +9,31 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.*
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.Locale
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MachinesTest {
+    @Test fun loadPerCoreMatchesTheWebRoundingAndOmitsMissingReadings() {
+        val languages = listOf(Locale.ENGLISH, Locale.SIMPLIFIED_CHINESE, Locale.JAPANESE)
+        for (language in languages) {
+            assertEquals("1.4", MetricFormat.loadPerCore(loadPerCore(5.6, 4)!!, language))
+            assertEquals("1.3", MetricFormat.loadPerCore(loadPerCore(10.0, 8)!!, language))
+            assertEquals("1.1", MetricFormat.loadPerCore(loadPerCore(23.0, 20)!!, language))
+            assertEquals("0.0", MetricFormat.loadPerCore(loadPerCore(0.0, 4)!!, language))
+        }
+        for (load in listOf(null, -1.0, Double.NaN, Double.POSITIVE_INFINITY)) assertNull(loadPerCore(load, 4))
+        for (cores in listOf(null, 0, -1)) assertNull(loadPerCore(5.6, cores))
+    }
+
+    @Test fun loadAlertThresholdsUseTheUnroundedReading() {
+        fun loadAlerts(load: Double, cores: Int?) = alerts(MetricSample(0, load = load), cores)
+        assertTrue(loadAlerts(3.99, 4).isEmpty())
+        assertEquals(listOf(MetricAlert(R.string.machines_alert_load, false)), loadAlerts(4.0, 4))
+        assertEquals(listOf(MetricAlert(R.string.machines_alert_load, false)), loadAlerts(7.99, 4))
+        assertEquals(listOf(MetricAlert(R.string.machines_alert_load, true)), loadAlerts(8.0, 4))
+        assertTrue(loadAlerts(8.0, null).isEmpty())
+    }
+
     @Test fun bytesPickTheUnitAfterRounding() {
         val en = java.util.Locale.ENGLISH
         assertEquals("1,023.0 B", MetricFormat.bytes(1023, en))

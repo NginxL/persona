@@ -18,6 +18,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isPopup
@@ -27,6 +28,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -86,6 +88,9 @@ class AssistantSettingsShotsTest {
 
     @Config(sdk = [35], qualifiers = "en-w400dp-h2600dp-xhdpi")
     @Test fun nextSuggestionsLargeFont() = nextSuggestionLargeFont()
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h3600dp-xhdpi")
+    @Test fun ownerApprovalEnglish() = ownerApprovalShots()
 
     private class FakeManagement(memoryTitle: String, memoryBody: String) : AssistantManagement {
         private val updated = Instant.now().minusSeconds(3_600).toString()
@@ -272,6 +277,51 @@ class AssistantSettingsShotsTest {
         val large = rule.onNodeWithTag("next-large").captureToImage().asAndroidBitmap()
         assertFalse("the large-text capture really scales Compose text", standard.sameAs(large))
         save("settings-next-suggestions-en-off-glass-light-font-2.png", large)
+    }
+
+    private fun ownerApprovalShots() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var fontScale by mutableStateOf(1f)
+        val management = FakeManagement("Morning", "Keep it short.").apply {
+            config = config.copy(mainBackgroundFolded = true, ownerReplyApproval = false,
+                persistentOwnerActionCards = false, ownerReplyApprovalPhrases = listOf("发", "同意"))
+        }
+        var replyTitle = ""
+        var persistentTitle = ""
+        var saveTitle = ""
+        var zoneTitle = ""
+        rule.setContent {
+            replyTitle = stringResource(R.string.assistant_settings_owner_approval)
+            persistentTitle = stringResource(R.string.assistant_settings_owner_approval_persistent)
+            saveTitle = stringResource(R.string.assistant_settings_owner_approval_save_phrases)
+            zoneTitle = stringResource(R.string.assistant_settings_zone_follow)
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                    val roster = ManagerRoster(listOf(HubManager("assistant", "Persona", online = true, isDefault = true)), "assistant")
+                    CompositionLocalProvider(LocalManagerRoster provides roster) {
+                        Box(Modifier.testTag("owner-shot").width(400.dp).height(3600.dp).background(PersonaTheme.palette.background)) {
+                            AssistantSettingsScreen(management, machines, onBack = {}, onModelConfiguration = { _, _ -> })
+                        }
+                    }
+                }
+            }
+        }
+        for (s in AppStyle.entries) for (d in listOf(false, true)) for (scale in listOf(1f, 2f)) {
+            style = s; dark = d; fontScale = scale
+            rule.waitForIdle()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(replyTitle))
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("发\n同意"))
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(saveTitle))
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(zoneTitle))
+            rule.onNode(hasText(replyTitle) and isToggleable()).assertIsOff()
+            rule.onNode(hasText(persistentTitle) and isToggleable()).assertIsOff()
+            rule.onNodeWithText("发\n同意").assertExists()
+            val image = rule.onNodeWithTag("owner-shot").captureToImage().asAndroidBitmap()
+            val font = if (scale > 1f) "font-2" else "default"
+            save("settings-owner-approval-en-off-$font-${s.name.lowercase()}-${if (d) "dark" else "light"}.png", image)
+        }
     }
 
     private val machines = listOf(

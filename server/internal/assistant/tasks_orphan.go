@@ -88,8 +88,8 @@ func taskOrphan(t Todo, agents []orphanAgent, now time.Time) (TodoOrphan, bool) 
 	if t.DoneAt != nil || len(agents) == 0 {
 		return TodoOrphan{}, false
 	}
-	if st := t.Supervision.state(t); st == reviewPending || st == reviewNeedsUser || st == reviewParked {
-		return TodoOrphan{}, false // a parked task waits on purpose: nobody is meant to work on it (parked.go)
+	if st := t.Supervision.state(t); st == reviewPending || st == reviewNeedsUser || st == reviewParked || st == reviewTimedOut || st == reviewClosing {
+		return TodoOrphan{}, false // a parked or timed-out task waits on purpose: nobody is meant to work on it
 	}
 	rank := map[string]int{orphanError: 3, orphanOffline: 2, orphanClosed: 1}
 	var o TodoOrphan
@@ -118,11 +118,24 @@ func taskOrphan(t Todo, agents []orphanAgent, now time.Time) (TodoOrphan, bool) 
 	return o, true
 }
 
+const (
+	orphanActivityGrace = 2 * time.Minute  // keep treating a closed-tab session as active while transcript entries advance
+	orphanFreshActivity = 45 * time.Second // recent rollout activity before the first pass (#12389)
+)
+
+type orphanProgress struct {
+	rev         int64
+	updatedAt   time.Time
+	lastMovedAt time.Time
+	closed      bool
+}
+
 // orphanBook is what the pass found last: the orphaned to-dos by id, and since when each candidate was seen.
 type orphanBook struct {
-	mu   sync.Mutex
-	now  map[string]TodoOrphan
-	seen map[string]time.Time
+	mu       sync.Mutex
+	now      map[string]TodoOrphan
+	seen     map[string]time.Time
+	progress map[string]map[[2]string]orphanProgress
 }
 
 // orphanOf is to-do id's orphan state as the last pass found it.
@@ -196,11 +209,15 @@ func (s *Service) orphanWatch(ctx context.Context, now time.Time) {
 	}
 	lists, failed := map[string]map[string]proto.Session{}, map[string]bool{}
 	found, unknown := map[string]TodoOrphan{}, map[string]bool{}
+	listed := map[string][]orphanAgent{}
 	for _, t := range open {
 		agents, known := s.orphanAgents(ctx, t, reachable, lists, failed)
 		if !known {
 			unknown[t.ID] = true
-		} else if o, ok := taskOrphan(t, agents, now); ok {
+			continue
+		}
+		listed[t.ID] = agents
+		if o, ok := taskOrphan(t, agents, now); ok {
 			found[t.ID] = o
 		}
 	}
@@ -208,12 +225,47 @@ func (s *Service) orphanWatch(ctx context.Context, now time.Time) {
 	b := &s.orphans
 	b.mu.Lock()
 	next, seen := map[string]TodoOrphan{}, map[string]time.Time{}
+	progress := map[string]map[[2]string]orphanProgress{}
 	for id := range unknown { // not asked: as before
 		if at, ok := b.seen[id]; ok {
 			seen[id] = at
 		}
 		if o, ok := b.now[id]; ok {
 			next[id] = o
+		}
+		if p, ok := b.progress[id]; ok {
+			progress[id] = p
+		}
+	}
+	for id, agents := range listed {
+		cur := map[[2]string]orphanProgress{}
+		active := false
+		prevTodo := b.progress[id]
+		for _, a := range agents {
+			if !a.listed || !sessionClosed(a.c) {
+				continue
+			}
+			k := [2]string{a.machine, a.session}
+			prev, had := prevTodo[k]
+			movedAt := prev.lastMovedAt
+			if had && prev.closed && (a.c.Rev > prev.rev || a.c.UpdatedAt.After(prev.updatedAt)) {
+				movedAt = now
+			} else if !had && a.c.TurnError == "" && (a.c.Capabilities == nil || a.c.Capabilities.StopCause == "") &&
+				!a.c.UpdatedAt.IsZero() && now.Sub(a.c.UpdatedAt) >= 0 && now.Sub(a.c.UpdatedAt) < orphanFreshActivity {
+				movedAt = a.c.UpdatedAt
+			}
+			if !movedAt.IsZero() && now.Sub(movedAt) < orphanActivityGrace {
+				active = true
+			}
+			cur[k] = orphanProgress{rev: a.c.Rev, updatedAt: a.c.UpdatedAt, lastMovedAt: movedAt, closed: true}
+		}
+		if len(cur) > 0 {
+			progress[id] = cur
+		}
+		if active {
+			if o, ok := found[id]; ok && o.Reason == orphanClosed {
+				delete(found, id)
+			}
 		}
 	}
 	for id, o := range found {
@@ -238,7 +290,7 @@ func (s *Service) orphanWatch(ctx context.Context, now time.Time) {
 			changed = true
 		}
 	}
-	b.now, b.seen = next, seen
+	b.now, b.seen, b.progress = next, seen, progress
 	b.mu.Unlock()
 	if changed {
 		s.todosPushSoon()
@@ -250,6 +302,9 @@ func (s *Service) orphanWatch(ctx context.Context, now time.Time) {
 func (s *Service) orphanSignal(t Todo) (superviseSignal, bool) {
 	o, ok := s.orphanOf(t.ID)
 	if !ok || t.Supervision == nil || t.DoneAt != nil {
+		return superviseSignal{}, false
+	}
+	if st := t.Supervision.state(t); st == reviewTimedOut || st == reviewClosing {
 		return superviseSignal{}, false
 	}
 	return superviseSignal{Todo: t.ID, Kind: sigOrphaned, Key: o.key, Machine: o.machine, Session: o.session,

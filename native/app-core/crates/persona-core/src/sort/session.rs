@@ -196,8 +196,8 @@ impl Session {
     pub fn agent_label(&self) -> String {
         if self.is_codex() {
             "Codex".to_owned()
-        } else if self.agent.as_deref() == Some("traex") {
-            "TRAEX".to_owned()
+        } else if matches!(self.agent.as_deref(), Some("traex" | "traecli" | "trae-cli")) {
+            "TRAE CLI".to_owned()
         } else if self.is_claude() {
             "Claude".to_owned()
         } else {

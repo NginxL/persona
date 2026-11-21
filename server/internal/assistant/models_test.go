@@ -506,7 +506,7 @@ func TestSixModelCategoriesCatalog(t *testing.T) {
 			if p.CategoryID != "agent.new" || p.Parent != "agent.new" || len(p.Fields) == 0 {
 				t.Fatalf("%s missing independent editor: %+v", p.ID, p)
 			}
-		} else if p.ID == purposeSupervise || p.ID == purposeMeetingRoom {
+		} else if p.ID == purposeMain || p.ID == purposeSupervise || p.ID == purposeMeetingRoom {
 			if p.CategoryID != "assistant" || p.Parent != "assistant" || p.Launch != "headless" || len(p.Uses) != 0 || len(p.Fields) == 0 {
 				t.Fatalf("%s missing independent editor: %+v", p.ID, p)
 			}
@@ -518,7 +518,7 @@ func TestSixModelCategoriesCatalog(t *testing.T) {
 			t.Fatalf("category missing scope or editor: %+v", p)
 		}
 	}
-	want := []string{"assistant", "agent.new", "kb", "inbox.triage", "agent.delegate", "translate", purposeAgent, purposeLarkAgent, purposeSupervise, purposeMeetingRoom, purposeMeetingMinutes}
+	want := []string{"assistant", "agent.new", "kb", "inbox.triage", "agent.delegate", "translate", purposeAgent, purposeLarkAgent, purposeSupervise, purposeMeetingRoom, purposeMeetingMinutes, purposeMain}
 	if !reflect.DeepEqual(ids, want) || !reflect.DeepEqual(ids, modelConfigIDs) {
 		t.Fatalf("catalog is not the ordered categories, the AI twin, Lark /agent, the background supervisor and the two meeting purposes: %v", ids)
 	}
@@ -584,7 +584,7 @@ func TestATaskCanOverrideMainChatAndOtherTasksFollowIt(t *testing.T) {
 	}
 	p := purposeOf(t, s, "task.job")
 	if p.CategoryID != "assistant" || p.Parent != "assistant" || p.Revision != 0 || p.Override != (ModelBinding{}) ||
-		p.InheritedFrom != "主对话" || len(p.Fields) == 0 || !slices.Contains(p.ProviderIDs, "launcher.cheap") ||
+		p.InheritedFrom != purposeName(i18n.ZhHans, "assistant") || len(p.Fields) == 0 || !slices.Contains(p.ProviderIDs, "launcher.cheap") ||
 		p.Effective != main || p.MachineID != "server" {
 		t.Fatalf("task purpose: %+v", p)
 	}

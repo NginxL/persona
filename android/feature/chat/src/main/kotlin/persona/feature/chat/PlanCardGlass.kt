@@ -153,6 +153,7 @@ private fun GlassPlanTask(number: Int, task: PlanTask, numbered: Boolean, host: 
             else task.permission?.takeIf(String::isNotEmpty)?.let { JChip(permissionLabel(it)) }
         }
         task.why?.takeIf(String::isNotBlank)?.let { Text(it, style = type.caption, color = palette.ink2) }
+        task.brief?.let { PlanTaskBrief(it, task.title) }
     }
 }
 

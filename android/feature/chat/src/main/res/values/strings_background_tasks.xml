@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_background_title">Background tasks</string>
+    <string name="chat_background_slash_detail">Open latest workflow in Background Tasks</string>
+    <string name="chat_background_open_workflow">Open in Background Tasks</string>
+    <string name="chat_background_close">Close Background Tasks</string>
+    <string name="chat_background_running">Running</string>
+    <string name="chat_background_completed">Completed</string>
+    <string name="chat_background_failed">Failed</string>
+    <string name="chat_background_stopped">Stopped</string>
+    <string name="chat_background_unknown">Not listed as running</string>
+    <string name="chat_background_workflow_meta">%1$s · %2$s agents</string>
+    <string name="chat_background_empty">There are no background tasks in this chat.</string>
+    <string name="chat_background_run_unavailable">This workflow is no longer listed.</string>
+    <string name="chat_background_details_failed">Could not load background tasks.</string>
+    <string name="chat_background_retry">Retry</string>
+    <string name="chat_background_status_label">Status</string>
+    <string name="chat_background_runtime">Runtime</string>
+    <string name="chat_background_started">Started</string>
+    <string name="chat_background_exit_code">Exit code</string>
+    <string name="chat_background_command">Command</string>
+    <string name="chat_background_copy_command">Copy command</string>
+    <string name="chat_background_command_copied">Command copied</string>
+    <string name="chat_background_full_command">Show full command</string>
+    <string name="chat_background_less_command">Show less</string>
+    <string name="chat_background_output">Output</string>
+    <string name="chat_background_output_pending">No output yet</string>
+    <string name="chat_background_output_empty">No output</string>
+    <string name="chat_background_output_unavailable">Output is unavailable here.</string>
+    <string name="chat_background_output_failed">Could not read output.</string>
+    <string name="chat_background_open_file">Open as file</string>
+    <string name="chat_background_separator">" · "</string>
+    <plurals name="chat_background_lines">
+        <item quantity="one">%d line</item>
+        <item quantity="other">%d lines</item>
+    </plurals>
+    <plurals name="chat_background_last_lines">
+        <item quantity="one">Last %d line</item>
+        <item quantity="other">Last %d lines</item>
+    </plurals>
+</resources>

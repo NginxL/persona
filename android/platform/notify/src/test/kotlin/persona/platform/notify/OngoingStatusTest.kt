@@ -3,6 +3,7 @@ package persona.platform.notify
 import persona.core.contracts.FleetItem
 import persona.core.contracts.FleetState
 import persona.core.contracts.FleetStats
+import persona.core.contracts.Interaction
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.ConnectionState
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -64,13 +65,25 @@ class OngoingStatusTest {
 
     @Test fun permissionsGetDenyAndAllowAndOneAgentOpensItself() {
         val fleet = FleetState("needsYou", needsYou = 1, items = listOf(permission))
-        val status = OngoingStatus.from(ConnectionState.Online, fleet, details = true)
+        val status = OngoingStatus.from(ConnectionState.Online, fleet, details = true,
+            pending = listOf(Interaction("ix_build", kind = "permission")))
         assertEquals(SessionKey("mac", "tests"), status.open)
         assertNull(status.subText)
         assertEquals("补齐网络层的单元测试 · 授权：Bash: swift test（MacBook · weather › tests）", status.lines)
         assertEquals(listOf(OngoingButton(R.string.notify_action_deny, "deny", false), OngoingButton(R.string.notify_action_allow, "allow", true)), status.action!!.buttons)
         // A question has no buttons here: it needs the conversation.
         assertNull(OngoingStatus.from(ConnectionState.Online, FleetState("needsYou", needsYou = 1, items = listOf(question))).action)
+    }
+
+    @Test fun aSecretHandoffOrUnresolvedPermissionGetsOnlyView() {
+        val handoff = persona.core.contracts.JsonCodec.decodeFromString<Interaction>(
+            """{"id":"ix_build","kind":"permission","tool_name":"secret_handoff","tool_input":{"variables":[{"name":"TOKEN"}]}}""")
+        for (cards in listOf(emptyList(), listOf(handoff))) {
+            val status = OngoingStatus.from(ConnectionState.Online,
+                FleetState("needsYou", needsYou = 1, items = listOf(permission)), pending = cards)
+            assertEquals(listOf(OngoingButton(R.string.notify_action_view, null, false)), status.action!!.buttons)
+            assertTrue(status.action!!.buttons.none { it.key == "allow" || it.key == "always" })
+        }
     }
 
     @Test fun theBodyAboveTheButtonsIsTheRequestTheySettle() {

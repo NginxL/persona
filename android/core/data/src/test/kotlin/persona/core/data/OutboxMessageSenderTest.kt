@@ -8,6 +8,7 @@ import persona.core.contracts.api.MessageEvidence
 import persona.core.contracts.api.MessageTransport
 import persona.core.contracts.api.MessageTransportResult
 import persona.core.contracts.api.MainConversationResolver
+import persona.core.contracts.api.MessageVia
 import persona.core.contracts.api.PendingMainConversation
 import persona.core.contracts.api.ChatComposerService
 import persona.core.contracts.api.ComposerDelivery
@@ -101,6 +102,57 @@ class OutboxMessageSenderTest {
         assertTrue(store.entries.value.all { it.state == OutboxState.Sent })
         assertEquals(listOf("main-a", "main-a", "main-b"), transport.requests.map { it.clientMessageId })
         assertTrue(transport.requests.all { it.session == session })
+        restarted.close()
+    }
+
+    @Test fun preparingAMainForAShareMarksCreationAndTheFollowingMessage() = runTest {
+        val transport = FakeTransport(online = true)
+        transport.answers += MessageTransportResult.Accepted
+        val creations = mutableListOf<String?>()
+        val resolver = object : MainConversationResolver {
+            override suspend fun findMainConversation(): SessionKey? = null
+            override suspend fun createMainConversation(): SessionKey = error("A marked creation must use its marked overload")
+            override suspend fun createMainConversation(via: String?): SessionKey {
+                creations += via
+                return session
+            }
+        }
+        val sender = OutboxMessageSender(scope, MemoryOutboxStore(), transport, backgroundScope)
+        sender.connectMainConversation(resolver)
+        assertEquals(session, sender.prepareMainConversation(MessageVia.Share))
+        sender.sendToMain("Shared words", "share-main", null, MessageVia.Share)
+        runCurrent()
+        assertEquals(listOf(MessageVia.Share), creations)
+        assertEquals(listOf(MessageVia.Share), transport.requests.map { it.via })
+        sender.close()
+    }
+
+    @Test fun anOfflineShareRestoresProvenanceIntoCreationAndMessage() = runTest {
+        val store = MemoryOutboxStore()
+        val transport = FakeTransport(online = false)
+        val first = OutboxMessageSender(scope, store, transport, backgroundScope)
+        first.sendToMain("Shared words", "share-main", null, MessageVia.Share)
+        runCurrent()
+        assertEquals(MessageVia.Share, store.entries.value.single().via)
+        assertTrue(transport.requests.isEmpty())
+        first.close()
+
+        val creations = mutableListOf<String?>()
+        val resolver = object : MainConversationResolver {
+            override suspend fun findMainConversation(): SessionKey? = null
+            override suspend fun createMainConversation(): SessionKey = error("A marked creation must use its marked overload")
+            override suspend fun createMainConversation(via: String?): SessionKey {
+                creations += via
+                return session
+            }
+        }
+        val restarted = OutboxMessageSender(scope, store, transport, backgroundScope)
+        restarted.connectMainConversation(resolver)
+        transport.answers += MessageTransportResult.Accepted
+        transport.readyToSend.value = true
+        runCurrent()
+        assertEquals(listOf(MessageVia.Share), creations)
+        assertEquals(listOf(MessageVia.Share), transport.requests.map { it.via })
         restarted.close()
     }
 

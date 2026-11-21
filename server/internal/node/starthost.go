@@ -68,7 +68,7 @@ func (n *Node) checkStartHost(kind string) error {
 	if !n.hostEnabled(kind) {
 		return refusal(engineMissing, fmt.Sprintf("这台电脑没有启用 %s，不能在 %s 里新开会话，这次没有发送。", name, name), nil)
 	}
-	if kind == proto.EnginePaseo || kind == proto.EngineCindy {
+	if proto.RuntimeEngine(kind) {
 		return nil // its runtime starts sessions (runtimecontrol.go)
 	}
 	if _, ok := n.hosts.Get(kind).(host.Launcher); !ok {

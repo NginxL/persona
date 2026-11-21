@@ -149,6 +149,7 @@ class HttpMessageTransport(
             request.launcher?.let { put("launcher", it) }
             request.model?.let { put("model", it) }
             if (request.applySwitch) put("apply_switch", true)
+            request.via?.let { put("via", it) }
         }.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
         return try {
             // Non-2xx replies throw HubFailure (handled below); a 2xx body may still be a pending receipt.

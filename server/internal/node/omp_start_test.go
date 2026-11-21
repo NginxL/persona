@@ -58,14 +58,14 @@ func TestOmpStartCommand(t *testing.T) {
 	}
 }
 
-// A start that names a model, a permission mode, a thinking level or ultracode is refused before anything runs.
+// A resume model override or launcher options unsupported by omp are refused before anything runs.
 func TestOmpStartRefusesOptions(t *testing.T) {
 	cases := map[string]map[string]any{
-		"model":      {"model": "some-model"},
-		"mode":       {"permission_mode": "plan"},
-		"effort":     {"effort": "high"},
-		"ultracode":  {"ultracode": true},
-		"model+mode": {"model": "some-model", "permission_mode": "plan"},
+		"resume model": {"model": "some-model", "resume_session_id": "00000000-0000-4000-8000-000000000001"},
+		"mode":         {"permission_mode": "plan"},
+		"effort":       {"effort": "high"},
+		"ultracode":    {"ultracode": true},
+		"model+mode":   {"model": "some-model", "permission_mode": "plan"},
 	}
 	for name, extra := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -89,13 +89,15 @@ func TestOmpStartRefusesOptions(t *testing.T) {
 // that launcher would get the first message, not omp.
 func TestOmpStartRefusesOtherLaunchers(t *testing.T) {
 	for _, launcher := range []string{"codex", "my-omp-provider"} {
-		n, f, home := herdrNode(t)
-		_, err := request(t, n, "session.start", map[string]any{"cwd": home, "launcher": launcher, "agent_type": "omp"})
-		if err == nil || !strings.Contains(err.Error(), "launcher named omp") {
-			t.Fatalf("%s: err = %v", launcher, err)
-		}
-		if got := f.trace(); len(got) != 0 {
-			t.Fatalf("%s: herdr was asked %v", launcher, got)
+		for _, model := range []string{"", "opus"} {
+			n, f, home := herdrNode(t)
+			_, err := request(t, n, "session.start", map[string]any{"cwd": home, "launcher": launcher, "agent_type": "omp", "model": model})
+			if err == nil || !strings.Contains(err.Error(), "launcher named omp") {
+				t.Fatalf("%s (model %q): err = %v", launcher, model, err)
+			}
+			if got := f.trace(); len(got) != 0 {
+				t.Fatalf("%s (model %q): herdr was asked %v", launcher, model, got)
+			}
 		}
 	}
 }

@@ -21,7 +21,7 @@ from them instead of being written once per platform:
 | `storage.schema.json` | **Plugin-side.** Default-deny installation-owned business storage (#1187): CAS/atomic transactions, bounded request receipts and queues, and opaque chunked blobs; manager-owned authentication/retention/restore are not guest RPC methods. See `docs/extensions/extensions.md` ("Installation-owned business storage") |
 | `todos.schema.json` | **Plugin-side.** The to-do events an extension subscribed to and was granted `todos.read` is told of (`docs/extensions/extensions.md` "Events"): `event.todo.changed`, `event.todo.decision` |
 | `leaders.schema.json` | **Plugin-side.** The leader events an extension subscribed to and was granted `leaders.read` is told of (`docs/extensions/extensions.md` "Leader events"): `event.leader.changed`, `event.leader.report` |
-| `repository.schema.json` | **Plugin-side.** The `repository_providers` extension point's calls (#10330): the manager asks a code-hosting source's program `repo.parse` (what repository an address on its hosts names), `repo.check` (it exists and is visible), `repo.link` (an issue or pull request of a repository, by address or by kind and number) and the optional `repo.describe` (a stored link's title and state), and re-checks every answer; `RepoErrorCode`. The manifest's item (`RepositoryProviderItem`, `RepositoryLinkLabel`, `RepositoryLinkKind`) is in `manifest.schema.json` |
+| `repository.schema.json` | **Plugin-side.** The `repository_providers` extension point's calls (#10330): the manager asks a code-hosting source's program `repo.parse` (what repository an address on its hosts names), `repo.check` (it exists and is visible), `repo.link` (an issue or pull request of a repository, by address or by kind and number) the optional `repo.describe` (a stored link's title and state) and `repo.pr_status` (a stored pull request's state, for a contribution declaring the `pr_status` capability, #11584), and re-checks every answer; `RepoErrorCode`. The manifest's item (`RepositoryProviderItem`, `RepositoryLinkLabel`, `RepositoryLinkKind`, `RepositoryCapability`) is in `manifest.schema.json` |
 | `examples/` | Examples: `<definition>.<name>.json` must hold to the schema; those under `examples/invalid/` must not. The plugin-side schemas' are in `examples/plugin/` (and `examples/plugin/invalid/`) |
 
 ## Generating
@@ -396,6 +396,13 @@ group and action, plus the optional inspector and timeline fields `started_at`, 
 (`GraphNodeLink`, a `{title, url}` pair). The hub's `downgrade10` (`server/internal/extension/ui_v10.go`) draws an older app one indented row per
 visible node in reading order; a native stream's source may draw a graph too (`UIStreamItem` lists it), but its client
 never gets one, at 10 included: the hub draws it as those rows. Its examples are `examples/View.v10-*.json`.
+UI version 11 (#12544) adds one component, `scene` (`SceneComponent`: `alt`, `caption`, `poster`, `camera`, `shapes`,
+`labels`, `pins`): a small 3D model of simple shapes (`SceneShape`, told apart by `kind`: `SceneBox`, `SceneCylinder`,
+`ScenePrism`, each with a `SceneColor` and a `SceneMaterial`), quiet floor names (`SceneLabel`) and devices (`ScenePin`, with
+an optional `SceneLight`). Numbers where 0 means something (`bottom`, `top`, `yaw`, `round`, heights, the camera's) are
+`x-go-pointer`. The hub's `downgrade11` (`server/internal/extension/ui_v11.go`) draws an older app the poster as an `image`, or
+without one a row per pin; a native stream's source may draw a scene too (`UIStreamItem` lists it), but its client never gets
+one: the hub draws it the same way. Its example is `examples/View.v11-scene-flat.json`.
 
 ## Adding a call
 

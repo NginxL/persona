@@ -1,4 +1,4 @@
-Rename: direction name via main-only direction_name (no date/kind); ordinary kind/topic becomes MMDD | kind | topic using its start date. User-chosen names/titles require user_asked. Main has no title.
+Rename: direction name via main-only direction_name (no date/kind); ordinary kind/topic becomes MMDD | kind | topic using its start date. User-chosen names/titles require user_asked. Main has no title.{{template "shared/mcp_language" .}}
 
 ```json
 {

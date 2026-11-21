@@ -300,7 +300,7 @@ type SnapshotProfile struct {
 // SnapshotTier is one tier of the profile in use: what an Agent started on it runs on ("" model or effort: the
 // launcher's), and when to use it.
 type SnapshotTier struct {
-	Name, Launcher, Model, Effort, Speed, Description string
+	Name, Launcher, Model, Effort, Speed, PermissionMode, Description string
 }
 
 // Snapshot is the live context a starting assistant gets in its system prompt.
@@ -753,6 +753,20 @@ type TaskEnded struct {
 
 func RenderTaskEnded(n TaskEnded) string { return render("assistant/task_ended", n) }
 
+// PRFollowupNotice tells a closed to-do's original supervisor conversation that a delivery PR it no longer watches
+// through an open to-do changed after acceptance (#12371): merged, closed unmerged, a merge conflict, or a
+// changes-requested review on the current head. Event is one of merged | closed | conflict | changes_requested. The
+// to-do stays closed; this is a record, not a reopen and not an acceptance signal. Language is the owner's
+// (answerLanguage: empty Chinese, English or Japanese).
+type PRFollowupNotice struct {
+	ID, Title, PRURL string
+	Event            string
+	Realtime         bool
+	Language         string
+}
+
+func RenderPRFollowupNotice(n PRFollowupNotice) string { return render("assistant/pr_followup", n) }
+
 // RelayRefused tells a conversation that the message it sent another with conversation_send or conversation_new (Tool)
 // was refused for good by that conversation (Title, ID) with a refusal Code, and is not tried again (#11393). Excerpt
 // is how the message began. Language is the owner's (answerLanguage: "" Chinese, "English", "日本語").
@@ -762,6 +776,21 @@ type RelayRefused struct {
 }
 
 func RenderRelayRefused(d RelayRefused) string { return render("assistant/relay_refused", d) }
+
+// RelayLater is what conversation_send with wake: false kept for a conversation (#11614): it goes in, as a context
+// block, at the start of the next message the hub delivers there for any other reason. Language is the owner's
+// (answerLanguage; empty: Chinese).
+type RelayLater struct {
+	Language string
+	Items    []RelayLaterItem
+}
+
+// RelayLaterItem is one kept message: the sending conversation, when it was sent (the owner's local time) and its words.
+type RelayLaterItem struct {
+	FromID, FromTitle, At, Text string
+}
+
+func RenderRelayLater(d RelayLater) string { return render("assistant/relay_later", d) }
 
 // ChatReply tells a conversation that wrote into a Lark chat as the user that others wrote there since (#10777): the
 // chat's name (Group: a group, else a direct chat with that person), when the conversation last wrote there (local
@@ -846,9 +875,9 @@ type Supervise struct {
 	// they wait here before going up a rung.
 	Asked      bool
 	AskMinutes int
-	// LowDistraction: the owner's low-distraction mode is on: a card is never handed to the user on a timeout, and ask_escalate
+	// PushGrading: the owner's push grading switch is on: a card is never handed to the user on a timeout, and ask_escalate
 	// pushes only what is the owner's alone (why_owner).
-	LowDistraction bool
+	PushGrading bool
 	// Decisions: an entry is about a decision the owner cannot answer as it is (recheck, undecidable,
 	// owner_cannot_answer; #3804).
 	Decisions bool
@@ -907,6 +936,8 @@ type SuperviseEntry struct {
 	// (decide_yourself, not_what_i_asked, explain_first).
 	Decision *SuperviseDecision
 	Response string
+	// Told: a check's decided entry whose answer is already in its Agent's chat (said there, or sent by agent_send).
+	Told bool
 	// parked_due: what the task was parked for; park_decided: what it was parked for again before the message went.
 	Parked *SuperviseParked
 	// From the task's brief (#3822): Asked is the owner's message that led to the work (clipped) and AskedAt its day;
@@ -1319,4 +1350,21 @@ func RenderTodoDirection(d DirectionNotes) string {
 		return ""
 	}
 	return render("todo/direction", d)
+}
+
+// SegmentHandoff continues the same logical conversation on a new engine.
+type SegmentHandoff struct {
+	Language string
+	Summary  string
+	Recent   []HandoffTurn
+	Text     string
+	Partial  bool
+}
+
+func RenderSegmentHandoff(h SegmentHandoff) string { return render("assistant/segment_handoff", h) }
+
+// RenderSegmentSummary accepts the established language display names as well as BCP 47 codes.
+// Empty and Chinese retain the original default bytes; Japanese and English are the other supported branches.
+func RenderSegmentSummary(language string) string {
+	return render("assistant/segment_summary", struct{ Language string }{Language: language})
 }

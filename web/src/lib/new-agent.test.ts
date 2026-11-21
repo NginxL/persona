@@ -204,6 +204,33 @@ describe("本地优先启动", () => {
     expect(body).not.toHaveProperty("effort");
   });
 
+  it("includes permission_mode on inlinePrompt Codex starts and codex_needs_prompt retries", async () => {
+    const inlineFetch = vi.fn().mockResolvedValueOnce(response({ session: { ...session, agent: "codex" } }));
+    vi.stubGlobal("fetch", inlineFetch);
+    launchAgent({ ...input, launcher: "codex", agentType: "codex", inlinePrompt: true, permissionMode: "bypassPermissions" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(inlineFetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(inlineFetch.mock.calls[0][1].body)).toMatchObject({
+      launcher: "codex",
+      agent_type: "codex",
+      prompt: input.text,
+      permission_mode: "bypassPermissions",
+    });
+
+    const fallbackFetch = vi.fn()
+      .mockResolvedValueOnce(response({ error: "needs prompt", code: "codex_needs_prompt" }, 409))
+      .mockResolvedValueOnce(response({ session: { ...session, agent: "codex" } }));
+    vi.stubGlobal("fetch", fallbackFetch);
+    launchAgent({ ...input, launcher: "codex", permissionMode: "plan" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fallbackFetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fallbackFetch.mock.calls[1][1].body)).toMatchObject({
+      launcher: "codex",
+      prompt: input.text,
+      permission_mode: "plan",
+    });
+  });
+
   it("requests the native agy effort with no effort override", async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(response({ session })).mockResolvedValueOnce(response({}));
     vi.stubGlobal("fetch", fetcher);

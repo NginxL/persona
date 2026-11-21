@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,6 +35,10 @@ func (h *Hub) sessionModes(w http.ResponseWriter, r *http.Request, m *Machine) {
 			writeErr(w, http.StatusBadRequest, errors.New("provide only a nonempty permission_mode"))
 			return
 		}
+	}
+	if restrictedAgentData(r) && !h.publicSessionForControl(m, r.PathValue("sid")) {
+		writeErr(w, http.StatusNotFound, errDeleteUnknown)
+		return
 	}
 	// Keep speed separate from session.modes, which older nodes ignore unknown fields in.
 	if tier, exists := p["service_tier"]; exists {
@@ -121,7 +124,19 @@ func modesLauncher(p map[string]any, s proto.Session) string {
 	if l, _ := p["launcher"].(string); strings.TrimSpace(l) != "" {
 		return strings.TrimSpace(l)
 	}
-	return cmp.Or(s.Launcher, "claude")
+	if s.Launcher != "" {
+		return s.Launcher
+	}
+	switch {
+	case s.Agent == "codex" && s.AgentSurface == "desktop":
+		return "codex-app"
+	case s.Agent == "codex":
+		return "codex"
+	case s.SourceKind == "claude_desktop" || s.SpaceKind == "claude_desktop":
+		return "claude-desktop"
+	default:
+		return "claude"
+	}
 }
 
 // oldEngineRefusal says whether err, a node's refusal of POST …/modes with a launcher (p), is a node without

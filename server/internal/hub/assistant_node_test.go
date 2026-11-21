@@ -60,6 +60,12 @@ func newAssistantNode(t *testing.T, h *Hub) *assistantNode {
 			return map[string]any{}, nil
 		case "session.items":
 			return map[string]any{"items": n.items}, nil
+		case "session.queue.edit":
+			n.sends = append(n.sends, map[string]any{method: p})
+			return proto.QueueEdit{Queue: []string{"Fixture message"}}, nil
+		case "session.queue.send_now":
+			n.sends = append(n.sends, map[string]any{method: p})
+			return map[string]any{"sent": true}, nil
 		case "session.rename":
 			n.sends = append(n.sends, map[string]any{"rename": p})
 			return map[string]any{"ok": true}, nil

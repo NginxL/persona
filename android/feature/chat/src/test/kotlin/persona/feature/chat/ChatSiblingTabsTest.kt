@@ -61,4 +61,18 @@ class ChatSiblingTabsTest {
         val named = listOf(lead.copy(slotName = "一个很长很长的任务标题，被 herdr 拿来当标签页的名字"), pane("review", 1, 1, agent = "codex"))
         assertEquals(listOf("#1 Claude", "#1 Codex"), siblingTabs(spaceTabs(named[0], named)).map { it.name })
     }
+
+    @Test fun workspaceIdOnlyAndFoldedSideOrWorkerRowsAreNotSiblingTabs() {
+        val parent = Session(machineId = "mac", sessionId = "parent", workspaceId = "bytedance", status = "idle")
+        val side = Session(machineId = "mac", sessionId = "side-1", workspaceId = "bytedance",
+            foldedUnder = "parent", foldedAs = persona.core.contracts.FoldedAs.SIDE, status = "working")
+        val unrelated = Session(machineId = "mac", sessionId = "other-chat", workspaceId = "bytedance", status = "working")
+        assertTrue(spaceTabs(parent, listOf(parent, side, unrelated)).isEmpty())
+
+        val lead = s("lead", space = "ws1", slot = 1, pane = "w1:p0")
+        val peer = s("peer", space = "ws1", slot = 2, pane = "w1:p1")
+        val worker = s("worker", space = "ws1", slot = 1, pane = "w1:p2").copy(
+            foldedUnder = "lead", foldedAs = persona.core.contracts.FoldedAs.WORKER)
+        assertEquals(listOf("lead", "peer"), spaceTabs(lead, listOf(lead, peer, worker)).map { it.sessionId })
+    }
 }

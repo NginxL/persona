@@ -19,4 +19,9 @@
     <string name="chat_share_card_light">ライト</string>
     <string name="chat_share_card_dark">ダーク</string>
     <string name="chat_reply_image_original">元の画像を開く</string>
+    <string name="chat_local_image_load_failed">ローカル画像を読み込めませんでした</string>
+    <string name="chat_local_image_not_found">ファイルが見つかりません</string>
+    <string name="chat_local_image_denied">ファイルへのアクセス権限がありません</string>
+    <string name="chat_local_image_unreadable">画像を読み取れません</string>
+    <string name="chat_local_image_open_file">ファイルを開く</string>
 </resources>

@@ -205,6 +205,19 @@ func agyContextEndNames() string {
 
 var agyTrimSpace = lazyre.New(`^` + agySpace + `+|` + agySpace + `+$`)
 
+var agyInterruptedError = lazyre.New(`(?is)^(?:api error:\s*)?the stream was interrupted\.?(?:\s+please continue\b.*)?$`)
+
+func isAgyInterruptedStep(step agyStep) bool {
+	if step.Type != "ERROR_MESSAGE" {
+		return false
+	}
+	text := step.Error
+	if text == "" {
+		text = step.Content
+	}
+	return agyInterruptedError.MatchString(strings.TrimSpace(text))
+}
+
 func agyUserText(text string) string {
 	if m := agyUserRequest.FindStringSubmatch(text); m != nil {
 		text = m[1]
@@ -286,7 +299,7 @@ func mapAgySteps(steps []agyStep, fallback time.Time, receipts map[string]bool) 
 		// Block -1 precedes that work at its sequence, even if a watch already passed the notification.
 		plannerWork := step.Type == "PLANNER_RESPONSE" && (strings.TrimSpace(step.Content) != "" ||
 			strings.TrimSpace(step.Thinking) != "" || len(step.ToolCalls) != 0)
-		if plannerWork || step.Type == "GENERIC" || step.Type == "ERROR_MESSAGE" {
+		if plannerWork || step.Type == "GENERIC" || (step.Type == "ERROR_MESSAGE" && !isAgyInterruptedStep(step)) {
 			observed := false
 			if delivered != "" && len(receipts) > 0 {
 				link := priorWakeKey + " " + step.wakeKey()
@@ -365,6 +378,9 @@ func mapAgySteps(steps []agyStep, fallback time.Time, receipts map[string]bool) 
 			}
 			addMedia("assistant", callID, "", nil)
 		case "ERROR_MESSAGE":
+			if isAgyInterruptedStep(step) {
+				break
+			}
 			text := step.Error
 			if text == "" {
 				text = step.Content

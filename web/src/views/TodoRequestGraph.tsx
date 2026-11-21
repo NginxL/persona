@@ -17,7 +17,7 @@ import {
   buildGraph, CARD_H, CARD_W, layoutRequest, lineage, MERGED_H, queuedRows, roundedPath, TREE_HEAD_H, TREE_MORE_H, TREE_PAD, TREE_ROW_H, treeHeight,
   type GraphNode, type GraphRequest, type NodeAgent, type NodeState, type QueueRow, type TreeRow,
 } from "../lib/request-graph";
-import { navigate } from "../lib/router";
+import { openFromPage } from "../lib/handoff";
 import { effortLabel } from "../lib/routines";
 import { modelLabel } from "../lib/session-models";
 import { useFullAgentSessions } from "../lib/sessions";
@@ -114,8 +114,9 @@ function detail(node: GraphNode, now: number): string {
 
 // ── the view ────────────────────────────────────────────────
 
-/** Opens an Agent's session as its own page (a subagent's: the session that launched it). */
-const openSession = (mid: string, sid: string) => navigate({ name: "session", mid, sid });
+/** Opens an Agent's session as its own page (a subagent's: the session that launched it), a drill-down from the
+ *  To-dos page: Back and the sidebar stay with it (#12055). */
+const openSession = (mid: string, sid: string) => openFromPage({ name: "session", mid, sid });
 
 /** What every request block shares: the hover cards, which trees are folded, and where a tree's line goes. */
 interface Shared {

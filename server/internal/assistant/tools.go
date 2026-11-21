@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -46,10 +48,15 @@ var toolNames = []string{"ask_user", "notify_user", "supervision_finish", "sched
 // Tools are the assistant's tools (assistant.tools).
 func (s *Service) Tools(ctx context.Context) []proto.Tool {
 	tools := toolsNamed(toolNames)
+	// A bare Service has no settings store and is used by registry tests. With no
+	// store the opt-in is false; do not call the nil store function just to hide it.
+	if s.store != nil && ownerReplyApprovalOn(s.settings(ctx)) {
+		tools = append(tools, toolsNamed([]string{ownerActionPrepareTool})...)
+	}
 	if s.urgentOn(ctx) {
 		tools = append(tools, toolsNamed([]string{"urgent_call"})...)
 	}
-	return append(tools, s.knowledgeFolderTools(ctx)...)
+	return localizedMCPTools(append(tools, s.knowledgeFolderTools(ctx)...), s.toolLanguage(ctx))
 }
 
 // toolsNamed are the MCP tools of these names, as prompts/mcp has them.
@@ -63,7 +70,7 @@ func toolsNamed(names []string) []proto.Tool {
 }
 
 // Tool runs one of the assistant's MCP tools for the conversation call.SessionID on machine call.MachineID.
-func (s *Service) Tool(ctx context.Context, call ToolCall) proto.ToolResult {
+func (s *Service) tool(ctx context.Context, call ToolCall) proto.ToolResult {
 	if err := s.conversationAvailable(ctx, call.MachineID, call.SessionID); err != nil {
 		return proto.TextResult(err.Error(), true)
 	}
@@ -144,6 +151,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		return s.toolSupervisionFinish(ctx, self, args)
 	case "ask_user":
 		return s.toolAskUser(ctx, machine, self, args)
+	case ownerActionPrepareTool:
+		return s.toolOwnerActionPrepare(ctx, machine, self, args)
 	case "view_show", "view_update", "view_get":
 		return s.toolView(ctx, machine, self, name, args)
 	case "task_plan":
@@ -230,8 +239,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", fmt.Errorf("title and body are required")
 		}
 		// An empty level is passed through, not normalised to P1: with ln mode on the hub decides by conversation
-		// (the main conversation's ordinary notices still interrupt, fleet_link.go lnNotifyPushLevel); with it off the
-		// hub derives P1 for a NotifyPush anyway (hub/lnmode.go levelFor), so delivery there is unchanged.
+		// (the main conversation's ordinary notices still interrupt, fleet_link.go pushGradingNotifyLevel); with it off the
+		// hub derives P1 for a NotifyPush anyway (hub/push_grading.go levelFor), so delivery there is unchanged.
 		switch a.PushLevel {
 		case "", assistantwire.LevelP0, assistantwire.LevelP1:
 		default:
@@ -324,7 +333,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 	case "agents_list":
 		var a struct{ State, Machine, Query string }
 		_ = json.Unmarshal(args, &a)
-		return s.describeAgents(ctx, a.State, a.Machine, a.Query), nil
+		return s.describeAgents(ctx, a.State, a.Machine, a.Query, s.agentCallerSpace(ctx, machine, self)), nil
 	case "agent_read":
 		var a struct {
 			Machine   string `json:"machine"`
@@ -332,7 +341,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			Turns     int    `json:"turns"`
 		}
 		_ = json.Unmarshal(args, &a)
-		return s.toolAgentRead(ctx, a.Machine, a.SessionID, a.Turns)
+		return s.toolAgentRead(ctx, a.Machine, a.SessionID, a.Turns, s.agentCallerSpace(ctx, machine, self))
 	case "agent_send":
 		wait, waitErr := agentWaitDuration(args)
 		if waitErr != nil {
@@ -361,7 +370,8 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", fmt.Errorf("arguments: %w", err)
 		}
 		a.Task = givenTask(a.RawTask)
-		am, c, err := s.findAgent(ctx, a.Machine, a.SessionID)
+		space := s.agentCallerSpace(ctx, machine, self)
+		am, c, err := s.findAgentInSpace(ctx, a.Machine, a.SessionID, &space)
 		if err != nil {
 			return "", err
 		}
@@ -571,15 +581,16 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", waitErr
 		}
 		var a struct {
-			Machine  string `json:"machine"`
-			Cwd      string `json:"cwd"`
-			Prompt   string `json:"prompt"`
-			Launcher string `json:"launcher"`
-			Model    string `json:"model"`
-			Effort   string `json:"effort"`
-			Speed    string `json:"speed"`
-			Tier     string `json:"tier"`
-			Worktree struct {
+			Machine        string `json:"machine"`
+			Cwd            string `json:"cwd"`
+			Prompt         string `json:"prompt"`
+			Launcher       string `json:"launcher"`
+			Model          string `json:"model"`
+			Effort         string `json:"effort"`
+			Speed          string `json:"speed"`
+			PermissionMode string `json:"permission_mode"`
+			Tier           string `json:"tier"`
+			Worktree       struct {
 				Branch string `json:"branch"`
 			} `json:"worktree"`
 			Ultracode bool `json:"ultracode"`
@@ -592,6 +603,9 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		_ = json.Unmarshal(args, &a)
 		if err := checkSecretEnvArg(args); err != nil {
 			return "", fmt.Errorf("%w; no agent was started", err)
+		}
+		if a.PermissionMode = strings.TrimSpace(a.PermissionMode); a.PermissionMode != "" && !slices.Contains(proto.PermissionModes, a.PermissionMode) {
+			return "", fmt.Errorf("invalid permission_mode %q; no agent was started", a.PermissionMode)
 		}
 		am, ok := s.machineByName(ctx, a.Machine)
 		if !ok {
@@ -609,10 +623,10 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
 		a.Cwd = proto.ExpandHome(a.Cwd, am.Home)
-		own := startPick{launcher: strings.TrimSpace(a.Launcher), effort: strings.TrimSpace(a.Effort), speed: strings.TrimSpace(a.Speed)} // before the tier
+		own := startPick{launcher: strings.TrimSpace(a.Launcher), effort: strings.TrimSpace(a.Effort), speed: strings.TrimSpace(a.Speed), permission: a.PermissionMode} // before the tier
 		// The tier is resolved first (an unknown one asks and starts nothing), then Model Settings' Agents laid over it as
 		// the start lays it: what runs is said on the card (a hand-off from the health space asks) and in the answer.
-		tier, runs := strings.TrimSpace(a.Tier), ""
+		tier := strings.TrimSpace(a.Tier)
 		if tier != "" {
 			t, err := s.tierModel(ctx, tier)
 			if err != nil {
@@ -625,23 +639,23 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 				if a.Speed == "" && (model == "" || model == t.Model) {
 					a.Speed = t.Speed
 				}
-				picks := map[string]any{"launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed}
-				if s.applyModel(ctx, "agent.new", picks) == nil { // one that can't run is the start's to say
-					l, _ := picks["launcher"].(string)
-					m, _ := picks["model"].(string)
-					e, _ := picks["effort"].(string)
-					v, _ := picks["speed"].(string)
-					runs = ModelTier{Launcher: l, Model: m, Effort: e, Speed: v}.runs()
+				if a.PermissionMode == "" && t.PermissionMode != "" {
+					a.PermissionMode = t.PermissionMode
 				}
 			}
 		}
+		// The tier that actually contributed a launcher is a caller choice: fitLauncher refuses where its launcher is
+		// absent instead of substituting another one and dropping the preset (#12032). A tier that gave nothing
+		// (a launcher of the caller's own) leaves this "".
+		own.tier = tier
+		own.ompModelDefault = a.Launcher == "omp" && a.Model == ""
 		// What it runs on this computer, before the user is asked (#2640, launcher_fit.go): a launcher named here that
 		// the computer lacks starts nothing; a default it lacks gives way to one it has, and the card and answer say so.
-		run := map[string]any{"launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed}
+		run := map[string]any{"launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed, "permission_mode": a.PermissionMode}
 		if err := s.applyModel(ctx, "agent.new", run); err != nil {
 			return "", err
 		}
-		swapped, fit, err := s.fitLauncher(ctx, am, own, run)
+		swapped, fit, err := s.fitNewLauncher(ctx, am, own, run)
 		if err != nil {
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
@@ -654,16 +668,22 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 			a.Model, _ = run["model"].(string)
 			a.Effort, _ = run["effort"].(string)
 			a.Speed, _ = run["speed"].(string)
-			tier, runs = "", "" // the tier's launcher is not what runs
+			a.PermissionMode, _ = run["permission_mode"].(string)
+			tier = "" // the tier's launcher is not what runs
 		}
-		// traex, omp…: no effort (launcher_modes.go). One this call names is refused before the user is asked, rather
-		// than by the computer after they said yes; one a tier filled in is dropped. pi, cursor, agy: dropped either way.
+		// traex, omp…: no effort or permission mode (launcher_modes.go). One this call names is refused before the user is asked, rather
+		// than by the computer after they said yes; one a tier filled in is dropped. pi, cursor: dropped either way.
 		if !startTakesModes(fit.agent) {
 			launcher, _ := run["launcher"].(string)
-			if err := startModesRefused(launcher, fit.agent, "", own.effort); err != nil {
+			if err := startModesRefused(launcher, fit.agent, own.permission, own.effort); err != nil {
 				return "", fmt.Errorf("%w; no agent was started", err)
 			}
 			a.Effort = ""
+			a.PermissionMode = ""
+			delete(run, "effort")
+			delete(run, "permission_mode")
+		} else if mode, _ := run["permission_mode"].(string); mode != "" && own.permission == "" && !fit.supportsPermissionMode(mode) {
+			delete(run, "permission_mode")
 		}
 		// The admission gate refuses a too-busy computer before the user is asked to approve anything.
 		gated, _ := run["launcher"].(string)
@@ -672,18 +692,26 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		}
 		branch := strings.TrimSpace(a.Worktree.Branch)
 		where := am.Name + " · " + a.Cwd
+		var runs string
 		if branch != "" {
 			where += i18n.T(s.lang(ctx), "assistant-tools.new_worktree", i18n.Args{"branch": branch})
 		}
 		switch { // the user sees what it will run on before saying yes
 		case swapped != "":
 			where += " · " + swapped
-		case runs != "":
+		case tier != "":
+			selected := pickOf(run)
+			runs = ModelTier{Launcher: selected.launcher, Model: selected.model, Effort: selected.effort, Speed: selected.speed, PermissionMode: selected.permission}.runs()
 			where += i18n.T(s.lang(ctx), "assistant-tools.with_tier", i18n.Args{"tier": tier, "runs": runs})
 		case a.Model != "":
 			where += i18n.T(s.lang(ctx), "assistant-tools.with_model", i18n.Args{"model": a.Model})
 		case proto.FasterSpeed(a.Speed):
 			where += " · " + a.Speed
+		}
+		if tier == "" {
+			if perm, _ := run["permission_mode"].(string); perm != "" {
+				where += " · " + perm
+			}
 		}
 		if a.Ultracode {
 			where += " · ultracode"
@@ -705,7 +733,7 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 		defer cancel()
 		// The tab is named from the prompt as written; the agent gets its project's background before it (#2820).
 		title := s.tabName(sctx, a.Prompt)
-		params := map[string]any{"cwd": a.Cwd, "launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed, "tab_name": title, "title": title}
+		params := map[string]any{"cwd": a.Cwd, "launcher": a.Launcher, "model": a.Model, "effort": a.Effort, "speed": a.Speed, "permission_mode": a.PermissionMode, "tab_name": title, "title": title}
 		prompt := s.withProjectContext(sctx, am.ID, a.Cwd, self, a.Prompt)
 		if a.Ultracode {
 			params["ultracode"] = true
@@ -725,19 +753,32 @@ func (s *Service) runTool(ctx context.Context, machine, self, name string, args 
 				return "", fmt.Errorf("%w; no agent was started", err)
 			}
 		}
+		if err := s.applyOmpStartDefaults(sctx, am, own, fit, params); err != nil {
+			return "", err
+		}
 		params["prompt"] = s.withCloseoutBrief(sctx, am.ID, prompt, false)
 		if err := checkStartSpeed(params, fit, ""); err != nil {
 			return "", fmt.Errorf("%w; no agent was started", err)
 		}
-		// Allow all for Claude Code and for a provider whose approval is an Auto Accept switch (startAgent.allowAll, #8141).
-		if fit.allowAll() {
-			params["permission_mode"] = "bypassPermissions"
-		}
+		// Precedence: explicit permission_mode > tier preset > agent.new binding > Allow all (Claude / Auto Accept) > CLI default.
 		if !startTakesModes(fit.agent) { // the machine a health detour landed on may run another agent under this name
-			if err := startModesRefused(picked, fit.agent, "", own.effort); err != nil {
+			if err := startModesRefused(picked, fit.agent, own.permission, own.effort); err != nil {
 				return "", fmt.Errorf("%w; no agent was started", err)
 			}
-			delete(params, "effort") // Model configuration's, not this call's
+			delete(params, "effort")          // Model configuration's, not this call's
+			delete(params, "permission_mode") // Model configuration's or tier's, not this call's
+		} else {
+			mode, _ := params["permission_mode"].(string)
+			if mode != "" && own.permission == "" && !fit.supportsPermissionMode(mode) {
+				delete(params, "permission_mode")
+				mode = ""
+			}
+			if mode == "" && fit.allowAll() {
+				// Allow all for Claude Code and for a provider whose approval is an Auto Accept switch (startAgent.allowAll, #8141).
+				params["permission_mode"] = "bypassPermissions"
+			} else if mode == "" {
+				delete(params, "permission_mode")
+			}
 		}
 		if !s.isWorkMachine(am.ID) {
 			params["prompt"] = params["prompt"].(string) + "\n\n" + s.taskHandoff(sctx, am.ID, fit)
@@ -939,7 +980,8 @@ type completedNodeWriteError struct{ error }
 func (e *completedNodeWriteError) Unwrap() error { return e.error }
 
 func tracksNodeWrite(method string) bool {
-	return method == DeviceSessionSend || method == DeviceSessionStart || method == devicewire.MethodCloseTaskTerminal
+	return method == DeviceSessionSend || method == DeviceSessionStart || method == devicewire.MethodCloseTaskTerminal ||
+		method == "session.a2a.send" || method == "session.a2a.wake"
 }
 
 func beforeNodeWrite(method string, err error) error {
@@ -1342,8 +1384,32 @@ func (s *Service) machineIDs(ctx context.Context) string {
 	return strings.Join(ids, ", ")
 }
 
-// findAgent resolves a session by full id or prefix; an empty machine searches all of them.
+// agentSpace includes health subdirectories for the tools' access boundary.
+func agentSpace(c proto.Session) string {
+	if c.Space == SpaceHealth || identity.InHealthSpace(c.Cwd) {
+		return SpaceHealth
+	}
+	return ""
+}
+
+// agentCallerSpace uses the calling conversation on its own machine. Calls without
+// a known session can reach only the ordinary space, as with knownSpace.
+func (s *Service) agentCallerSpace(ctx context.Context, machine, self string) string {
+	if self != "" && machine != "" {
+		if c, ok := s.session(ctx, machine, self); ok {
+			return agentSpace(c)
+		}
+	}
+	return ""
+}
+
 func (s *Service) findAgent(ctx context.Context, machine, id string) (Device, proto.Session, error) {
+	return s.findAgentInSpace(ctx, machine, id, nil)
+}
+
+// findAgentInSpace resolves a full id or prefix among eligible sessions. An empty
+// machine searches all of them. A nil space preserves the lookup for other callers.
+func (s *Service) findAgentInSpace(ctx context.Context, machine, id string, space *string) (Device, proto.Session, error) {
 	id = strings.TrimSpace(id)
 	if len(id) < 6 {
 		return Device{}, proto.Session{}, fmt.Errorf("session_id is required (at least its first 8 characters)")
@@ -1358,7 +1424,7 @@ func (s *Service) findAgent(ctx context.Context, machine, id string) (Device, pr
 		}
 		list, _ := s.sessions(ctx, m.ID)
 		for _, c := range list {
-			if c.HiddenByDirectory() {
+			if c.HiddenByDirectory() || space != nil && (c.IsDeleted() || agentSpace(c) != *space) {
 				continue
 			}
 			if c.SessionID == id || strings.HasPrefix(c.SessionID, id) {
@@ -1375,7 +1441,11 @@ func (s *Service) findAgent(ctx context.Context, machine, id string) (Device, pr
 	return Device{}, proto.Session{}, fmt.Errorf("no agent %s (use agents_list)", id)
 }
 
-func (s *Service) describeAgents(ctx context.Context, state, machine, query string) string {
+func (s *Service) describeAgents(ctx context.Context, state, machine, query string, spaces ...string) string {
+	space := ""
+	if len(spaces) > 0 {
+		space = spaces[0]
+	}
 	if state == "" {
 		state = "active"
 	}
@@ -1384,8 +1454,17 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 		Interactions []proto.Interaction `json:"interactions"`
 	}
 	_ = s.call(ctx, DeviceAll, DeviceInteractionsList, map[string]any{}, &res)
-	pending := map[[2]string][]string{}
+	type pendingCard struct {
+		text   string
+		folded bool
+		source [2]string
+	}
+	pending := map[[2]string][]pendingCard{}
+	folded := map[[2]string]bool{}
 	for _, ix := range res.Interactions {
+		if identity.InHealthSpace(ix.Cwd) && space != SpaceHealth {
+			continue
+		}
 		what := ix.Summary
 		if ix.Kind == proto.IxQuestion && len(ix.Questions) > 0 {
 			what = "提问：" + questionSummary(ix)
@@ -1397,13 +1476,16 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 			what = "终端对话框等你处理"
 		}
 		session := ix.SessionID
-		if ix.FoldedUnder != "" {
+		source := [2]string{ix.MachineID, session}
+		isFolded := ix.FoldedUnder != "" && ix.FoldedUnder != session
+		if isFolded {
+			folded[source] = false // include a folded card only after checking its own session
 			session = ix.FoldedUnder
 		}
 		k := [2]string{ix.MachineID, session}
 		// The id goes after the clip: a long request must not cut it off, or interaction_answer has nothing to answer.
 		id := " (interaction_id=" + ix.ID + ")"
-		pending[k] = append(pending[k], clip(what, max(400-utf8.RuneCountInString(id), 1))+id)
+		pending[k] = append(pending[k], pendingCard{clip(what, max(400-utf8.RuneCountInString(id), 1)) + id, isFolded, source})
 	}
 	type row struct {
 		m Device
@@ -1424,7 +1506,15 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 		}
 		list, muted, _ := s.sessionsMuted(ctx, m.ID)
 		for _, c := range list {
-			if c.Assistant || c.HiddenByDirectory() || c.FoldedUnder() != "" {
+			if c.HiddenByDirectory() || c.IsDeleted() || agentSpace(c) != space {
+				continue
+			}
+			if source := [2]string{m.ID, c.SessionID}; c.FoldedUnder() != "" {
+				if _, tracked := folded[source]; tracked {
+					folded[source] = true
+				}
+			}
+			if c.Assistant || c.FoldedUnder() != "" {
 				continue
 			}
 			c.State = c.FoldedState()
@@ -1532,7 +1622,9 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 			fmt.Fprintf(&b, "    后台 workflow 在跑（在等它的结果，没做完）：%s\n", prompts.RenderSnapshotWorkflow(w))
 		}
 		for _, p := range pending[[2]string{r.m.ID, c.SessionID}] {
-			fmt.Fprintf(&b, "    等你：%s\n", p)
+			if !p.folded || folded[p.source] {
+				fmt.Fprintf(&b, "    等你：%s\n", p.text)
+			}
 		}
 		if c.AwaitsReply && c.Asks != "" {
 			fmt.Fprintf(&b, "    在问你、还没回：%s\n", c.Asks) // i18n-ignore: agents_list output for the model, as the lines around it
@@ -1553,8 +1645,8 @@ func (s *Service) describeAgents(ctx context.Context, state, machine, query stri
 	return b.String()
 }
 
-func (s *Service) toolAgentRead(ctx context.Context, machine, id string, turns int) (string, error) {
-	m, c, err := s.findAgent(ctx, machine, id)
+func (s *Service) toolAgentRead(ctx context.Context, machine, id string, turns int, space string) (string, error) {
+	m, c, err := s.findAgentInSpace(ctx, machine, id, &space)
 	if err != nil {
 		return "", err
 	}

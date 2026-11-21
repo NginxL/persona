@@ -99,6 +99,24 @@ func helloWriteLoop(ctx context.Context, wake <-chan struct{}, flush func() bool
 	}
 }
 
+// wakeHelloWriters lets a resumed snapshot write the reports that arrived
+// while writes were paused. A non-blocking send: one pending wake covers them.
+func (h *Hub) wakeHelloWriters() {
+	w := &h.helloWrites
+	w.mu.Lock()
+	wakes := []chan struct{}{w.appsWake, w.langsWake, w.toolsWake}
+	w.mu.Unlock()
+	for _, wake := range wakes {
+		if wake == nil {
+			continue
+		}
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
 func (h *Hub) stopHelloWriters() {
 	w := &h.helloWrites
 	w.mu.Lock()
@@ -186,6 +204,12 @@ func wakeHelloWriter(ch chan struct{}) {
 }
 
 func (h *Hub) flushClientApps() bool {
+	// A snapshot waits for writes to finish and refuses new ones; the reports
+	// stay pending and a wake after resume writes them (quiesce.go).
+	if !h.quiesce.begin() {
+		return false
+	}
+	defer h.quiesce.end()
 	a := &h.apps
 	a.pendingMu.Lock()
 	if len(a.pending) == 0 {
@@ -212,6 +236,10 @@ func (h *Hub) flushClientApps() bool {
 }
 
 func (h *Hub) flushUserLangs() bool {
+	if !h.quiesce.begin() {
+		return false
+	}
+	defer h.quiesce.end()
 	g := &h.langs
 	g.pendingMu.Lock()
 	if len(g.pending) == 0 {
@@ -239,6 +267,10 @@ func (h *Hub) flushUserLangs() bool {
 }
 
 func (h *Hub) flushPhoneTools() bool {
+	if !h.quiesce.begin() {
+		return false
+	}
+	defer h.quiesce.end()
 	q := &h.phoneToolUpdates
 	q.mu.Lock()
 	if len(q.order) == 0 {

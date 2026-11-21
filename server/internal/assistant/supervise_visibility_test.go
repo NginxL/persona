@@ -113,8 +113,8 @@ func TestSupervisionSummaryDedupPersists(t *testing.T) {
 		t.Fatalf("unchanged summary woke after restart: %v, %v", out, err)
 	}
 	out, _, _, err = restarted.reserveSupervision(ctx, []prompts.SuperviseEntry{entry}, []superviseSignal{g}, now.Add(30*time.Minute))
-	if err != nil || len(out) != 1 {
-		t.Fatalf("deduplication did not expire: %v, %v", out, err)
+	if err != nil || len(out) != 0 {
+		t.Fatalf("unchanged routine deduplication expired: %v, %v", out, err)
 	}
 }
 

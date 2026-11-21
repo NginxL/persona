@@ -3,6 +3,7 @@ package devices
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -299,6 +300,50 @@ func TestUsageWindowsRouteIncludesGatewayAccounts(t *testing.T) {
 	}
 }
 
+// A relay read with an ordinary API key (#12311): its key self-service document feeds the same bars, named after the
+// provider and plan, and neither the key nor the gateway's account ids reach the answer.
+func TestUsageWindowsRouteIncludesAKeysRelayAccounts(t *testing.T) {
+	now := time.Now()
+	at, reset := now.UTC().Format(time.RFC3339), now.Add(3*time.Hour).UTC().Format(time.RFC3339)
+	var paths []string
+	gate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.RequestURI())
+		if r.Header.Get("Authorization") != "Bearer an-api-key" {
+			w.WriteHeader(401)
+			return
+		}
+		if r.URL.Path != "/me/usage" {
+			w.WriteHeader(404)
+			return
+		}
+		fmt.Fprintf(w, `{"account_quota_shared":true,"accounts":[
+		 {"account_id":"acct-1","provider":"claude","plan":"max","windows":[{"kind":"five_hour","scope":"account","used_ratio":0.4,"resets_at":%[2]q,"checked_at":%[1]q},{"kind":"weekly_fable","scope":"model","scoped_model":"Fable","used_ratio":0.1,"resets_at":%[2]q,"checked_at":%[1]q}]},
+		 {"account_id":"acct-2","provider":"claude","plan":"max","windows":[{"kind":"weekly","scope":"account","used_ratio":0.83,"resets_at":%[2]q,"checked_at":%[1]q}]}]}`, at, reset)
+	}))
+	defer gate.Close()
+	h := newTestDevices(t)
+	h.usageGW.init(UsageConfig{Sources: []UsageSourceConfig{{ID: "s1", Name: "Team relay", Type: "relay_key", URL: gate.URL + "/v1", Key: "an-api-key"}}}, h.usageWin.invalidate, h.logf)
+	h.usageGW.pollDue(context.Background(), now)
+	if len(paths) != 1 || paths[0] != "GET /me/usage" {
+		t.Fatalf("one read of the document: %v", paths)
+	}
+	mux := h.Handler(http.NotFoundHandler())
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/usage/windows", nil))
+	body := w.Body.String()
+	for _, want := range []string{`"name":"Claude Max"`, `"name":"Claude Max 2"`, `"plan":"max"`, `"sources":["Team relay"]`, `"used_percent":40`, `"used_percent":83`, `"model":"Fable"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %s in %s", want, body)
+		}
+	}
+	if strings.Contains(body, "an-api-key") || strings.Contains(body, "acct-") || strings.Contains(body, `"local"`) {
+		t.Errorf("the key and the gateway's ids stay out: %s", body)
+	}
+	if inv := h.usageGW.gatewayAccounts(); len(inv.Sources) != 0 || len(inv.Accounts) != 0 {
+		t.Errorf("a key sees no pool inventory: %+v", inv)
+	}
+}
+
 func TestOfflineNodeCannotClaimASource(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	var u usageWindowsHub
@@ -392,7 +437,7 @@ func TestUsageGatewayAccountsOverTheDevicesMethod(t *testing.T) {
 // A hub.json written before the relay type had its name still reads: any type that is not generic was the relay one.
 func TestUsageSourceConfigReadsOlderTypeNames(t *testing.T) {
 	var cfg UsageConfig
-	raw := `{"sources":[{"id":"a","type":"generic"},{"id":"b","type":"relay"},{"id":"c","type":"some-earlier-name"},{"id":"d"}]}`
+	raw := `{"sources":[{"id":"a","type":"generic"},{"id":"b","type":"relay"},{"id":"c","type":"some-earlier-name"},{"id":"d"},{"id":"e","type":"relay_key"}]}`
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +445,73 @@ func TestUsageSourceConfigReadsOlderTypeNames(t *testing.T) {
 	for _, s := range cfg.Sources {
 		got = append(got, s.Type)
 	}
-	if want := []string{"generic", "relay", "relay", ""}; !slices.Equal(got, want) {
+	if want := []string{"generic", "relay", "relay", "", "relay_key"}; !slices.Equal(got, want) {
 		t.Fatalf("types = %q, want %q", got, want)
+	}
+}
+
+// A source of type extension is asked through the manager's hook, its rows stay as the extension sent them (not merged
+// with a computer's account of the same provider) and go last, in its order.
+func TestExtensionSourceRowsAreNotMerged(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	var g usageGateways
+	asked := 0
+	g.fetchExtension = func(_ context.Context, ext, launcher string) (json.RawMessage, error) {
+		asked++
+		if ext != "example-usage" || launcher != "pool" {
+			t.Errorf("asked %q %q", ext, launcher)
+		}
+		return json.RawMessage(`{"accounts": [
+			{"provider": "claude", "name": "Pool", "headline": "available 5/6", "windows": [{"label": "5h", "used_percent": 40, "group": "5h"}, {"label": "7d", "used_percent": 10, "group": "weekly"}]},
+			{"provider": "claude", "name": "Seat 1", "notice": "no numbers"}]}`), nil
+	}
+	g.init(UsageConfig{Sources: []UsageSourceConfig{{ID: "s1", Name: "Pool", Type: "extension", Extension: "example-usage", Launcher: "pool"}}}, func() {}, func(string, ...any) {})
+	g.pollDue(context.Background(), now)
+	got := g.accounts(now)
+	if asked != 1 || len(got) != 2 || !got[0].Pass || got[0].Sources[0] != "Pool" || got[0].Ref != "" {
+		t.Fatalf("%d %+v", asked, got)
+	}
+	machine := local("claude", "Claude", now, uw("5h", 300, 40, now.Add(time.Hour)), uw("7d", 10080, 10, now.Add(48*time.Hour)))
+	merged := mergeUsageAccounts(append([]proto.UsageAccount{machine}, got...), now)
+	if len(merged) != 3 || merged[0].Name != "Claude" || merged[1].Name != "Pool" || merged[2].Name != "Seat 1" {
+		t.Fatalf("%+v", merged)
+	}
+	if merged[1].Headline != "available 5/6" || merged[1].Windows[0].Group != "5h" || merged[1].StaleAt == nil || merged[1].ID == merged[2].ID || merged[1].ID == merged[0].ID {
+		t.Fatalf("%+v", merged[1])
+	}
+	if merged[2].Windows == nil || merged[2].Notice != "no numbers" {
+		t.Fatalf("%+v", merged[2])
+	}
+	// The hook failing keeps the last answer and says why; no hook at all is a configuration problem.
+	g.fetchExtension = func(context.Context, string, string) (json.RawMessage, error) {
+		return nil, errors.New("extension is not running")
+	}
+	g.pollDue(context.Background(), now.Add(6*time.Minute))
+	if got := g.accounts(now.Add(6 * time.Minute)); len(got) != 2 || !got[0].Stale || got[0].Problem != "unreachable" {
+		t.Fatalf("%+v", got)
+	}
+	var none usageGateways
+	none.init(UsageConfig{Sources: []UsageSourceConfig{{ID: "s2", Name: "X", Type: "extension", Extension: "e", Launcher: "l"}}}, func() {}, func(string, ...any) {})
+	none.pollDue(context.Background(), now)
+	if st := none.status("s2"); st.Error != usagesource.CodeBadConfig {
+		t.Fatalf("%+v", st)
+	}
+}
+
+// manager.json's extension source keeps its extension and launcher through a read and a rewrite, and a different one is
+// another source (its samples are not the old one's).
+func TestExtensionSourceConfigRoundTrip(t *testing.T) {
+	var c UsageConfig
+	if err := json.Unmarshal([]byte(`{"sources": [{"id": "s1", "name": "Pool", "type": "extension", "extension": "example-usage", "launcher": "pool"}]}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	s := c.Sources[0]
+	if s.Type != "extension" || s.Extension != "example-usage" || s.Launcher != "pool" {
+		t.Fatalf("%+v", s)
+	}
+	other := s
+	other.Launcher = "pool2"
+	if s.fingerprint() == other.fingerprint() {
+		t.Fatal("same fingerprint")
 	}
 }

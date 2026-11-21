@@ -13,6 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -45,6 +46,7 @@ type ownerAction struct {
 	channel     string
 	interaction string   // a card's press: that card only ("" for a message)
 	kinds       []string // a message: the kinds of card it may answer (none: no card at all)
+	approval    *assistantwire.OwnerApprovalProof
 	expires     time.Time
 }
 
@@ -59,6 +61,14 @@ func (h *Manager) issueOwnerAction(channel, interaction string) string {
 // a card of one of kinds, the channel's typed answers (it can't know which card the message answers).
 func (h *Manager) issueMessageAction(channel string, kinds ...string) string {
 	return h.recordOwnerAction(ownerAction{channel: channel, kinds: kinds})
+}
+
+// issueOwnerReplyAction retains the ordinary question-answer capability and
+// independently vouches for this exact owner message's text and direct-parent
+// location. It does not name an interaction: the assistant must find the
+// pending proposal whose posted card is ParentID, then present that target here.
+func (h *Manager) issueOwnerReplyAction(channel string, proof assistantwire.OwnerApprovalProof) string {
+	return h.recordOwnerAction(ownerAction{channel: channel, kinds: []string{proto.IxQuestion}, approval: &proof})
 }
 
 func (h *Manager) recordOwnerAction(a ownerAction) string {
@@ -98,6 +108,23 @@ func (h *Manager) takeOwnerAction(id, channel, interaction, kind string) error {
 	}
 	delete(in.actions, id)
 	return nil
+}
+
+// takeOwnerApproval is the strict permission-reply counterpart of
+// takeOwnerAction. The expected proof comes from the event and the assistant's
+// direct-parent card lookup; every field must equal the hub-issued original.
+func (h *Manager) takeOwnerApproval(id, channel, interaction, kind string, expected assistantwire.OwnerApprovalProof) (assistantwire.OwnerApprovalProof, error) {
+	in := &h.chans.in
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	a, ok := in.actions[id]
+	if !ok || id == "" || time.Now().After(a.expires) || a.channel == "" || a.channel != channel ||
+		interaction == "" || kind != proto.IxPermission || a.approval == nil || *a.approval != expected ||
+		expected.MessageID == "" || expected.ParentID == "" || expected.ChatID == "" {
+		return assistantwire.OwnerApprovalProof{}, errNoOwnerAction
+	}
+	delete(in.actions, id)
+	return *a.approval, nil
 }
 
 // answers: the action may answer interaction, a card of kind, in channel.

@@ -75,8 +75,12 @@ internal data class OngoingStatus(
             val shown = fleet.items.take(MAX_ITEMS)
             val actionable = FleetSummary.firstActionable(fleet)
             val action = actionable?.let { item ->
+                val card = pending.firstOrNull { it.id == item.interaction }
                 OngoingAction.of(item.kind, item.interaction.orEmpty(), FleetSummary.key(item),
-                    needsFieldValues = pending.any { it.id == item.interaction && it.needsFieldValues })
+                    // A fleet row can arrive before its card. Until the card is known, open the app rather than guessing
+                    // that this is an ordinary permission; a secret hand-off must never gain a quick Allow.
+                    needsFieldValues = card?.needsFieldValues ?: true,
+                    secretHandoff = card?.isSecretHandoff ?: (item.kind == "permission"))
             }
             // With buttons, the body is the request they settle (like iOS), not an older question above it.
             val first = if (action != null) actionable else shown.firstOrNull()
@@ -135,14 +139,16 @@ internal data class OngoingButton(@StringRes val label: Int, val key: String?, v
 internal data class OngoingAction(val kind: String, val interaction: String, val session: SessionKey?, val buttons: List<OngoingButton>) {
     companion object {
         /** [needsFieldValues]: allowing needs values this app has no form for, so only Deny (#4987). */
-        fun of(kind: String, interaction: String, session: SessionKey?, needsFieldValues: Boolean = false): OngoingAction? {
+        fun of(kind: String, interaction: String, session: SessionKey?, needsFieldValues: Boolean = false,
+            secretHandoff: Boolean = false): OngoingAction? {
             if (interaction.isEmpty()) return null
             val policy = ApprovalPolicy.actions(AnswerEntry.LockScreen, kind, locked = true).associateBy { it.id }
             fun answer(id: ApprovalAction, @StringRes label: Int) = policy[id]?.let {
                 OngoingButton(label, id.wire, it.authentication != Authentication.None)
             }
             val buttons = when (kind) {
-                "permission" -> listOfNotNull(answer(ApprovalAction.Deny, R.string.notify_action_deny),
+                "permission" -> if (secretHandoff) listOf(OngoingButton(R.string.notify_action_view, null, false))
+                else listOfNotNull(answer(ApprovalAction.Deny, R.string.notify_action_deny),
                     if (needsFieldValues) null else answer(ApprovalAction.Allow, R.string.notify_action_allow))
                 "plan" -> listOfNotNull(policy[ApprovalAction.OpenApp]?.let { OngoingButton(R.string.notify_action_view, null, false) },
                     answer(ApprovalAction.ApproveEdits, R.string.notify_action_approve))

@@ -1,4 +1,4 @@
--- The hub's record of delivered alert pushes (hub/lnmode.go, #8257): one row per push, appended, swept by age and count.
+-- The hub's record of delivered alert pushes (hub/push_grading.go, #8257): one row per push, appended, swept by age and count.
 -- It replaces the hub.push_sent setting, which every push rewrote whole; the hub adds that setting's entries here at
 -- start (AdoptPushSentSetting) and keeps the setting for a build from before this table, so this migration only makes
 -- the table. push_id names one logical push, chosen before

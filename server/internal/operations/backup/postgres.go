@@ -180,6 +180,27 @@ func sealedValues(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 }
 
 func (b *postgresBackend) Quiesced(ctx context.Context, target Target, database string, missingOK bool) error {
+	return b.quiesced(ctx, target, database, missingOK, nil)
+}
+
+// QuiescedDatabase is the backup command's quiesce check for a process that has
+// no pool of its own on the database (the hub checking the built-in manager's
+// own database while the manager is stopped). missingOK: a database that does
+// not exist yet (the manager has not moved there) passes.
+func QuiescedDatabase(ctx context.Context, target Target, database string, missingOK bool) error {
+	return newPostgresBackend().Quiesced(ctx, target, database, missingOK)
+}
+
+// QuiescedExcept is Quiesced for a process that keeps its own pool open while
+// it reads the database (the hub, pausing its own writers for a built-in
+// snapshot): the named server processes are its connections and do not count
+// as other writers. Everything else, including sessions a role may not see,
+// still fails closed.
+func QuiescedExcept(ctx context.Context, target Target, database string, own ...int32) error {
+	return newPostgresBackend().quiesced(ctx, target, database, false, own)
+}
+
+func (b *postgresBackend) quiesced(ctx context.Context, target Target, database string, missingOK bool, own []int32) error {
 	if database == "" {
 		database = target.Database
 	}
@@ -195,7 +216,12 @@ func (b *postgresBackend) Quiesced(ctx context.Context, target Target, database 
 	}
 	defer closeConn(ctx, conn)
 	var sessions, hidden int
-	if err := conn.QueryRow(ctx, quiescedQuery).Scan(&sessions, &hidden); err != nil {
+	if len(own) == 0 {
+		err = conn.QueryRow(ctx, quiescedQuery).Scan(&sessions, &hidden)
+	} else {
+		err = conn.QueryRow(ctx, quiescedExceptQuery, own).Scan(&sessions, &hidden)
+	}
+	if err != nil {
 		return targetError(target, "check that writes are stopped", err)
 	}
 	if sessions != 0 {
@@ -220,6 +246,13 @@ func (b *postgresBackend) Quiesced(ctx context.Context, target Target, database 
 const quiescedQuery = `SELECT
 	count(*) FILTER (WHERE backend_type = 'client backend'),
 	count(*) FILTER (WHERE backend_type IS NULL AND usesysid IS NOT NULL)
+	FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()`
+
+// quiescedExceptQuery is quiescedQuery for the caller's own connections: the
+// hub's pool keeps its server processes open while it reads the database.
+const quiescedExceptQuery = `SELECT
+	count(*) FILTER (WHERE backend_type = 'client backend' AND NOT (pid = ANY($1::int4[]))),
+	count(*) FILTER (WHERE backend_type IS NULL AND usesysid IS NOT NULL AND NOT (pid = ANY($1::int4[])))
 	FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()`
 
 func (b *postgresBackend) Create(ctx context.Context, target Target, name string) error {

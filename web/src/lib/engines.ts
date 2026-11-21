@@ -11,8 +11,10 @@ export const KNOWN_ENGINES: { id: string; name: string; detail: string }[] = [
   { id: "herdr-both", name: "herdr + Herdr App", detail: t("lib-engines.detail_herdr_both") },
   { id: "orca", name: "Orca", detail: t("lib-engines.detail_orca") },
   { id: "tern", name: "Tern", detail: t("lib-engines.detail_tern") },
+  { id: "rex", name: "Rex", detail: t("lib-engines.detail_rex") },
   { id: "paseo", name: "Paseo", detail: t("lib-engines.detail_paseo") },
   { id: "cindy", name: "Cindy", detail: t("lib-engines.detail_cindy") },
+  { id: "t3code", name: "T3 Code", detail: t("lib-engines.detail_t3code") },
 ];
 
 const known = (id: string) => KNOWN_ENGINES.find((e) => e.id === id);
@@ -75,7 +77,7 @@ export function engineSaveError(message: string): string {
 // ---- Host sets (#2576, docs/integrations/engines.md "Host sets"): several engines enabled side by side plus a default one. ----
 
 /** The hosts a set may hold, in the hub's canonical order (proto.EngineHostIDs); herdr-both is a set, not a member. */
-export const ENGINE_HOSTS = ["herdr", "herdr-core", "orca", "tern", "paseo", "cindy"];
+export const ENGINE_HOSTS = ["herdr", "herdr-core", "orca", "tern", "rex", "paseo", "cindy", "t3code"];
 
 export interface HostChoice {
   hosts: string[];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answeredTags, badgeText, BATCH_MAX_MS, BATCH_QUIET_MS, batchDue, finishedBatch, detectNewCards, FORGET_CARD_MS, detectTransitions, MIN_GAP_MS, pickEvent, rateLimiter, SETTLE_MS, suppressed, tabTitle, trackTurns } from "./attention";
+import { answeredTags, badgeText, BATCH_MAX_MS, BATCH_QUIET_MS, batchDue, finishedBatch, detectNewCards, FORGET_CARD_MS, detectTransitions, heldOnlyNeeds, isHeldLevel, MIN_GAP_MS, pickEvent, rateLimiter, SETTLE_MS, suppressed, tabTitle, trackTurns } from "./attention";
 import { stateCounts } from "./sessions";
 import { agentKey } from "./pins";
 import type { AgentMutes } from "./agent-groups";
@@ -271,4 +271,49 @@ it("does not notify about a directory-hidden question or completion", () => {
   const r = detectTransitions(prevOf(["a", "working"], ["b", "working"]), [session("a", "needs_you", { hidden_by_directory: true }), session("b", "unread", { hidden_by_directory: true })], noMutes);
   expect(r.events).toEqual([]);
   expect(r.next.size).toBe(0);
+});
+
+describe("push grading levels (#11771)", () => {
+  const p0: Interaction = { id: "p0", machine_id: "m", session_id: "a", kind: "question" };
+  const p1: Interaction = { id: "p1", machine_id: "m", session_id: "a", kind: "permission", push_level: "P1" };
+  const p2: Interaction = { id: "p2", machine_id: "m", session_id: "a", kind: "question", push_level: "P2" };
+
+  it("classifies P1/P2-only needs_you sessions as held and treats P0/mixed/cardless as immediate", () => {
+    expect(isHeldLevel("P1")).toBe(true);
+    expect(isHeldLevel("P2")).toBe(true);
+    expect(isHeldLevel("P0")).toBe(false);
+    expect(isHeldLevel(undefined)).toBe(false);
+
+    const a = session("a", "needs_you");
+    expect(heldOnlyNeeds(a, [])).toBe(false);
+    expect(heldOnlyNeeds(a, [p1])).toBe(true);
+    expect(heldOnlyNeeds(a, [p1, p2])).toBe(true);
+    expect(heldOnlyNeeds(a, [p1, p0])).toBe(false);
+    expect(heldOnlyNeeds(a, [p1, { ...p0, delegating: true }])).toBe(true);
+  });
+
+  it("suppresses P1 needs and finished (P2) transitions when grading is on, preserving off-mode behavior", () => {
+    const base = prevOf(["a", "working"], ["b", "working"], ["c", "working"]);
+    const next = [session("a", "needs_you"), session("b", "needs_you"), session("c", "unread")];
+    const cards: Interaction[] = [p1, { id: "b0", machine_id: "m", session_id: "b", kind: "question" }];
+
+    expect(detectTransitions(base, next, noMutes, cards, false).events).toEqual([
+      { kind: "needs", key: "m/a" },
+      { kind: "needs", key: "m/b" },
+      { kind: "finished", key: "m/c" },
+    ]);
+    expect(detectTransitions(base, next, noMutes, cards, true).events).toEqual([
+      { kind: "needs", key: "m/b" },
+    ]);
+  });
+
+  it("ignores new P1/P2 cards when grading is on while still alerting on new P0 cards", () => {
+    const waiting = prevOf(["a", "needs_you"]);
+    const known = new Map([["old", 100]]);
+    const rOn = detectNewCards(known, [{ id: "old", machine_id: "m", session_id: "a", kind: "question", push_level: "P1" }, p1, p2, p0], waiting, waiting, [session("a", "needs_you")], new Set(), 200, true);
+    expect(rOn.events).toEqual([{ kind: "needs", key: "m/a", card: p0 }]);
+
+    const rOff = detectNewCards(known, [{ id: "old", machine_id: "m", session_id: "a", kind: "question" }, p1], waiting, waiting, [session("a", "needs_you")], new Set(), 200, false);
+    expect(rOff.events).toEqual([{ kind: "needs", key: "m/a", card: p1 }]);
+  });
 });

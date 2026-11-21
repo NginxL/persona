@@ -31,6 +31,8 @@ func (s *Service) dropSearchIndex(ctx context.Context, st searchStore, machine, 
 }
 
 func (s *Service) finishDeletedConversation(ctx context.Context, machine, id string) error {
+	s.logicalChanged()
+	s.historyWake()
 	if err := s.dropSearchIndex(ctx, s.searchDB(), machine, id); err != nil {
 		return err
 	}

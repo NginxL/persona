@@ -13,6 +13,15 @@ import { unconnectedUsageProviders } from "./UsageUnconnected";
 const NOW = new Date(2026, 10, 5, 10, 0, 0).getTime();
 const H = 3600_000;
 const iso = (ms: number) => new Date(NOW + ms).toISOString();
+const balanceAccount = (id: string, amount: string, o: Partial<UsageAccount> = {}): UsageAccount => ({
+  id,
+  provider: "deepseek",
+  name: "DeepSeek",
+  sampled_at: iso(-12_000),
+  windows: [],
+  balance: { amount, currency: "CNY" },
+  ...o,
+});
 const account = (id: string, used5: number, used7: number, o: Partial<UsageAccount> = {}): UsageAccount => ({
   id,
   provider: "codex",
@@ -69,6 +78,49 @@ describe("the sidebar's usage strip", () => {
   });
 });
 
+describe("a prepaid balance in the sidebar (#11825)", () => {
+  it("shows the amount and currency beside the two fullest window accounts", () => {
+    const html = renderToStaticMarkup(<UsageBars accounts={[balanceAccount("ds", "12.34"), account("a", 10, 20), account("b", 85, 30), account("c", 50, 60)]} now={NOW} />);
+    expect(html).toContain("CNY 12.34");
+    expect(html.match(/role="progressbar"/g)).toHaveLength(2); // the balance takes no bar
+    expect(html).toContain("账号 b");
+    expect(html).toContain("账号 c");
+    expect(html).not.toContain("账号 a");
+  });
+  it("shows a genuine zero as an amount, not as no data", () => {
+    const html = renderToStaticMarkup(<UsageBars accounts={[balanceAccount("ds", "0.00")]} now={NOW} />);
+    expect(html).toContain("CNY 0.00");
+    expect(html).toMatch(/text-orange[^>]*>CNY 0\.00/);
+    expect(html).not.toContain("余额无法读取");
+  });
+  it("shows a failed read as no amount and keeps healthy window accounts", () => {
+    const failed = balanceAccount("ds", "12.34", { balance: undefined, problem: "unreachable", stale: true });
+    const html = renderToStaticMarkup(<UsageBars accounts={[failed, account("a", 10, 20)]} now={NOW} />);
+    expect(html).toContain(">—<");
+    expect(html).toContain("账号 a");
+    expect(html.match(/role="progressbar"/g)).toHaveLength(1);
+    expect(html).toContain("opacity-60");
+    // the words behind it are the popover's (it is not first-screen code)
+    expect(renderToStaticMarkup(<UsagePopover accounts={[failed]} now={NOW} />)).toContain("余额无法读取");
+  });
+  it("shows the amount, the sample age and both kinds of account in the popover", () => {
+    const html = renderToStaticMarkup(<UsagePopover accounts={[balanceAccount("ds", "12.34"), account("a", 70, 10)]} now={NOW} />);
+    expect(html).toContain("预付余额");
+    expect(html).toContain("CNY 12.34");
+    expect(html).toContain("5h");
+    expect(html).toContain("70%");
+    expect(html.match(/role="progressbar"/g)).toHaveLength(2); // only the window account's bars
+  });
+  it("says in the popover why a balance is unavailable or is the last one", () => {
+    const never = balanceAccount("ds", "12.34", { balance: undefined, problem: "unreachable" });
+    expect(renderToStaticMarkup(<UsagePopover accounts={[never]} now={NOW} />)).toContain("暂时连不上 DeepSeek");
+    const kept = balanceAccount("ds", "12.34", { problem: "unreachable" });
+    expect(renderToStaticMarkup(<UsagePopover accounts={[kept]} now={NOW} />)).toContain("上次的余额");
+    const refused = balanceAccount("ds", "12.34", { problem: "rejected" });
+    expect(renderToStaticMarkup(<UsagePopover accounts={[refused]} now={NOW} />)).toContain("Key");
+  });
+});
+
 describe("the popover", () => {
   it("lists every window with percent, countdown, sample age and the pace", () => {
     // 5h window, 2h elapsed = 40% expected: 70% is over; 7d window, 5 days elapsed (~71%): 10% is under
@@ -89,6 +141,15 @@ describe("the popover", () => {
     const html = renderToStaticMarkup(<UsagePopover accounts={[a]} now={NOW} />);
     expect(html.match(/data-pace-tick/g)).toHaveLength(1);
     expect(html.match(/用得偏快/g)).toHaveLength(1);
+  });
+  it("keeps an out-of-date account's numbers and reset but gives no pace, nor a tick (#12411)", () => {
+    const html = renderToStaticMarkup(<UsagePopover accounts={[account("a", 70, 10, { stale: true })]} now={NOW} />);
+    expect(html).toContain("已过期");
+    expect(html).toContain("70%");
+    expect(html).toContain("2 天 3 小时后重置");
+    expect(html).not.toContain("用得偏快");
+    expect(html).not.toContain("用得偏慢");
+    expect(html).not.toContain("data-pace-tick");
   });
   it("is a labelled dialog", () => {
     expect(renderToStaticMarkup(<UsagePopover accounts={[account("a", 1, 1)]} now={NOW} />)).toContain('role="dialog" aria-label="订阅额度"');
@@ -155,6 +216,34 @@ describe("where the numbers came from (#2595)", () => {
     } finally {
       await initI18n("zh-Hans");
     }
+  });
+  it("shows agy quota windows instead of its missing-data row", () => {
+    const live = [account("agy", 25, 75, { provider: "agy", name: "Antigravity", local: true })];
+    const unconnected = unconnectedUsageProviders([{ name: "agy", agent: "agy" }], live);
+    expect(unconnected).toEqual([]);
+    const strip = renderToStaticMarkup(<UsageBars accounts={live} unconnected={unconnected} now={NOW} />);
+    expect(strip).toContain("Antigravity");
+    expect(strip).toContain("75%");
+    expect(strip).not.toContain("未接额度数据");
+  });
+  it("says in plain words whether a provider is not read yet or can only be read through its relay (#12411)", () => {
+    const html = renderToStaticMarkup(
+      <UsagePopover
+        accounts={[]}
+        unconnected={[
+          { id: "claude", title: "Claude Code", agent: "claude" },
+          { id: "agy", title: "Antigravity", agent: "agy" },
+          { id: "deepseek", title: "DeepSeek", agent: "claude" },
+        ]}
+        now={NOW}
+      />,
+    );
+    expect(html).toContain("还没读到 Claude Code 的额度");
+    expect(html).toContain("还没读到 Antigravity 的额度");
+    // a launcher run through Claude Code against another provider is not Claude's subscription
+    expect(html.match(/还没读到 Claude Code/g)).toHaveLength(1);
+    expect(html).toContain("不能直接读这家服务商的额度");
+    expect(html).not.toMatch(/statusLine|网关/);
   });
   it("lists active providers without usage data and hands setup off to the assistant on click", () => {
     const live = [account("c", 40, 75, { provider: "codex", name: "Codex Pro", local: true })];

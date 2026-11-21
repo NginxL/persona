@@ -181,6 +181,16 @@ struct AssistantProfileView: View {
                     Text(Self.recentFooter)
                 }
             }
+            if ownerApprovalOffered {
+                Section {
+                    NavigationLink { OwnerApprovalSettingsView() } label: {
+                        row("Exact Approval Replies", Theme.Icon.standingAuthorization, detail: nil)
+                    }
+                    .accessibilityIdentifier("assistant-owner-approval-settings")
+                } footer: {
+                    Text("Approve one displayed batch with an exact reply. No standing permission.")
+                }
+            }
             #if os(iOS)
             if let suggestions = nextSuggestions {
                 Section {
@@ -298,6 +308,14 @@ struct AssistantProfileView: View {
                         }
                     }
                 }
+                if ownerApprovalOffered {
+                    BUIListSection(String(localized: "Exact Approval Replies")) {
+                        NavigationLink { OwnerApprovalSettingsView() } label: {
+                            buiRow("Exact Approval Replies", Theme.Icon.standingAuthorization, detail: nil)
+                        }
+                        .accessibilityIdentifier("assistant-owner-approval-settings")
+                    }
+                }
                 #if os(iOS)
                 if let suggestions = nextSuggestions {
                     BUIListSection(footer: Self.nextSuggestionsFooter) {
@@ -413,6 +431,12 @@ struct AssistantProfileView: View {
     static let recentTitle = String(localized: "Show Scheduled Task Chats")
     private static let recentFooter = String(localized: "Chats your scheduled tasks and the background supervisor start also appear in the sidebar's Recent, by time. All your devices follow.")
 
+    /// An older hub omits all three fields, so it gets no new settings entry or local-only switch.
+    private var ownerApprovalOffered: Bool {
+        model.assistantConfig?.ownerReplyApproval != nil && model.assistantConfig?.persistentOwnerActionCards != nil &&
+            model.assistantConfig?.ownerReplyApprovalPhrases != nil
+    }
+
     /// JSON-object probe payload; the UI-test reader cannot encode a top-level Bool back to JSON.
     private struct NextSuggestionsProbe: Equatable, Encodable {
         var loaded: Bool
@@ -486,7 +510,8 @@ struct AssistantProfileView: View {
         async let s = try? api.standingAuthorizations()
         // The switch shows once the hub says it has the setting (#1731): a hub updated since the app read it, too.
         let held = model.assistantConfig
-        if held?.mainTasksQuiet == nil || held?.mainBackgroundFolded == nil || held?.mainSupervisesOwnTasks == nil || held?.recentTaskChats == nil {
+        if held?.mainTasksQuiet == nil || held?.mainBackgroundFolded == nil || held?.mainSupervisesOwnTasks == nil || held?.recentTaskChats == nil ||
+            held?.ownerReplyApproval == nil || held?.persistentOwnerActionCards == nil || held?.ownerReplyApprovalPhrases == nil {
             await model.refreshAssistant()
         }
         tasks = await r

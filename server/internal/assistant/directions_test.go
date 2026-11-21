@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // The leaders' records and leader.changed (directions.go, #3484): each change is told once, a restart or a replay of
@@ -181,6 +182,8 @@ func TestLeadersRouteListsEveryDirection(t *testing.T) {
 // todo.changed carries the supervisor, and a change of supervisor is told (a task moved to another leader).
 func TestTodoChangedTellsTheSupervisor(t *testing.T) {
 	e := newTodoEventEnv(t, nil)
+	// The leaders, listed outside the health space: an extension is told of their tasks (todo_scope.go).
+	e.sessions("server", proto.Session{SessionID: "conv_lead_a", Assistant: true}, proto.Session{SessionID: "conv_lead_b", Assistant: true})
 	a := e.create("发版").ID
 	e.settle()
 	e.s.superviseTodo(context.Background(), a, "conv_lead_a", nil, 0)

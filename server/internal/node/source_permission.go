@@ -92,7 +92,7 @@ func (n *Node) sourcePermissionIn(pids []int, session, name string, args json.Ra
 		if !sourceRegistryMatches(c, mark) {
 			continue
 		}
-		evidence.Class = peerSessionClass(n, c, session)
+		evidence.Class = permissionClass(peerSessionModeAt(context.Background(), n, c, session))
 		evidence.Generation = fmt.Sprintf("%d/%s", c.pid, mark)
 		// Recheck after reading the transcript: never attest a reused process id.
 		if evidence.Valid() && sourceGeneration(c.pid) == mark {

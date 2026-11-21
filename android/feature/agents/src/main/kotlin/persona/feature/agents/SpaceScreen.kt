@@ -43,7 +43,7 @@ internal fun SpaceScreen(
     val machine = machines.firstOrNull { it.id == space?.machineId }
     Box(Modifier.fillMaxSize()) {
         // The cards name the computer in their first line, under a large title as on iOS.
-        JListPage(title = space?.name ?: title.ifBlank { stringResource(R.string.agents_space) }, onBack = onDismiss,
+        JListPage(title = space?.name ?: title.ifBlank { stringResource(R.string.agents_space) }, onBack = if (LocalIsSidebarRoot.current) null else onDismiss,
             subtitle = machine?.displayName?.takeUnless { grid }, largeTitle = grid,
             actions = { space?.let { spaceMenu(it) } }) {
             if (space == null) {

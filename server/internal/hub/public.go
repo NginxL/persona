@@ -29,10 +29,13 @@ type publicState struct {
 	certificate *tls.Certificate
 	server      *http.Server
 	listener    net.Listener
-	proxy       *proxyPolicy // security.proxy_protocol, read by startPublic
-	proxyLog    proxyLog
-	addresses   addressSource
-	endpoints   []Endpoint
+	// testPlaintext is an already-bound listener injected by a test. serveHTTP takes ownership of it as it does of a
+	// listener it opened itself; nil keeps the production bind unchanged.
+	testPlaintext net.Listener
+	proxy         *proxyPolicy // security.proxy_protocol, read by startPublic
+	proxyLog      proxyLog
+	addresses     addressSource
+	endpoints     []Endpoint
 }
 
 func (h *Hub) initHubID(ctx context.Context) error {
@@ -231,6 +234,13 @@ func (h *Hub) serveHTTP(ctx context.Context) error {
 	if h.public.listener != nil {
 		listeners = append(listeners, h.public.listener)
 	}
+	injected := h.public.testPlaintext
+	if injected != nil {
+		// Register the injected listener now so every later startup failure closes it. Clear the hook after taking
+		// ownership; serveHTTP uses this same listener below instead of binding its address again.
+		listeners = append(listeners, injected)
+		h.public.testPlaintext = nil
+	}
 	stopSessions, stopTests := func() {}, func() {}
 	defer func() {
 		h.shutdown.start()
@@ -279,9 +289,13 @@ func (h *Hub) serveHTTP(ctx context.Context) error {
 		servers = append(servers, srv)
 		go func() { errs <- srv.ServeTLS(h.public.listener, "", "") }()
 	}
-	ln, activated, err := h.listen(plain.Addr)
-	if err != nil {
-		return err
+	ln := injected
+	activated := false
+	if ln == nil {
+		ln, activated, err = h.listen(plain.Addr)
+		if err != nil {
+			return err
+		}
 	}
 	if activated {
 		h.logf("hub: listening on the socket systemd passed (%s): restarts refuse no connection", ln.Addr())

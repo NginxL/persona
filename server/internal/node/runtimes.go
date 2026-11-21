@@ -157,6 +157,9 @@ type runtimeConn struct {
 	workspacesSaid bool
 	// daemon is its id in daemons.json when the node dialed it (daemons.go), "" for a runtime on the socket.
 	daemon string
+	// builtinAgy is true only when RuntimeHost.registerRuntime verified this connection matches the built-in
+	// Antigravity companion instance it spawned (agybridge.go).
+	builtinAgy bool
 	// pid is the process at the other end of the runtime socket; 0 when not known (a daemon's link, the Orca bridge,
 	// a system that does not tell). A runtime running the assistant vouches for its descendants' MCP servers
 	// (mcpAssistantOf).

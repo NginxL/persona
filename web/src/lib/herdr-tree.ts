@@ -12,6 +12,7 @@ import type { Route, SessionView } from "./router";
 import type { AgentState, Machine, Session } from "./types";
 import { byTime } from "./times";
 import { homeKey } from "./folded-rows";
+import type { StableRowOrder } from "./side-sessions";
 
 // docs/protocol/agent-states.md "Unified states": what a folded row shows for everything under it, and which pane a tab opens on.
 const URGENCY: AgentState[] = ["needs_you", "working", "unread", "idle", "unknown", "offline"];
@@ -47,6 +48,38 @@ const placeOf = (s: Session) => s.pane_index ?? Number.MAX_SAFE_INTEGER;
  *  the order herdr opened them in (the number in the pane id), then the session id. */
 export function paneOrder(a: Session, b: Session): number {
   return placeOf(a) - placeOf(b) || paneNumber(a) - paneNumber(b) || a.session_id.localeCompare(b.session_id);
+}
+
+const tabPlace = (s: Session) => s.slot_index ?? Number.MAX_SAFE_INTEGER;
+const spacePlace = (s: Session) => s.space_index ?? Number.MAX_SAFE_INTEGER;
+
+/** The sidebar's deterministic structural presentation (#11801): the hub's computers, then herdr's workspaces, tabs
+ *  and panes. No state, timestamp or previous row position participates. The paged transport keeps its own newest-first
+ *  cursor order. */
+export function machineSessionPresentation(machines: readonly Machine[]): StableRowOrder<Session> {
+  const machinePlace = new Map(machines.map((m, i) => [m.id, i]));
+  const machine = (s: Session) => machinePlace.get(s.machine_id) ?? Number.MAX_SAFE_INTEGER;
+  const placement = (s: Session): readonly (number | string)[] => [
+    machine(s), s.machine_id,
+    // buildMachineTree lists every workspace before Other, including when the host supplies no workspace indices.
+    s.space_id ? 0 : 1, spacePlace(s), s.space_name || s.space_id || "", s.space_id || "",
+    // buildSpace likewise lists every tab before its loose sessions, even when neither has a slot index.
+    s.slot_id ? 0 : 1, tabPlace(s), s.slot_id || "", placeOf(s), paneNumber(s), s.session_id,
+  ];
+  const compare = (a: Session, b: Session): number => {
+    const left = placement(a), right = placement(b);
+    for (let i = 0; i < left.length; i++) {
+      const x = left[i]!, y = right[i]!;
+      const order = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+      if (order) return order;
+    }
+    return 0;
+  };
+  return { compare };
+}
+
+export function machineSessionOrder(machines: readonly Machine[]): (a: Session, b: Session) => number {
+  return machineSessionPresentation(machines).compare;
 }
 
 /** The tab's "Lead" (#2320): the agent in the tab's first pane (`pane_index` 0, top left, the one the others were split

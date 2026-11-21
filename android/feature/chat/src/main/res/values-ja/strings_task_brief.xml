@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_task_brief_show_all">すべて表示</string>
+    <string name="chat_task_brief_asked_owner">%1$s のあなたの依頼：</string>
+    <string name="chat_task_brief_asked_cut">ここで省略しています。全文は元の会話にあります。</string>
+    <string name="chat_task_brief_started_assistant">%1$s にアシスタントが開始</string>
+    <string name="chat_task_brief_started_leader">%1$s にリーダーの会話が開始</string>
+    <string name="chat_task_brief_started_routine">%1$s に定期タスクが開始</string>
+    <string name="chat_task_brief_started_hub">%1$s に Persona が自動で開始</string>
+    <string name="chat_task_brief_started_unknown">%1$s に開始。依頼者は記録されていません。</string>
+    <string name="chat_task_brief_started_why">%1$s：%2$s</string>
+    <string name="chat_task_brief_reconstructed">後から再構成：元の依頼は記録されていません</string>
+    <string name="chat_task_brief_handover">引き継ぎ時のプロンプト</string>
+    <string name="chat_task_brief_done_when">完了条件</string>
+    <string name="chat_task_brief_expected_time">目安時間</string>
+    <string name="chat_task_brief_expect_hours">約 %1$s 時間</string>
+    <string name="chat_task_brief_out_of_bounds">してはいけないこと</string>
+    <string name="chat_task_brief_summary_minutes">約 %1$d 分</string>
+    <string name="chat_task_brief_summary_hours">約 %1$s 時間</string>
+    <plurals name="chat_task_brief_summary_criteria">
+        <item quantity="other">完了条件 %1$d 件</item>
+    </plurals>
+    <plurals name="chat_task_brief_summary_bounds">
+        <item quantity="other">禁止事項 %1$d 件</item>
+    </plurals>
+</resources>

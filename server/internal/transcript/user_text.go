@@ -190,6 +190,8 @@ func userText(mk func(int, string, string) proto.Item, s string, meta *Meta) []p
 	}
 	if trimmed == "[Request interrupted by user]" || trimmed == "[Request interrupted by user for tool use]" {
 		it := mk(0, "system", proto.KindNotice)
+		meta.clearTurnError() // A user interrupt must not leave an older gateway failure eligible for recovery.
+		meta.resumesSaid = true
 		meta.endTurn(it.Seq, it.TS)
 		it.Text = InterruptedNotice
 		return []proto.Item{it}

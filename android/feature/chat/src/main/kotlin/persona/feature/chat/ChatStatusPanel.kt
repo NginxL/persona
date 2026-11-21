@@ -65,7 +65,8 @@ internal fun ChatSessionStatusLine(
     val chips = listOfNotNull(
         session?.queued?.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.chat_status_chip_queued, it.size) },
         session?.loop?.takeIf { !activityInHeader }?.let { stringResource(R.string.chat_status_loop) },
-        session?.background?.takeIf { it.isNotEmpty() && !activityInHeader }?.let { stringResource(R.string.chat_status_chip_background, it.size) },
+        session?.takeUnless { activityInHeader }?.let { backgroundRunningCount(it, java.time.Instant.now()) }
+            ?.takeIf { it > 0 }?.let { stringResource(R.string.chat_status_chip_background, it) },
         draftSaveError?.let { stringResource(R.string.chat_status_draft_failed) },
     )
     // The header's title line says the state, once (#3957; iOS shows none above its composer): this line keeps only what

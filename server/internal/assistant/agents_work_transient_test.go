@@ -126,6 +126,62 @@ func TestTransientContinuedWithTriageOff(t *testing.T) {
 	}
 }
 
+func TestTransientContinueAllowsHerdrIdleOnlyForOpenTaskAgents(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		openTask bool
+	}{
+		{name: "open task Agent", openTask: true},
+		{name: "ordinary session"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := transientService(t)
+			if tc.openTask {
+				putTodo(s, Todo{ID: "todo-worker", Agents: []TodoAgent{{MachineID: "box", SessionID: "s1"}}})
+			}
+			c := apiErrorTurn("s1", "API Error: 503 no eligible upstream")
+			f.setSessions("box", c)
+			triage(t, s, "s1")
+			if e := entryOf(t, s, "s1"); e.WakeAt == nil || e.Work.On != proto.WaitTransient {
+				t.Fatalf("transient retry was not scheduled: %+v", e)
+			}
+
+			c.Status = proto.StatusIdle // herdr observed the same failed turn; its timestamp and error are unchanged.
+			f.setSessions("box", c)
+			s.workTick(context.Background(), time.Now().Add(16*time.Second))
+
+			got := f.sentToAgents()
+			if tc.openTask {
+				if len(got) != 1 || got[0] != "s1: 继续" {
+					t.Fatalf("open task Agent lost its transient retry: sent %v", got)
+				}
+			} else if len(got) != 0 {
+				t.Fatalf("ordinary session did not yield after being seen: sent %v", got)
+			}
+		})
+	}
+}
+
+func TestHerdrIdleStillCancelsAnOpenTaskWake(t *testing.T) {
+	s, f := workService(t)
+	putTodo(s, Todo{ID: "todo-worker", Agents: []TodoAgent{{MachineID: "box", SessionID: "s1"}}})
+	f.triage = `{"phase":"blocked","on":"external","line":"等 CI","wait":{"what":"CI","then":"跑测试","check_minutes":5}}`
+	c := stopped("s1", "等 CI 结束后跑测试")
+	f.setItems(proto.Item{Kind: proto.KindText, Role: "assistant", Text: c.LastText})
+	f.setSessions("box", c)
+	triage(t, s, "s1")
+	if e := entryOf(t, s, "s1"); e.WakeAt == nil || e.Work.On != proto.WaitExternal {
+		t.Fatalf("external wake was not scheduled: %+v", e)
+	}
+
+	c.Status = proto.StatusIdle
+	f.setSessions("box", c)
+	s.workTick(context.Background(), time.Now().Add(6*time.Minute))
+	if got := f.sentToAgents(); len(got) != 0 {
+		t.Fatalf("an open task's non-transient wake bypassed the herdr guard: sent %v", got)
+	}
+}
+
 // Each "Continue" that errs again waits twice as long; after the cap the session is left as it was (its error and
 // the apps' Retry), with no card. A turn that ends normally starts the count again.
 func TestTransientCapAndReset(t *testing.T) {

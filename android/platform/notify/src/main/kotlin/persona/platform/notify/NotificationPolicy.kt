@@ -39,7 +39,7 @@ internal data class NotificationAction(
 internal object NotificationPolicy {
     fun expired(ix: Interaction, now: Instant = Instant.now()): Boolean = RequestExpiry.expired(ix.expiresAt, now)
 
-    fun actions(ix: Interaction): List<NotificationAction> =
+    fun actions(ix: Interaction): List<NotificationAction> = if (ix.isSecretHandoff) emptyList() else
         ApprovalPolicy.actions(AnswerEntry.Notification, ix.kind, locked = true).sortedBy { order(it.id) }.flatMap { policy ->
             fun action(key: String, label: String?, answer: AnswerAction, draft: AnswerDraft = AnswerDraft(), @StringRes labelRes: Int? = null) =
                 NotificationAction(

@@ -66,6 +66,10 @@ func getOriginCounts(t *testing.T, h *Hub, q url.Values) sessionlist.Counts {
 	if err := json.Unmarshal(w.Body.Bytes(), &c); err != nil {
 		t.Fatal(err)
 	}
+	if c.PaneSource == nil {
+		// pane_source is omitempty: a query no row matches leaves it out, as an empty count.
+		c.PaneSource = map[string]int{}
+	}
 	return c
 }
 

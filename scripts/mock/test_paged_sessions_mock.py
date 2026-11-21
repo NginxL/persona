@@ -40,6 +40,7 @@ class PagedSessionsMockTests(unittest.TestCase):
             self.assertEqual(sum(counts[dimension].values()), len(full))
         first = self.read(summary=1, limit=2)
         self.assertEqual(len(first["sessions"]), 2)
+        self.assertEqual(first["added"], [])
         self.assertTrue(first["has_more"])
         self.assertIn("waiting", first["sessions"][0])
         second = self.read(summary=1, limit=2, cursor=first["next_cursor"])
@@ -106,6 +107,7 @@ class PagedSessionsMockTests(unittest.TestCase):
         delta = self.read(summary=1, since=first["revision"])
         self.assertEqual(delta["sessions"], [])
         self.assertEqual(delta["remove"], [])
+        self.assertEqual(delta["added"], [])
         self.assertFalse(delta["has_more"])
         for query, code in (({"since": ["expired"]}, "revision_expired"), ({"cursor": ["expired:2"]}, "cursor_expired")):
             body, status = hub.paged_sessions(query)
@@ -142,6 +144,21 @@ class PagedSessionsMockTests(unittest.TestCase):
         rest = self.read(summary=0, limit=200, since=base["revision"], cursor=small["next_cursor"])
         self.assertEqual(rest["revision"], small["revision"])
         self.assertEqual(len(small["sessions"]) + len(small["remove"]) + len(rest["sessions"]) + len(rest["remove"]), 2)
+
+    def test_delta_added_distinguishes_creation_from_filter_entrance(self):
+        sessions = hub.SESSIONS
+        saved = [dict(s) for s in sessions]
+        self.addCleanup(lambda: sessions.__setitem__(slice(None), saved))
+        changed = sessions[0]
+        changed["state"] = "idle"
+        baseline = self.read(summary=0, limit=200, state="working")
+        fresh = {**sessions[1], "session_id": "test-created", "title": "Created tab", "state": "working"}
+        changed["state"] = "working"
+        sessions.append(fresh)
+        delta = self.read(summary=0, limit=200, state="working", since=baseline["revision"])
+        self.assertIn(changed["session_id"], [s["session_id"] for s in delta["sessions"]])
+        self.assertIn(fresh["session_id"], [s["session_id"] for s in delta["sessions"]])
+        self.assertEqual(delta["added"], [hub.LIST_TUPLE(hub.decorated_session(fresh))])
 
     def test_journal_is_bounded_like_the_hub(self):
         sessions = hub.SESSIONS

@@ -1,6 +1,6 @@
 # Android 手机工具
 
-本模块对应 `docs/archive/redesign/android.md` 5.12、`parity.md` 第 21 节和设置中的「手机数据」。提供通讯录搜索、日历查询与新建、当前位置、照片元数据与缩放取图、剪贴板、设备信息、本地通知、健康数据汇总（Health Connect）、运动记录列表与详情（Health Connect）及 Persona 当前通知列表，共 14 个工具。
+本模块对应 `docs/archive/redesign/android.md` 5.12、`parity.md` 第 21 节和设置中的「手机数据」。提供通讯录搜索、日历查询与新建、当前位置、照片元数据与缩放取图、剪贴板、设备信息、本地通知、健康数据汇总（Health Connect）、运动记录列表与详情（Health Connect）及 Persona 当前通知列表，共 19 个工具。
 
 Android 没有统一的系统提醒事项接口，故不注册 `phone_reminders_*`。健康数据通过 Health Connect 提供每天的汇总（`phone_health_summary`，安卓 14 起系统自带；写入健康数据 `phone_health_write_sample` 为 iOS 独有）。不申请通知监听权限，不读取其他 App 的通知。`phone_notifications_list` 是 Android 新增工具，只返回本应用当前显示的通知，不包含操作确认通知。
 
@@ -47,6 +47,15 @@ App 已依赖 `:platform:phonetools`；`AppServices` 按配对及同一 device_i
 单元测试：`PhoneToolCatalogTest`（工具集合、每个工具的说明和 schema 与 iOS 夹具逐字一致、只有新建日程要确认、前台限定的工具、参数读取和夹取、时间解析和确认摘要、照片 id 和截图判断）、`PhoneToolRegistryTest`（开关、权限、前后台、离线、未知工具、超范围不拒绝、重复调用只执行一次、日历的拒绝原句 / 批准 / 批准后状态变化 / 参数错误不打扰用户）、`PhotoContentTest`（图片块用 `mime_type`），`core:hub` 的 `HubPhoneToolsTransportTest`（`args` 缺省或 null 当空对象）。2026-11-02 跑过 `:platform:phonetools:testDebugUnitTest`、`:core:hub:test` 和 `:app:assembleDebug`。
 
 仍需在设备上验证：真实 WebSocket 往返（假 hub 的 `GET /mock/tool_call` 和 `GET /mock/phone`）、授权弹窗、前台确认对话框和后台通知的解锁确认、国产系统日历显示。
+
+## Calling tool (English, 2026-11-21)
+
+`phone_call_start` has the exact exported iOS description, parameters and required fields. Its Calls source is off by default, needs no Android permission and is offered only in the foreground. Every execution needs one existing confirmation; denial, a disabled source or a background phone starts no intent.
+
+- Android accepts `kind: phone` (the default) with the same number validation and normalization as iOS. Blank, alphabetic, short and multiple-number input fails before confirmation. `facetime` and `facetime_audio` fail cleanly as unsupported, including email addresses.
+- After Allow, the tool starts `ACTION_DIAL` with a normalized `tel:` URI and `FLAG_ACTIVITY_NEW_TASK`. It never uses `ACTION_CALL` or requests `CALL_PHONE`. The result is `handed_to_android`, not a claim that the call connected.
+- A narrow `ACTION_DIAL` package-visibility declaration lets the tool detect a missing dialer. Missing handlers and launch failures return a definite "no call was started" error rather than the uncertain-write fallback.
+- Robolectric `CallToolTest` covers schema use, confirmation, foreground rejection, validation, both handoff failures and permission absence. `PhoneToolsShotsTest` captures the Calls switch and confirmation in en / zh-Hans / ja, light / dark and large text. A physical dialer and Android device were not tested.
 
 ## Calendar and contact write tools (English, 2026-11-15)
 

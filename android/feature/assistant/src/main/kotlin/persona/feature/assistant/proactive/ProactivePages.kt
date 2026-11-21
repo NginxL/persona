@@ -38,7 +38,7 @@ private const val RunsShown = 3
  */
 @Composable
 internal fun OverviewPage(
-    state: ProactiveState, machines: List<Machine>, now: Instant, zone: ZoneId, onBack: () -> Unit, actions: ProactiveActions,
+    state: ProactiveState, machines: List<Machine>, now: Instant, zone: ZoneId, onBack: (() -> Unit)?, actions: ProactiveActions,
 ) {
     val tasks = state.shownTasks
     val repeating = state.repeating

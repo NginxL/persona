@@ -2,10 +2,10 @@
 // one page — what repeats (every day at a time, every N minutes) and the one-offs it scheduled from a conversation, each
 // with its rule in words, next and last run, what it runs with and an on/off switch; what comes next and the history
 // of runs beside them. A row opens the editor; "New" starts from a template or blank.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, enc, errorText } from "../../lib/api";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { api, ApiError, credentialOwner, enc, errorText, getToken, subscribeCredentialOwner } from "../../lib/api";
 import { conversationPage } from "../../lib/conversation-page";
-import { shownManager, useChosenManager } from "../../lib/manager-choice";
+import { chosenManager, onManagerChoice, shownManager, stampedHeaders, useChosenManager } from "../../lib/manager-choice";
 import { namedLauncher, providerIdNote, useProviderNames } from "../../lib/provider-names";
 import { machineLaunchers, type MachineLaunchers } from "../../lib/launcher-models";
 import { href, navigate, onLinkClick } from "../../lib/router";
@@ -13,7 +13,7 @@ import { isAutoConversation } from "../../lib/conversation-origins";
 import {
   taskConversations, parseTime,
   fromTemplate, hm, blankTask, dayLabel, lastRunText, nextText, ruleText, runDays, runsWith, splitTasks, taskBody, taskTitle, TEMPLATES,
-  untilLabel, untilText, upcoming, type Run, type Task,
+  momentLabel, skipNextTarget, untilLabel, untilText, upcoming, type Run, type SkipNextTarget, type Task,
 } from "../../lib/routines";
 import { isResumed } from "../../lib/reconnect";
 import { onHubEvent, useStore } from "../../lib/store";
@@ -42,8 +42,31 @@ function taskIcon(task: Task): IconName {
 
 const RUNS_SHOWN = 30;
 
+let routinesScope = 0;
+const currentRoutinesScope = () => routinesScope;
+function subscribeRoutinesScope(listener: () => void) {
+  const changed = () => { routinesScope++; listener(); };
+  const stop = [onManagerChoice(changed), subscribeCredentialOwner(changed)];
+  return () => { stop.forEach((off) => off()); };
+}
+
 export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
-  const manager = useChosenManager();
+  const scope = useSyncExternalStore(subscribeRoutinesScope, currentRoutinesScope, currentRoutinesScope);
+  return <RoutinesPage key={scope} scope={scope} onToggleSidebar={onToggleSidebar} />;
+}
+
+function RoutinesPage({ scope, onToggleSidebar }: { scope: number; onToggleSidebar: () => void }) {
+  const [origin] = useState(() => ({ manager: shownManager(), chosen: chosenManager(), token: getToken(), owner: credentialOwner() }));
+  const alive = useRef(false);
+  useLayoutEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  const current = useCallback(() => alive.current && scope === currentRoutinesScope() && shownManager() === origin.manager &&
+    credentialOwner() === origin.owner, [origin, scope]);
+  const readOptions = useMemo(() => ({
+    token: origin.token, tokenOwner: origin.owner, headers: stampedHeaders(origin.chosen ?? undefined), isAuthContextCurrent: current,
+  }), [current, origin]);
   const assistant = useStore((s) => s.assistant);
   const timezone = (assistant as { timezone?: string } | null)?.timezone;
   const [tasks, setTasks] = useState<Task[] | null>(null);
@@ -55,6 +78,9 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const [allRuns, setAllRuns] = useState(false);
   const [rowMenu, setRowMenu] = useState<{ task: Task; at: MenuAt } | null>(null);
   const menu = useMenu();
+  const changingSkip = useRef(false);
+  const [skipBusy, setSkipBusy] = useState(false);
+  const [skipError, setSkipError] = useState("");
   // A touch screen sends no right click (iOS Safari has no contextmenu on long press): the footer names it only where it exists.
   const noHover = useMedia(NO_HOVER);
   const nowMs = useNow(30_000);
@@ -67,7 +93,7 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
     setLauncherNames({});
     // Each computer's catalog is authoritative as soon as it answers.
     for (const id of machines) {
-      void machineLaunchers(id, { purpose: "task", manager: manager ?? undefined, signal: controller.signal }).then(
+      void machineLaunchers(id, { purpose: "task", manager: origin.chosen ?? undefined, signal: controller.signal }).then(
         ({ launchers }) => {
           if (!controller.signal.aborted) setLauncherNames((known) => ({ ...known, [id]: launchers }));
         },
@@ -75,12 +101,16 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
       );
     }
     return () => controller.abort();
-  }, [tasks, manager]);
+  }, [tasks, origin]);
 
   const load = useCallback(async () => {
+    if (!current()) return;
     const mine = ++seq.current;
-    const [task, r] = await Promise.allSettled([api<{ tasks: Task[] }>("/assistant/tasks"), api<{ runs: Run[] }>("/assistant/runs")]);
-    if (mine !== seq.current) return; // a newer load (a toggle's) won
+    const [task, r] = await Promise.allSettled([
+      api<{ tasks: Task[] }>("/assistant/tasks", readOptions),
+      api<{ runs: Run[] }>("/assistant/runs", readOptions),
+    ]);
+    if (mine !== seq.current || !current()) return;
     if (task.status === "fulfilled") {
       setTasks(task.value.tasks ?? []);
       setError("");
@@ -89,7 +119,7 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
       setRuns(r.value.runs ?? []);
       setRunsError("");
     } else setRunsError(errorText(r.reason));
-  }, []);
+  }, [current, readOptions]);
 
   useEffect(() => {
     void load();
@@ -110,13 +140,16 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   }, [load]);
 
   const toggle = async (task: Task, on: boolean) => {
+    if (!current()) return;
     const next = { ...task, enabled: on };
     setTasks((list) => list?.map((x) => (x.id === task.id ? next : x)) ?? list);
     seq.current++; // a load already on its way would put the old value back
     try {
-      const r = await api<{ task: Task }>(`/assistant/tasks/${enc(task.id)}`, { method: "PUT", json: taskBody(next, task) });
+      const r = await api<{ task: Task }>(`/assistant/tasks/${enc(task.id)}`, { ...readOptions, method: "PUT", json: taskBody(next, task) });
+      if (!current()) return;
       setTasks((list) => list?.map((x) => (x.id === task.id ? r.task : x)) ?? list);
     } catch (e) {
+      if (!current()) return;
       // put the row back first: the reload below fails too when the hub is unreachable, and keeps the list it has.
       // Only while it still shows this change: a newer toggle or load already replaced it otherwise.
       setTasks((list) => list?.map((x) => (x === next ? task : x)) ?? list);
@@ -136,12 +169,15 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 
   // A row's right click (iOS / Mac contextMenu): "Run now" opens the run's conversation, as the editor's does.
   const runNow = async (task: Task) => {
+    if (!current()) return;
     if (task.repeat === "once") setTasks((list) => list?.filter((x) => x.id !== task.id) ?? list); // a one-off runs once
     try {
-      const r = await api<{ session_id: string }>(`/assistant/tasks/${enc(task.id)}/run`, { method: "POST", json: {} });
+      const r = await api<{ session_id: string }>(`/assistant/tasks/${enc(task.id)}/run`, { ...readOptions, method: "POST", json: {} });
+      if (!current()) return;
       toast(t("assistant-taskeditor.run_started", { title: taskTitle(task) }), "ok");
-      navigate(conversationPage(r.session_id, undefined, shownManager()));
+      navigate(conversationPage(r.session_id, undefined, origin.manager));
     } catch (e) {
+      if (!current()) return;
       toast(e instanceof ApiError && e.status === 409 ? e.message || t("assistant-taskeditor.still_running") : errorText(e), "error");
       // the one-off did not run: bring it back, as toggle does, whether or not the reload can read the list
       if (task.repeat === "once") setTasks((list) => (list && !list.some((x) => x.id === task.id) ? [...list, task] : list));
@@ -149,19 +185,68 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
     }
   };
   const remove = async (task: Task) => {
+    if (!current()) return;
     try {
-      await api(`/assistant/tasks/${enc(task.id)}`, { method: "DELETE" });
+      await api(`/assistant/tasks/${enc(task.id)}`, { ...readOptions, method: "DELETE" });
+      if (!current()) return;
       toast(t("assistant-taskeditor.deleted", { title: taskTitle(task) }), "ok");
       deleted(task);
     } catch (e) {
-      toast(errorText(e), "error");
+      if (current()) toast(errorText(e), "error");
     }
   };
-  const rowItems = (task: Task): MenuItem[] => [
-    { key: "run", label: t("assistant-routines.menu_run"), icon: "play", onSelect: () => void runNow(task) },
-    { key: "edit", label: t("assistant-routines.menu_edit"), icon: "pencil", onSelect: () => setEditing(task) },
-    { key: "delete", label: t("assistant-routines.menu_delete"), icon: "trash", danger: true, divider: true, closes: true, confirm: t("assistant-routines.menu_delete_confirm"), onSelect: () => void remove(task) },
-  ];
+  const changeSkip = async (task: Task, selected: SkipNextTarget) => {
+    if (changingSkip.current || !current()) return;
+    const latest = tasks?.find((row) => row.id === task.id);
+    const currentTarget = latest && skipNextTarget(latest);
+    if (!currentTarget || currentTarget.at !== selected.at || currentTarget.cancel !== selected.cancel || currentTarget.token !== selected.token) {
+      setSkipError(t("assistant-routines.skip_conflict"));
+      void load();
+      return;
+    }
+
+    changingSkip.current = true;
+    setSkipBusy(true);
+    setSkipError("");
+    const mine = ++seq.current;
+    const path = `/assistant/tasks/${enc(task.id)}/skip-next`;
+    const options = { ...readOptions, headers: stampedHeaders(origin.manager) };
+    try {
+      const reply = selected.cancel
+        ? await api<{ task: Task }>(`${path}?at=${enc(selected.at)}&token=${enc(selected.token)}`, { ...options, method: "DELETE" })
+        : await api<{ task: Task }>(path, { ...options, method: "POST", json: { at: selected.at } });
+      if (!current()) return;
+      if (seq.current === mine && reply.task?.id === task.id) {
+        setTasks((list) => list?.map((row) => row.id === task.id ? reply.task : row) ?? list);
+      }
+      void load();
+    } catch (failure) {
+      if (!current()) return;
+      setSkipError(failure instanceof ApiError && failure.status === 409
+        ? t("assistant-routines.skip_conflict")
+        : t("assistant-routines.skip_failed", { error: errorText(failure) }));
+      void load();
+    } finally {
+      changingSkip.current = false;
+      if (current()) setSkipBusy(false);
+    }
+  };
+  const rowItems = (task: Task): MenuItem[] => {
+    const target = skipNextTarget(task);
+    return [
+      { key: "run", label: t("assistant-routines.menu_run"), icon: "play", onSelect: () => void runNow(task) },
+      ...(target ? [{
+        key: "skip-next",
+        label: t(target.cancel ? "assistant-routines.menu_cancel_skip" : "assistant-routines.menu_skip_next"),
+        detail: momentLabel(target.time, now),
+        icon: target.cancel ? "undo" as const : "minus" as const,
+        disabled: skipBusy,
+        onSelect: () => void changeSkip(task, target),
+      }] : []),
+      { key: "edit", label: t("assistant-routines.menu_edit"), icon: "pencil", onSelect: () => setEditing(task) },
+      { key: "delete", label: t("assistant-routines.menu_delete"), icon: "trash", danger: true, divider: true, closes: true, confirm: t("assistant-routines.menu_delete_confirm"), onSelect: () => void remove(task) },
+    ];
+  };
   const openRowMenu = (task: Task) => (at: MenuAt) => setRowMenu({ task, at });
 
   const items: MenuItem[] = [
@@ -197,6 +282,10 @@ export function Routines({ onToggleSidebar }: { onToggleSidebar: () => void }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[1120px] flex-col gap-6 px-4 py-6 sm:px-8 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1">
+            {skipError && <div className="mb-4 flex items-center gap-3 rounded-card bg-surface px-4 py-3 shadow-card">
+              <p role="alert" className="min-w-0 flex-1 break-words text-meta text-red">{skipError}</p>
+              <Button tone="quiet" onClick={() => setSkipError("")}>{t("ui-atoms.close")}</Button>
+            </div>}
             {tasks === null && !error && (
               <div className="flex justify-center py-16">
                 <Loading />
@@ -332,6 +421,7 @@ function TaskRow({ task, launchers, now, chats, onOpen, onMenu, onToggle }: { ta
   const menu = contextMenuProps(onMenu);
   return (
     <div>
+    <div className={cx("flex items-start gap-3 px-4 transition-colors hover:bg-hover focus-within:bg-hover", chats.length > 0 ? "pt-3 pb-1.5" : "py-3")}>
     <div
       role="button"
       tabIndex={0}
@@ -346,7 +436,7 @@ function TaskRow({ task, launchers, now, chats, onOpen, onMenu, onToggle }: { ta
         }
       }}
       aria-label={t("assistant-routines.row_label", { title: taskTitle(task), rule: ruleText(task), next })}
-      className={cx("flex cursor-pointer items-start gap-3 px-4 transition-colors hover:bg-hover focus-visible:bg-hover focus-visible:outline-none", chats.length > 0 ? "pt-3 pb-1.5" : "py-3")}
+      className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 focus-visible:outline-none"
     >
       <span className={cx("mt-0.5", !task.enabled && "opacity-60")}>
         <IconTile icon={taskIcon(task)} tone={with_?.danger ? "red" : task.enabled ? "accent" : "muted"} />
@@ -379,9 +469,12 @@ function TaskRow({ task, launchers, now, chats, onOpen, onMenu, onToggle }: { ta
           </div>
         )}
       </div>
+    </div>
       <span className="mt-1.5">
         <Switch checked={task.enabled} label={task.enabled ? t("assistant-routines.turn_off", { title: taskTitle(task) }) : t("assistant-routines.turn_on", { title: taskTitle(task) })} onChange={onToggle} />
       </span>
+      {skipNextTarget(task) && <IconButton icon="more" label={t("assistant-routines.menu_actions", { title: taskTitle(task) })}
+        onClick={(event) => onMenu({ anchor: event.currentTarget })} />}
     </div>
       {chats.length > 0 && (
         // its conversations (#2824), under the row (not inside its button): a tap opens one

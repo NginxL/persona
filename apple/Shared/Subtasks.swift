@@ -1,7 +1,7 @@
 import Foundation
 
 extension Session {
-    /// A Codex agent, by its agent or where it was read from (Android's `hasCodexIdentity`). TRAEX is not: only Codex's
+    /// A Codex agent, by its agent or where it was read from (Android's `hasCodexIdentity`). TRAE CLI is not: only Codex's
     /// provenance defines the hierarchy below.
     nonisolated var hasCodexIdentity: Bool {
         agent == "codex" || (sourceKind?.hasPrefix("codex_") ?? false)

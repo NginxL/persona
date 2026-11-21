@@ -338,6 +338,7 @@ func (s *Service) snapshotOld() {
 // ProfileChanged makes the next message take a new snapshot (the time zone changed), and the settings be read again
 // (the hub's defaults for them changed, or someone changed them behind the assistant's back).
 func (s *Service) ProfileChanged(context.Context) {
+	s.mcpChanges.notify() // language/settings changes invalidate the model's tool descriptions too
 	cs := &s.live
 	cs.mu.Lock()
 	cs.snap, cs.at = nil, time.Time{}

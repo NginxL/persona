@@ -278,11 +278,14 @@ func (n *Node) commitCodexTakeover(ctx context.Context, id, token string, confir
 	return n.sessionFor(id, a), nil
 }
 
+// Takeover has its own budget for joining an existing thread on the shared server.
+const codexTakeoverWait = 60 * time.Second
+
 func (n *Node) waitCodexTakeover(ctx context.Context, id, pane string) error {
-	wait, cancel := context.WithTimeout(ctx, codexStartWait)
+	wait, cancel := context.WithTimeout(ctx, codexTakeoverWait)
 	defer cancel()
 	for {
-		if err := n.waitCodexBox(wait, pane); err != nil {
+		if err := n.waitCodexBox(wait, pane, codexTakeoverWait); err != nil {
 			if wait.Err() != nil {
 				return takeoverRefusal("not_ready")
 			}

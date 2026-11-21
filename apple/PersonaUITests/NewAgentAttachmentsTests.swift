@@ -114,6 +114,56 @@ final class NewAgentAttachmentsTests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "newChat.codexNote").firstMatch.exists)
     }
 
+    /// An omp launcher (docs/integrations/omp.md), against a mock started with MOCK_OMP=1 too: no Permissions & Thinking,
+    /// no attachments (the photo picked before says why), and the first message goes with the start, which sets no mode,
+    /// effort, model or ultracode and is not async (the node refuses those for omp).
+    @MainActor func testOmpStartsWithItsFirstMessageAndNoOptions() throws {
+        // On the server: a computer of the assistant whose computers New Agent offers, so the sheet keeps it (and the
+        // launcher picked on it) rather than falling back to another one.
+        openNewAgent(attaching: "photo", machine: "server")
+        see(app.buttons["newChat.launcher"], "launcher row", timeout: 30)
+        // Claude Code first: its modes are offered, so their absence below is omp's. The form makes only the rows on
+        // screen (recent setups above can push the section below it).
+        reveal(app.staticTexts["权限与思考"], "Claude Code's Permissions & Thinking", timeout: 20)
+        reveal(app.buttons["newChat.launcher"], "launcher row", up: false).tap()
+        let pick = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "omp")).firstMatch
+        guard pick.waitForExistence(timeout: 10) else { throw XCTSkip("needs MOCK_OMP=1: no omp launcher listed") }
+        pick.tap()
+        see(app.staticTexts["omp"], "launcher picked")
+        // First Message on screen: Permissions & Thinking, just above it, would be made too.
+        reveal(app.buttons["移除图片 1"], "the photo's ×", timeout: 30)
+        XCTAssertFalse(app.staticTexts["权限与思考"].exists, "no Permissions & Thinking for omp")
+        XCTAssertFalse(app.staticTexts["思考强度"].exists, "no Thinking Effort for omp")
+        XCTAssertFalse(app.buttons["newChat.attach"].exists, "no add menu for omp")
+        let note = reveal(app.descendants(matching: .any).matching(identifier: "newChat.codexNote").firstMatch, "the web's words")
+        XCTAssertTrue(note.label.contains("换一个启动器"), note.label)
+        let start = see(button("开始对话"), "开始对话")
+        XCTAssertFalse(start.isEnabled)
+        // The line's text, not its icon, which carries the same identifier.
+        let why = see(app.staticTexts.matching(identifier: "newChat.notReady").firstMatch, "why Start Chat waits")
+        XCTAssertTrue(why.label.contains("omp 不能带附件"), why.label)
+        nudge()
+        shot("new-agent-omp")
+        app.buttons["移除图片 1"].tap()
+        let prompt = promptField()
+        prompt.tap()
+        prompt.typeText("整理 README")
+        usleep(1_500_000) // the keyboard settled
+        shot("new-agent-omp-typing")
+        wait("nothing attached, the omp start can go") { start.isEnabled }
+        start.tap()
+        wait("POST /api/v1/sessions sent") { started().last?["launcher"] as? String == "omp" }
+        let body = started().last ?? [:]
+        XCTAssertEqual(body["prompt"] as? String, "整理 README", "the first message goes with the start")
+        for key in ["async", "permission_mode", "effort", "model", "ultracode"] {
+            XCTAssertNil(body[key], "an omp start sets no \(key)")
+        }
+        XCTAssertFalse(app.navigationBars["新对话"].waitForExistence(timeout: 5), "the sheet closes on start")
+        XCTAssertNil(sentContaining("整理 README"), "no first message sent after the start")
+        see(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "整理 README")).firstMatch, "the first message on screen")
+        shot("new-agent-omp-started")
+    }
+
     /// A to-do handed to a new Agent: the same row, and the to-do's context block still first in the message.
     @MainActor func testToDoHandoffKeepsItsContextFirst() throws {
         launch(["-tab", "assistant", "-openShellPage", "todos", "-openNewAgentAttachments", "photo"])

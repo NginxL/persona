@@ -15,20 +15,27 @@ final class PushHealthNoticeUITests: XCTestCase {
         self.hub = hub
     }
 
+    /// `PERSONA_ORIENTATION=landscape`: the captures held sideways (the Duo open on its side), like `ComposerExpandTests`.
+    private var landscape: Bool { ProcessInfo.processInfo.environment["PERSONA_ORIENTATION"] == "landscape" }
+
     override func tearDown() {
+        if landscape { XCUIDevice.shared.orientation = .portrait }
         app?.terminate()
         super.tearDown()
     }
 
-    @MainActor private func launch(_ sample: String, look: String = "light", largest: Bool = false) {
+    /// `keepClosed`: read the ✕ an earlier launch remembered (#12319); otherwise every launch starts with none closed.
+    @MainActor private func launch(_ sample: String, look: String = "light", largest: Bool = false, keepClosed: Bool = false) {
         app?.terminate()
         app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-app.tab", "assistant", "-tab", "assistant",
                                "-openAssistant", "server/b2e4d6f8-0000-4000-8000-000000000001",
                                "-showPushHealth", sample, "-ui.scheme", look]
+            + (keepClosed ? [] : ["-pushNotice.dismissed", "{}"])
             + (largest ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
         app.launchPinned()
+        if landscape { XCUIDevice.shared.orientation = .landscapeLeft }
 
         // Answer only the system's notification question. A previously authorized simulator shows no alert.
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -59,6 +66,27 @@ final class PushHealthNoticeUITests: XCTestCase {
         XCTAssertFalse(notice.waitForExistence(timeout: 2), "a healthy direct push route must not show the notice")
     }
 
+    /// #12319: the ✕ hides the notice and the next launch remembers; another cause shows its own notice, and pushes
+    /// reaching the device again forget the ✕. Settings › Notifications keeps the status.
+    @MainActor func testClosingTheNoticeIsRememberedUntilItsCauseChanges() {
+        launch("unreachable")
+        let close = requireNotice().buttons["notice.dismiss"]
+        XCTAssertTrue(close.isHittable, "the notice has no visible close button:\n\(app.debugDescription)")
+        XCTAssertEqual(close.label, "隐藏")
+        close.tap()
+        XCTAssertTrue(notice.waitForNonExistence(timeout: 5), "the ✕ did not hide the notice")
+
+        launch("unreachable", keepClosed: true)
+        XCTAssertFalse(notice.waitForExistence(timeout: 3), "a closed notice came back on the next launch")
+
+        launch("moved", keepClosed: true)
+        _ = requireNotice()
+
+        launch("direct", keepClosed: true)
+        launch("unreachable", keepClosed: true)
+        _ = requireNotice()
+    }
+
     @MainActor func testNoticeUsesPlainLanguageAndOneStatusSpecificRepairAction() {
         launch("unreachable")
         let notice = requireNotice()
@@ -72,8 +100,9 @@ final class PushHealthNoticeUITests: XCTestCase {
                            "engineering detail '\(detail)' is the primary message: \(primary)")
         }
 
-        XCTAssertEqual(notice.buttons.count, 1, "the notice must offer exactly one repair action")
-        let action = notice.buttons.firstMatch
+        let repairs = notice.buttons.matching(NSPredicate(format: "identifier != %@", "notice.dismiss"))
+        XCTAssertEqual(repairs.count, 1, "the notice must offer exactly one repair action besides its ✕")
+        let action = notice.buttons["pushHealth.action"]
         XCTAssertEqual(action.label, "Persona 通知设置",
                        "the action must name its actual in-app destination: \(action.label)")
         action.tap()
@@ -93,7 +122,7 @@ final class PushHealthNoticeUITests: XCTestCase {
             for look in ["light", "dark"] {
                 launch("unreachable", look: look, largest: largest)
                 let notice = requireNotice()
-                XCTAssertTrue(notice.buttons.firstMatch.isHittable,
+                XCTAssertTrue(notice.buttons["pushHealth.action"].isHittable && notice.buttons["notice.dismiss"].isHittable,
                               "the repair action is not visible at \(look), largest=\(largest)")
                 shot(look: look, largest: largest)
             }
@@ -109,7 +138,7 @@ final class PushHealthNoticeUITests: XCTestCase {
             break
         }
         let image = app.screenshot()
-        let name = "push-health-notice-\(look)-\(largest ? "largest" : "default")-\(UITestStyle.name)"
+        let name = "push-health-notice-\(look)-\(largest ? "largest" : "default")\(landscape ? "-landscape" : "")-\(UITestStyle.name)"
         let attachment = XCTAttachment(screenshot: image)
         attachment.name = name
         attachment.lifetime = .keepAlways

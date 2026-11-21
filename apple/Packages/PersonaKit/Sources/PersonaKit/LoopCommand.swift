@@ -42,7 +42,7 @@ public enum LoopCommand {
                         missing: false)
     }
 
-    /// Claude Code has /loop; Codex, TRAEX and other runtimes do not, and the assistant's composer offers no commands
+    /// Claude Code has /loop; Codex, TRAE CLI and other runtimes do not, and the assistant's composer offers no commands
     /// (as on the web).
     public static func offered(agent: String?, sourceKind: String?, assistant: Bool) -> Bool {
         guard !assistant else { return false }

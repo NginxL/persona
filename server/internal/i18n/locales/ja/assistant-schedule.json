@@ -1,4 +1,8 @@
 {
+  "skip_next_changed": "次回の実行時刻が変わりました。更新してから再試行してください。",
+  "skip_next_forbidden": "実行予定をスキップできるのはオーナーだけです。",
+  "skip_next_invalid": "有効な実行時刻を入力してください。",
+  "skip_next_owner": "あなたがスキップしました",
   "execution_context_unavailable": "タスクの会話の実行環境を確認できません。Agent を再接続して再試行してください。",
   "followup": "フォローアップ",
   "morning": "朝のまとめ",
@@ -67,5 +71,6 @@
   "todo_wait": "引き続き待つ",
   "todo_wait_cost": "次の実行時間になってもタスクが進まない可能性があります。",
   "todo_change_result": "現在の許可の範囲内で別の方法を提案するよう監督役に依頼します。",
-  "todo_wait_result": "承認済みの方法を維持し、次回の定期確認を待ちます。"
+  "todo_wait_result": "承認済みの方法を維持し、次回の定期確認を待ちます。",
+  "execution_antigravity_unavailable": "{machine} の Antigravity が切断されているか、利用できません。そのコンピュータで Antigravity を復旧してから、このタスクを再実行すると既存の会話を続けられます。"
 }

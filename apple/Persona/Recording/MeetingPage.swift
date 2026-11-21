@@ -70,6 +70,8 @@ struct MeetingPage: View {
     /// here, shown before the minutes are read again.
     @State private var handing: MeetingHandoffAsk?
     @State private var handed: MeetingHandoff?
+    /// The Agent a hand-off went to, pushed over this page with Back to it (#12006).
+    @State private var pushedAgent: SessionKey?
     @State private var minutesCards: RecordingMinutesCards.Summary?
     @State private var transcriptItems: [RecordingTimeline.Item] = []
     /// The composer's field has the keyboard: the top of the page steps aside as the bar's controls do, so the thread
@@ -144,6 +146,7 @@ struct MeetingPage: View {
             .navigationDestination(item: $transcriptAt) { focus in
                 MeetingTranscriptPage(id: id, exchanges: exchanges, focus: focus)
             }
+            .pushedAgentChat($pushedAgent)
     }
 
     @ViewBuilder private func liveLayout(_ entry: RecordingEntry) -> some View {
@@ -711,11 +714,12 @@ struct MeetingPage: View {
         return minutes.ready != nil || sync.status(entry) == .synced
     }
 
-    /// The Agent a hand-off went to, its conversation opened over the page's sheet (closed first) or from the page.
+    /// The Agent a hand-off went to: pushed over the page, Back to it (#12006). In the recording's sheet (closed first), its
+    /// conversation opens as before.
     private func openHandedAgent(_ h: MeetingHandoff) {
         let key = SessionKey(group: model.hub?.group ?? "", machineID: h.machineID, sessionID: h.sessionID)
         close?()
-        model.open(key)
+        model.openInPage(key, push: pageAgentPush(inSheet: close != nil) { pushedAgent = $0 })
     }
 
     /// The whole map full screen: the meeting room's Map page.

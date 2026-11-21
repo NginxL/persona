@@ -3331,6 +3331,142 @@
           "task:closed"
         ]
       }
+    },
+    {
+      "name": "personal_verification_needs_you_before_ask",
+      "description": "A personal-verification task has one owner-action home, not running, shelved or completed.",
+      "source": [
+        "web/src/lib/assistant-entries.ts taskAwaitsDecision",
+        "issue #10047"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "t-personal-check",
+            "title": "Inspect the updated layout",
+            "origin": "main-chat",
+            "created_at": "2026-11-01T08:00:00Z",
+            "updated_at": "2026-11-01T08:00:00Z",
+            "seen_at": "2026-11-02T08:00:00Z",
+            "agents": [
+              {
+                "machine_id": "m",
+                "session_id": "check-agent",
+                "linked_at": "2026-11-01T08:00:00Z"
+              }
+            ],
+            "delivery": {
+              "state": "live",
+              "at": "2026-11-01T08:00:00Z"
+            },
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "user_check",
+              "reviews": [
+                {
+                  "at": "2026-11-01T08:00:00Z",
+                  "verdict": "accepted",
+                  "user_check": true
+                }
+              ]
+            }
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "check-agent",
+            "title": "Layout review",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-01T08:00:00Z"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-personal-check"
+        ],
+        "running": [],
+        "shelved": []
+      }
+    },
+    {
+      "name": "personal_verification_needs_you_with_ask",
+      "description": "A personal-verification task has one owner-action home, not running, shelved or completed.",
+      "source": [
+        "web/src/lib/assistant-entries.ts taskAwaitsDecision",
+        "issue #10047"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "t-personal-check",
+            "title": "Inspect the updated layout",
+            "origin": "main-chat",
+            "created_at": "2026-11-01T08:00:00Z",
+            "updated_at": "2026-11-01T08:00:00Z",
+            "seen_at": "2026-11-02T08:00:00Z",
+            "agents": [
+              {
+                "machine_id": "m",
+                "session_id": "check-agent",
+                "linked_at": "2026-11-01T08:00:00Z"
+              }
+            ],
+            "delivery": {
+              "state": "live",
+              "at": "2026-11-01T08:00:00Z"
+            },
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "user_check",
+              "reviews": [
+                {
+                  "at": "2026-11-01T08:00:00Z",
+                  "verdict": "accepted",
+                  "user_check": true
+                }
+              ]
+            },
+            "ask": {
+              "verdict": "Inspect the layout",
+              "asked_at": "2026-11-01T08:00:00Z"
+            }
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "m",
+            "session_id": "check-agent",
+            "title": "Layout review",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-01T08:00:00Z"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-personal-check"
+        ],
+        "running": [],
+        "shelved": []
+      }
     }
   ]
 }

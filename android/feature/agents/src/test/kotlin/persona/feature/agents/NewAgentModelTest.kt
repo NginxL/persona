@@ -2,6 +2,7 @@ package persona.feature.agents
 
 import persona.core.designsystem.matches
 import androidx.lifecycle.viewModelScope
+import persona.core.contracts.JsonCodec
 import persona.core.contracts.Machine
 import persona.core.contracts.Session
 import persona.core.contracts.api.*
@@ -297,9 +298,236 @@ class NewAgentModelTest {
 
     private data class Call(val machine: String, val launcher: String, val refresh: Boolean)
 
-    private class MemoryStore : AgentCreationStore {
+    private fun ompModels(models: String = "[]") = JsonCodec.decodeFromString<LauncherModels>(
+        """{"agent":"omp","models":$models,"supports_start_model":true}""")
+
+    @Test fun ompAcceptsAnUnlistedModelWithOrWithoutSuggestionsAndKeepsItsOwnOtherDefaults() = test {
+        val launcher = AgentLauncher("omp", agentType = "omp", permissionModes = listOf("default", "plan"))
+        for (catalogue in listOf(ompModels(), ompModels("""[{"id":"studio/listed"}]"""))) {
+            val service = service().apply {
+                available = listOf(launcher)
+                lists = mapOf(launcher.name to catalogue)
+            }
+            val former = RecentSetup("first", "/code", launcher.name, "previous/model", "omp")
+            val store = MemoryStore(listOf(former)).apply { saved["first"] = AgentDefaults("/code", launcher.name, "plan", "high") }
+            val form = NewAgentViewModel(service, store, machines)
+            try {
+                advanceUntilIdle()
+                assertTrue(form.state.value.canPickModel)
+                assertNull(form.state.value.sentModel)
+                form.useRecent(former)
+                advanceUntilIdle()
+                assertEquals("previous/model", form.state.value.sentModel)
+                assertFalse(form.state.value.claudeModes)
+                assertNull(form.state.value.providerModes)
+                form.providerMode("plan")
+                form.providerEffort("high")
+                form.ultracode(true)
+                form.pickModel("openai/gpt-5.2")
+                form.reloadModels()
+                advanceUntilIdle()
+                assertEquals("openai/gpt-5.2", form.state.value.sentModel)
+                form.pickModel("")
+                assertNull(form.state.value.sentModel)
+                if (catalogue.models.isNotEmpty()) form.pickModel("opus")
+                form.submit()
+                advanceUntilIdle()
+                val request = requireNotNull(service.request)
+                assertEquals("omp", request.agentType)
+                assertEquals(if (catalogue.models.isEmpty()) null else "opus", request.model)
+                assertNull(request.permissionMode)
+                assertNull(request.effort)
+                assertNull(request.ultracode)
+            } finally { form.viewModelScope.cancel() }
+        }
+    }
+
+    @Test fun ompRespectsListedModelsAndALockedLauncher() = test {
+        val launcher = AgentLauncher("omp", agentType = "omp")
+        val list = ompModels("""[{"id":"studio/local","name":"Local model"}]""")
+        val service = service().apply {
+            available = listOf(launcher)
+            lists = mapOf(launcher.name to list)
+        }
+        val form = NewAgentViewModel(service, MemoryStore(), machines)
+        try {
+            advanceUntilIdle()
+            form.pickModel("studio/local")
+            assertEquals("Local model", form.state.value.pickedModel?.label)
+            form.pickModel("unlisted/compact")
+            assertEquals("unlisted/compact", form.state.value.sentModel)
+            service.lists = mapOf(launcher.name to list.copy(locked = "The launcher fixes its model."))
+            form.reloadModels()
+            advanceUntilIdle()
+            assertFalse(form.state.value.canPickModel)
+            form.pickModel("opus")
+            form.submit()
+            advanceUntilIdle()
+            assertNull(requireNotNull(service.request).model)
+        } finally { form.viewModelScope.cancel() }
+    }
+    @Test fun ompModelsFollowTheRealLauncherAndCurrentHostAcrossWorkspaceAndMachineChanges() = test {
+        fun machine(hosts: String, preferred: String) = JsonCodec.decodeFromString<Machine>(
+            """{"id":"first","online":true,"engine":"herdr-both","engine_hosts":$hosts,"engine_default":"$preferred"}""")
+        val both = """["herdr","herdr-core","orca"]"""
+        val live = MutableStateFlow(listOf(machine(both, "herdr")))
+        val catalogue = ompModels("""[{"id":"studio/listed"}]""")
+        val service = service().apply {
+            available = listOf(AgentLauncher("omp", agentType = "omp"), AgentLauncher("other", agentType = "omp"))
+            lists = mapOf("omp" to catalogue, "other" to catalogue)
+        }
+        val form = NewAgentViewModel(service, MemoryStore(), live)
+        try {
+            advanceUntilIdle()
+            form.pickModel("studio/listed")
+            assertEquals("studio/listed", form.state.value.sentModel)
+            form.selection(form.state.value.selection.copy(launcher = "other"))
+            advanceUntilIdle()
+            assertFalse(form.state.value.canPickModel)
+            form.pickModel("studio/listed")
+            assertNull(form.state.value.sentModel)
+            form.selection(form.state.value.selection.copy(launcher = "omp"))
+            advanceUntilIdle()
+            form.pickModel("studio/typed")
+            val workspace = AgentWorkspace(machineId = "first", source = "orca", sourceId = "project", cwd = "/code")
+            form.pickWorkspace(workspace)
+            assertFalse(form.state.value.canPickModel)
+            assertNull(form.state.value.sentModel)
+            form.chooseByFolder()
+            assertTrue(form.state.value.canPickModel)
+            assertNull(form.state.value.sentModel)
+            live.value = listOf(machine(both, "herdr-core"))
+            advanceUntilIdle()
+            assertFalse(form.state.value.canPickModel)
+            form.pickWorkspace(workspace.copy(source = "herdr"))
+            assertTrue(form.state.value.canPickModel)
+            form.chooseByFolder()
+            live.value = listOf(Machine("first", online = true, engine = "herdr-both"))
+            advanceUntilIdle()
+            assertTrue(form.state.value.canPickModel)
+            form.pickModel("studio/typed")
+            live.value = listOf(machine("[]", ""))
+            // Submit even before the collector redraws the old machine. The request must use its current host.
+            form.submit()
+            advanceUntilIdle()
+            assertFalse(form.state.value.canPickModel)
+            assertNull(requireNotNull(service.request).model)
+        } finally { form.viewModelScope.cancel() }
+    }
+
+    @Test fun ompModelsUseOnlyTheNativeLauncherSource() = test {
+        for (source in listOf("zshrc", "path", "builtin", "persona")) {
+            val service = service().apply {
+                available = listOf(JsonCodec.decodeFromString<AgentLauncher>(
+                    """{"name":"omp","agent":"omp","source":"$source"}"""))
+                lists = mapOf("omp" to ompModels("""[{"id":"studio/listed"}]"""))
+            }
+            val form = NewAgentViewModel(service, MemoryStore(), machines)
+            try {
+                advanceUntilIdle()
+                val native = source in setOf("zshrc", "path", "builtin")
+                assertEquals(source, native, form.state.value.canPickModel)
+                form.pickModel("studio/listed")
+                assertEquals(source, if (native) "studio/listed" else null, form.state.value.sentModel)
+            } finally { form.viewModelScope.cancel() }
+        }
+    }
+
+    @Test fun ompRuntimeKeepsItsOwnAdvertisedModelsAndOptionsWithoutNativeTyping() = test {
+        for (source in listOf("omp-provider", "paseo")) {
+            val service = service().apply {
+                available = listOf(JsonCodec.decodeFromString<AgentLauncher>(
+                    """{"name":"omp","agent":"omp","source":"$source","permission_modes":["default","plan"]}"""))
+                lists = mapOf("omp" to LauncherModels("omp", listOf(AgentModel("runtime-model", efforts = listOf("high")))))
+            }
+            val live = MutableStateFlow(listOf(Machine("first", online = true, engine = "paseo")))
+            val form = NewAgentViewModel(service, MemoryStore(), live)
+            try {
+                advanceUntilIdle()
+                assertTrue(form.state.value.canPickModel)
+                form.pickModel("unlisted/model")
+                assertNull(form.state.value.sentModel)
+                form.pickModel("runtime-model")
+                assertEquals(listOf("default", "plan"), form.state.value.providerModes)
+                form.providerMode("plan")
+                form.providerEffort("high")
+                form.submit()
+                advanceUntilIdle()
+                val start = requireNotNull(service.request)
+                assertEquals("runtime-model", start.model)
+                assertEquals("plan", start.permissionMode)
+                assertEquals("high", start.effort)
+                assertNull(start.ultracode)
+            } finally { form.viewModelScope.cancel() }
+        }
+    }
+
+    @Test fun ompKeepsTheComputerDefaultWhenTheNodeLacksOrLocksStartModels() = test {
+        val preset = PickerTier("Review", "omp", model = "studio/listed")
+        val legacy = LauncherModels("omp", listOf(AgentModel("studio/listed")))
+        val refused = JsonCodec.decodeFromString<LauncherModels>(
+            """{"agent":"omp","models":[{"id":"studio/listed"}],"supports_start_model":false}""")
+        for (catalogue in listOf(null, LauncherModels("omp"), legacy, refused, ompModels().copy(locked = "Pinned"),
+            ompModels().copy(agent = "codex"))) {
+            val service = service().apply {
+                available = listOf(AgentLauncher("omp", agentType = "omp"))
+                tiers = listOf(preset)
+                lists = catalogue?.let { mapOf("omp" to it) }.orEmpty()
+            }
+            val form = NewAgentViewModel(service, MemoryStore(), machines)
+            try {
+                advanceUntilIdle()
+                assertFalse(form.state.value.canPickModel)
+                form.pickModel("studio/listed")
+                form.pickModel("studio/typed")
+                assertNull(form.state.value.sentModel)
+                form.pickTier(preset)
+                advanceUntilIdle()
+                assertNull(form.state.value.sentModel)
+                assertTrue(form.state.value.presetLeftOut.isNotEmpty())
+                form.submit()
+                advanceUntilIdle()
+                val request = requireNotNull(service.request)
+                assertEquals("omp", request.launcher)
+                assertNull(request.model)
+            } finally { form.viewModelScope.cancel() }
+        }
+    }
+
+    @Test fun ompRefreshFailureWithdrawsThePreviousCapabilityUntilTheNodeConfirmsItAgain() = test {
+        val service = service().apply {
+            available = listOf(AgentLauncher("omp", agentType = "omp"))
+            lists = mapOf("omp" to ompModels())
+        }
+        val form = NewAgentViewModel(service, MemoryStore(), machines)
+        try {
+            advanceUntilIdle()
+            form.pickModel("studio/selected")
+            assertEquals("studio/selected", form.state.value.sentModel)
+            service.failure = IOException("Computer unavailable")
+            form.reloadModels()
+            advanceUntilIdle()
+            assertNotNull(form.state.value.models.error)
+            assertFalse(form.state.value.canPickModel)
+            assertNull(form.state.value.sentModel)
+            service.failure = null
+            form.reloadModels()
+            advanceUntilIdle()
+            assertTrue(form.state.value.canPickModel)
+            form.pickModel("studio/selected")
+            service.failure = IOException("Computer unavailable")
+            form.reloadModels()
+            advanceUntilIdle()
+            form.submit()
+            advanceUntilIdle()
+            assertNull(requireNotNull(service.request).model)
+        } finally { form.viewModelScope.cancel() }
+    }
+
+    private class MemoryStore(private val recents: List<RecentSetup> = emptyList()) : AgentCreationStore {
         var operation: AgentStartOperation? = null
         val saved = mutableMapOf<String, AgentDefaults>()
+        override suspend fun recentSetups(scope: String) = recents
         override suspend fun lastMachine(scope: String) = "first"
         override suspend fun defaults(scope: String, machine: String) = saved[machine] ?: AgentDefaults()
         override suspend fun saveDefaults(scope: String, machine: String, defaults: AgentDefaults) { saved[machine] = defaults }
@@ -312,6 +540,7 @@ class NewAgentModelTest {
         var starts = 0
         var request: AgentStartRequest? = null
         var available = listOf(AgentLauncher("claude"))
+        var tiers = emptyList<PickerTier>()
         var model: ModelPurposeDetail? = null
         /** Absent launchers answer like an older hub (null). */
         var lists = emptyMap<String, LauncherModels>()
@@ -319,6 +548,7 @@ class NewAgentModelTest {
         var gate: CompletableDeferred<Unit>? = null
         val calls = mutableListOf<Call>()
         override suspend fun launchers(machineId: String) = available
+        override suspend fun launcherList(machineId: String) = AssistantLaunchers(launchers(machineId), tiers = tiers)
         override suspend fun directories(machineId: String, path: String) = AgentDirectories(path.ifEmpty { "/code" })
         override suspend fun start(request: AgentStartRequest, operationId: String): AgentStartResult {
             starts++

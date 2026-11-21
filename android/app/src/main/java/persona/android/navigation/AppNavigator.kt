@@ -109,6 +109,20 @@ internal class AppNavigator(
         if (to != from && page != tabRoot(to) && (page != shown[to] || page == opened)) openedFrom[page] = from
     }
 
+    /** A sidebar pick changes the displayed Agent root while retaining the logical Agents anchor. */
+    fun pickSidebarAgent(key: NavKey) {
+        val stack = stacks.getValue(AppTab.Agents)
+        // Use the existing key for the same session, even when the list omits kind or the key has saved provenance.
+        val target = (key as? ChatRoute)?.let { chat -> stack.firstOrNull { sameKindlessTarget(it, chat) } } ?: key
+        noteDirectOpen(key)
+        openedFrom.remove(target)
+        replaceBackStack(stack, listOf(AgentsRoute, target))
+        if (target is ChatRoute) {
+            stacks.getValue(AppTab.Persona).removeAll { it is ChatRoute && sameConversation(it, target) }
+        }
+        onSelectTab(AppTab.Agents)
+    }
+
     /** Record a direct ResolvedRoute open without changing its route, card, focus, or saved UI state. */
     fun noteOpened(key: NavKey) {
         val chat = key.chat() ?: return

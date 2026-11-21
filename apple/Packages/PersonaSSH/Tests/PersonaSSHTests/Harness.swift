@@ -81,6 +81,32 @@ final class TestSSHD: @unchecked Sendable {
 
     var log: String { (try? String(contentsOf: dir.appending(path: "sshd.log"), encoding: .utf8)) ?? "" }
 
+    /// Preserve timing and connection/authentication events, not the fixture username or public-key fingerprint.
+    /// These are test-generated credentials; the snapshot still redacts them before entering the retained trace.
+    /// Bound the redacted payload, not raw input: both line and UTF-8 byte caps get an explicit truncation marker.
+    func traceFailure() {
+        let limit = 65_536
+        var bytes = 0
+        var truncated = false
+        for (index, line) in log.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            if index == 1000 {
+                truncated = true
+                break
+            }
+            let redacted = line
+                .replacingOccurrences(of: user, with: "<test-user>")
+                .replacingOccurrences(of: "SHA256:[A-Za-z0-9+/=]+", with: "<key-id>", options: .regularExpression)
+            let size = redacted.utf8.count
+            if bytes + size > limit {
+                truncated = true
+                break
+            }
+            trace("sshd failure | \(redacted)")
+            bytes += size
+        }
+        if truncated { trace("sshd failure | snapshot truncated at 1000 lines or \(limit) bytes") }
+    }
+
     deinit {
         stop()
         try? FileManager.default.removeItem(at: dir)
@@ -103,18 +129,22 @@ final class TestHub: @unchecked Sendable {
         let out = Pipe()
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
+        trace("mock spawn start")
         try p.run()
         process = p
+        trace("mock waiting for banner")
         // "mock hub on 127.0.0.1:<port>"
         var seen = ""
         let deadline = Date.now + 20
         while Date.now < deadline {
             let chunk = out.fileHandleForReading.availableData
             if chunk.isEmpty { break }
+            trace("mock stdout received")
             seen += String(decoding: chunk, as: UTF8.self)
             if let line = seen.split(separator: "\n").first(where: { $0.contains("mock hub on") }),
                let p = Int(line.split(separator: ":").last ?? "") {
                 port = p
+                trace("mock banner received")
                 trace("hub \(p) up")
                 return
             }
@@ -140,6 +170,9 @@ struct TestError: Error, CustomStringConvertible {
 enum Shell {
     @discardableResult
     static func run(_ path: String, _ args: [String], allowFailure: Bool = false) throws -> String {
+        let command = URL(filePath: path).lastPathComponent
+        trace("command \(command) start")
+        defer { trace("command \(command) end") }
         let p = Process()
         p.executableURL = URL(filePath: path)
         p.arguments = args
@@ -191,14 +224,4 @@ enum FreePort {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0 }
         }
     }
-}
-
-/// With PERSONA_SSH_TRACE=<file>: what the fixtures do, line by line (swift test only prints when it is done).
-func trace(_ s: String) {
-    guard let path = ProcessInfo.processInfo.environment["PERSONA_SSH_TRACE"] else { return }
-    if !FileManager.default.fileExists(atPath: path) { FileManager.default.createFile(atPath: path, contents: nil) }
-    guard let h = FileHandle(forWritingAtPath: path) else { return }
-    h.seekToEndOfFile()
-    h.write(Data((s + "\n").utf8))
-    try? h.close()
 }

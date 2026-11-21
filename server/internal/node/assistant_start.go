@@ -260,6 +260,9 @@ func (n *Node) claudeAssistantMCPAndToolsFor(id, cwd string, legacyMCP bool, too
 	}
 	mcp, _ := json.Marshal(map[string]any{"mcpServers": compat.MCPRegistrationServers(servers, legacyMCP)})
 	if inbox {
+		// Local Read is investigation. Network, shell and mutation tools keep their normal permission flow. Credential
+		// denies are appended below as individual arguments, after the legacy comma-joined MCP rules.
+		allow = append(allow, "Read")
 		allow = append(allow, n.inboxReadRules()...) // inbox_policy.go
 	}
 	allow = append(allow, healthReportRules(cwd)...) // healthdeny.go
@@ -270,6 +273,9 @@ func (n *Node) claudeAssistantMCPAndToolsFor(id, cwd string, legacyMCP bool, too
 	// One --disallowedTools with a word per rule (it takes several, up to the next flag): a path may hold a comma.
 	if len(deny) > 0 {
 		deny = []string{strings.Join(deny, ",")}
+	}
+	if inbox {
+		deny = append(deny, n.inboxSecretDenyRules()...)
 	}
 	deny = append(deny, n.healthDenyRules(cwd)...) // healthdeny.go
 	if len(deny) > 0 {

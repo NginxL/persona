@@ -314,13 +314,15 @@ type TodoEdit struct {
 	Title, Notes *string
 	InboxItem    *string
 	Done         *bool
-	SetDue       bool
-	DueAt        *time.Time
-	DueDate      *time.Time
-	SetRemind    bool
-	RemindAt     *time.Time
-	Priority     *string
-	Project      *string
+	// RestartWork starts a new work round when Done is false even if the task was already open.
+	RestartWork bool
+	SetDue      bool
+	DueAt       *time.Time
+	DueDate     *time.Time
+	SetRemind   bool
+	RemindAt    *time.Time
+	Priority    *string
+	Project     *string
 	// Origin: the conversation (or agent) the task belongs to now; a task whose supervisor was handed to another
 	// conversation moves with it (assistant/task_leader.go rehome).
 	Origin *string
@@ -353,7 +355,7 @@ func (e TodoEdit) Apply(cur *TodoRow, at time.Time) {
 				cur.DoneBy, cur.DoneReason = "", ""
 			}
 		} else {
-			if cur.DoneAt != nil {
+			if cur.DoneAt != nil || e.RestartWork {
 				cur.ReopenedAt = &at // the same stretch of work must not close it again
 			}
 			cur.DoneAt = nil
@@ -424,6 +426,7 @@ func (d *DB) EditTodo(ctx context.Context, id string, e TodoEdit, updatedAt time
 		if cur.Kind == KindConcern && cur.DoneAt == nil && e.Done != nil && *e.Done {
 			return ErrConcernUnreported // only ReportConcern closes it
 		}
+		reopening := e.Done != nil && !*e.Done && (cur.DoneAt != nil || e.RestartWork)
 		e.Apply(&cur, updatedAt)
 		_, err = tx.Exec(ctx, `UPDATE todos SET title = $2, notes = $3, done_at = $4, updated_at = $5, start_error = $6,
 			done_by = $7, done_reason = $8, reopened_at = $9, due_at = $10, due_date = $11, remind_at = $12, reminded_at = $13,
@@ -434,6 +437,13 @@ func (d *DB) EditTodo(ctx context.Context, id string, e TodoEdit, updatedAt time
 			cur.SomedayUntil, cur.RequireAcceptedAfter)
 		if err != nil {
 			return err
+		}
+		if reopening {
+			// The old Pass is stale as soon as reopened_at advances. Reset its ledger in the same commit.
+			if _, err := tx.Exec(ctx, `UPDATE todo_supervision SET state = '', pending_since = NULL, updated_at = $2
+				WHERE todo_id = $1 AND state = 'user_check' AND updated_at <= $2`, id, updatedAt); err != nil {
+				return err
+			}
 		}
 		updated = cur
 		return nil
@@ -616,10 +626,33 @@ func (d *DB) DeletedRequestGates(ctx context.Context) (map[string]bool, error) {
 	return gates, rows.Err()
 }
 
+// KeptLinks are the links through a space that its unlink, move or void keeps rather than deletes (#10941: those whose
+// directory is in the health space, since they tell the to-do's history as the space's): those to Sessions of the
+// space's computer, taken off the space, released and dismissed at At as UnlinkTodoAgent leaves a link, in the same
+// transaction as the space's write.
+type KeptLinks struct {
+	Sessions []string
+	At       time.Time
+}
+
+// keepTodoAgentsTx keeps todoID's links through via (machineID's space) that keep names, before the links through it
+// are deleted.
+func keepTodoAgentsTx(ctx context.Context, tx pgx.Tx, todoID, machineID, via string, keep KeptLinks) error {
+	if len(keep.Sessions) == 0 {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `UPDATE todo_agents SET source = 'manual', via = '',
+			released_at = COALESCE(released_at, $5), dismissed_at = COALESCE(dismissed_at, $5)
+		WHERE todo_id = $1 AND machine_id = $2 AND source = 'space' AND via = $3 AND session_id = ANY($4)`,
+		todoID, machineID, via, keep.Sessions, keep.At.UTC())
+	return err
+}
+
 // LinkTodoSpace links a project space to a todo.
-// If the space is already linked to another todo, that link is removed and its space-sourced agents are removed.
+// If the space is already linked to another todo, that link is removed and its space-sourced agents are removed, but
+// for those keep names (KeptLinks).
 // Returns the old todo ID if one was unlinked.
-func (d *DB) LinkTodoSpace(ctx context.Context, todoID, machineID, space string, linkedAt time.Time) (string, error) {
+func (d *DB) LinkTodoSpace(ctx context.Context, todoID, machineID, space string, linkedAt time.Time, keep KeptLinks) (string, error) {
 	conn, err := d.pool.Acquire(ctx)
 	if err != nil {
 		return "", err
@@ -650,6 +683,9 @@ func (d *DB) LinkTodoSpace(ctx context.Context, todoID, machineID, space string,
 					return err
 				}
 				viaKey := machineID + "/" + space
+				if err := keepTodoAgentsTx(ctx, tx, oldTodoID, machineID, viaKey, keep); err != nil {
+					return err
+				}
 				if _, err := tx.Exec(ctx, `DELETE FROM todo_agents WHERE todo_id = $1 AND source = 'space' AND via = $2`, oldTodoID, viaKey); err != nil {
 					return err
 				}
@@ -681,8 +717,9 @@ func (d *DB) LinkTodoSpace(ctx context.Context, todoID, machineID, space string,
 	return oldTodoID, nil
 }
 
-// UnlinkTodoSpace removes a space link and physically deletes source=space agents linked via this space.
-func (d *DB) UnlinkTodoSpace(ctx context.Context, todoID, machineID, space string) error {
+// UnlinkTodoSpace removes a space link and physically deletes source=space agents linked via this space, but for those
+// keep names (KeptLinks).
+func (d *DB) UnlinkTodoSpace(ctx context.Context, todoID, machineID, space string, keep KeptLinks) error {
 	conn, err := d.pool.Acquire(ctx)
 	if err != nil {
 		return err
@@ -708,6 +745,9 @@ func (d *DB) UnlinkTodoSpace(ctx context.Context, todoID, machineID, space strin
 		}
 
 		viaKey := machineID + "/" + space
+		if err := keepTodoAgentsTx(ctx, tx, todoID, machineID, viaKey, keep); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM todo_agents WHERE todo_id = $1 AND source = 'space' AND via = $2`, todoID, viaKey); err != nil {
 			return err
 		}
@@ -719,8 +759,9 @@ func (d *DB) UnlinkTodoSpace(ctx context.Context, todoID, machineID, space strin
 
 // RenameTodoSpace migrates todo_spaces and todo_agents via when a space is renamed via hub.
 // If newSpace is already linked to another todo (unique constraint conflict), the old space's
-// link is voided (deleted) rather than migrating, returning (voided: true, err: nil).
-func (d *DB) RenameTodoSpace(ctx context.Context, machineID, oldSpace, newSpace string) (bool, error) {
+// link is voided (deleted) rather than migrating, returning (voided: true, err: nil); its holder's links keep names
+// stay (KeptLinks).
+func (d *DB) RenameTodoSpace(ctx context.Context, machineID, oldSpace, newSpace string, keep KeptLinks) (bool, error) {
 	conn, err := d.pool.Acquire(ctx)
 	if err != nil {
 		return false, err
@@ -737,6 +778,16 @@ func (d *DB) RenameTodoSpace(ctx context.Context, machineID, oldSpace, newSpace 
 			// Void old link to avoid violating unique constraint.
 			voided = true
 			oldVia := machineID + "/" + oldSpace
+			var holder string
+			err := tx.QueryRow(ctx, `SELECT todo_id FROM todo_spaces WHERE machine_id = $1 AND space = $2 FOR UPDATE`, machineID, oldSpace).Scan(&holder)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if holder != "" {
+				if err := keepTodoAgentsTx(ctx, tx, holder, machineID, oldVia, keep); err != nil {
+					return err
+				}
+			}
 			if _, err := tx.Exec(ctx, `DELETE FROM todo_spaces WHERE machine_id = $1 AND space = $2`, machineID, oldSpace); err != nil {
 				return err
 			}

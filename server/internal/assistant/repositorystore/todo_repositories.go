@@ -183,6 +183,48 @@ func (d *Store) SetTodoRepositoryLinks(ctx context.Context, id, repoID string, i
 	return out, err
 }
 
+// SetTodoRepositoryLinkRoles persists a role rewrite the manager classified (e.g. a proven-foreign PR downgraded to
+// reference), serializing with interactive edits through the same revision and Todo lock.
+func (d *Store) SetTodoRepositoryLinkRoles(ctx context.Context, id string, rows []repository.TaskRepository) (repository.TaskSet, error) {
+	var out repository.TaskSet
+	err := d.Transaction(ctx, func(tx pgx.Tx) error {
+		cur, err := ReadTodoRepositoriesTx(ctx, tx, id, nil)
+		if err != nil {
+			return err
+		}
+		roles := map[string]string{}
+		for _, row := range rows {
+			for _, l := range row.Links {
+				role, perr := repository.NormalizeLinkRole(l.Role)
+				if perr != "" {
+					return perr
+				}
+				roles[l.CanonicalURL] = role
+			}
+		}
+		changed := false
+		for ri := range cur.Repositories {
+			for li := range cur.Repositories[ri].Links {
+				if role, ok := roles[cur.Repositories[ri].Links[li].CanonicalURL]; ok && cur.Repositories[ri].Links[li].Role != role {
+					cur.Repositories[ri].Links[li].Role = role
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			out = cur
+			return nil
+		}
+		if cur.Revision >= repository.MaxRevision {
+			return repository.Problem("limit")
+		}
+		cur.Revision++
+		out = cur
+		return writeTodoRepositoriesTx(ctx, tx, cur)
+	})
+	return out, err
+}
+
 func repositoryURLs(rows []repository.TaskRepository) []string {
 	urls := []string{}
 	for _, row := range rows {
@@ -246,7 +288,7 @@ func (d *Store) ImportTodoRepositoryLinkDetails(ctx context.Context, id string, 
 			}
 			canonical = append(canonical, link.CanonicalURL)
 			if source == "explicit" || !slices.Contains(seen, link.CanonicalURL) {
-				pending = append(pending, repository.LinkInput{URL: link.CanonicalURL, Title: link.Title, Resolved: in.Resolved})
+				pending = append(pending, repository.LinkInput{URL: link.CanonicalURL, Title: link.Title, Role: in.Role, Resolved: in.Resolved})
 			}
 		}
 		if len(pending) == 0 {

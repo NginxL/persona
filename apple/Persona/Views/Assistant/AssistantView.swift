@@ -199,7 +199,16 @@ struct AssistantView: View {
                                 onMachines: places ? { show(.machines) } : nil,
                                 onOpenExtension: places ? { show(.extensionPage($0)) } : { r in drawer.close(); openedExtension = r },
                                 openHealth: places ? { show(.health) } : { drawer.close(); enterHealth() },
-                                openRecordingsPage: Self.recordingsPage(places ? { show(.recordings) } : { drawer.close(); showRecordings = true }))
+                                openRecordingsPage: Self.recordingsPage(places ? { show(.recordings) } : { drawer.close(); showRecordings = true }),
+                                openStarred: sidebarStars)
+    }
+
+    private var sidebarStars: (() -> Void)? {
+        #if os(iOS)
+        { show(.starred) }
+        #else
+        nil
+        #endif
     }
 
     /// The sidebar's Recordings: `open`s the page, which shows the recording running, else Record to start one.
@@ -590,6 +599,9 @@ struct AssistantView: View {
             case .profile: if placesByValue { navPath.wrappedValue.append(ShellRoute.profile) } else { showProfile = true }
             case .routines: if placesByValue { navPath.wrappedValue.append(ShellRoute.routines) } else { showRoutines = true }
             case .knowledge: if placesByValue { navPath.wrappedValue.append(ShellRoute.knowledge) } else { showKnowledge = true }
+            #if os(iOS)
+            case .starred: navPath.wrappedValue.append(ShellRoute.starred)
+            #endif
             case .inbox: navPath.wrappedValue.append(ShellRoute.inbox)
             case .todos: navPath.wrappedValue.append(ShellRoute.todos)
             case .machines: navPath.wrappedValue.append(ShellRoute.machines)

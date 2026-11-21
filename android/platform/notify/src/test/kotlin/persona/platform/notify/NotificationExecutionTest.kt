@@ -111,6 +111,16 @@ class NotificationExecutionTest {
         assertEquals(0, center.writes)
     }
 
+    @Test fun aStaleAllowCannotApproveASecretHandoffRevealedByRefresh() = runBlocking {
+        val handoff = JsonCodec.decodeFromString<Interaction>(
+            """{"id":"request","machine_id":"machine","session_id":"session","kind":"permission","tool_name":"secret_handoff","tool_input":{"variables":[{"name":"TOKEN"}]}}""")
+        val center = Center(request).apply { remote = handoff }
+        val executor = NotificationActionExecutor(center, { error("A hand-off must not be claimed") }, { now })
+        assertEquals(NotificationActionResult.Invalid, executor.execute(request.id, "allow", null, { false }))
+        assertEquals(1, center.refreshes)
+        assertEquals(0, center.writes)
+    }
+
     @Test fun refreshExpiryLockAndDurableClaimGuardEveryResolve() = runBlocking {
         val center = Center(request)
         val claims = mutableMapOf<String, String>()

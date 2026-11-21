@@ -21,8 +21,8 @@ describe("secret references", () => {
     await setExtensionSecretReference("a b", "api_key", "op://Dev/x/y");
     await removeHandoffRule("a b", "0123456789abcdef");
     expect(calls).toEqual([
-      'PUT /api/v1/extensions/a%20b/-/secrets/api_key {"reference":"op://Dev/x/y"}',
-      "DELETE /api/v1/extensions/a%20b/-/handoff-rules/0123456789abcdef",
+      'PUT /api/v1/extensions/a%20b/-/secrets/api_key?entry_lists=1 {"reference":"op://Dev/x/y"}',
+      "DELETE /api/v1/extensions/a%20b/-/handoff-rules/0123456789abcdef?entry_lists=1",
     ]);
   });
 

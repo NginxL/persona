@@ -4,18 +4,29 @@
 # Only this machine's values are known (its config, private-words.txt, CLAUDE.local.md): see docs/operations/testing.md "Privacy scan".
 # The base is the first of origin/HEAD, origin/main, origin/master and the remote's tip that shares history with the
 # pushed commit (a clone older than a history rewrite can keep origin/HEAD on the old one). A branch that shares none
-# with them (an orphan, such as a screenshot branch) is scanned whole: every file and every commit message.
+# with them (an orphan) is scanned whole: every file and every commit message.
 # It also refuses a push whose commits change the trusted Deno adapter or what it is built from (sdk/ts/src, adapter.ts,
 # the generator) while the adapter they carry is not the one those sources build: check-deno-adapter.sh, against the
 # same base; an orphan branch has nothing to compare (#6001; docs/operations/testing.md "Trusted Deno adapter").
+# Before either, it refuses creating or updating a branch under artifacts/ or pr-assets/: screenshots belong to the PR,
+# and every clone fetches such branches (#12726; docs/operations/collaboration.md "Screenshots in PRs"). Deleting one
+# still goes through.
 set -u
 root="$(git rev-parse --show-toplevel)"
 adapter_inputs=(sdk/ts/src server/internal/extension/denohost/adapter.ts server/internal/extension/denohost/adapter.mjs
   scripts/gen/deno_adapter.sh)
 zero="0000000000000000000000000000000000000000"
 refused=""
+shots=""
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$zero" ] && continue # a deletion
+  case "$remote_ref" in
+  refs/heads/artifacts/* | refs/heads/pr-assets/*)
+    echo "pre-push: refused $remote_ref: screenshots never get a branch of their own; show them in the PR (docs/operations/collaboration.md, \"Screenshots in PRs\")" >&2
+    shots="$shots $remote_ref"
+    continue
+    ;;
+  esac
   from=""
   unrelated=""
   for ref in refs/remotes/origin/HEAD refs/remotes/origin/main refs/remotes/origin/master "$remote_sha"; do
@@ -38,6 +49,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     "$root/scripts/hooks/check-deno-adapter.sh" "$local_sha" </dev/null || refused="$refused $remote_ref"
   fi
 done
-[ -z "$refused" ] && exit 0
-echo "pre-push: refused$refused; fix what is reported above, or see docs/operations/testing.md, \"Privacy scan\" and \"Trusted Deno adapter\"" >&2
+[ -z "$refused$shots" ] && exit 0
+[ -n "$refused" ] &&
+  echo "pre-push: refused$refused; fix what is reported above, or see docs/operations/testing.md, \"Privacy scan\" and \"Trusted Deno adapter\"" >&2
 exit 1

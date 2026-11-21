@@ -72,8 +72,8 @@ struct IPhoneControlSection: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("iphone-job")
                     action(String(localized: "Cancel"), "cancel", device: nil, identifier: "iphone-cancel")
-                } else if let job = p.job, job.state == "failed", let error = job.error {
-                    line(String(localized: "Couldn't pair: \(error)"), ok: false)
+                } else if let job = p.job, let error = IPhoneControlText.jobFailure(job) {
+                    line(error, ok: false)
                 }
                 if p.devices.isEmpty {
                     if p.note == nil { line(String(localized: "No iPhone paired with this computer can be reached"), ok: false) }
@@ -176,6 +176,18 @@ struct IPhoneControlSection: View {
 
 /// How an iPhone reads in the sections that list it: one line of its state, and whether it is ready for the assistant.
 nonisolated enum IPhoneControlText {
+    static func jobFailure(_ job: ComputerJob) -> String? {
+        guard job.state == "failed" else { return nil }
+        if job.kind == "prepare" { return prepareFailure(job.error) }
+        guard let error = job.error else { return nil }
+        return job.kind == "pair" ? String(localized: "Couldn't pair: \(error)") : error
+    }
+
+    static func prepareFailure(_ reason: String?) -> String {
+        if let reason, !reason.isEmpty { return String(localized: "Couldn't get this iPhone ready: \(reason)") }
+        return String(localized: "Couldn't get this iPhone ready.")
+    }
+
     static func state(_ d: IPhoneDevice) -> (String, ok: Bool) {
         let version = d.ios.map { String(localized: "iOS \($0)") }
         let what: String

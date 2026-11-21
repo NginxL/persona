@@ -164,7 +164,7 @@ func TestWindowsNodePackagesRetainExecutableNames(t *testing.T) {
 	for _, program := range []string{nodeproto.ProgramPersonad, nodeproto.ProgramPersonaNode} {
 		t.Run(program, func(t *testing.T) {
 			site := newFakeRelease(t)
-			site.publish(t, "v2", overlapping("v2", 2), false, map[string]string{
+			manifest := site.publish(t, "v2", overlapping("v2", 2), false, map[string]string{
 				nodeproto.ProgramPersonad + "-" + plat + ".exe": full,
 				program + "-" + plat + ".exe": map[string]string{
 					nodeproto.ProgramPersonad: full, nodeproto.ProgramPersonaNode: node}[program]})
@@ -189,8 +189,29 @@ func TestWindowsNodePackagesRetainExecutableNames(t *testing.T) {
 			if err != nil || again != bin || len(site.requests()) != asked {
 				t.Fatalf("cache hit: %q %q %v, requests %v", again, bin, err, site.requests())
 			}
-			for _, wrong := range []string{program + "-" + plat + ".gz", program + "-windows-arm64.exe.gz", "../" + program + "-" + plat + ".exe.gz"} {
-				if fileFor(update.File{Name: wrong}, plat) {
+
+			// The offline cache also uses the full executable name.
+			site.setDown(true)
+			if cached, err := d.lookupPackage(ctx, d.packageKey(goos, arch, program)); err != nil || cached.path != bin {
+				t.Fatalf("offline cache: %+v %v", cached, err)
+			}
+			site.setDown(false)
+			for _, wrong := range []string{program + "-" + plat + ".gz", program + "-windows-arm64.exe.gz", "../" + pkg.file.Name} {
+				f := pkg.file
+				f.Name = wrong
+				if program == nodeproto.ProgramPersonaNode {
+					manifest.Nodes[program][plat] = f
+				} else {
+					manifest.Files[plat] = f
+				}
+				raw, err := json.Marshal(manifest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				site.mu.Lock()
+				site.files["/v2/manifest.json"] = raw
+				site.mu.Unlock()
+				if _, err := d.lookupPackage(ctx, d.packageKey(goos, arch, program)); err == nil {
 					t.Errorf("accepted an unrelated Windows artifact: %s", wrong)
 				}
 			}
@@ -308,16 +329,41 @@ func TestNodePackageLookupOrder(t *testing.T) {
 		}
 	})
 
-	t.Run("fallback", func(t *testing.T) {
+	t.Run("fallback for the running program", func(t *testing.T) {
 		site := newFakeRelease(t)
-		site.publish(t, "v9-1", overlapping("v9-1", 9), true, map[string]string{"personad-" + plat: full})
-		d, _, _ := packageDevices(t, "1.2.3", site.srv.URL) // an image's version: no release of it
+		site.publish(t, "v9-1", overlapping("v9-1", 9), true, map[string]string{"personad-" + plat: full, "persona-node-" + plat: node})
+		d, _, _ := packageDevices(t, "1.2.3", site.srv.URL)
 		pkg, err := d.nodePackageFor(ctx, otherOS, otherArch, nodeproto.ProgramPersonaNode)
-		if err != nil || !pkg.Fallback || pkg.Version != "v9-1" || pkg.Program != nodeproto.ProgramPersonad {
+		if err != nil || !pkg.Fallback || pkg.Version != "v9-1" || pkg.Program != nodeproto.ProgramPersonaNode {
 			t.Fatalf("%+v %v", pkg, err)
 		}
 		if got := site.requests(); len(got) != 2 || got[0] != "/1.2.3/manifest.json" || got[1] != "/latest.json" {
 			t.Fatalf("asked %v", got)
+		}
+	})
+
+	t.Run("personad-only releases and cache", func(t *testing.T) {
+		for _, hub := range []string{"v2", "v1"} {
+			t.Run(hub, func(t *testing.T) {
+				site := newFakeRelease(t)
+				site.publish(t, "v2", overlapping("v2", 2), true, map[string]string{"personad-" + plat: full})
+				d, _, _ := packageDevices(t, hub, site.srv.URL)
+				pkg, err := d.nodePackageFor(ctx, otherOS, otherArch, "")
+				if err != nil || pkg.Program != nodeproto.ProgramPersonad {
+					t.Fatalf("legacy node: %+v %v", pkg, err)
+				}
+				if _, err := d.fetchPackage(ctx, pkg); err != nil {
+					t.Fatal(err)
+				}
+				if pkg, err := d.nodePackageFor(ctx, otherOS, otherArch, nodeproto.ProgramPersonaNode); err == nil {
+					t.Fatalf("selected personad for a persona-node from the manifest: %+v", pkg)
+				}
+				site.setDown(true)
+				d.packages.results = nil
+				if pkg, err := d.nodePackageFor(ctx, otherOS, otherArch, nodeproto.ProgramPersonaNode); !siteAway(err) {
+					t.Fatalf("selected personad for a persona-node from the offline cache: %+v %v", pkg, err)
+				}
+			})
 		}
 	})
 

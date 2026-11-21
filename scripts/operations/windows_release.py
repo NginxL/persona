@@ -258,9 +258,16 @@ def check_gzip_outputs(outputs, program, version, build, target):
         raise WindowsReleaseError("Windows executable command outputs differ from the requested release")
 
 
-def check_gzip_executables(assets, expected_version):
-    """Require a native report for each current .exe.gz, bound to the exact compressed and executable bytes."""
-    executables = [asset for asset in assets if GZIP.fullmatch(asset["name"])]
+def check_gzip_executables(assets, expected_version, architecture=""):
+    """Require a native report for each current .exe.gz, bound to the exact compressed and executable bytes.
+
+    A CI runner may prove only its own architecture. Limiting that scope never marks another architecture verified:
+    the release plan keeps it blocked until its matching native runner supplies evidence.
+    """
+    if architecture and architecture not in ("amd64", "arm64"):
+        raise WindowsReleaseError("Windows native verification architecture is invalid")
+    executables = [asset for asset in assets if GZIP.fullmatch(asset["name"])
+                   and (not architecture or gzip_identity(asset["name"])[1] == "windows-" + architecture)]
     if not executables:
         return
     by_name = {asset["name"]: Path(asset["path"]) for asset in assets}
@@ -288,9 +295,9 @@ def check_gzip_executables(assets, expected_version):
         check_gzip_outputs(report.get("outputs"), program, expected_version, build, target)
 
 
-def check_windows_artifacts(assets, expected_version):
+def check_windows_artifacts(assets, expected_version, architecture=""):
     check_windows_archives(assets, expected_version)
-    check_gzip_executables(assets, expected_version)
+    check_gzip_executables(assets, expected_version, architecture)
 
 
 def verify_gzip_native(path, program, target, version, build):

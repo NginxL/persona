@@ -114,6 +114,8 @@ export const CONTEXT_RE = /<(?:persona|jarvis)-context\b([^>]*)>([\s\S]*?)<\/(?:
 export const LEAD_CONTEXT_RE = /^\s*<(?:persona|jarvis)-context\b[^>]*>[\s\S]*?<\/(?:persona|jarvis)-context>/;
 export const CONTEXT_CLOSE_RE = /<\s*\/\s*(?:persona|jarvis)-context\s*>/gi;
 export const FILE_RE = /<(?:persona|jarvis)-file\b([^>]*?)\/?>(?:\s*<\/(?:persona|jarvis)-file>)?/g;
+/** A source whose legacy context or file marker could be rewritten by an older hub. */
+export const LEGACY_CONTEXT_OR_FILE_RE = /<\s*\/?\s*(?:persona|jarvis)-(?:context|file)\b/i;
 const TOOL_ALIASES: Record<string, string> = { ask_jarvis: "ask_persona", jarvis_settings: "persona_settings" };
 export const canonicalTool = (name: string): string => TOOL_ALIASES[name] ?? name;
 export const managedProvider = (source?: string): boolean => source === "persona" || source === "jarvis";

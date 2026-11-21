@@ -251,6 +251,7 @@ describe("Agents list Filter menu (#4397) on the title row, the search in ⌘K (
   // 44 px box, as the fold-all button is
   it("gives Filter, ⋯ and + a 44 px box of their own on a touch screen", async () => {
     seed();
+    getState().features = ["agent_session_archives"];
     await act(async () => {
       root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />);
     });

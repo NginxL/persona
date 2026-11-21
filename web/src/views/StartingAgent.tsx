@@ -18,8 +18,10 @@ export function StartingAgent({ launch, onToggleSidebar }: { launch: AgentLaunch
   const [text, setText] = useState(launch.text);
   const [launcher, setLauncher] = useState(launch.launcher);
   // the launcher by the provider's display name; the line's tooltip says it with its startup ID (#5029)
-  const runsOn = namedLauncher(launch.launcher, useProviderNames());
-  const subtitle = (name: string) => [machine?.name ?? launch.machineId, shortPath(launch.cwd), name, launch.model].filter(Boolean).join(" · ");
+  const shownLauncher = launch.launcher || launch.displayLauncher || "";
+  const shownModel = launch.model || launch.displayModel;
+  const runsOn = namedLauncher(shownLauncher, useProviderNames());
+  const subtitle = (name: string) => [machine?.name ?? launch.machineId, shortPath(launch.cwd), name, shownModel].filter(Boolean).join(" · ");
   const editable = launch.phase === "failed" && !launch.session && !launch.uncertain && !launch.repeatOnly;
   useEffect(() => {
     if (launch.phase === "ready" && launch.session) navigate({ name: "session", mid: launch.machineId, sid: launch.session.session_id }, true);
@@ -30,7 +32,7 @@ export function StartingAgent({ launch, onToggleSidebar }: { launch: AgentLaunch
     const other = launcher.trim() !== launch.launcher;
     const retireTextStart = launch.agentType === "traex" && launch.inlinePrompt && (other || !text.trim());
     if (editable) putLaunch({ ...launch, text: text.trim(), launcher: launcher.trim(), outgoing: undefined,
-      ...(other && { model: undefined, effort: undefined }), ...(retireTextStart && { agentType: undefined, inlinePrompt: undefined }) });
+      ...(other && { model: undefined, effort: undefined, displayLauncher: undefined, displayEngine: undefined, displayModel: undefined }), ...(retireTextStart && { agentType: undefined, inlinePrompt: undefined }) });
     void deliverLaunch(launch.id, launch.clearable);
   };
   const label = launch.phase === "creating" ? t("startingagent.creating") : launch.phase === "uploading" ? t("startingagent.uploading") : t("startingagent.sending");

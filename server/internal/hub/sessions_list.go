@@ -34,6 +34,10 @@ const (
 	// featureAgentsPageCounts: the same for a paged GET /api/v1/agents/sessions, the personal Agents the extension
 	// manager serves (extmgr/agents.go, #6496).
 	featureAgentsPageCounts = "agents_page_counts"
+	// featureAgentsProviderOR: a paged GET /api/v1/agents/sessions takes provider repeatedly (1 to 64 values) for an
+	// exact, case-sensitive OR set. Order and duplicates do not change matching, counts or cursor binding. An older hub
+	// rejects repetition on a paged request, so clients send it only when this feature is advertised (#994).
+	featureAgentsProviderOR = "agents_provider_or"
 	// featureSessionsListChanges: an app that lists it in the WebSocket URL's ?features= gets, on a sessions_list hint
 	// that follows a change of the index, the revision before the change (`since`) and the ids changed after it
 	// (`changed`), so an open chat does not read its row again for another session's change (sessionListHint, #6685).
@@ -649,13 +653,7 @@ func (h *Hub) pagedSessions(w http.ResponseWriter, r *http.Request, manager stri
 		return
 	}
 	if counts := r.URL.Query().Get("counts"); counts == "1" || counts == "true" {
-		var counts sessionlist.Counts
-		var err error
-		if limited {
-			counts, err = ownCounts(index, opts, own)
-		} else {
-			counts, err = index.Counts(opts)
-		}
+		counts, err := h.countsWithHeld(index, opts, own, limited)
 		if err != nil {
 			sessionListErr(w, err)
 			return
@@ -677,12 +675,7 @@ func (h *Hub) pagedSessions(w http.ResponseWriter, r *http.Request, manager stri
 	if with := r.URL.Query().Get("with_counts"); with == "1" || with == "true" {
 		o := opts
 		o.Since, o.Cursor = "", "" // current membership, as the separate counts read asks for it
-		var counts sessionlist.Counts
-		if limited {
-			counts, err = ownCounts(index, o, own)
-		} else {
-			counts, err = index.Counts(o)
-		}
+		counts, err := h.countsWithHeld(index, o, own, limited)
 		if err != nil {
 			sessionListErr(w, err)
 			return
@@ -708,6 +701,82 @@ func (h *Hub) extensionMachines(r *http.Request) (own []string, limited bool) {
 		}
 	}
 	return own, limited
+}
+
+func (h *Hub) heldNeedsIDs() []string {
+	interactions := h.pendingInteractions()
+	if len(interactions) == 0 {
+		return nil
+	}
+	type flags struct {
+		hasP0   bool
+		hasHeld bool
+	}
+	byHome := map[[2]string]flags{}
+	for _, ix := range interactions {
+		if ix.Delegating {
+			continue
+		}
+		home := ix.FoldedUnder
+		if home == "" {
+			home = ix.SessionID
+		}
+		if home == "" {
+			continue
+		}
+		k := [2]string{ix.MachineID, home}
+		st := byHome[k]
+		if ix.PushLevel == assistantwire.LevelP1 || ix.PushLevel == assistantwire.LevelP2 {
+			st.hasHeld = true
+		} else {
+			st.hasP0 = true
+		}
+		byHome[k] = st
+	}
+	var ids []string
+	for k, st := range byHome {
+		if st.hasHeld && !st.hasP0 {
+			ids = append(ids, runtimeListID(k[0], k[1]))
+		}
+	}
+	return ids
+}
+
+func (h *Hub) countsWithHeld(index *sessionlist.Index, opts sessionlist.Options, own []string, limited bool) (sessionlist.Counts, error) {
+	var (
+		counts sessionlist.Counts
+		err    error
+	)
+	if limited {
+		counts, err = ownCounts(index, opts, own)
+	} else {
+		counts, err = index.Counts(opts)
+	}
+	if err != nil {
+		return sessionlist.Counts{}, err
+	}
+	ids := h.heldNeedsIDs()
+	if len(ids) == 0 || counts.State[proto.StateNeedsYou] == 0 {
+		return counts, nil
+	}
+	if limited {
+		for _, mid := range own {
+			o := opts
+			o.Machine, o.Cursor = mid, ""
+			n, herr := index.CountMatchingState(o, proto.StateNeedsYou, ids)
+			if herr != nil {
+				return sessionlist.Counts{}, herr
+			}
+			counts.HeldNeeds += n
+		}
+	} else {
+		n, herr := index.CountMatchingState(opts, proto.StateNeedsYou, ids)
+		if herr != nil {
+			return sessionlist.Counts{}, herr
+		}
+		counts.HeldNeeds = n
+	}
+	return counts, nil
 }
 
 // ownCounts are the counts of opts over the machines own only (each machine's, added up).

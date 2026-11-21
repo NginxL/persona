@@ -8,8 +8,12 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/operations/backup"
 	"github.com/nwverse/persona/server/internal/update"
 )
+
+// developmentBackupRetainMax bounds the snapshot count a Web UI choice may set.
+const developmentBackupRetainMax = 50
 
 func (u *updater) routes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/v1/hub/update/backups", func(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +92,10 @@ func (u *updater) routes(api *http.ServeMux) {
 			Auto            *bool   `json:"auto"`
 			AutoNoticeSeen  *bool   `json:"auto_notice_seen"`
 			AutoUpdateNodes *bool   `json:"auto_update_nodes"`
+			// Declarative snapshot settings only: a folder and a count, never a
+			// command. An empty folder restores the recommended default.
+			DevelopmentBackupDirectory *string `json:"development_backup_directory"`
+			DevelopmentBackupRetain    *int    `json:"development_backup_retain"`
 		}
 		if err := decodeJSONBody(w, r, &body, 4<<10); err != nil {
 			writeBodyErr(w, err, err)
@@ -96,6 +104,41 @@ func (u *updater) routes(api *http.ServeMux) {
 		if body.Source != nil && *body.Source != "release" && *body.Source != "web-dev" && *body.Source != update.ChannelBeta {
 			writeErr(w, http.StatusConflict, i18n.Err("hub-selfupdate.err_busy"))
 			return
+		}
+		// The folder is checked with the backup command's own rules before any
+		// setting changes (IO, so outside the lock). An explicitly empty folder
+		// is the Web choice of the recommended one: it is stored as that path so
+		// it wins over hub.json's directory, while an omitted field keeps it.
+		var backupDir *string
+		if body.DevelopmentBackupDirectory != nil {
+			dir := *body.DevelopmentBackupDirectory
+			if dir == "" {
+				dir = backup.RecommendedDevelopmentBackupDir(u.h.cfg.dir)
+			}
+			validated, err := backup.ValidateOutputDirectory(u.h.cfg.dir, dir)
+			if err != nil {
+				writeErr(w, http.StatusConflict, i18n.Err("hub-selfupdate.err_development_backup_path", i18n.Args{"error": err.Error()}))
+				return
+			}
+			backupDir = &validated
+		}
+		if body.DevelopmentBackupRetain != nil && (*body.DevelopmentBackupRetain < 1 || *body.DevelopmentBackupRetain > developmentBackupRetainMax) {
+			writeErr(w, http.StatusConflict, i18n.Err("hub-selfupdate.err_development_backup_retain", i18n.Args{"max": developmentBackupRetainMax}))
+			return
+		}
+		if backupDir != nil {
+			// Snapshots in the folder being left must not be stranded: the
+			// helper's coordination marker and its incomplete snapshots both
+			// stop any retry until someone looked at them.
+			u.mu.Lock()
+			current := u.developmentBackupConfigLocked().Directory
+			u.mu.Unlock()
+			if *backupDir != current {
+				if err := backup.UnrecoveredSnapshot(current); err != nil {
+					writeErr(w, http.StatusConflict, i18n.Err("hub-selfupdate.err_development_backup_recovery", i18n.Args{"error": err.Error()}))
+					return
+				}
+			}
 		}
 		u.mu.Lock()
 		if err := u.loadLocked(r.Context()); err != nil {
@@ -120,7 +163,7 @@ func (u *updater) routes(api *http.ServeMux) {
 				writeErr(w, http.StatusConflict, i18n.Err("hub-selfupdate.err_busy"))
 				return
 			}
-			if *body.Source == "web-dev" && u.developmentConfig() == nil {
+			if *body.Source == "web-dev" && !u.developmentAvailable() {
 				u.mu.Unlock()
 				writeErr(w, http.StatusConflict, i18n.Err("hub-selfupdate.err_development_config"))
 				return
@@ -139,6 +182,12 @@ func (u *updater) routes(api *http.ServeMux) {
 		if body.AutoUpdateNodes != nil {
 			enabled := *body.AutoUpdateNodes
 			u.settings.AutoUpdateNodes = &enabled
+		}
+		if backupDir != nil {
+			u.settings.DevelopmentBackupDirectory = backupDir
+		}
+		if body.DevelopmentBackupRetain != nil {
+			u.settings.DevelopmentBackupRetain = *body.DevelopmentBackupRetain
 		}
 		if body.Auto != nil {
 			a := *body.Auto

@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import random
 import re
 import secrets
@@ -220,10 +221,11 @@ def parse_spec(spec: str):
     path, _, ranges = spec.rpartition(":")
     if not path or not re.fullmatch(r"[0-9,\-]+", ranges):
         return spec, None
-    want = set()
+    want = []
     for r in ranges.split(","):
         a, _, b = r.partition("-")
-        want.update(range(int(a), int(b or a) + 1))
+        want.append(range(int(a), int(b or a) + 1))
+    want.sort(key=lambda interval: interval.start)
     return path, want
 
 
@@ -235,15 +237,25 @@ def main():
                     help="drop lines of this type (default: the big api-request blobs)")
     ap.add_argument("src", nargs="+", help="file.jsonl[:ranges] (1-based line numbers)")
     args = ap.parse_args()
+    sources = [parse_spec(spec) for spec in args.src]
+    if os.path.exists(args.out) and any(os.path.samefile(args.out, path) for path, _ in sources):
+        ap.error("output must not refer to an input transcript")
+
     r = Redactor()
     n = 0
     with open(args.out, "w") as out:
-        for spec in args.src:
-            path, want = parse_spec(spec)
+        for path, want in sources:
+            ranges = iter(want or ())
+            active = next(ranges, None)
             with open(path, errors="replace") as f:
                 for i, line in enumerate(f, 1):
-                    if want is not None and i not in want:
-                        continue
+                    if want is not None:
+                        while active is not None and i >= active.stop:
+                            active = next(ranges, None)
+                        if active is None:
+                            break
+                        if i < active.start:
+                            continue
                     try:
                         e = json.loads(line)
                     except ValueError:

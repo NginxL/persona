@@ -811,6 +811,13 @@ func (h *Hub) managerJoinRoutes(mux *http.ServeMux) {
 			h.securityError(w, r, http.StatusTooManyRequests, "rate_limited", 0)
 			return
 		}
+		// Trading a code issues a bus token in the hub's database, before the
+		// code is spent: refused while a snapshot pauses writes.
+		if !h.quiesce.begin() {
+			writeErr(w, http.StatusServiceUnavailable, i18n.Err("hub-selfupdate.err_quiesced"))
+			return
+		}
+		defer h.quiesce.end()
 		var req struct {
 			Code string `json:"code"`
 			// Builtin: the joiner binds the built-in manager's own service (persona-manager join --builtin). A code

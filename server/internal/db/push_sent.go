@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// PushSent is one alert push the hub delivered (hub/lnmode.go): the record behind the daily push counts. Rows are only
+// PushSent is one alert push the hub delivered (hub/push_grading.go): the record behind the daily push counts. Rows are only
 // appended and swept (#8257); the JSON names are those of the hub.push_sent setting it replaces, which
 // AdoptPushSentSetting reads and the hub still writes for a build from before the table.
 type PushSent struct {
@@ -141,7 +141,7 @@ func (d *DB) PrunePushSent(ctx context.Context, before time.Time, keep int) (int
 
 // AdoptPushSentSetting adds to the table the entries of the settings row key (the whole-list record before
 // hub_push_sent) that it lacks, after its rows, in one transaction, and leaves the row as it is: a build from before
-// the table reads only that row, so the hub keeps it for a switch back (hub/lnmode.go mirrorSent). It returns how many
+// the table reads only that row, so the hub keeps it for a switch back (hub/push_grading.go mirrorSent). It returns how many
 // rows it added, and whether the table holds pushes later than after that the row lacks (no row: every one), which
 // is when the row is due a write. It runs at every start of the hub: the first one after the upgrade adds the whole
 // list; a later one adds what a build from before, switched back to, delivered meanwhile. An entry is the same push

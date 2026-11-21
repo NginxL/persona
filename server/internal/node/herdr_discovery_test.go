@@ -343,16 +343,16 @@ func TestHerdrTraexPanesAreMergedIntoTheList(t *testing.T) {
 	}
 	tr, ok := m[thread1]
 	if !ok {
-		t.Fatalf("no TRAEX session: %v", ids(list))
+		t.Fatalf("no TRAE CLI session: %v", ids(list))
 	}
 	// No rollout, and its herdr tab has a name: the title stays empty rather than the directory's name, so the apps
 	// name it by its tab (slot_name; decorate, #11631, docs/protocol/protocol.md).
 	if tr.Agent != traexAgent || tr.Status != proto.StatusWorking || tr.PaneID != "w3:p2" || tr.SpaceName != "tools" ||
 		tr.SlotName != "traex" || tr.SlotIndex != 2 || tr.Title != "" || tr.Cwd != "/tmp/tools/sub" {
-		t.Errorf("TRAEX session %+v", tr)
+		t.Errorf("TRAE CLI session %+v", tr)
 	}
 	if _, ok := m[thread2]; ok {
-		t.Error("a claude pane was taken for TRAEX")
+		t.Error("a claude pane was taken for TRAE CLI")
 	}
 	assertTrace(t, f.trace(), []string{call("session.snapshot", nil)})
 }

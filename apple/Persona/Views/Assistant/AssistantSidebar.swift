@@ -786,6 +786,7 @@ struct AssistantSidebar: View {
     /// The Sidebar layout (#6332): Messages (the Lark chats, the Separate layout's third page) among the places while
     /// it is turned on; nil leaves it out.
     var openMessages: (() -> Void)? = nil
+    var openStarred: (() -> Void)? = nil
     private var isShell: Bool { openInbox != nil }
     /// Which part this draws (#6332): the whole sidebar, or one piece of the Sidebar layout's column, which lays the
     /// rows inside the Agents list and puts the head, the main conversation and the foot around it
@@ -967,8 +968,7 @@ struct AssistantSidebar: View {
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(UnifiedSidebar.columnSpace)).minX } action: { x in
                 // Only where the rows are: as the column slides away its space moves and this read -376 for a moment,
                 // which laid the head and the main conversation out again twice per fold, once 376 pt off (#4206).
-                guard x >= 0, ui.rowsLeading != x else { return }
-                ui.rowsLeading = x
+                ui.placeRows(at: x)
             }
             if !placesFolded { actions(all) }
             // No New Chat on the heading: the column has one, its foot's (#4206, the owner).
@@ -1076,8 +1076,19 @@ enum AssistantSidebarPart {
     var pickedAgent: SessionKey?
     /// Where the Sidebar layout's list rows start in its column (the list's own margin and the rows' inset), measured on
     /// the Pages heading: its head and the main conversation start there too, so the marks of the head, the main row and
-    /// the places stand on one line (#4206). nil until the list is laid out.
-    var rowsLeading: CGFloat?
+    /// the places stand on one line (#4206). nil until the list is laid out. Written only through `placeRows(at:)`.
+    private(set) var rowsLeading: CGFloat?
+    /// Lazy: made by the first row-layout measurement, not when the view creates its `@State` model (P3).
+    @ObservationIgnored private lazy var rowsLeadingEchoes = LayoutEchoGuard()
+
+    /// A new measure of where the rows start. It is read back by the head and the main row, so a measure that only swings
+    /// back to the one before (the list moved by the write it caused) is not written again: the iPhone Duo grown from split
+    /// screen to full screen while an Agent's reply streamed swung the column between two widths 9 pt apart for ever,
+    /// inside one layout pass, until the watchdog ended the app (#12318).
+    func placeRows(at x: CGFloat) {
+        guard x >= 0, rowsLeadingEchoes.accepts(x, now: ProcessInfo.processInfo.systemUptime) else { return }
+        rowsLeading = x
+    }
     #endif
     var ending: Session?
     var renaming: Session?
@@ -1092,6 +1103,31 @@ enum AssistantSidebarPart {
     /// What was said in the chats, found by the manager (#6284), merged into the title / last-message matches. Lazy (P3):
     /// made by the first search; it is observable itself, so the results redraw when its answer comes.
     @ObservationIgnored lazy var chatSearch = AssistantChatSearch()
+}
+
+/// A value measured from layout and written back to state that the same layout reads (docs/apple/performance.md, P7): a
+/// measure equal to the one written before the current, within `window` of the current write, is the layout answering
+/// its own write (A → B → A), and is refused, so the layout settles on what it has. A real change, a new value or the old
+/// one again a while later (a turn there and back), is written (#12318).
+nonisolated struct LayoutEchoGuard: Sendable {
+    /// How long after a write a return to the value before it counts as the layout's echo.
+    static let window: TimeInterval = 0.5
+    /// Measures this close are the same.
+    static let tolerance: CGFloat = 0.5
+
+    private var current: (value: CGFloat, at: TimeInterval)?
+    private var previous: CGFloat?
+
+    /// Whether `value`, measured at `now` (seconds, monotonic), is to be written.
+    mutating func accepts(_ value: CGFloat, now: TimeInterval) -> Bool {
+        if let current {
+            if abs(current.value - value) < Self.tolerance { return false }
+            if let previous, abs(previous - value) < Self.tolerance, now - current.at < Self.window { return false }
+        }
+        previous = current?.value
+        current = (value, now)
+        return true
+    }
 }
 
 /// Asks the manager for what was said in the chats as the search's words change (#6284): on the part that holds the
@@ -1216,11 +1252,15 @@ extension AssistantSidebar {
                     AssistantSwitcherHeader(manager: current, nameFont: Theme.Font.title, compact: macTitleRow,
                                             faceGap: part == .header ? Self.headFaceGap : Theme.Space.m, openSettings: showSettings)
                 } else {
-                    #if os(macOS)
-                    Text(model.assistantShownName).font(Theme.Font.title).foregroundStyle(Theme.macLabel).lineLimit(1)
-                    #else
-                    Text(model.assistantShownName).font(isShell && !besideBar ? Theme.Font.display : Theme.Font.title).foregroundStyle(Color.primary).lineLimit(1)
-                    #endif
+                    // A hub without a roster has no switcher: with several hubs the title keeps a hub menu under it (#12594).
+                    VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                        #if os(macOS)
+                        Text(model.assistantShownName).font(Theme.Font.title).foregroundStyle(Theme.macLabel).lineLimit(1)
+                        #else
+                        Text(model.assistantShownName).font(isShell && !besideBar ? Theme.Font.display : Theme.Font.title).foregroundStyle(Color.primary).lineLimit(1)
+                        #endif
+                        HubSwitcher(compact: true)
+                    }
                 }
                 Spacer(minLength: Theme.Space.s)
                 if part == .header {
@@ -1321,6 +1361,7 @@ extension AssistantSidebar {
             VStack(alignment: .leading, spacing: 0) {
                 meetingRow
                 action(String(localized: "Inbox"), Theme.Icon.inbox, id: "sidebar-inbox", count: InboxStore.shared.unreadCount, place: .inbox, run: openInbox)
+                starredRow
                 if TodoStore.shared.isSupported {
                     action(String(localized: "To-dos"), Theme.Icon.todo, id: "sidebar-todos", count: TodoStore.shared.sidebarCount, place: .todos, run: { (openTodos ?? openInbox)() })
                 }
@@ -1353,11 +1394,20 @@ extension AssistantSidebar {
         VStack(alignment: .leading, spacing: 0) {
             action(String(localized: "New Chat [Quick Actions ea4b29]"), Theme.Icon.conversation, id: "sidebar-new", run: newConversation)
             meetingRow
+            starredRow
             action(String(localized: "Scheduled Tasks"), Theme.Icon.schedule, run: openRoutines)
             action(String(localized: "Knowledge"), Theme.Icon.knowledge, run: openKnowledge)
             if let openHealth { action(String(localized: "Health"), Theme.Icon.health, id: "sidebar-health", run: openHealth) }
             extensionRows
         }
+    }
+
+    @ViewBuilder private var starredRow: some View {
+        #if os(iOS)
+        if let openStarred, let count = StarredStore.shared.count {
+            action(String(localized: "Starred"), Theme.Icon.starredMessage, id: "sidebar-starred", count: count, place: .starred, run: openStarred)
+        }
+        #endif
     }
 
     /// First among the places: Meetings (#8731; Recordings before), a place like the rows under it, so a tap opens the page
@@ -1496,13 +1546,6 @@ extension AssistantSidebar {
                 }
             }
         }
-    }
-
-    /// The assistant's name as the sidebar's head says it: the current assistant's own when the hub has a roster (#6401),
-    /// else the look's name; "Persona" only as the last fallback. The top bar names the main conversation by it too
-    /// (#9973); the main conversation's row and search results say "Main Chat" under the head.
-    static func assistantName(_ model: AppModel) -> String {
-        model.currentAssistant?.name ?? model.persona.name
     }
 
     /// A place to go; `place`: what it shows beside the Sidebar layout's sidebar, its row shaded while it does.

@@ -274,8 +274,13 @@ def verify_artifacts(plan_path, repository, channel, commit, additional=()):
         for path in sorted(Path(directory).iterdir()):
             if path.is_file():
                 item = {"name": path.name, "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-                if path.name in by_name and by_name[path.name] != item:
-                    raise ReleaseError("another platform's artifact already owns this name: " + path.name)
+                existing = by_name.get(path.name)
+                if existing is not None:
+                    # The same verified download may be presented again by another platform's job. A different path
+                    # with the same bytes is fine; changed bytes or a different hash is never a duplicate to ignore.
+                    if existing["sha256"] != item["sha256"]:
+                        raise ReleaseError("another platform's artifact already owns this name: " + path.name)
+                    continue
                 by_name[path.name] = item
     artifacts = sorted(by_name.values(), key=lambda item: item["name"])
     if not artifacts:

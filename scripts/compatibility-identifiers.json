@@ -390,6 +390,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "docs/integrations/opencode.md": {
+      "reason": "Published compatibility contract documenting the two context markers stripped by the runtime.",
+      "tokens": [
+        "jarvis-context"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "docs/operations/docker.md": {
       "reason": "Published upgrade, storage identity or compatibility documentation retained for existing installations.",
       "tokens": [
@@ -559,6 +567,30 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "integrations/opencode/test/map.test.js": {
+      "reason": "Exact regression fixture for stripping the legacy context marker while preserving visible text.",
+      "tokens": [
+        "jarvis-context"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "integrations/antigravity/test/stale-models.test.js": {
+      "reason": "Exact regression fixture for absent daemon candidates and isolated model state.",
+      "tokens": [
+        "jarvisdBin"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "integrations/paseo/lib/mcp.js": {
+      "reason": "Read-only fallback for the legacy MCP server key in an existing generated configuration; the A2A server always uses the Persona name.",
+      "tokens": [
+        "out.jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "integrations/paseo/test/bridge.test.js": {
       "reason": "Baseline regression fixture or exact compatibility assertion for a persisted contract.",
       "tokens": [
@@ -617,7 +649,8 @@
         "jarvis-reload",
         "jarvis-runtime.v1",
         "jarvis.json",
-        "jarvisd"
+        "jarvisd",
+        "jarvisdBin"
       ],
       "path_tokens": [],
       "external_refs": []
@@ -1397,6 +1430,16 @@
         "jarvis.tokenId",
         "jarvis_settings",
         "started_by_jarvis"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
+    "web/src/views/NewAgent.project-document.test.tsx": {
+      "reason": "Exact regression fixture for legacy context/file markers and URL schemes rewritten by an older hub.",
+      "tokens": [
+        "jarvis",
+        "jarvis-context",
+        "jarvis-file"
       ],
       "path_tokens": [],
       "external_refs": []

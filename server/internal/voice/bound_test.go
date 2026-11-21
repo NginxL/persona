@@ -107,7 +107,7 @@ func TestBoundToAnAgent(t *testing.T) {
 		{"role": "assistant", "text": "登录页的测试挂了两个"}, {"role": "tool", "text": "ignored"}}}))
 	ready := a.until(ofType("ready"))
 	target, _ := ready["target"].(map[string]any)
-	if ready["protocol"] != float64(2) || fmt.Sprint(ready["features"]) != "[target runs asks resume suspend speak speech_gate meeting hold]" || target["kind"] != "agent" ||
+	if ready["protocol"] != float64(2) || fmt.Sprint(ready["features"]) != "[target runs asks resume suspend speak speech_gate meeting hold dictation]" || target["kind"] != "agent" ||
 		target["agent_label"] != "Claude Code" || target["title"] != "修登录页的测试" || target["machine_name"] != "工作站" || target["session_id"] != "a1" {
 		t.Fatalf("ready: %v", ready)
 	}
@@ -148,6 +148,27 @@ func TestBoundToAnAgent(t *testing.T) {
 	a.mu.Unlock()
 	if tool {
 		t.Error("a tool frame for the handover: protocol 2 reports it with run frames")
+	}
+}
+
+func TestBoundToTraeCLI(t *testing.T) {
+	for _, test := range []struct{ label, want string }{
+		{label: "TRAEX", want: "TRAE CLI"},
+		{label: "Workspace agent", want: "Workspace agent"},
+	} {
+		t.Run(test.label, func(t *testing.T) {
+			hub := agentHub(t)
+			hub.sessions["a1"].look = func(s *proto.Session) {
+				s.Agent, s.AgentLabel = "traex", test.label
+			}
+			up := boundUpstream(t, false)
+			pl := testPlugin(t, liveProvider(up), hub.server(t))
+			a := dialApp(t, pl, boundStart("a1", nil))
+			target := a.until(ofType("ready"))["target"].(map[string]any)
+			if target["agent_label"] != test.want {
+				t.Errorf("ready target label = %q, want %q", target["agent_label"], test.want)
+			}
+		})
 	}
 }
 

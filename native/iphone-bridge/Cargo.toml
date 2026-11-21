@@ -23,6 +23,7 @@ idevice = { version = "=0.1.68", default-features = false, features = [
     "pair",
     "tcp",
     "mobile_image_mounter",
+    "cryptexd",
     "tss",
     "installation_proxy",
     "dvt",

@@ -20,4 +20,9 @@
     <string name="chat_share_card_light">Light</string>
     <string name="chat_share_card_dark">Dark</string>
     <string name="chat_reply_image_original">Open original</string>
+    <string name="chat_local_image_load_failed">Failed to load local image</string>
+    <string name="chat_local_image_not_found">File not found</string>
+    <string name="chat_local_image_denied">Permission denied</string>
+    <string name="chat_local_image_unreadable">Not a readable image</string>
+    <string name="chat_local_image_open_file">Open file</string>
 </resources>

@@ -42,6 +42,8 @@ func (h *Hub) hello() map[string]any {
 		"hub_id": h.hubID(), "hub_name": h.hubName(), "endpoints": h.endpointList(), "tls_port": port, "fp": fp,
 		// The hubs of this hub's mesh group, itself included (docs/archive/operations/plan-hub-mesh.md 2.6): only after authentication.
 		"mesh": map[string]any{"hubs": h.meshHubs()},
+		// Push grading switch (hub.ln_mode / push_grading): synced on hello and on switch toggles.
+		"push_grading": h.push.pushGradingOn(),
 		// the user's language (feature locale, locale.go)
 		"locale": string(h.userLang()),
 	}

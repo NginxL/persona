@@ -1,4 +1,4 @@
-Replace atomically using revisions from todo_repositories_get/repositories_list. [] removes metadata. Frozen source snapshots: remove/reselect to adopt catalog identity changes. Editable after execution. Omit links to keep; [] clears. Omitted/empty titles keep. Reread/reconcile conflicts. No files, progress or completion changes.
+Replace atomically using revisions from todo_repositories_get/repositories_list. [] removes metadata. Frozen source snapshots: remove/reselect to adopt catalog identity changes. Editable after execution. Omit links to keep; [] clears. Omitted/empty titles keep. Reread/reconcile conflicts. No files, progress or completion changes.{{template "shared/mcp_language" .}}
 
 ```json
 {

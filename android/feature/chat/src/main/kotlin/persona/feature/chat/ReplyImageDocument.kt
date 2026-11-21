@@ -9,9 +9,16 @@ import org.intellij.markdown.parser.CancellationToken
 import persona.core.contracts.api.ReplyImageSource
 import java.net.URI
 
-internal data class ReplyPicture(val url: String, val alt: String, val host: String)
+internal data class ReplyPicture(
+    val url: String,
+    val alt: String,
+    val host: String,
+    val localPath: String? = null,
+) {
+    val isLocal: Boolean get() = localPath != null
+}
 
-/** Replaces only parsed web images. Fences, code spans, linked pictures and quoted text retain their Markdown. */
+/** Replaces only parsed web and (when enabled) local-path images. Fences, code spans, linked pictures and quoted text retain their Markdown. */
 internal class ReplyImageDocument private constructor(
     val original: String,
     val markdown: String,
@@ -31,7 +38,7 @@ internal class ReplyImageDocument private constructor(
     private data class Match(val start: Int, val end: Int, val picture: ReplyPicture)
 
     companion object {
-        fun parse(text: String): ReplyImageDocument? {
+        fun parse(text: String, allowLocal: Boolean = false): ReplyImageDocument? {
             if (!text.contains("![")) return null
             val root = MarkdownParser(GFMFlavourDescriptor(), cancellationToken = CancellationToken.NonCancellable)
                 .buildMarkdownTreeFromString(text, 0)
@@ -41,12 +48,17 @@ internal class ReplyImageDocument private constructor(
                     MarkdownElementTypes.IMAGE -> {
                         val link = node.findChildOfType(MarkdownElementTypes.INLINE_LINK) ?: return
                         val destination = link.findChildOfType(MarkdownElementTypes.LINK_DESTINATION) ?: return
-                        val url = text.substring(destination.startOffset, destination.endOffset).removeSurrounding("<", ">")
-                        val address = ChatLinks.webUrl(url) ?: return
+                        val rawDest = text.substring(destination.startOffset, destination.endOffset).removeSurrounding("<", ">")
                         val alt = link.findChildOfType(MarkdownElementTypes.LINK_TEXT)?.let {
                             text.substring(it.startOffset, it.endOffset).removeSurrounding("[", "]")
                         }.orEmpty()
-                        matches.add(Match(node.startOffset, node.endOffset, ReplyPicture(address, alt, URI(address).host)))
+                        val web = ChatLinks.webUrl(rawDest)
+                        if (web != null) {
+                            matches.add(Match(node.startOffset, node.endOffset, ReplyPicture(web, alt, URI(web).host)))
+                        } else if (allowLocal) {
+                            val local = LocalMarkdownPath.parseLocalPath(rawDest) ?: return
+                            matches.add(Match(node.startOffset, node.endOffset, ReplyPicture(local.path, alt, "", localPath = local.path)))
+                        }
                     }
                     MarkdownElementTypes.INLINE_LINK, MarkdownElementTypes.BLOCK_QUOTE, MarkdownElementTypes.CODE_FENCE,
                     MarkdownElementTypes.CODE_BLOCK, MarkdownElementTypes.CODE_SPAN -> Unit
@@ -66,25 +78,42 @@ internal class ReplyImageDocument private constructor(
                 val found = matches[index]
                 val lineStart = text.lastIndexOf('\n', found.start - 1) + 1
                 val lineEnd = text.indexOf('\n', found.end).takeIf { it >= 0 } ?: text.length
-                // All web pictures on an otherwise empty line form one block (including a line within a paragraph).
+                // All pictures of the same kind on an otherwise empty line form one block (including a line within a paragraph).
                 var last = index
                 while (last + 1 < matches.size && matches[last + 1].start < lineEnd &&
+                    matches[last + 1].picture.isLocal == found.picture.isLocal &&
                     text.substring(matches[last].end, matches[last + 1].start).isBlank()) last++
                 val alone = text.substring(lineStart, found.start).isBlank() && text.substring(matches[last].end, lineEnd).isBlank()
                 if (!alone) {
-                    out.append(text, cursor, found.start)
-                    out.append("![").append(found.picture.alt).append("](").append(marker).append(':').append(index).append(')')
-                    cursor = found.end
+                    if (found.picture.isLocal) {
+                        // Lift local inline images into their own block while preserving surrounding text,
+                        // so failures surface the complete reason and manual Retry (aligned with iOS PR #12102).
+                        val before = text.substring(cursor, found.start).trimEnd(' ', '\t')
+                        out.append(before)
+                        if (out.isNotEmpty() && out.last() != '\n') out.append('\n')
+                        out.append("\n~~~").append(marker).append('\n')
+                            .append(groups.size).append("\n~~~\n\n")
+                        groups.add(index..index)
+                        var nextCursor = found.end
+                        while (nextCursor < text.length && (text[nextCursor] == ' ' || text[nextCursor] == '\t')) nextCursor++
+                        cursor = nextCursor
+                    } else {
+                        out.append(text, cursor, found.start)
+                        out.append("![").append(found.picture.alt).append("](").append(marker).append(':').append(index).append(')')
+                        cursor = found.end
+                    }
                     index++
                     continue
                 }
                 var end = lineEnd
                 while (last + 1 < matches.size) {
                     val next = matches[last + 1]
+                    if (next.picture.isLocal != found.picture.isLocal) break
                     if (!text.substring(end, next.start).isBlank()) break
                     val nextEnd = text.indexOf('\n', next.end).takeIf { it >= 0 } ?: text.length
                     var nextLast = last + 1
                     while (nextLast + 1 < matches.size && matches[nextLast + 1].start < nextEnd &&
+                        matches[nextLast + 1].picture.isLocal == found.picture.isLocal &&
                         text.substring(matches[nextLast].end, matches[nextLast + 1].start).isBlank()) nextLast++
                     if (!text.substring(matches[nextLast].end, nextEnd).isBlank()) break
                     last = nextLast

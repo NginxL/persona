@@ -1,6 +1,7 @@
 // A fake personad node for a runtime's unit tests: listens on a temp runtime socket, records what the runtime says and
 // lets the test call it like the node does. Real end-to-end checks use node-harness.mjs instead.
 
+import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
@@ -21,8 +22,9 @@ import { Peer, RpcError } from '../lib/wire.js'
  *   of it, runtime.package answers it; offerUpdates false leaves only runtime.package) and packageCalls (the runtime.package calls).
  */
 export async function startFakeNode(t, opts = {}) {
-  const dir = opts.path ? undefined : mkdtempSync('/tmp/jrt-') // unix socket paths are short on macOS: not under $TMPDIR
-  const path = opts.path ?? join(dir, 'runtime.sock')
+  const usePipe = !opts.path && process.platform === 'win32'
+  const dir = opts.path || usePipe ? undefined : mkdtempSync('/tmp/jrt-') // unix socket paths are short on macOS: not under $TMPDIR
+  const path = opts.path ?? (usePipe ? `\\\\.\\pipe\\jrt-${randomBytes(6).toString('hex')}` : join(dir, 'runtime.sock'))
   const n = { path, events: [], hello: undefined, peer: undefined, peers: new Set(), asked: [], refused: [], resolve: () => ({ dismiss: true }), hub: opts.hub ?? true, hellos: 0,
     tools: opts.tools ?? [], toolCalls: [], callTool: (params) => ({ content: [{ type: 'text', text: `${params.name} ran` }], is_error: false }),
     refuseHello: undefined, offer: undefined, offerUpdates: true, packageCalls: [] }
@@ -50,6 +52,7 @@ export async function startFakeNode(t, opts = {}) {
           if (!n.offer || params?.name !== n.offer.name) throw new RpcError(`no package ${params?.name}`, 'not_found')
           return n.offer
         }
+        if (method === 'runtime.a2a_mcp' && n.a2aMcpToken) return { token: n.a2aMcpToken(params.session_id) }
         if (method === 'interaction.create') {
           const sid = params.interaction?.session_id
           if (opts.strict && !n.last('runtime.sessions')?.sessions?.some((s) => s.session_id === sid)) {

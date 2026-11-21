@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs'
  * PERSONA_SESSION_ID in its environment (the agent's Persona session, not the provider's own session id).
  * Nothing usable (no path, no file, no stdio server): undefined, with the reason logged; creating the agent goes on.
  */
-export function personaMcpServers(path, sessionId, log = () => {}) {
+export function personaMcpServers(path, sessionId, log = () => {}, a2aToken) {
   if (!path) {
     log('paseo: no MCP config given; the new agent gets no Persona tools')
     return undefined
@@ -36,6 +36,10 @@ export function personaMcpServers(path, sessionId, log = () => {}) {
   if (!Object.keys(out).length) {
     log(`paseo: the MCP config ${path} has no stdio server; the new agent gets no Persona tools`)
     return undefined
+  }
+  const persona = out.persona ?? out.jarvis
+  if (a2aToken && persona) {
+    out.persona_a2a = { ...persona, env: { ...persona.env, PERSONA_A2A_TOKEN: a2aToken } }
   }
   return out
 }

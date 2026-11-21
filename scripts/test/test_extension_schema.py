@@ -179,6 +179,15 @@ class ExtensionSchemaTests(unittest.TestCase):
     def setUp(self):
         self.v = Validator(load_schemas())
 
+    def test_configured_network_entry_paths(self):
+        for value in ("config:endpoint", "config:endpoint:http", "config:accounts[].address", "config:accounts[].address:http"):
+            with self.subTest(valid=value):
+                self.assertEqual(self.v.validate("NetworkEntry", value), [])
+        for value in ("config:accounts[0].address", "config:accounts[].address[]", "config:accounts[].nested.address",
+                      "config:accounts[].address:http:extra", "config:[].address", "config:accounts[]."):
+            with self.subTest(invalid=value):
+                self.assertNotEqual(self.v.validate("NetworkEntry", value), [])
+
     def test_generated_files_are_current(self):
         r = subprocess.run([sys.executable, str(GENERATOR), "--check"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)

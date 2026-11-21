@@ -8,6 +8,7 @@ import { runtimeSessions } from "./runtime-list";
 import { isWaiting } from "./agent-groups";
 import { backgroundCount, workflowShortLine } from "./workflows";
 import { t } from "../i18n";
+import type { ListCounts } from "./session-list";
 import type { Session } from "./types";
 
 class Socket {
@@ -28,6 +29,7 @@ let removed: string[];
 let expired: boolean;
 let scopedNeeds: number;
 let scopedWaiting: number;
+let scopedHeld: number;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -37,6 +39,7 @@ beforeEach(() => {
   expired = false;
   scopedNeeds = 1;
   scopedWaiting = 0;
+  scopedHeld = 0;
   vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal("location", { protocol: "http:", host: "demo" });
   vi.stubGlobal("localStorage", { getItem: () => "demo-token" });
@@ -53,7 +56,10 @@ beforeEach(() => {
         const scoped = url.searchParams.get("agents_only") === "1";
         // The all-sessions aggregate also includes Assistant and health conversations.
         return Response.json({ total: 8000, machine: { demo: 8000 }, project: { "/demo": 8000 }, group: {},
-          state: scoped ? { needs_you: scopedNeeds, working: 3, unread: 2 } : { needs_you: 3, working: 5, unread: 4 }, ...(scoped && scopedWaiting ? { background_waiting: scopedWaiting } : {}), revision: "r2" });
+          state: scoped ? { needs_you: scopedNeeds, working: 3, unread: 2 } : { needs_you: 3, working: 5, unread: 4 },
+          ...(scoped && scopedWaiting ? { background_waiting: scopedWaiting } : {}),
+          ...(scoped && scopedHeld ? { held_needs: scopedHeld } : {}),
+          revision: "r2" } satisfies Partial<ListCounts> as ListCounts);
       }
       if (!url.search) return Response.json({ sessions: [session("legacy")] });
       if (url.searchParams.has("since")) return Response.json({ sessions: changed, remove: removed, total: 8000, has_more: false, revision: "r2" });
@@ -282,4 +288,29 @@ describe("archive failure rollback with negotiated lists", () => {
   expect(await operation).toEqual({ok:false});
   expect(getState().sessions.demo).toEqual([newer]);
  });
+
+  it("tracks hello.push_grading and push_grading events and subtracts held_needs from badge only while grading is on (#11771)", async () => {
+    scopedNeeds = 3;
+    scopedHeld = 2;
+    connect();
+    Socket.last.push({ type: "hello", features: ["sessions_list", "sessions_lookup", "sessions_hierarchy", "sessions_agents_only"], push_grading: false });
+    await settle();
+    expect(getState().pushGrading).toBe(false);
+    expect(countsShown()).toMatchObject({ needs: 3, badge: 3 });
+
+    Socket.last.push({ type: "push_grading", enabled: true });
+    expect(getState().pushGrading).toBe(true);
+    expect(countsShown()).toMatchObject({ needs: 3, badge: 1 });
+
+    // A P1 interaction update refreshes bounded counts so held_needs updates without a session row change.
+    const countsBefore = requests.filter((r) => r.searchParams.has("counts")).length;
+    scopedHeld = 3;
+    Socket.last.push({ type: "interaction", interaction: { id: "ix_p1", machine_id: "demo", session_id: "s1", kind: "permission", push_level: "P1" } });
+    await settleThrottled();
+    expect(requests.filter((r) => r.searchParams.has("counts")).length).toBeGreaterThan(countsBefore);
+    expect(countsShown()).toMatchObject({ needs: 3, badge: 0 });
+
+    Socket.last.push({ type: "push_grading", enabled: false });
+    expect(countsShown()).toMatchObject({ needs: 3, badge: 3 });
+  });
 });

@@ -1,4 +1,8 @@
 {
+  "skip_next_changed": "The next occurrence changed. Refresh the schedule and try again.",
+  "skip_next_forbidden": "Only the owner can skip a scheduled occurrence.",
+  "skip_next_invalid": "Enter a valid occurrence time.",
+  "skip_next_owner": "Skipped by you",
   "execution_context_unavailable": "Cannot verify the task conversation’s execution context. Reconnect its agent and try again.",
   "followup": "Follow-up",
   "morning": "Morning brief",
@@ -70,5 +74,6 @@
   "todo_wait": "Keep waiting",
   "todo_wait_cost": "Another scheduled window may pass without advancing the task.",
   "todo_change_result": "Ask the supervisor to propose another approach within the existing permissions.",
-  "todo_wait_result": "Keep the approved approach and wait for the next scheduled check."
+  "todo_wait_result": "Keep the approved approach and wait for the next scheduled check.",
+  "execution_antigravity_unavailable": "Antigravity is disconnected or unavailable on {machine}. Restore Antigravity on that computer, then run this task again to continue its existing conversation."
 }

@@ -9,6 +9,7 @@ import { Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState 
 import { api, enc, errorText } from "../lib/api";
 import { splitDevices } from "../lib/devices";
 import { ago } from "../lib/format";
+import { agentName, isTraeCli } from "../lib/agent-kind";
 import { install, useInstall, type InstallState } from "../lib/pwa";
 import { useStore } from "../lib/store";
 import { composing } from "../lib/send-history";
@@ -869,7 +870,8 @@ function Models() {
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!list || !q) return list ?? [];
-    return list.filter((l) => [l.name, l.display_name, l.model, l.small_model, l.base_url, ...(l.machines ?? []).map(name)].some((v) => v?.toLowerCase().includes(q)));
+    return list.filter((l) => [l.name, l.display_name, providerTitle(l), isTraeCli(l.name) ? "traecli" : undefined, l.model, l.small_model, l.base_url,
+      ...(l.machines ?? []).map(name)].some((v) => v?.toLowerCase().includes(q)));
   }, [list, query, machines, sync]);
   const managed = shown.filter((l) => managedProvider(l.source));
   const builtin = builtinRows(shown);
@@ -885,7 +887,7 @@ function Models() {
     <button key={l.name} type="button" onClick={() => setOpen(l.name)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-hover">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          {l.display_name ? <span className="truncate text-[13px] font-medium text-ink">{l.display_name}</span> : <span className="truncate font-mono text-[13px] font-medium text-ink">{l.name}</span>}
+          <span className={cx("truncate text-[13px] font-medium text-ink", !l.display_name && providerTitle(l) === l.name && "font-mono")}>{providerTitle(l)}</span>
           {managedProvider(l.source) && <Pill tone="accent">Persona</Pill>}
           {managedProvider(l.source) && l.pi && <span title={t("settings.pi_too_title")}><Pill>{t("settings.pi_too")}</Pill></span>}
           {l.source === "agy" && <Pill>Antigravity Runtime</Pill>}
@@ -893,7 +895,7 @@ function Models() {
           {staleMark(l.stale)}
         </div>
         <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11.5px] text-ink-3">
-          {l.display_name && <span className="shrink-0 font-mono">{l.name}</span>}
+          {l.display_name && l.name !== "traex" && <span className="shrink-0 font-mono">{l.name}</span>}
           {l.model && <span className="truncate font-mono text-ink-2">{l.model}</span>}
           {host(l.base_url) && <span className="truncate">{host(l.base_url)}</span>}
         </div>
@@ -1118,7 +1120,7 @@ export function LauncherDetailDialog({ name, onClose, onChanged, onEdit, onCopyL
       onClose={onClose}
       width={620}
       // a provider's display name with its startup ID after it (#5029); an rc alias, or one not read yet, by its ID
-      title={l && providerIdNote(l) ? <>{providerTitle(l)} <span className="font-mono text-[11.5px] font-normal text-ink-3">{providerIdNote(l)}</span></> : <span className="font-mono">{name}</span>}
+      title={l && providerIdNote(l) ? <>{providerTitle(l)} <span className="font-mono text-[11.5px] font-normal text-ink-3">{providerIdNote(l)}</span></> : <span className="font-mono">{name ? providerTitle(l ?? { name }) : name}</span>}
       footer={
         l && (
           <>
@@ -1301,7 +1303,7 @@ function KVRow({ k, v, mono, sub }: { k: React.ReactNode; v?: React.ReactNode; m
 function DetailBlock({ d, place }: { d: LauncherDetail; place?: string }) {
   const titled = (s: string) => (place ? `${s} · ${place}` : s);
   if (d.error) return <KV title={titled(t("settings.run"))}><p className="py-2 text-[12px] text-ink-3">{d.error}</p></KV>;
-  const agent = d.agent === "codex" ? "Codex" : d.agent === "traex" ? "TRAEX" : d.agent === "agy" ? "Antigravity" : "Claude Code";
+  const agent = d.agent === "codex" || isTraeCli(d.agent) ? agentName(d.agent) : d.agent === "agy" ? "Antigravity" : "Claude Code";
   return (
     <>
       <KV title={titled(t("settings.run"))}>

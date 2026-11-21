@@ -83,6 +83,7 @@ whose comments say the rules follow the Lark bot), and Siri (in the App). `/agen
 | --- | --- | --- |
 | Receive text | Always available | — |
 | `images_in` | Boolean | Receive images (up to 4, sent into the chat as image attachments) |
+| `images_out` | Boolean | Send pictures (#11986): in an answer or a push, each picture on a line of its own (`![alt](https://…)`, the block images the apps draw) is fetched through `remoteimage` with the same checks as the apps' remote images (the open internet only), drawn at 2048 px (smaller when that is over 3 MB), and sent in the last piece's `images` (at most 4, JPEG or PNG); its line leaves the text. Pictures in code, inline ones and the ones past 4 stay or become text, and one that can't be fetched or shown (HEIC, AVIF) becomes "Image: <alt> <address>". The hub's instructions tell Persona it may send pictures that way. Without it the text keeps its Markdown images and the hub drops `images` before the program |
 | `files_in` | Boolean | Receive files: the hub saves them to a temporary directory on the computer hosting the chat and writes the path into the message (as the Lark bot has always done); if unavailable, the message says "A file ‘…’ was sent, but can't be handed over yet" |
 | `voice_in` | Boolean | Receive voice (the channel supplies transcribed text) |
 | `format` | `markdown` / `plain` | The format of answers delivered to the user. The hub always sends Markdown; the channel converts it to what the IM understands (WeChat removes images, strikethrough… keeps bold and code; Lark cards unchanged); for `plain` channels, the hub's instructions to Persona request "plain text, conclusion first" |
@@ -91,7 +92,7 @@ whose comments say the rules follow the Lark bot), and Siri (in the App). `/agen
 | `push` | Boolean | Whether it can proactively send to the user (rather than reply to a message): pushes, sync, and questions all need it |
 | `typing` | Boolean | Whether it has "typing": the hub calls it every 5 seconds during a turn |
 | `progress` | Boolean | Whether it can send a message and edit it later (progress card): if a turn isn't done after 5 seconds, the hub sends progress, edits at most every 3 seconds, and writes the answer into the same message |
-| `threads` | Boolean | Replying to a bot message sends to the chat bound to that message (the Lark bot's `/agents`) |
+| `threads` | Boolean | Lark bot: replying to a bot message sends to the chat bound to that message (`/agents`). Extension channel: a message carrying `thread` goes to that thread's own chat ("Message flow" step 5, #11939) |
 
 ## 3. Unified pipeline (owned by the assistant)
 
@@ -136,12 +137,14 @@ While the assistant process is restarting or disconnected from hub, **receivers 
 
 ### Message flow
 
-1. **Receive**: the channel hands an owner's message to hub (Lark's persistent connection, an extension's `channel.receive`), and hub hands it to the assistant (`feishu.message`, `channels.receive`): `{id, text, chat?, topic?, context?, owner?, images, files, quote, forward, reply_to, unsupported}`. `chat` / `topic` locate a mention request and `context` carries its extension-gathered history as data. Receipt is acknowledged once the request is accepted and queued, before the model turn; a busy main chat uses the ordinary message queue. Lark's OnIt → DONE reaction remains the extension's own receipt UI.
+1. **Receive**: the channel hands an owner's message to hub (Lark's persistent connection, an extension's `channel.receive`), and hub hands it to the assistant (`feishu.message`, `channels.receive`): `{id, text, chat?, topic?, context?, owner?, images, files, quote, forward, reply_to, thread?, unsupported}`. `chat` / `topic` locate a mention request and `context` carries its extension-gathered history as data. Receipt is acknowledged once the request is accepted and queued, before the model turn; a busy main chat uses the ordinary message queue. Lark's OnIt → DONE reaction remains the extension's own receipt UI.
 2. **Deduplicate**: handle `<channel>-<message id>` only once (IM redelivers); this same id is `client_msg_id`, sharing the App's `sent_messages` deduplication, so retries aren't typed twice.
 3. **Commands**: treat a leading `/` as a command first; the pipeline implements `/help`, `/new [first message]`, `/main`, `/stop`, `/status` uniformly. Channels can add their own (the Lark bot's `/list`, `/agents`, `/start`).
    Send unknown commands into the chat unchanged (they might belong to the chat, such as `/compact`).
+   In a thread of an extension channel with `threads`, `/new` starts the thread over (its next message opens a new chat) and `/stop` and `/status` act on the thread's chat; none of them moves the channel's `target`.
 4. **Answer a question**: if this channel has a pending text question (`asks: text`) still in hub's pending list (`interactions.list`), this message is its answer. Drop questions already answered elsewhere and treat this as an ordinary message.
 5. **Target**: if replying to a target-bound message (`threads`), send to that target; otherwise send to the channel's `target`. If main chat doesn't exist yet, create a chat and set it as main chat; a chat created by `new` becomes the target afterward.
+   An extension channel with `threads` keeps a chat per thread: a message carrying `thread` goes to that thread's chat, and the thread's first message starts a new one (never the main chat; the channel's `target` stays as it is). A thread whose chat is gone, or that went quiet for 30 days, starts a new chat; at most 500 threads are kept per channel (`channels` setting, `threads`). A message without `thread`, or from a channel without `threads`, goes to the `target`.
 6. **Assemble content**: prepend a `<persona-context>` explaining which channel this came from, that the answer goes back there, and the format to use (prompt `prompts/channel/message.md`; the Lark bot keeps its own `bot/message.md`);
    put quoted messages and merged-forward chat records in separate `<persona-context>` blocks; images become attachments; files follow `files_in`. A mention uses `prompts/channel/mention_message.md` instead: its chat, topic and gathered context are data blocks, and the turn is explicitly public. The prompt does not disclose private context from other chats, sessions, mail or health unless the owner's request explicitly asks for the specific information. The internal per-message `public` marker also suppresses the owner's live snapshot for that input only; it never changes the main conversation's origin or later private turns.
 7. **Send**: Persona chats use `session.send` (main chat follows the model selected in Settings), `client_msg_id = <channel>-<message id>`.
@@ -247,16 +250,16 @@ Requires a process that speaks the protocol (`NeedsRPC`). Version 1.
 
 | Method | Parameters | Returns |
 | --- | --- | --- |
-| `channel.receive` | `{contribution, message: {id, text?, chat?, topic?, context?, owner?, images?: [{mime, data}], files?: [{name, mime, data}], quote?, forward?, reply_to?, unsupported?: [string]}}` | `{}`: hub accepted it (deduplicated and queued for handling, not waiting for the turn). A mention request must carry `owner: true`; false or omitted is refused on the main-chat path. Non-owner requests use a guest conversation instead. `chat` / `topic` and gathered `context` are inserted as escaped context, never as the owner's instructions |
+| `channel.receive` | `{contribution, message: {id, text?, chat?, topic?, context?, owner?, images?: [{mime, data}], files?: [{name, mime, data}], quote?, forward?, reply_to?, thread?, unsupported?: [string]}}` | `{}`: hub accepted it (deduplicated and queued for handling, not waiting for the turn). A mention request must carry `owner: true`; false or omitted is refused on the main-chat path. Non-owner requests use a guest conversation instead. `chat` / `topic` and gathered `context` are inserted as escaped context, never as the owner's instructions. `thread` is an opaque key that only routes (step 5) |
 | `channel.status` | `{contribution, state, error?, account?}` | `{}`: channels without a connector report their own state; channels with `connector` don't need this call |
 
-`data` is base64. Up to 4 images, 3 MB each; files up to 50 MB each. Oversized ones are dropped with an explanation in the message. When hub hands a message to the assistant over the bus, images and files total at most 40 MB (a bus message is 64 MB, with base64 data); ones that don't fit become "Image / file ‘…’ (too large)".
+`data` is base64. Up to 4 images, 3 MB each: a larger picture (a photo sent as the original) is scaled down to fit, not dropped (decoded once, turned upright by its EXIF orientation and drawn at the largest of the remote-image sizes, at most 2048 px, that fits; `remoteimage.Fit` in `server/internal/remoteimage`, JPEG, or PNG when it has transparency), and only one that can't be decoded or still doesn't fit is dropped with a note in the message (#11985). Files up to 50 MB each; larger ones are dropped with an explanation in the message. When hub hands a message to the assistant over the bus, images and files total at most 40 MB (a bus message is 64 MB, with base64 data); ones that don't fit become "Image / file ‘…’ (too large)".
 
 **hub calls extension**:
 
 | Method | Parameters | Returns |
 | --- | --- | --- |
-| `channel.send` | `{contribution, ref, text, kind, reply_to?}`: `text` is Markdown (already split by `max_text`), `kind` is `answer` / `note` / `ask` / `push` | `{message_id?}`; if sending is impossible (no conversation it can send to yet), return error code `cannot_send` |
+| `channel.send` | `{contribution, ref, text, kind, reply_to?, images?}`: `text` is Markdown (already split by `max_text`), `kind` is `answer` / `note` / `ask` / `push`; `images` (`[{mime, data}]`, only with `images_out`) are pictures to send after the text, and `text` may then be empty | `{message_id?}`; if sending is impossible (no conversation it can send to yet), return error code `cannot_send` |
 | `channel.typing` | `{contribution, on}` | `{}` (called only with `typing`) |
 | `channel.edit` | `{contribution, message_id, text}` | `{}` (called only with `progress`) |
 

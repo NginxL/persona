@@ -716,7 +716,7 @@ func TestRelayStateReadsAcrossVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"urgent", "spoke", "decision_at", "handover", "answers"} {
+	for _, field := range []string{"urgent", "spoke", "decision_at", "handover", "answers", "handed"} {
 		if strings.Contains(string(out), field) {
 			t.Fatalf("new fields written for a queue that has none: %s", out)
 		}

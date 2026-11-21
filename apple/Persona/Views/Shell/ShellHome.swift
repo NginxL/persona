@@ -532,6 +532,9 @@ struct ShellDestinations: ViewModifier {
         case .profile: AssistantProfileView()
         case .routines: AssistantRoutinesView()
         case .knowledge: KnowledgeView()
+        #if os(iOS)
+        case .starred: StarredMessagesPage()
+        #endif
         case .recordings:
             #if os(iOS) || os(visionOS)
             RecordingsPage()

@@ -26,10 +26,13 @@ const HintLast4 = "last4"
 // hintMinLen: a shorter secret is not shown by its end (four characters of a short one say too much of it).
 const hintMinLen = 12
 
-// ConfiguredNetwork is one "config:<field>" entry of permissions.network.
+// ConfiguredNetwork is one "config:<field>" or "config:<list>[].<field>" entry of permissions.network.
 type ConfiguredNetwork struct {
-	Field string
-	HTTP  bool // http allowed too, as the manifest says (":http")
+	Field string // the fixed field, or the entry field when List is set
+	List  string // the entry-list field; empty for a fixed field
+	HTTP  bool   // http allowed too, as the manifest says (":http")
+	// Malformed remembers a config: path that looks like an entry path but is not exactly list[].field.
+	Malformed bool
 }
 
 // ParseConfigNetwork reads a permissions.network entry; ok false for a host name.
@@ -39,7 +42,17 @@ func ParseConfigNetwork(entry string) (ConfiguredNetwork, bool) {
 		return ConfiguredNetwork{}, false
 	}
 	field, http := strings.CutSuffix(rest, ":http")
-	return ConfiguredNetwork{Field: field, HTTP: http}, true
+	c := ConfiguredNetwork{Field: field, HTTP: http}
+	if strings.ContainsAny(field, "[]") {
+		list, entry, found := strings.Cut(field, "[].")
+		c.List, c.Field = list, entry
+		c.Malformed = !found || list == "" || entry == "" || strings.ContainsAny(list, "[].:") || strings.ContainsAny(entry, "[].:")
+		if c.Malformed {
+			c.List = ""
+			c.Field = field
+		}
+	}
+	return c, true
 }
 
 // ConfiguredNetworks are permissions.network's "config:" entries.
@@ -73,18 +86,46 @@ func (m *Manifest) checkConfigured() []error {
 		sc, err := ParseSchema(m.Configuration)
 		for _, c := range cs {
 			var f *Field
+			var list *Field
 			if err == nil && sc != nil {
+				name := c.Field
+				if c.List != "" {
+					name = c.List
+				}
 				for i := range sc.Fields {
-					if sc.Fields[i].Name == c.Field {
+					if sc.Fields[i].Name == name {
 						f = &sc.Fields[i]
 					}
 				}
 			}
 			switch {
+			case c.Malformed:
+				errs = append(errs, fmt.Errorf("permissions.network: %q: config:<list>[].<field> or config:<list>[].<field>:http", ConfigNetworkPrefix+c.Field))
 			case c.Field == "" || strings.Contains(c.Field, ":"):
 				errs = append(errs, fmt.Errorf("permissions.network: %q: config:<field> or config:<field>:http", ConfigNetworkPrefix+c.Field))
 			case f == nil:
-				errs = append(errs, fmt.Errorf("permissions.network: configuration has no field %q", c.Field))
+				name := c.Field
+				if c.List != "" {
+					name = c.List
+				}
+				errs = append(errs, fmt.Errorf("permissions.network: configuration has no field %q", name))
+			case c.List != "" && !f.EntryList():
+				errs = append(errs, fmt.Errorf("permissions.network: configuration.%s: not an entry list", c.List))
+			case c.List != "":
+				list = f
+				f = nil
+				for i := range list.Items.Fields {
+					if list.Items.Fields[i].Name == c.Field {
+						f = &list.Items.Fields[i]
+					}
+				}
+				if f == nil {
+					errs = append(errs, fmt.Errorf("permissions.network: configuration.%s has no entry field %q", c.List, c.Field))
+				} else if f.Type != "string" || f.Format != "uri" {
+					errs = append(errs, fmt.Errorf("permissions.network: configuration.%s[].%s: the address it reaches is a string of format uri", c.List, c.Field))
+				} else if f.Default != nil {
+					errs = append(errs, fmt.Errorf("permissions.network: configuration.%s[].%s: the address it reaches has a default, but only the user writes it", c.List, c.Field))
+				}
 			case f.Type != "string" || f.Format != "uri":
 				errs = append(errs, fmt.Errorf("permissions.network: configuration.%s: the address it reaches is a string of format uri", c.Field))
 			case f.Default != nil:
@@ -116,6 +157,10 @@ func ConfiguredTarget(c ConfiguredNetwork, config json.RawMessage) (egress.Targe
 	var values map[string]any
 	_ = json.Unmarshal(config, &values)
 	raw, _ := values[c.Field].(string)
+	return configuredTargetValue(c, raw)
+}
+
+func configuredTargetValue(c ConfiguredNetwork, raw string) (egress.Target, string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return egress.Target{}, ""
@@ -151,7 +196,29 @@ func ConfiguredTarget(c ConfiguredNetwork, config json.RawMessage) (egress.Targe
 func ConfiguredTargets(m *Manifest, config json.RawMessage) []egress.Target {
 	var out []egress.Target
 	for _, c := range m.Permissions.ConfiguredNetworks() {
+		out = append(out, configuredTargets(c, config)...)
+	}
+	return out
+}
+
+func configuredTargets(c ConfiguredNetwork, config json.RawMessage) []egress.Target {
+	var out []egress.Target
+	var values map[string]json.RawMessage
+	_ = json.Unmarshal(config, &values)
+	if c.List == "" {
 		if t, _ := ConfiguredTarget(c, config); t.Host != "" {
+			out = append(out, t)
+		}
+		return out
+	}
+	var entries []map[string]json.RawMessage
+	if json.Unmarshal(values[c.List], &entries) != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		var raw string
+		_ = json.Unmarshal(entry[c.Field], &raw)
+		if t, _ := configuredTargetValue(c, raw); t.Host != "" {
 			out = append(out, t)
 		}
 	}

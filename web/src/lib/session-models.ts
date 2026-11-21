@@ -95,6 +95,8 @@ export const assistantLaunchers = (mid: string): { info?: AssistantLaunchers; lo
   read: assistantReads.get(machineKey(mid, catalogScope("assistant"))),
 });
 
+const mainDefaults = new Map<string, LauncherDefault | null>();
+const mainReads = new Map<string, Promise<void>>();
 const superviseDefaults = new Map<string, LauncherDefault | null>();
 const superviseReads = new Map<string, Promise<void>>();
 
@@ -104,19 +106,29 @@ export const superviseDefault = (mid: string): LauncherDefault | null | undefine
 
 /** Reads it: once, or `again` (a push changed the conversation, an opening of the panel). */
 export function readSuperviseDefault(mid: string, o: { again?: boolean } = {}): Promise<void> {
+  return readPurposeDefault(mid, SUPERVISE_PURPOSE, superviseDefaults, superviseReads, o);
+}
+
+/** Main-only settings are separate from the new-conversation catalog's default. */
+export const mainDefault = (mid: string): LauncherDefault | null | undefined => mainDefaults.get(machineKey(mid, catalogScope("assistant"))) ?? undefined;
+export function readMainDefault(mid: string, o: { again?: boolean } = {}): Promise<void> {
+  return readPurposeDefault(mid, "assistant.main", mainDefaults, mainReads, o);
+}
+
+function readPurposeDefault(mid: string, purpose: string, defaults: Map<string, LauncherDefault | null>, pending: Map<string, Promise<void>>, o: { again?: boolean }): Promise<void> {
   const scope = catalogScope("assistant");
   const key = machineKey(mid, scope);
-  const reading = superviseReads.get(key);
+  const reading = pending.get(key);
   if (reading) return reading;
-  if (superviseDefaults.has(key) && !o.again) return Promise.resolve();
-  const read = machineLaunchers(mid, { purpose: SUPERVISE_PURPOSE, manager: scope.manager }).then(
-    (r) => void superviseDefaults.set(key, r.default ?? null),
-    () => undefined, // the one shown stays; none shown: Main chat's default is the closest thing known
+  if (defaults.has(key) && !o.again) return Promise.resolve();
+  const read = machineLaunchers(mid, { purpose, manager: scope.manager }).then(
+    (r) => void defaults.set(key, r.default ?? null),
+    () => undefined, // An older hub has no main purpose: retain the shared default.
   ).finally(() => {
-    superviseReads.delete(key);
+    pending.delete(key);
     changed();
   });
-  superviseReads.set(key, read);
+  pending.set(key, read);
   return read;
 }
 
@@ -184,9 +196,10 @@ export function readModels(mid: string, launcher: string, o: { again?: boolean; 
       }
       lists.set(key, { list: r && hidden.size ? { ...r, models: r.models.filter((m) => !(m.custom && hidden.has(m.id))) } : r });
     } catch (e) {
-      // a list already shown stays (and says nothing): a newer one just didn't come
-      const now = lists.get(key);
-      lists.set(key, now?.list !== undefined ? { list: now.list } : { error: errorText(e) });
+      // Keep the catalog on a failed refresh. A new omp start still needs the node to confirm its capability.
+      const list = lists.get(key)?.list;
+      lists.set(key, list === undefined ? { error: errorText(e) } :
+        { list: list?.supports_start_model ? { ...list, supports_start_model: false } : list });
     } finally {
       done();
       reads.delete(key);
@@ -387,8 +400,8 @@ export function pendingView(s: Session, listOf: (launcher: string) => ModelList)
   return out;
 }
 
-export function pillView(s: Session, e: ModelList): PillView {
-  const model = pillModel(e.list?.models ?? [], s.model);
+export function pillView(s: Session, e: ModelList, displayModel?: string): PillView {
+  const model = pillModel(e.list?.models ?? [], s.model || displayModel);
   const out: PillView = { engine: sessionEngine(s), provider: sessionLauncher(s), loading: e.list === undefined && Boolean(e.loading), failed: e.list === undefined && Boolean(e.error) };
   if (s.agent_label) out.engineLabel = s.agent_label;
   if (model) out.model = model;

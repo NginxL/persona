@@ -36,11 +36,11 @@ struct HubTunnel: Hashable {
     }
 
     /// Up and routing the hub's requests: true; it could not be made: false.
-    func open() async -> Bool {
+    func open(owner: UUID? = nil) async -> Bool {
         switch kind {
         case .ssh:
             guard let route = hub.ssh else { return false }
-            return (try? await SSHTunnels.shared.open(hub.id, route: route, hub: hub.config.url, carrier: carrier)) != nil
+            return (try? await SSHTunnels.shared.open(hub.id, route: route, hub: hub.config.url, carrier: carrier, owner: owner)) != nil
         case .localProxy:
             guard let route = hub.localProxy else { return false }
             return (try? await LocalProxies.shared.open(hub.id, route: route, hub: hub.config.url)) != nil
@@ -71,9 +71,78 @@ struct HubTunnel: Hashable {
 /// to finish closes the tunnels they opened, and the app going to the background leaves them to it.
 @MainActor private var outsideRuns: [String: Int] = [:]
 
+/// Only recovery picks: a newer pick closes its predecessor's SSH attempt before it can join that attempt.
+@MainActor private var tunnelRecoveries: [String: HubTunnelRecovery] = [:]
+
+/// Restores a previously used SSH route without waiting for a direct address that no longer answers. Both waits
+/// must honor cancellation; the SSH owner closes only the attempt this pick created, fencing late completions.
+@MainActor final class HubTunnelRecovery {
+    enum Result: Sendable {
+        case direct(HubRoute.Candidate)
+        case tunnel
+        case unavailable
+        case cancelled
+    }
+
+    private enum Answer: Sendable {
+        case direct(HubRoute.Candidate?)
+        case tunnel(Bool)
+    }
+
+    private var closeTunnel: (() -> Void)?
+    private(set) var cancelled = false
+
+    init(closeTunnel: @escaping () -> Void) {
+        self.closeTunnel = closeTunnel
+    }
+
+    func cancel() {
+        cancelled = true
+        close()
+    }
+
+    /// Ownership passes to the selected connection once both race waiters have ended.
+    func keepTunnel() { closeTunnel = nil }
+
+    private func close() {
+        let action = closeTunnel
+        closeTunnel = nil
+        action?()
+    }
+
+    func pick(direct: @escaping @MainActor () async -> HubRoute.Candidate?,
+              tunnel: @escaping @MainActor () async -> Bool) async -> Result {
+        guard !cancelled, !Task.isCancelled else { cancel(); return .cancelled }
+        return await withTaskGroup(of: Answer.self) { tasks in
+            tasks.addTask { .direct(await direct()) }
+            tasks.addTask { .tunnel(await tunnel()) }
+            defer { tasks.cancelAll() }
+            for await answer in tasks {
+                guard !self.cancelled, !Task.isCancelled else { self.cancel(); return .cancelled }
+                switch answer {
+                case .direct(let candidate?):
+                    self.close()
+                    return .direct(candidate)
+                case .tunnel(true):
+                    return .tunnel
+                case .direct(nil), .tunnel(false):
+                    continue
+                }
+            }
+            self.close()
+            return .unavailable
+        }
+    }
+}
+
 /// Which of two racing tasks answered first.
 @MainActor private final class Once {
     var done = false
+}
+
+/// What the restore race's direct probes came to (`AppModel.restoreRace`).
+@MainActor private final class Asked {
+    var tried: [HubRoute.Tried] = []
 }
 
 extension AppModel {
@@ -108,31 +177,72 @@ extension AppModel {
 
     /// Where a group's socket goes next when it has a tunnel, step by step as `HubWay.next` says: straight to the hub
     /// when one of its addresses answers (the tunnels close), else through a tunnel; tunnels set to be used every time
-    /// first. Nothing answering at all: the first address, for the socket's own retries.
+    /// first. Restoring the last SSH session races the direct addresses, so an unreachable address cannot delay an
+    /// already-restored tunnel. Nothing answering at all: the first address, for the socket's own retries.
     func tunnelRoute(_ group: String) async -> ServerConfig? {
+        guard !Task.isCancelled else { return nil }
+        tunnelRecoveries.removeValue(forKey: group)?.cancel()
+        let attemptStart = Date() // what its direct check learns after the app went to the background was cut short
         let candidates = HubRoute.candidates(registry, group: group)
         let tunnels = hubTunnels(group)
-        let options = tunnels.map { HubWay.Option(always: $0.always, recent: $0.recent) }
+        let options = tunnels.map {
+            HubWay.Option(always: $0.always, recent: $0.recent,
+                          recovering: $0.kind == .ssh && !SSHTunnels.shared.routed.contains($0.hub.id))
+        }
         var seen = HubWay.Seen()
         var direct: HubRoute.Candidate?
         while true {
+            guard !Task.isCancelled else { return nil }
             switch HubWay.next(options, seen) {
             case .open(let i):
                 seen.opened[i] = await tunnels[i].open()
+            case .restore(let i):
+                let t = tunnels[i]
+                let owner = UUID()
+                let recovery = HubTunnelRecovery { SSHTunnels.shared.close(t.hub.id, openedBy: owner) }
+                tunnelRecoveries[group] = recovery
+                let result = await restoreRace(group, recovery, candidates, since: attemptStart) { await t.open(owner: owner) }
+                if tunnelRecoveries[group] === recovery { tunnelRecoveries[group] = nil }
+                guard !Task.isCancelled, !recovery.cancelled else { recovery.cancel(); return nil }
+                switch result {
+                case .direct(let answer):
+                    direct = answer
+                    seen.direct = true
+                case .tunnel:
+                    recovery.keepTunnel()
+                    return through(only(t, of: tunnels), group)
+                case .unavailable:
+                    seen.direct = false
+                    seen.opened[i] = false
+                case .cancelled:
+                    return nil
+                }
             case .askDirect(let warm):
                 // Through a tunnel last time (back from the background, a dropped socket): it starts while the direct
                 // way is asked, so an address that does not answer costs no wait (up to the probe's 3 s) on top.
                 let warming: Task<[Int: Bool], Never>? = warm.isEmpty ? nil : Task { @MainActor in
                     var tried: [Int: Bool] = [:]
                     for i in warm {
+                        guard !Task.isCancelled else { break }
                         tried[i] = await tunnels[i].open()
                         if tried[i] == true { break }
                     }
                     return tried
                 }
-                direct = await HubRoute.answering(candidates)
+                defer { warming?.cancel() }
+                let asked = await HubRoute.answeringTried(candidates, check: routeCheck)
+                attemptTried(group, asked.tried, since: attemptStart)
+                guard !Task.isCancelled else { return nil }
+                direct = asked.winner
                 seen.direct = direct != nil
-                if let tried = await warming?.value { seen.opened.merge(tried) { $1 } }
+                if let warming {
+                    let tried = await withTaskCancellationHandler {
+                        await warming.value
+                    } onCancel: {
+                        warming.cancel()
+                    }
+                    seen.opened.merge(tried) { $1 }
+                }
             case .direct:
                 for t in tunnels { t.close() }
                 return direct?.config
@@ -143,6 +253,26 @@ extension AppModel {
                 return candidates.first?.config
             }
         }
+    }
+
+    /// The `.restore` step's race (#11683): a closed SSH tunnel used last time against the group's own addresses, with
+    /// what each address's probe came to on the lines and in the tally, however the race ends (#11390): a direct
+    /// address won, the tunnel did, nothing answered, or the pick was cancelled (probes cut short are Unknown). Only a
+    /// direct winner hands the socket the addresses that answered: through the tunnel, the socket's failure is the
+    /// tunnel's, and a cancelled pick's answers are not the next attempt's. `.cancelled` when cancelled meanwhile.
+    func restoreRace(_ group: String, _ recovery: HubTunnelRecovery, _ candidates: [HubRoute.Candidate], since attemptStart: Date,
+                     tunnel: @escaping @MainActor () async -> Bool) async -> HubTunnelRecovery.Result {
+        let check = routeCheck, asked = Asked()
+        // `pick` waits for its direct side, cancelled or not, before it returns: `asked` is complete by then.
+        let result = await recovery.pick(direct: {
+            let r = await HubRoute.answeringTried(candidates, check: check)
+            asked.tried = r.tried
+            return r.winner
+        }, tunnel: tunnel)
+        tried(group, asked.tried, since: attemptStart)
+        guard !Task.isCancelled, !recovery.cancelled else { return .cancelled }
+        if case .direct = result { attemptAnswered(group, asked.tried, since: attemptStart) }
+        return result
     }
 
     /// `t` carries its hub's traffic: the hub's other tunnel closes (both route the same hub address in HubTransport, so
@@ -156,7 +286,10 @@ extension AppModel {
     private func through(_ t: HubTunnel, _ group: String) -> ServerConfig {
         t.watchDirect(answers: { [weak self] in
             guard let self else { return false }
-            return await HubRoute.answering(HubRoute.candidates(self.registry, group: group)) != nil
+            let start = Date()
+            let asked = await HubRoute.answeringTried(HubRoute.candidates(self.registry, group: group), check: self.routeCheck)
+            self.tried(group, asked.tried, since: start)
+            return asked.winner != nil
         }, moveBack: { [weak self] in self?.link(group)?.live.reroute() })
         return t.hub.config
     }
@@ -199,8 +332,20 @@ extension AppModel {
         let once = Once()
         let config: ServerConfig? = try await withCheckedThrowingContinuation { c in
             Task { @MainActor in
-                let config = await self.tunnelRoute(group)
-                if !once.done { once.done = true; c.resume(returning: config) }
+                do {
+                    // A notification action can arrive while foreground recovery already owns the group's route.
+                    // Join it; a second route pick would cancel that recovery and release its reads too early.
+                    let config: ServerConfig?
+                    if let live = self.link(group)?.live, live.state == .connecting || live.state == .connected {
+                        config = try await live.waitForRoute()
+                    } else {
+                        config = await self.tunnelRoute(group)
+                    }
+                    guard let config else { throw CancellationError() }
+                    if !once.done { once.done = true; c.resume(returning: config) }
+                } catch {
+                    if !once.done { once.done = true; c.resume(throwing: error) }
+                }
             }
             Task { @MainActor in
                 try? await Task.sleep(for: AppModel.outsideWayLimit)
@@ -264,7 +409,9 @@ extension AppModel {
 /// How a group's next connection picks its way when its hubs have tunnels
 /// (docs/operations/network.md「Connecting to hub through SSH」): the tunnels set to Always Use first, in order, the first that
 /// comes up taken; then the hub's own addresses, while the tunnels used last time start meanwhile; an address
-/// answering: straight to the hub; else the first of those to have come up, then the other tunnels in order. Going
+/// answering: straight to the hub; else the first of those to have come up, then the other tunnels in order. A closed
+/// SSH tunnel used last time races the direct addresses during recovery only; a live tunnel keeps direct-first
+/// selection so the periodic check can move back to the hub's own address. Going
 /// through a tunnel only because the direct way did not answer, the direct way is asked again every `recheck`. Pure:
 /// `AppModel.tunnelRoute` carries out each step and tells it what came of it, and the tests go through the steps by
 /// hand.
@@ -278,6 +425,9 @@ nonisolated enum HubWay {
         var always: Bool
         /// Used the last time (kept while the app was in the background).
         var recent: Bool
+        /// Its SSH session was closed, so restoring it may win before the direct probe finishes. An already-routed
+        /// tunnel keeps direct-first selection, including the periodic check that moves back to a direct address.
+        var recovering = false
     }
 
     /// What the pick learned so far.
@@ -291,6 +441,8 @@ nonisolated enum HubWay {
     enum Step: Equatable, Sendable {
         /// Bring up tunnel `i`.
         case open(Int)
+        /// Race a previously used, closed SSH tunnel against the direct addresses; the first success restores service.
+        case restore(Int)
         /// Ask the hub's own addresses, bringing up these tunnels meanwhile, in order, until one comes up.
         case askDirect(warming: [Int])
         /// Straight to the hub; every tunnel closes.
@@ -311,6 +463,7 @@ nonisolated enum HubWay {
         }
         let fallback = options.indices.filter { !options[$0].always }
         let warm = fallback.filter { options[$0].recent }
+        if seen.direct == nil, let first = warm.first, options[first].recovering { return .restore(first) }
         guard let direct = seen.direct else { return .askDirect(warming: warm) }
         if direct { return .direct }
         for i in warm + fallback.filter({ !options[$0].recent }) {

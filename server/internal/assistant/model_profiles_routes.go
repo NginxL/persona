@@ -169,7 +169,9 @@ func modelProfileStatus(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, errModelProfileConflict), errors.Is(err, errModelProfileNoRollback):
 		return http.StatusConflict
-	case errors.As(err, &m) && strings.HasPrefix(m.Key, "assistant-model_profiles."):
+	case errors.As(err, &m) && (strings.HasPrefix(m.Key, "assistant-model_profiles.") ||
+		m.Key == "assistant-models.err_permission_mode_launcher_only" ||
+		m.Key == "assistant-models.err_permission_mode_unsupported"):
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError

@@ -462,6 +462,7 @@ func ExplainWith(l i18n.Lang, m *Manifest, config json.RawMessage) []PermissionL
 		}
 		out = append(out, PermissionLine{Key: "secrets", Title: permissionText(l, "secrets_title"), Detail: strings.Join(names, permissionText(l, "list_separator"))})
 	}
+	out = append(out, entrySecretLines(l, m, nil, false)...)
 	if len(m.Tools) > 0 {
 		out = append(out, toolsLine(l, m.Tools, permissionText(l, "tools_title")))
 	}
@@ -608,11 +609,14 @@ func AddedWith(l i18n.Lang, old, m *Manifest, config json.RawMessage) []Permissi
 	}
 	var names []string
 	for _, s := range newSecrets(old, m) {
-		names = append(names, s.Title)
+		if slices.ContainsFunc(m.Secrets, func(fixed SecretSpec) bool { return fixed.Name == s.Name }) {
+			names = append(names, s.Title)
+		}
 	}
 	if len(names) > 0 {
 		out = append(out, PermissionLine{Key: "secrets", Title: permissionText(l, "secrets_more_title"), Detail: strings.Join(names, permissionText(l, "list_separator"))})
 	}
+	out = append(out, entrySecretLines(l, m, old, true)...)
 	if m.NodeProgram() != nil {
 		out = append(out, nodeLines(l, m.Node, old.NodeProgram())...)
 		if names := nodeSecrets(m, old); len(names) > 0 {
@@ -622,13 +626,51 @@ func AddedWith(l i18n.Lang, old, m *Manifest, config json.RawMessage) []Permissi
 	return out
 }
 
-// newSecrets are m's secrets whose names old did not declare, whether required or optional.
+// newSecrets are m's fixed or entry-list secret declarations whose scope old did not declare. A fixed secret and a
+// same-named entry-list secret are different scopes: the latter covers every current and future entry.
 func newSecrets(old, m *Manifest) []SecretSpec {
+	var oldFixed []SecretSpec
+	if old != nil {
+		oldFixed = old.Secrets
+	}
 	var out []SecretSpec
 	for _, s := range m.Secrets {
-		if !slices.ContainsFunc(old.Secrets, func(o SecretSpec) bool { return o.Name == s.Name }) {
+		if !slices.ContainsFunc(oldFixed, func(o SecretSpec) bool { return o.Name == s.Name }) {
 			out = append(out, s)
 		}
+	}
+	schema, _ := ParseSchema(m.Configuration)
+	for _, f := range schema.EntryListFields() {
+		if !hasEntrySecretDeclaration(old, f.Secret.Name) {
+			out = append(out, *f.Secret)
+		}
+	}
+	return out
+}
+
+func hasEntrySecretDeclaration(m *Manifest, name string) bool {
+	if m == nil {
+		return false
+	}
+	schema, _ := ParseSchema(m.Configuration)
+	return slices.ContainsFunc(schema.EntryListFields(), func(f Field) bool { return f.Secret.Name == name })
+}
+
+// entrySecretLines explains that one write-only, sealed secret belongs to every current and future entry. The key
+// stays "secrets" so existing clients' generic permission renderer can show it.
+func entrySecretLines(l i18n.Lang, m, old *Manifest, addedOnly bool) []PermissionLine {
+	schema, _ := ParseSchema(m.Configuration)
+	var out []PermissionLine
+	for _, f := range schema.EntryListFields() {
+		if addedOnly && hasEntrySecretDeclaration(old, f.Secret.Name) {
+			continue
+		}
+		title := permissionText(l, "entry_secrets_title")
+		if addedOnly {
+			title = permissionText(l, "entry_secrets_more_title")
+		}
+		out = append(out, PermissionLine{Key: "secrets", Title: title, Detail: permissionText(l, "entry_secrets_detail",
+			i18n.Args{"secret": f.Secret.Title, "list": f.Title})})
 	}
 	return out
 }
@@ -676,23 +718,49 @@ func configuredLines(l i18n.Lang, m *Manifest, cs []ConfiguredNetwork, config js
 	sc, _ := ParseSchema(m.Configuration)
 	for _, c := range cs {
 		field := c.Field
+		listTitle := c.List
 		if sc != nil {
 			for _, f := range sc.Fields {
-				if f.Name == c.Field && f.Title != "" {
+				if c.List == "" && f.Name == c.Field && f.Title != "" {
 					field = f.Title
+				}
+				if c.List != "" && f.Name == c.List && f.EntryList() {
+					if f.Title != "" {
+						listTitle = f.Title
+					}
+					for _, sub := range f.Items.Fields {
+						if sub.Name == c.Field && sub.Title != "" {
+							field = sub.Title
+						}
+					}
 				}
 			}
 		}
+		var hosts []string
+		for _, t := range configuredTargets(c, config) {
+			host := net.JoinHostPort(t.Host, t.Port)
+			if !slices.Contains(hosts, host) {
+				hosts = append(hosts, host)
+			}
+		}
 		now := permissionText(l, "network_config_unset")
-		if t, _ := ConfiguredTarget(c, config); t.Host != "" {
-			now = net.JoinHostPort(t.Host, t.Port)
+		if len(hosts) > 0 {
+			now = strings.Join(hosts, permissionText(l, "list_separator"))
 		}
 		key := "network_config_detail"
 		if c.HTTP {
 			key = "network_config_detail_http"
 		}
+		args := i18n.Args{"field": field, "host": now}
+		if c.List != "" {
+			key = "network_config_entries_detail"
+			if c.HTTP {
+				key = "network_config_entries_detail_http"
+			}
+			args["list"] = listTitle
+		}
 		out = append(out, PermissionLine{Key: "network_config", Title: permissionText(l, "network_config_title"),
-			Detail: permissionText(l, key, i18n.Args{"field": field, "host": now})})
+			Detail: permissionText(l, key, args)})
 	}
 	return out
 }

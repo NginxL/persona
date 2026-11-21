@@ -56,7 +56,7 @@ func (i *Index) Query(options Options) (Page, error) {
 		}
 	}
 	end := min(offset+o.Limit, len(r.events))
-	p := Page{Sessions: make([]any, 0, end-offset), Remove: make([]string, 0), Revision: r.counts.Revision, Total: r.counts.Total, HasMore: end < len(r.events)}
+	p := Page{Sessions: make([]any, 0, end-offset), Remove: make([]string, 0), Added: make([]string, 0), Revision: r.counts.Revision, Total: r.counts.Total, HasMore: end < len(r.events)}
 	if o.Search != "" {
 		p.SearchHits = make(map[string]SearchHit, end-offset)
 	}
@@ -70,6 +70,9 @@ func (i *Index) Query(options Options) (Page, error) {
 			value = e.value.item.Summary
 		}
 		p.Sessions = append(p.Sessions, clone(value))
+		if e.added {
+			p.Added = append(p.Added, e.id)
+		}
 		if o.Search != "" {
 			ranked := r.searchHits[e.id]
 			hit := ranked.SearchHit
@@ -115,6 +118,49 @@ func (i *Index) Counts(options Options) (Counts, error) {
 	return copyCounts(i.countsResult(o.filters()).counts), nil
 }
 
+// CountMatchingState counts distinct items named by ids matching options whose state (under Roots) equals state.
+func (i *Index) CountMatchingState(options Options, state string, ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	if options.Search != "" {
+		return 0, failure("invalid_query", "search does not support counts")
+	}
+	o, err := validate(options)
+	if err != nil {
+		return 0, err
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.initialize()
+	i.pruneSnapshots()
+	f := o.filters()
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	if o.Cursor != "" {
+		s, _, _, err := i.cursorSnapshot(o)
+		if err != nil {
+			return 0, err
+		}
+		n := 0
+		for _, e := range s.result.events {
+			if e.value != nil && want[e.value.item.ID] && f.matches(e.value) && stateOf(e.value.item, f.Roots) == state {
+				n++
+			}
+		}
+		return n, nil
+	}
+	n := 0
+	for id := range want {
+		if r := i.items[id]; r != nil && f.matches(r) && stateOf(r.item, f.Roots) == state {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func copyCounts(c Counts) Counts {
 	c.Machine = maps.Clone(c.Machine)
 	c.ActiveAgentsByMachine = maps.Clone(c.ActiveAgentsByMachine)
@@ -148,6 +194,7 @@ func (f filters) matches(r *record) bool {
 		(f.JustFinished == "" || (f.JustFinished == "1") == justFinishedOf(v, f.Roots)) &&
 		(f.Manager == "" || f.Manager == r.owner) &&
 		(f.Provider == "" || f.Provider == v.Provider) &&
+		(f.Providers == "" || inProviders(f.Providers, v.Provider)) &&
 		(f.Todo == "" || f.Todo == todo || f.Todo == TodoNone && todo == "") &&
 		(f.Q == "" || strings.Contains(r.search, f.Q))
 }
@@ -336,7 +383,7 @@ func (i *Index) queryResult(o Options) *result {
 			if before && reflect.DeepEqual(c.before.item, c.after.item) {
 				continue
 			}
-			r.events = append(r.events, event{id: id, updated: c.after.item.UpdatedAt, value: c.after})
+			r.events = append(r.events, event{id: id, updated: c.after.item.UpdatedAt, value: c.after, added: c.before == nil})
 		} else if before {
 			updated := c.before.item.UpdatedAt
 			if c.after != nil {

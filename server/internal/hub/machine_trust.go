@@ -321,7 +321,14 @@ func (h *Hub) expirePending(ctx context.Context, now time.Time) {
 	t.mu.Unlock()
 	slices.Sort(due)
 	for _, id := range due {
-		if err := h.rejectMachine(ctx, id, "hub", "expire"); err != nil && !errors.Is(err, errNotPending) {
+		// Rejecting a computer writes the trust rows; its audit, and hub.json's
+		// machine entry: left for the next sweep while a snapshot pauses writes.
+		if !h.quiesce.begin() {
+			return
+		}
+		err := h.rejectMachine(ctx, id, "hub", "expire")
+		h.quiesce.end()
+		if err != nil && !errors.Is(err, errNotPending) {
 			h.logf("[%s] remove after waiting a day to be confirmed: %v", id, err)
 		}
 	}

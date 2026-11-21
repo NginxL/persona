@@ -360,7 +360,16 @@ def extract_history(path, destination):
 
 
 def backup_store(request):
-    store = Path(request["runtime"]).resolve(strict=True) / "update/development-backups"
+    # The Web UI's folder (already canonical) or hub.json's advanced setting;
+    # absent: the recommended directory the Hub has always used.
+    directory = request["config"]["backup"].get("directory")
+    if directory:
+        if (not isinstance(directory, str) or not directory.startswith("/") or
+                "\\" in directory or "\x00" in directory or ".." in PurePosixPath(directory).parts):
+            raise ValueError("invalid backup directory")
+        store = Path(directory)
+    else:
+        store = Path(request["runtime"]).resolve(strict=True) / "update/development-backups"
     if store.is_symlink():
         raise ValueError("linked backup directory")
     return store
@@ -511,12 +520,26 @@ def snapshot(request):
     runtime, roots, databases = inventory(request)
     database_envs = [database_environment(database) for database in databases]
     backup = request["config"]["backup"]
-    if not backup.get("quiesce") or not backup.get("resume"):
+    # The Hub pauses its own writers and says so (builtin); otherwise the
+    # configured hooks must pause every writer this snapshot includes.
+    builtin = backup.get("builtin") is True
+    if not builtin and (not backup.get("quiesce") or not backup.get("resume")):
         raise ValueError("configure writer quiesce and resume commands before updating")
-    store = runtime / "update" / "development-backups"
+    retain = backup.get("retain") or 3
+    if type(retain) is not int or not 1 <= retain <= 50:
+        raise ValueError("invalid snapshot retention")
+    store = backup_store(request)
+    # A store that is a collected root or holds one cannot be left out of the
+    # archive without dropping that root, so the snapshot would be hollow.
+    resolved_store = store.resolve()
+    for root in roots:
+        if root == resolved_store or root.is_relative_to(resolved_store):
+            raise ValueError("the backup directory may not be the runtime or contain a collected root")
     store.mkdir(mode=0o700, parents=True, exist_ok=True)
     if store.is_symlink():
         raise ValueError("linked backup directory")
+    if store.stat().st_mode & 0o077:
+        raise ValueError("backup directory must be private (0700)")
     with (store / ".lock").open("a") as lock:
         lock_backup(lock)
         coordination = store / "coordination-pending.json"
@@ -532,12 +555,16 @@ def snapshot(request):
                     "from_build": request.get("from_build", 0), "from_updated_at": request.get("from_updated_at", ""),
                     "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "platform": request.get("platform", ""),
                     "roots": [str(p) for p in roots], "databases": len(databases), "programs": {}, "nodes": {}, "files": {}}
-        write_json(coordination, {"owner": OWNER, "snapshot": ident, "phase": "quiescing"})
+        if not builtin:
+            write_json(coordination, {"owner": OWNER, "snapshot": ident, "phase": "quiescing"})
         snapshot_error = None
         try:
             try:
-                print("development backup: pausing writers", flush=True)
-                run(backup["quiesce"], timeout=60)
+                if builtin:
+                    print("development backup: writers paused by the hub", flush=True)
+                else:
+                    print("development backup: pausing writers", flush=True)
+                    run(backup["quiesce"], timeout=60)
                 # Hooks must stop every DB/file writer in this snapshot's scope,
                 # including independent managers, before returning successfully.
                 for i, database_env in enumerate(database_envs):
@@ -553,6 +580,13 @@ def snapshot(request):
                     run(["pg_restore", "--list", str(target)], output=True)
                     manifest["files"][target.name] = digest(target)
                 excluded = {runtime / n for n in ("update", "bin", "cache", "logs")}
+                # A chosen folder inside a collected root is never archived:
+                # each snapshot would otherwise carry every earlier one. A
+                # folder outside the roots needs no exclusion (and one that
+                # holds a root was refused above).
+                if any(store.is_relative_to(root) or store.resolve().is_relative_to(root) for root in roots):
+                    excluded.add(store)
+                    excluded.add(store.resolve())
                 count = 0
 
                 def include(info):
@@ -623,21 +657,25 @@ def snapshot(request):
                 print("development backup: snapshot failed: " + failure_detail(exc), file=sys.stderr, flush=True)
                 raise
             finally:
-                # Even partially failed quiesce hooks can have stopped a writer.
-                # A failed resume preserves its marker and blocks adoption/retry.
-                with defer_cancellation() as cancelled:
-                    print("development backup: resuming writers", flush=True)
-                    try:
-                        run(backup["resume"], timeout=60)
-                    except BaseException as exc:
-                        print("development backup: resume failed: " + failure_detail(exc), file=sys.stderr, flush=True)
-                        if snapshot_error is not None:
-                            raise exc from snapshot_error
-                        raise
-                    coordination.unlink()
-                    sync_dir(store)
-                if cancelled and snapshot_error is None:
-                    raise InterruptedError()
+                # The Hub resumes its own writers after this helper returns.
+                if builtin:
+                    print("development backup: hub will resume writers", flush=True)
+                else:
+                    # Even partially failed quiesce hooks can have stopped a writer.
+                    # A failed resume preserves its marker and blocks adoption/retry.
+                    with defer_cancellation() as cancelled:
+                        print("development backup: resuming writers", flush=True)
+                        try:
+                            run(backup["resume"], timeout=60)
+                        except BaseException as exc:
+                            print("development backup: resume failed: " + failure_detail(exc), file=sys.stderr, flush=True)
+                            if snapshot_error is not None:
+                                raise exc from snapshot_error
+                            raise
+                        coordination.unlink()
+                        sync_dir(store)
+                    if cancelled and snapshot_error is None:
+                        raise InterruptedError()
             for member in temporary.iterdir():
                 sync_dir(member)
             os.rename(temporary, published)
@@ -656,12 +694,12 @@ def snapshot(request):
                     owned.append(path)
                 except (ValueError, OSError, json.JSONDecodeError):
                     pass  # Unknown/damaged data is retained for inspection.
-        for old in sorted(owned)[:-3]:
+        for old in sorted(owned)[:-retain]:
             print("development backup: cleaning " + old.name, flush=True)
             shutil.rmtree(old)
             pruned.append(old.name)
         sync_dir(store)
-        return {"id": ident, "retained": min(len(owned), 3), "pruned": pruned}
+        return {"id": ident, "retained": min(len(owned), retain), "pruned": pruned}
 
 
 def main():

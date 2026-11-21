@@ -29,6 +29,16 @@ class TrafficReportTests(unittest.TestCase):
         self.assertEqual(data["unknown_platform_requests"], 0)
         self.assertEqual(list(report.rows(events, end, report.timestamp("2026-01-03T00:00:00Z"))), [])
 
+    def test_journal_skips_valid_json_that_is_not_a_record(self):
+        start = report.timestamp("2026-01-01T00:00:00Z")
+        end = report.timestamp("2026-01-02T00:00:00Z")
+        message = ('traffic minute=2026-01-01T01:00:00Z route=unmatched event=http '
+                   'action=started count=4 body_bytes=8 max_body_bytes=4 elapsed_ms=16')
+        record = json.dumps({"MESSAGE": message})
+        lines = [record, "null", "[]", "42", json.dumps(message), record]
+        data = report.aggregate(report.rows(lines, start, end))
+        self.assertEqual([(row["count"], row["body_bytes"]) for row in data["hourly"]], [(8, 16)])
+
     def test_connection_overlap_and_redaction(self):
         start, end = report.timestamp("2026-01-01T00:00:00Z"), report.timestamp("2026-01-02T00:00:00Z")
         sessions = [{"identity": "0123456789abcdef", "start": "2025-12-31T23:30:00Z", "end": "2026-01-01T00:30:00Z", "reason": "private-note", "heartbeat_interval": "private-token"},
@@ -54,6 +64,21 @@ class TrafficReportTests(unittest.TestCase):
         self.assertEqual(following["heartbeat_intervals"], {})
         self.assertEqual(following["completed_in_window_count"], 0)
         self.assertIsNone(following["mean_completed_in_window_seconds"])
+
+    def test_connection_seconds_split_only_overlapping_utc_hours(self):
+        start = report.timestamp("2026-01-01T12:59:55Z")
+        end = report.timestamp("2026-01-31T14:30:00Z")
+        sessions = [
+            {"start": "2026-01-01T13:59:50+01:00", "end": "2026-01-01T14:00:20+01:00"},
+            {"start": "2026-01-31T13:59:45Z", "end": None},
+        ]
+        data = report.connection_report(sessions, start, end)
+        self.assertEqual([(row["hour"], row["connected_seconds"]) for row in data["hourly"]], [
+            ("2026-01-01T12:00:00Z", 5),
+            ("2026-01-01T13:00:00Z", 20),
+            ("2026-01-31T13:00:00Z", 15),
+            ("2026-01-31T14:00:00Z", 1800),
+        ])
 
     def test_boundary_close_preserves_other_window_and_identity_rules(self):
         start, end = report.timestamp("2026-01-02T00:00:00Z"), report.timestamp("2026-01-03T00:00:00Z")

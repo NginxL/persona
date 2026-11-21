@@ -10,7 +10,7 @@ import (
 )
 
 func TestSupervisionBatchImmediateSignals(t *testing.T) {
-	immediate := []string{sigNeedsYou, sigAsk, sigEscalated, sigDecide, sigDecisionReply, sigParkDecided, sigOwnerCannot, sigRecheck, sigUndecidable, sigFailed}
+	immediate := []string{sigNeedsYou, sigAsk, sigEscalated, sigDecide, sigDecisionReply, sigParkDecided, sigOwnerCannot, sigRecheck, sigUndecidable, sigFailed, sigParkedDue}
 	for _, kind := range immediate {
 		if !supervisionBatchImmediate(superviseSignal{Kind: kind}) {
 			t.Errorf("%s must bypass routine batching", kind)
@@ -51,7 +51,7 @@ func TestSupervisionBatchAnchorsFirstRoutineSignal(t *testing.T) {
 	first := superviseSignal{Todo: "first", Kind: sigStalled, Key: "one", At: now.Add(-2 * time.Minute)}
 	second := superviseSignal{Todo: "second", Kind: sigInterrupted, Key: "two", At: now.Add(-time.Minute)}
 	groups := map[string][]superviseSignal{"recipient": {first, second}}
-	if order := s.gateDigestBatches([]string{"recipient"}, groups, now, 45*time.Minute); len(order) != 0 {
+	if order := s.gateDigestBatches([]string{"recipient"}, groups, now, 45*time.Minute, 0); len(order) != 0 {
 		t.Fatalf("routine batch released early: %v", order)
 	}
 	want := first.At.Add(45 * time.Minute)
@@ -78,7 +78,7 @@ func TestSupervisionBatchRecipientsHaveIndependentDeadlines(t *testing.T) {
 		"due":   {{Todo: "due-task", Kind: sigStalled, Key: "due", At: now.Add(-time.Hour)}},
 		"later": {{Todo: "later-task", Kind: sigStalled, Key: "later", At: now.Add(-time.Hour)}},
 	}
-	order := s.gateDigestBatches([]string{"due", "later"}, groups, now, time.Hour)
+	order := s.gateDigestBatches([]string{"due", "later"}, groups, now, time.Hour, 0)
 	if !slices.Equal(order, []string{"due"}) {
 		t.Fatalf("released recipients = %v, want only due", order)
 	}

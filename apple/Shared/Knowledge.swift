@@ -135,6 +135,8 @@ nonisolated struct KBDetail: Decodable, Sendable {
     var log: [String]?
     var recent: String?
     var links: [KBEntry]?
+    /// Links the user keeps out of automatic updates. Older hubs omit this list.
+    var removed: [KBEntry]?
     /// A project's Moments posts (the hub's LinkMoments), newest first.
     var moments: [KBMomentRef]?
     /// A topic's knowledge points (docs/assistant/knowledge.md "Topics").

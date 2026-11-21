@@ -47,6 +47,14 @@ var (
 	larkCLIReadVerbs      = map[string]bool{"fetch": true, "agenda": true, "search": true, "list": true, "get": true, "mget": true}
 	larkCLILeadReadVerbs  = map[string]bool{"get": true, "list": true}
 	larkCLIMethodReadVerb = map[string]bool{"list": true, "get": true, "search": true, "mget": true, "batch_get": true}
+	// larkCLILocalDownloads save what a message carries (an image, a file) under the current directory and change
+	// nothing on Lark, though lark-cli rates them "Risk: write" (lark-cli 1.0.91): /read downloads a group's images
+	// and files with them (#11803). lark-cli overwrites an existing file and takes a dotfile name, and without --output
+	// the name is the sender's (Content-Disposition), so one is a read only when --output names a plain file in
+	// lark-im-resources/ (larkCLIDownloadOutput, the directory --download-resources uses), and only for an ordinary
+	// write rating: a high-risk one is not.
+	larkCLILocalDownloads = map[string]bool{"im/+messages-resources-download": true}
+	larkCLIDownloadOutput = lazyre.New(`^lark-im-resources/[A-Za-z0-9_][A-Za-z0-9._-]{0,199}$`)
 	larkCLIRead           = map[string]bool{"schema": true, "skills": true, "whoami": true, "doctor": true, "help": true, "completion": true}
 	larkCLIAuthRead       = map[string]bool{"status": true, "check": true, "scopes": true, "list": true}
 	larkCLIEventRead      = map[string]bool{"list": true, "schema": true, "status": true}
@@ -155,6 +163,9 @@ func parseLarkCLI(args []string, risk larkRisk) (c larkCall, deny string, ok boo
 		if c.Risk == "" && (larkCLIKnownReads[strings.Join(words, "/")] || larkCLINamedRead(words)) {
 			c.Risk = "read"
 		}
+		if (c.Risk == "" || c.Risk == "write") && larkCLILocalDownloads[strings.Join(words, "/")] && larkCLISafeDownload(flags) {
+			c.Risk = "read"
+		}
 	}
 	return c, "", true
 }
@@ -179,6 +190,46 @@ func larkCLINamedRead(words []string) bool {
 		}
 	}
 	return len(words) >= 3 && larkCLIMethodReadVerb[last]
+}
+
+// larkCLIDownloadFlags are the flags of `im +messages-resources-download` (lark-cli 1.0.91 --help), true for those
+// that take a value. The command has no -o: lark-cli rejects it today, but a later version may add one, so a word the
+// list does not name keeps the download a write.
+var larkCLIDownloadFlags = map[string]bool{
+	"--as": true, "--file-key": true, "--format": true, "-q": true, "--jq": true, "--message-id": true, "--output": true,
+	"--type": true, "--dry-run": false, "--json": false,
+}
+
+// larkCLISafeDownload: the download can only write a plain file in lark-im-resources/, nowhere else and no dotfile.
+// It has to be proved from the words alone, read in order: every one is a flag the command is known to have (no -o in
+// any spelling, no shorthand cluster, no "--", no stray argument), there is an --output, and every --output (not
+// only the last, which pflag keeps) names such a file.
+func larkCLISafeDownload(flags []string) bool {
+	outputs := 0
+	for i := 0; i < len(flags); i++ {
+		key, val, inline := strings.Cut(flags[i], "=")
+		takesValue, known := larkCLIDownloadFlags[key]
+		if !known {
+			return false
+		}
+		if !takesValue {
+			continue
+		}
+		if !inline {
+			if i+1 == len(flags) {
+				return false
+			}
+			i++
+			val = flags[i]
+		}
+		if key == "--output" {
+			if val == "" || strings.Contains(val, "..") || !larkCLIDownloadOutput.MatchString(val) {
+				return false
+			}
+			outputs++
+		}
+	}
+	return outputs > 0
 }
 
 // cliRead: a lark-cli call that only reads (its own risk level, or a GET through `lark-cli api`).
@@ -429,6 +480,59 @@ func (n *Node) larkCLIBin(c *proto.LarkCLI) string {
 		n.mu.Unlock()
 	}
 	return p
+}
+
+// larkLoginPATHRetry: how long a failed ask of the login shell's PATH stands before another try.
+const larkLoginPATHRetry = 5 * time.Minute
+
+// larkLoginPATHMark starts the line the login shell prints its PATH on, apart from what the user's shell startup
+// prints.
+const larkLoginPATHMark = "__PERSONA_LOGIN_PATH__"
+
+// larkLoginPATH is the login shell's PATH directories: the ones the assistant's Bash resolves programs in. Claude Code
+// runs each command through the user's shell snapshot (larkgate_env.go), which restores that PATH, and an npm global
+// lark-cli and the node it starts live in a version manager's directory that this process's own PATH need not have
+// (#12483). Asked at most once per larkLoginPATHRetry; nil when the shell cannot say.
+func (n *Node) larkLoginPATH() []string {
+	n.mu.Lock()
+	dirs, at := n.larkPATH, n.larkPATHAt
+	n.mu.Unlock()
+	if dirs != nil || time.Since(at) < larkLoginPATHRetry {
+		return dirs
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	out, _ := loginShell(ctx, `printf '\n`+larkLoginPATHMark+`%s\n' "$PATH"`).Output()
+	cancel()
+	dirs = parseLoginPATH(out)
+	n.mu.Lock()
+	n.larkPATHAt = time.Now()
+	if dirs != nil {
+		n.larkPATH = dirs
+	}
+	n.mu.Unlock()
+	return dirs
+}
+
+// parseLoginPATH reads the last marked line of a login shell's output: its PATH directories. Anything else the shell
+// printed (a profile's greeting) counts for nothing, and only absolute directories are kept. nil when the line is not
+// there, so the ask is tried again later.
+func parseLoginPATH(out []byte) []string {
+	path, seen := "", false
+	for _, line := range strings.Split(string(out), "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), larkLoginPATHMark); ok {
+			path, seen = v, true
+		}
+	}
+	if !seen {
+		return nil
+	}
+	dirs := []string{}
+	for _, d := range strings.Split(path, ":") {
+		if d != "" && filepath.IsAbs(d) {
+			dirs = append(dirs, d)
+		}
+	}
+	return dirs
 }
 
 func larkCLIProfile(c *proto.LarkCLI) []string {

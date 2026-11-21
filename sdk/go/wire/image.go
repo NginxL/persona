@@ -127,8 +127,8 @@ func webpSize(b []byte) (int, int, error) {
 	return 0, 0, bad
 }
 
-// ImageRefs are the refs of a view's pictures (an image's src, a row's thumbnail and avatar, a header's and a
-// comment's avatar, a tile's image), each once, in order: what the hub would ask ui.image for.
+// ImageRefs are the refs of a view's pictures (an image's src, a scene's poster, a row's thumbnail and avatar, a
+// header's and a comment's avatar, a tile's image), each once, in order: what the hub would ask ui.image for.
 func ImageRefs(v *View) []string {
 	var out []string
 	add := func(ref string) {
@@ -143,6 +143,9 @@ func ImageRefs(v *View) []string {
 		for _, e := range s.Items {
 			if e.Src != nil {
 				add(e.Src.Ref)
+			}
+			if e.Poster != nil {
+				add(e.Poster.Ref)
 			}
 			if e.Thumbnail != nil {
 				add(e.Thumbnail.Ref)

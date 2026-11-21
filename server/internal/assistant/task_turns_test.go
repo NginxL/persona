@@ -899,7 +899,7 @@ func TestCompletionUnnamedThenNamed(t *testing.T) {
 			f.setItems(closed[:len(closed)-1]...) // the prompt and the reply; the runtime's end record is not written yet
 			if how != laterRecord {
 				f.mu.Lock()
-				f.itemsFail = 1 // the end's one read of the transcript
+				f.itemsFailPlain = 1 // the completion read, not the independent next-step suggestion read
 				f.mu.Unlock()
 			}
 			before := workMark(s, todo.ID)
@@ -972,7 +972,7 @@ func TestCompletionAfterAnUnnamedTurnWithTheNodeClockBehind(t *testing.T) {
 	f.judge = `{"verdict":"not_done","reason":"测试还没补"}`
 	f.setItems(page("turn-1", "修了崩溃，测试还没补")...)
 	f.mu.Lock()
-	f.itemsFail = 1 // the end's one read of the transcript
+	f.itemsFailPlain = 1 // the completion read, not the independent next-step suggestion read
 	f.mu.Unlock()
 	before := workMark(s, todo.ID)
 	nodeListed(s, f, row(proto.StatusWorking, 2, ""))

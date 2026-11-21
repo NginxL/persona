@@ -64,6 +64,9 @@ func (s *Service) chansNow() time.Time {
 func (f feishuSink) progress(ctx context.Context, r *channel.Run, took time.Duration, steps []string, live string) {
 	ctx = feishuSendAs(ctx, "progress", r.MachineID, r.SessionID)
 	s := f.s
+	if s.runExt(r, readChatKey) != "" {
+		return // a /read shows no progress in its group: the reaction says it is being worked on (feishu_read.go)
+	}
 	if s.runExt(r, "chat") != "" {
 		// The topic's card keeps its own immediate lifecycle; the native API must not hold it back.
 		defer func() { f.cotProgressNow(ctx, r) }()
@@ -214,6 +217,12 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 	if !f.cotFinishNow(ctx, r) {
 		steps = append([]string{}, all...)
 	}
+	// A /read's answer is read by the whole group: the process (commands, paths on the computer) and the web link to
+	// the conversation stay out of it (feishu_read.go).
+	read := readRun(r.Ext)
+	if read {
+		steps = nil
+	}
 	card := r.Ext["card"]
 	if card != "" {
 		// Its last write is as a message: the card stops streaming first (the run's lock is held, feishu_stream.go).
@@ -249,7 +258,7 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 	}()
 	for i, ac := range cards {
 		c, piece := ac.card, ac.fallback
-		if i == len(cards)-1 && r.SessionID != "" {
+		if i == len(cards)-1 && r.SessionID != "" && !read {
 			// The conversation's web link goes under the last piece only, as on pushed and mirrored turns, in the row of
 			// the answer's own links.
 			c.AppendToLinks(s.openButton(ctx, r.MachineID, r.SessionID))
@@ -310,7 +319,13 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 			}
 		}
 		if mid == "" {
-			mid, err = s.botPostTo(ctx, to, r.ReplyTo, c, piece, "")
+			key := ""
+			if read {
+				// A /read has no progress card to write into or to key a new card by: each piece goes out under a key of
+				// its own turn, so a retry after an unreachable failure lands once in the group (#11987).
+				key = readAnswerKey(r.ID, r.WaitFrom(), i)
+			}
+			mid, err = s.botPostTo(ctx, to, r.ReplyTo, c, piece, key)
 		}
 		if err != nil {
 			if i == 0 && unreachable(err) {
@@ -349,6 +364,14 @@ func (f feishuSink) answer(ctx context.Context, r *channel.Run, answer, note str
 func answerKey(id, card string) string {
 	sum := sha256.Sum256([]byte("answer:" + id + "\x00" + card))
 	return "ans-" + hex.EncodeToString(sum[:12])
+}
+
+// readAnswerKey is the key piece i of a /read's answer goes out under: the same for every retry of the turn (a retry
+// keeps the run and its wait's start; its footer's elapsed time changes, so the hub's key from the card's words would
+// not), another for each piece and for a held run's later turn. Hashed to fit Feishu's 50-character uuid.
+func readAnswerKey(id string, turn time.Time, i int) string {
+	sum := sha256.Sum256([]byte("read:" + id + "\x00" + strconv.FormatInt(turn.UnixNano(), 10) + "\x00" + strconv.Itoa(i)))
+	return "rd-" + hex.EncodeToString(sum[:12])
 }
 
 // foldedProgressCard is what a progress card becomes once its answer went out as a new card: the process, folded,

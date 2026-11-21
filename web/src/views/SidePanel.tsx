@@ -169,7 +169,7 @@ function body(p: Panel) {
       // never a subagent's own conversation: openPanel opens its parent's instead (#5030, lib/subagent-link.ts)
       return <AgentPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} onClose={closePanel} />;
     case "team":
-      return <TeamPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} worker={p.worker} onClose={closePanel} />;
+      return <TeamPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} worker={p.worker} at={p.at} onClose={closePanel} />;
     case "sides":
       // keyed by the parent, not the side: picking another pill keeps the strip where it is
       return <SidesPanel key={`${p.mid}/${p.sid}`} mid={p.mid} sid={p.sid} side={p.side} at={p.at} onClose={closePanel} />;

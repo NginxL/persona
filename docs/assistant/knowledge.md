@@ -142,7 +142,7 @@ Exclusions are case-insensitive. Directory paths are relative to the configured 
     meta.json               # Name, type (short requirement / long mission), status, members, related chats / docs / meetings / Agent directories
     summary.md              # Goal, current state, next steps, risks, my role
     log.md                  # Timeline: append an entry for each update (date · source · one line)
-    memory.jsonl            # Typed worker outcomes, decisions with reasons, and pitfalls; provenance/time/supersession (not searched)
+    memory.jsonl            # Typed worker outcomes, decisions with reasons, pitfalls, and lessons from accepted tasks (todos.md "Lessons from accepted tasks"); provenance/time/supersession (not searched)
     .topics.json            # How far the knowledge points curation read the timeline ("Topics"; bookkeeping, not searched; a chat has one too)
   topics/<slug>/            # One directory per topic of knowledge points ("Topics" below, #3783)
     meta.json               # Name, one line, aliases, how many points, the projects and chats they came from, tags
@@ -890,9 +890,17 @@ Removing one wrong person or chat used to lock the **whole** list on both entrie
 - **Automatic writes** (compression, project linking, connectors, history import, merges: every `putEntity` without `manual`) leave excluded ids out of the list they write and keep `excluded` as it is on disk; everything else in the list is added and removed as before. Linking a chat by hand brings its people except the ones the user took off the project.
 - **Extensions** cannot make an excluded link: `kb.update` drops it from `people` / `chats` / `projects`, applies the rest, and names it in `ignored`. An extension's own removals exclude nothing.
 - **Linking again by hand** lifts the exclusion on both entries. `allow_people` / `allow_chats` / `allow_projects` (user paths only: HTTP `PUT` and `kb_update`) lift it without linking, so Persona may link it again on its own. They follow the kind's lists (projects: people, chats; chats: people, projects; people: chats, projects; docs, meetings, events and recordings: projects); others land in `ignored`.
-- **Whole-list lock**: `lock_lists: true` also locks the lists a removal touches, on both entries (`locked_fields`), as before. `lock_lists: false` keeps out only the removed link. Unset, a removal locks as `lock` says (unset or `true` locks): what older clients asked for, so they keep getting it. The web and assistant `kb_update` send `false` unless the user asks for the lock. Existing `locked_fields` keep their meaning; nothing is migrated.
+- **Whole-list lock**: `lock_lists: true` also locks the lists a removal touches, on both entries (`locked_fields`), as before. `lock_lists: false` keeps out only the removed link. Unset, a removal locks as `lock` says (unset or `true` locks): what older clients asked for, so they keep getting it. The web, iPhone, iPad and assistant `kb_update` send `false` unless the user asks for the lock. Existing `locked_fields` keep their meaning; nothing is migrated.
 - **Detail**: `GET /api/v1/kb/{kind}/{id}` (and `kb.get`) adds `removed`, the excluded links named as `links` are, for the app to list with Allow again.
 - **Merges** keep what the user removed from either project off the kept one, both ways, unless the kept project links it; the merge record (`merge.excluded`) lets an unmerge give it back. Forgetting a source drops its ids from `excluded` too.
+
+On iPhone and iPad (#10481), **Remove Link** is available from a row's swipe actions or menu. The confirmation keeps both
+entries and offers an off-by-default switch to protect both lists. The row disappears immediately. The app confirms the
+change only after both details show the link absent and excluded, and both lists locked when requested. If a read fails
+or an older hub returns only locks, **Check Again** reads both entries without sending another write. **Removed by you**
+shows the links this entry keeps out. **Allow again** clears the exclusion and reads the entry back. For a project's
+linked document or other item, the write goes to the item. Allowing the link leaves existing locks in place and lets a
+future automatic update link it if the lists permit it.
 
 ### Who holds a field (#6100)
 

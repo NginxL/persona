@@ -64,33 +64,68 @@ func isoImage(data []byte) string {
 // render draws src to fit size × size under p: decoded, upright, scaled down (never up) and encoded again. A HEIC or
 // AVIF goes as it is where p passes them.
 func (p Profile) render(src []byte, size int) (*Image, error) {
+	pic, passed, err := p.decode(src)
+	if err != nil || passed != nil {
+		return passed, err
+	}
+	return encode(pic, size)
+}
+
+// decode is src decoded and upright under p, or, for a HEIC or AVIF p passes, src as it is (passed).
+func (p Profile) decode(src []byte) (pic image.Image, passed *Image, err error) {
 	kind, _ := sniff(src)
 	if !p.served(kind) {
-		return nil, p.unsupported()
+		return nil, nil, p.unsupported()
 	}
 	if kind == "image/heic" || kind == "image/avif" {
 		if len(src) > p.MaxPassThrough {
-			return nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%s of %d bytes, more than %d", kind, len(src), p.MaxPassThrough)
+			return nil, nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%s of %d bytes, more than %d", kind, len(src), p.MaxPassThrough)
 		}
-		return &Image{Type: kind, Data: src}, nil
+		return nil, &Image{Type: kind, Data: src}, nil
 	}
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(src))
 	if err != nil {
-		return nil, fail(CodeBadImage, http.StatusUnprocessableEntity, "%s does not decode", kind)
+		return nil, nil, fail(CodeBadImage, http.StatusUnprocessableEntity, "%s does not decode", kind)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > p.MaxPixels {
-		return nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%d×%d pixels, more than %d", cfg.Width, cfg.Height, p.MaxPixels)
+		return nil, nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%d×%d pixels, more than %d", cfg.Width, cfg.Height, p.MaxPixels)
 	}
-	pic, _, err := image.Decode(bytes.NewReader(src))
+	pic, _, err = image.Decode(bytes.NewReader(src))
 	if err != nil {
-		return nil, fail(CodeBadImage, http.StatusUnprocessableEntity, "%s does not decode", kind)
+		return nil, nil, fail(CodeBadImage, http.StatusUnprocessableEntity, "%s does not decode", kind)
 	}
 	if kind == "image/jpeg" {
 		if o := imageorient.JPEG(bytes.NewReader(src), int64(len(src))); o >= 2 && o <= 8 {
 			pic = imageorient.Image{Image: pic, Orientation: o}
 		}
 	}
-	return encode(pic, size)
+	return pic, nil, nil
+}
+
+// Fit is a picture someone sent (a channel's photo sent as the original, #11985) made to hold at most most bytes:
+// decoded once under Pictures and drawn at the largest of Sizes whose encoding fits. A HEIC or AVIF is kept as it is
+// when it fits. An error is an *Error: the type is not one the hub takes, it does not decode, or no size fits.
+func Fit(src []byte, most int) (*Image, error) {
+	pic, passed, err := Pictures.decode(src)
+	if err != nil {
+		return nil, err
+	}
+	if passed != nil {
+		if len(passed.Data) > most {
+			return nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "%s of %d bytes, more than %d", passed.Type, len(passed.Data), most)
+		}
+		return passed, nil
+	}
+	for _, size := range slices.Backward(Pictures.Sizes) {
+		img, err := encode(pic, size)
+		if err != nil {
+			return nil, err
+		}
+		if len(img.Data) <= most {
+			return img, nil
+		}
+	}
+	return nil, fail(CodeTooLarge, http.StatusRequestEntityTooLarge, "no size of it fits in %d bytes", most)
 }
 
 // encode fits pic into size × size (never enlarging): JPEG when the source is opaque, PNG to keep transparency.

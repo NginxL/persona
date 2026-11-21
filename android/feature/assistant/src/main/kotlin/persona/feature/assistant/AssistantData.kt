@@ -92,7 +92,18 @@ internal fun recentConversations(snapshot: AssistantSnapshot, limit: Int = RECEN
                 automaticConversationOrigin(it.origin) != AssistantConversationOrigin.Task)) }
         .map { it to it.updated }
         .sortedWith(compareByDescending<Pair<Session, java.time.Instant?>> { it.second }.thenBy { it.first.sessionId })
-        .take(limit).map { it.first }
+        .map { it.first }
+        .let { orderConversations(it, snapshot.conversationOrder) }
+        .take(limit)
+}
+
+/** Saved chats first; unknown saved ids are skipped here, and new chats follow in the existing activity-time order. */
+internal fun orderConversations(activityOrdered: List<Session>, savedOrder: List<String>?): List<Session> {
+    if (savedOrder.isNullOrEmpty()) return activityOrdered
+    val byId = activityOrdered.associateBy { it.sessionId }
+    val listed = savedOrder.distinct().mapNotNull(byId::get)
+    val seen = listed.mapTo(HashSet()) { it.sessionId }
+    return listed + activityOrdered.filter { it.sessionId !in seen }
 }
 
 internal fun conversationGroups(
@@ -121,7 +132,9 @@ internal fun conversationGroups(
         filtered.conversations.firstOrNull { it.sessionId == id && it.key != filtered.mainSession && !it.archived }
     }.filter { query.isBlank() || it in matches || names[it.sessionId].orEmpty().contains(query.trim(), ignoreCase = true) }
     val listed = directions.mapTo(HashSet()) { it.key }
-    val others = matches.filter { it.key != filtered.mainSession && it.key !in listed }
+    val others = orderConversations(
+        matches.filter { it.key != filtered.mainSession && it.key !in listed }, filtered.conversationOrder,
+    )
     return ConversationGroups(
         filtered.conversations.firstOrNull { it.key == filtered.mainSession && !it.archived },
         directions, others, names, filtered.leaderCounts,

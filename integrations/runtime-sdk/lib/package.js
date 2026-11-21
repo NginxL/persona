@@ -17,6 +17,7 @@ export const PACKAGES = addPackageAliases({
   'persona-dsh-runtime': ['dsh/package.json', 'dsh/lib/*.js', 'runtime-sdk/package.json', 'runtime-sdk/index.js', 'runtime-sdk/lib/*.js'],
   'persona-pi-runtime': ['pi/package.json', 'pi/index.js', 'pi/companion.mjs', 'pi/lib/*.js', 'runtime-sdk/package.json', 'runtime-sdk/index.js', 'runtime-sdk/lib/*.js'],
   'persona-antigravity-runtime': ['antigravity/package.json', 'antigravity/companion.mjs', 'antigravity/desktop.mjs', 'antigravity/mcp-proxy.mjs', 'antigravity/media-guard.mjs', 'antigravity/lib/*.js', 'runtime-sdk/package.json', 'runtime-sdk/index.js', 'runtime-sdk/lib/*.js'],
+  'persona-opencode-runtime': ['opencode/package.json', 'opencode/index.js', 'opencode/companion.mjs', 'opencode/lib/*.js', 'runtime-sdk/package.json', 'runtime-sdk/index.js', 'runtime-sdk/lib/*.js'],
   'persona-paseo-runtime': ['paseo/package.json', 'paseo/bridge.mjs', 'paseo/lib/*.js', 'runtime-sdk/package.json', 'runtime-sdk/index.js', 'runtime-sdk/lib/*.js'],
 })
 

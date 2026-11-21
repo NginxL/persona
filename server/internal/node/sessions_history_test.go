@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,6 +75,39 @@ func historyCall(t *testing.T, n *Node, params map[string]any) sessionhistory.An
 		t.Fatal(err)
 	}
 	return ans
+}
+
+// The extracted domain handler is the same pre-shared-params dispatch as Node.handle, including its own malformed-params error.
+func TestSessionsHistoryDispatchParity(t *testing.T) {
+	n := &Node{}
+	for _, tc := range []struct {
+		name    string
+		params  json.RawMessage
+		wantErr string
+	}{
+		{name: "valid", params: json.RawMessage(`{"since":"2026-01-01T00:00:00Z","source":"runtime","limit":1}`)},
+		{name: "malformed", params: json.RawMessage(`{"since":`), wantErr: "sessions.history: malformed params"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dispatched, dispatchErr := n.handle(t.Context(), "sessions.history", tc.params)
+			forwarded, forwardErr := n.handleSessionsHistory(t.Context(), "sessions.history", tc.params)
+			if !reflect.DeepEqual(forwarded, dispatched) {
+				t.Fatalf("domain result %#v, dispatch result %#v", forwarded, dispatched)
+			}
+			errorText := func(err error) string {
+				if err == nil {
+					return ""
+				}
+				return err.Error()
+			}
+			if got := errorText(dispatchErr); got != tc.wantErr {
+				t.Fatalf("dispatch error %q, want %q", got, tc.wantErr)
+			}
+			if got, want := errorText(forwardErr), errorText(dispatchErr); got != want {
+				t.Fatalf("domain error %q, dispatch error %q", got, want)
+			}
+		})
+	}
 }
 
 // A runtime that declares caps.history is listed in full over a 90-day window, page by page, far past what it pushes

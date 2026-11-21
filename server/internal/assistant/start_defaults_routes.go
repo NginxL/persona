@@ -16,6 +16,7 @@ import (
 // policy it writes must expire within startDefaultsMaxExpiry, so a stopped or uninstalled extension leaves nothing in
 // force. Empty rules clear it.
 func (s *Service) startDefaultsRoutes() {
+	s.startDefaultsPreviewRoutes() // start_defaults_preview.go
 	s.handle("GET /api/v1/assistant/start-defaults", func(w http.ResponseWriter, r *http.Request) {
 		policy := s.activeStartDefaults(r.Context())
 		if policy == nil {
@@ -35,7 +36,7 @@ func (s *Service) startDefaultsRoutes() {
 		var in struct {
 			StartDefaults *StartDefaultsPolicy `json:"start_defaults"`
 		}
-		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, startDefaultsBodyLimit))
 		dec.DisallowUnknownFields() // a misspelt field must not silently do nothing
 		if err := dec.Decode(&in); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)

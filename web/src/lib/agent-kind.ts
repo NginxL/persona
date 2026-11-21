@@ -35,10 +35,21 @@ const MARK_ALIASES: Record<string, MarkedAgent> = {
   githubcopilotcli: "copilot",
 };
 
+const agentKey = (id: string) => id.replace(/[\s._-]/g, "");
+
 /** The agent a reported `agent` string names: lowercase, aliases folded in, "" (Claude Code reports nothing) is Claude. */
 export function agentId(raw: string | undefined | null): string {
   const id = (raw ?? "").trim().toLowerCase();
-  return ALIASES[id.replace(/[\s._-]/g, "")] ?? (id || "claude");
+  return ALIASES[agentKey(id)] ?? (id || "claude");
+}
+
+/** The built-in type and the CLI's public command name share a display name. */
+export function isTraeCli(raw: string | undefined | null): boolean {
+  return /^trae(?:x|cli)$/.test(agentKey((raw ?? "").toLowerCase()));
+}
+
+export function normalizeTraeCliName<T extends string | undefined>(name: T): T | string {
+  return isTraeCli(name) ? t("agent-mark.trae_cli") : name;
 }
 
 export function isMarked(id: string): id is MarkedAgent {
@@ -56,7 +67,7 @@ export function markId(raw: string | undefined | null, label?: string): string {
 }
 
 function brandedId(id: string): string {
-  const key = id.replace(/[\s._-]/g, "");
+  const key = agentKey(id);
   return Object.hasOwn(MARK_ALIASES, key) ? MARK_ALIASES[key] : id;
 }
 
@@ -73,8 +84,9 @@ export function providerAgent(agent: string | undefined | null, provider: string
 
 /** What the agent is called: the product's name for the ones the app knows, else the runtime's own label, else the string as reported. */
 export function agentName(raw: string | undefined | null, label?: string): string {
+  if (isTraeCli(raw)) return t("agent-mark.trae_cli");
   const id = agentId(raw);
-  if ((NAMED_AGENTS as readonly string[]).includes(id) || id === "traex" || id === "omp") return t(`agent-mark.${id}`); // spec/fixtures/agent-names
+  if ((NAMED_AGENTS as readonly string[]).includes(id) || id === "omp") return t(`agent-mark.${id}`); // spec/fixtures/agent-names
   return label?.trim() || (raw ?? "").trim() || t("agent-mark.unknown");
 }
 

@@ -10,7 +10,7 @@ import time
 import socket
 import uuid
 
-from node_artifacts import node_manifest
+from node_artifacts import node_files, node_manifest
 from hub_release_paths import prepare_remote_staging, release_directory, validate_remote_upload
 from urllib.parse import urlsplit
 
@@ -122,7 +122,7 @@ def main():
             prepare_remote_staging(sftp, remote_root, namespace, staged)
             names = ['latest.json', manifest['files']['linux-amd64']['name']]
             if packages:
-                names += ['node-manifest.json'] + [a['name'] for a in packages['files'].values()]
+                names += ['node-manifest.json'] + [artifact['name'] for _, _, artifact in node_files(packages)]
             for name in dict.fromkeys(names):
                 destination = validate_remote_upload(sftp, remote_root, namespace, staged, name)
                 sftp.put(str(args.artifact_dir / name), destination)

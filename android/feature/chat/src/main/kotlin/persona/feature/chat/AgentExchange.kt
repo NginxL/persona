@@ -169,7 +169,10 @@ internal fun newAgentKey(item: FeedItem, todo: Todo?): SessionKey? {
     return SessionKey(machine, id)
 }
 
-/** The same New hand-off as the web when messaging a task starts a successor Agent (#5110): one card, opening that Agent. */
+/**
+ * The same New hand-off as the web when messaging a task starts a successor Agent (#5110): one card, opening that Agent.
+ * The row above it (`FeedLine`) leaves `Tokens.Space.s`, iOS's gap between hand-off cards (`Theme.Space.s`).
+ */
 @Composable
 internal fun NewAgentHandoff(item: FeedItem, title: String, todo: Todo?, host: AssistantTaskHost) {
     val key = newAgentKey(item, todo)
@@ -181,7 +184,7 @@ internal fun NewAgentHandoff(item: FeedItem, title: String, todo: Todo?, host: A
         sessionId = key?.sessionId,
         todoId = todo?.id,
     )
-    AgentHandoffCards(listOf(handoff), host, Modifier.padding(top = Tokens.Space.s), cardTag = "new-agent-handoff")
+    AgentHandoffCards(listOf(handoff), host, cardTag = "new-agent-handoff")
 }
 
 /** A task's agent to Persona (`report`, iOS `ReportExchange`): a question, a block, done, or how far it got. */

@@ -3,11 +3,17 @@ import json
 import os
 import sys
 
+# Jobs every run needs, whatever it selected. Repository guards run in their own job so that a failing guard
+# never hides the platform results; it still fails this check.
+GATES = (("changes", "path selection"), ("guards", "repository guards"))
+
 
 def failures(needs):
     bad = []
-    if needs.get("changes", {}).get("result") != "success":
-        bad.append("repository guards/path selection did not succeed")
+    for job, label in GATES:
+        result = needs.get(job, {}).get("result")
+        if result != "success":
+            bad.append(f"{label} did not succeed: {result}")
     selected = needs.get("changes", {}).get("outputs", {})
     # apple is the required iOS/Watch/HTML lane; the former native Mac lane was removed with PersonaMac.
     for platform in ("server", "web", "android", "apple", "core", "runtimes", "desktop", "scripts"):

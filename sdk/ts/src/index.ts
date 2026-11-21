@@ -619,6 +619,9 @@ export async function main(prog: Program) {
   // A last frame without a trailing newline is still a request (Go's bufio.Scanner returns it too).
   const last = (buf + decoder.decode()).trim();
   if (last) conn.line(last);
+  // Start accepted requests before closing the hub; a queued handler may need to issue its own hub call at EOF.
+  await Promise.resolve();
+  await Promise.resolve();
   await conn.shutdown();
   // rpc: none (only HTTP): the hub sends nothing on stdin; serve until it stops the program.
   if (server && !spoke) return;

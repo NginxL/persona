@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.onNodeWithTag
@@ -27,8 +28,11 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.width
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -95,6 +99,50 @@ class ConversationTagsShotsTest {
             val suffix = if (scale > 1f) "-large" else ""
             val name = "android-conversation-tags-${s.name.lowercase()}-${if (d) "dark" else "light"}$suffix"
             val bitmap = rule.onNodeWithTag("conversation-tags-shot").captureToImage().asAndroidBitmap()
+            if (scale == 1f) standard[s to d] = bitmap
+            else assertFalse("large text must change the rendered pixels", standard.getValue(s to d).sameAs(bitmap))
+            historyShot(bitmap, name)
+        }
+    }
+
+    @Test fun filterEditorInEveryStyleAppearanceAndTextSize() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var fontScale by mutableFloatStateOf(1f)
+        rule.setContent {
+            val density = LocalDensity.current
+            val configuration = Configuration(LocalConfiguration.current).apply {
+                this.fontScale = fontScale
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+            }
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale),
+                LocalConfiguration provides configuration) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                    Box(Modifier.testTag("conversation-tag-filters-shot").width(400.dp).height(320.dp)
+                        .background(PersonaTheme.palette.background)) {
+                        ConversationTagFilterBar(entries = listOf("Planning", "Research", "Unused"),
+                            activeTag = "Planning", customized = true, editing = true, busy = false,
+                            onSelect = {}, onChange = { true }, onEdit = {}, onDone = {})
+                    }
+                }
+            }
+        }
+        val standard = mutableMapOf<Pair<AppStyle, Boolean>, Bitmap>()
+        for (s in AppStyle.entries) for (d in listOf(false, true)) for (scale in listOf(1f, 2f)) {
+            style = s
+            dark = d
+            fontScale = scale
+            Snapshot.sendApplyNotifications()
+            rule.waitForIdle()
+            rule.onNodeWithText("Reset to automatic").assertExists()
+            for (tag in listOf("Planning", "Research", "Unused")) {
+                val bounds = rule.onNodeWithText(tag, useUnmergedTree = true).getUnclippedBoundsInRoot()
+                assertTrue("$tag label collapsed for $s dark=$d scale=$scale", bounds.width > 0.dp && bounds.height > 0.dp)
+            }
+            val suffix = if (scale > 1f) "-large" else ""
+            val name = "android-conversation-tag-filters-${s.name.lowercase()}-${if (d) "dark" else "light"}$suffix"
+            val bitmap = rule.onNodeWithTag("conversation-tag-filters-shot").captureToImage().asAndroidBitmap()
             if (scale == 1f) standard[s to d] = bitmap
             else assertFalse("large text must change the rendered pixels", standard.getValue(s to d).sameAs(bitmap))
             historyShot(bitmap, name)

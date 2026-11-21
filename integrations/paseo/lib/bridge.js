@@ -1647,6 +1647,9 @@ export function createPaseoBridge(deps = {}, options = {}) {
    */
   async function deliverMessage(params, wait) {
     const agent = agentFor(params.session_id)
+    if (params.a2a_wake_on_send && agent.archivedAt) {
+      throw new RpcError('The receiving agent was archived', 'a2a_session_busy', { delivered: 'none' })
+    }
     const text = typeof params.text === 'string' ? params.text : ''
     const images = (params.images ?? []).filter((i) => i?.data).map((i) => ({ data: i.data, mimeType: i.mime || 'image/jpeg' }))
     if (!text.trim() && images.length === 0) throw new RpcError('消息是空的', 'bad_request')
@@ -2296,8 +2299,9 @@ export function createPaseoBridge(deps = {}, options = {}) {
     // request has an idempotency key of its own, the same each time it is asked: Paseo's creation service keeps a
     // request by its key across connections, so one asked again after a reconnect (repeat) gets the agent Paseo made
     // for it, or waits for the one it is still making, never a second agent.
-    const attempt = (withTools, withPolicy) => {
-      const mcpServers = withTools ? personaMcpServers(options.mcpConfig, sessionId, log) : undefined
+    const attempt = async (withTools, withPolicy) => {
+      const a2aToken = withTools ? await rt.a2aMcpToken(sessionId).catch(() => undefined) : undefined
+      const mcpServers = withTools ? personaMcpServers(options.mcpConfig, sessionId, log, a2aToken) : undefined
       const req = { agentId, idempotencyKey: `persona:${sessionId}:${++tries}`, config: mcpServers ? { ...config, mcpServers } : config,
         labels: { [SESSION_LABEL]: sessionId } }
       const policy = mcpServers && withPolicy && root === 'claude' ? preapproved(mcpServers) : undefined

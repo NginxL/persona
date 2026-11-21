@@ -224,10 +224,11 @@ function LegacyBrowser({ activeSession, machines, onSelect }: WorkSessionBrowser
   const justFinished = useStore((s) => s.features.includes(SESSIONS_JUST_FINISHED_FEATURE));
   // a hub that folds side sessions (#7944) leaves them out: nothing to nest under a parent
   const sideFold = useStore((s) => s.features.includes(SESSIONS_SIDE_FOLD_FEATURE));
+  const machineOrder = useMemo(() => machines.map((m) => m.id), [machines]);
   return <div className="@container/work-sessions">
     <p className="px-2 pt-2 text-xs text-ink-3">{copy("legacy")}</p>
     <PagedSessionList root={runtimeSessions} path="/sessions" identity={runtimeIdentity} compare={runtimeOrder} removeIdentity={runtimeRemoval} parentOf={sideFold ? undefined : runtimeParentIdentity}
-      event="sessions_list" catalog={catalog} justFinished={justFinished} placeOf={runtimePlace} label={(dimension, id) => dimension === "machine" ? machineWithHub(id, machines) : id}
+      event="sessions_list" catalog={catalog} justFinished={justFinished} placeOf={runtimePlace} machineOrder={machineOrder} label={(dimension, id) => dimension === "machine" ? machineWithHub(id, machines) : id}
       renderRow={(session) => <WorkSessionRow session={session} name={machineWithHub(session.machine_id, machines)}
         active={activeSession?.machineId === session.machine_id && activeSession.sessionId === session.session_id}
         onSelect={onSelect} now={now} depth={0} />} />

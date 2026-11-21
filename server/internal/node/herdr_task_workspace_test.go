@@ -61,6 +61,60 @@ func TestHerdrOnlyTaskLeaderForcesNamedWorkspace(t *testing.T) {
 	}
 }
 
+func TestHerdrTaskStartRecoversMissingWorktreeWorkspace(t *testing.T) {
+	for _, reuse := range []bool{false, true} {
+		name := "reopen workspace"
+		if reuse {
+			name = "reuse exact checkout"
+		}
+		t.Run(name, func(t *testing.T) {
+			n, f, home := herdrNode(t)
+			cwd := mkdir(t, filepath.Join(home, "worktrees", "project"))
+			other := mkdir(t, filepath.Join(home, "other", "project"))
+			spaces := []any{map[string]any{"workspace_id": "w-other", "cwd": other, "label": "project"}}
+			if reuse {
+				spaces = append(spaces, map[string]any{"workspace_id": "w-current", "cwd": cwd, "label": "renamed"})
+			}
+			f.reply("workspace.list", map[string]any{"workspaces": spaces})
+			f.handle("tab.create", func(p map[string]any) any {
+				switch p["workspace_id"] {
+				case "w-old":
+					return herdrFail{Code: "workspace_not_found", Message: "the old workspace closed"}
+				case "w-current":
+					if p["cwd"] == cwd && reuse {
+						return map[string]any{"tab": map[string]any{"tab_id": "w-current:t1"}, "root_pane": map[string]any{"pane_id": "w-current:p1"}}
+					}
+				}
+				return herdrFail{Code: "wrong_workspace", Message: "unexpected tab destination"}
+			})
+			f.handle("workspace.create", func(p map[string]any) any {
+				if p["cwd"] != cwd || reuse {
+					return herdrFail{Code: "wrong_workspace", Message: "unexpected workspace creation"}
+				}
+				return map[string]any{"workspace": map[string]any{"workspace_id": "w-current"},
+					"tab": map[string]any{"tab_id": "w-current:t1"}, "root_pane": map[string]any{"pane_id": "w-current:p1"}}
+			})
+			startHerdr(f, "w-current:p1", proto.StatusIdle)
+			f.setScreen("w-current:p1", screenFixture(t, "claude-2.1.312-empty-162.txt"))
+			if _, err := request(t, n, "session.start", map[string]any{
+				"session_id": startID, "cwd": cwd, "workspace_id": "w-old", "reopen_worktree_workspace": true,
+			}); err != nil {
+				t.Fatalf("start in the recovered workspace: %v (calls: %v)", err, f.trace())
+			}
+			wantCreates := 1
+			if reuse {
+				wantCreates = 0
+			}
+			if got := f.trace("workspace.create"); len(got) != wantCreates {
+				t.Fatalf("workspace creates: got %v, want %d", got, wantCreates)
+			}
+			if typed := f.trace("pane.send_input"); len(typed) != 1 || !strings.Contains(typed[0], `"pane_id":"w-current:p1"`) {
+				t.Fatalf("start command should run once in the recovered workspace, got %v", typed)
+			}
+		})
+	}
+}
+
 func TestHerdrTaskWorktreeKeepsCheckoutWithoutOpeningWorkspace(t *testing.T) {
 	w := worktreeNode(t)
 	dest := filepath.Join(w.home, "task-checkout")

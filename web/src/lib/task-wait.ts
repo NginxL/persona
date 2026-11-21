@@ -77,7 +77,7 @@ export function orderWaitGroups(result: TriageResult, now: number): TriageResult
     const isWaiting = (todo: Todo) => group.triage.get(todo.id)?.section === "parked";
     const waiting = group.members.filter(isWaiting).sort((a, b) => compareWaitAge(a, b, now));
     const lead = waiting[0];
-    return { ...group, key: lead.id, lead, members: [...waiting, ...group.members.filter((todo) => !isWaiting(todo))] };
+    return { ...group, lead, members: [...waiting, ...group.members.filter((todo) => !isWaiting(todo))] };
   }).sort((a, b) => compareWaitAge(a.lead, b.lead, now));
   return { ...result, sections: { ...result.sections, parked } };
 }

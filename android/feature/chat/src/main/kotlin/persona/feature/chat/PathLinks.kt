@@ -85,11 +85,23 @@ internal object PathLinks {
         }
     }
 
-    /** Opens `persona-path:` links with [open] (the path, its line); every other link goes on to [outer] (the page's link host). */
+    /**
+     * Opens `persona-path:` links and local Markdown file links (`[label](/path/to/file.md)`, `./notes.md#L12`,
+     * `C:/Users/me/doc.md`) with [open]; web, app (`persona:`), and non-local schemes go on to [outer].
+     */
     fun handler(outer: UriHandler, open: (String, Int?) -> Unit): UriHandler = object : UriHandler {
         override fun openUri(uri: String) {
             val path = pathOf(uri)
-            if (path != null) open(path, lineOf(uri)) else outer.openUri(uri)
+            if (path != null) {
+                open(path, lineOf(uri))
+                return
+            }
+            val local = LocalMarkdownPath.parseLocalPath(uri)
+            if (local != null) {
+                open(local.path, local.line)
+                return
+            }
+            outer.openUri(uri)
         }
     }
 

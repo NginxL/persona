@@ -20,7 +20,10 @@ import (
 // board and the web app show it. "Pass" (the button, a reply saying so, or the web Accept button) marks the task verified; any other reply to the card is written into the todo's
 // decisions and sent to the agent that did the work. One still not accepted is asked again the next morning.
 
-const acceptanceKey = "assistant.acceptance"
+const (
+	acceptanceKey       = "assistant.acceptance"
+	outsideDecisionsKey = "assistant.outside_decisions"
+)
 
 type acceptAsk struct {
 	// prepared is the complete conclusion behind an in-flight claim. Saves keep it instead of the empty claim,
@@ -81,7 +84,9 @@ type acceptAsk struct {
 	RecheckAt     time.Time        `json:"recheck_at,omitzero"`
 	RaisedAt      time.Time        `json:"raised_at,omitzero"`
 	Response      string           `json:"response,omitempty"`
-	// Chosen: the option the owner chose when it was not the recommended one.
+	// Chosen: the option the owner chose when it was not the recommended one, or their own words (answerDecisionText).
+	// A recurring check's decision answered where its Agent works keeps even the recommended one (decisionTold): its
+	// card then does not say the Agent was not told.
 	Chosen string `json:"chosen,omitempty"`
 	// Check: the recurring schedule whose progress check raised this decision (schedule_todo.go, #11587). The option
 	// the owner takes is about the supervisor's approach, so it goes to the task's supervisor, not its Agent
@@ -96,6 +101,16 @@ type acceptAsk struct {
 	// to hear of it once it is pushed after all: the task's leader conversation, or the background supervisor, whose
 	// tasks' ledgers name the main conversation (heldEscalates, supervise_background.go).
 	RaisedBy string `json:"raised_by,omitempty"`
+	// OutsideID identifies a script or extension's decision. Its durable caller
+	// record lives beside this book (outside_decisions.go), so replacing this
+	// card cannot erase an answer the caller has not polled yet.
+	OutsideID         string         `json:"outside_id,omitempty"`
+	OutsideSource     string         `json:"outside_source,omitempty"`
+	OutsideKind       string         `json:"outside_kind,omitempty"`
+	OutsideBackground string         `json:"outside_background,omitempty"`
+	OutsideAnswer     *outsideAnswer `json:"outside_answer,omitempty"`
+	DefaultAllowed    bool           `json:"default_allowed,omitempty"`
+	WithdrawnAt       time.Time      `json:"withdrawn_at,omitzero"`
 }
 
 // acceptPostWindow is how long after an ask its card that did not go out (the bot's status could not be read, the send
@@ -124,9 +139,11 @@ func acceptCardDue(a *acceptAsk) bool {
 }
 
 type acceptBook struct {
-	mu     sync.Mutex
-	loaded bool
-	asks   map[string]*acceptAsk // by todo id
+	mu      sync.Mutex
+	writing sync.Mutex // serializes outside raises and their caller refs
+	loaded  bool
+	asks    map[string]*acceptAsk       // by todo id
+	outside map[string]*outsideDecision // by outside decision id
 }
 
 // loadAcceptLocked reads the asks once and reports whether they are in memory; s.accept.mu is held. A failed read
@@ -138,13 +155,21 @@ func (s *Service) loadAcceptLocked(ctx context.Context) bool {
 		return true
 	}
 	asks := map[string]*acceptAsk{}
+	outside := map[string]*outsideDecision{}
 	if st := s.store(); st != nil {
 		if _, err := st.Setting(ctx, acceptanceKey, &asks); err != nil {
 			s.logf("acceptance: load: %v", err)
 			return false
 		}
+		if _, err := st.Setting(ctx, outsideDecisionsKey, &outside); err != nil {
+			s.logf("acceptance: load outside decisions: %v", err)
+			return false
+		}
 		if asks == nil {
 			asks = map[string]*acceptAsk{}
+		}
+		if outside == nil {
+			outside = map[string]*outsideDecision{}
 		}
 	}
 	// What is read was written before this process asked anything. An entry with no time is a claim whose card was
@@ -156,7 +181,7 @@ func (s *Service) loadAcceptLocked(ctx context.Context) bool {
 			delete(asks, id)
 		}
 	}
-	b.asks, b.loaded = asks, true
+	b.asks, b.outside, b.loaded = asks, outside, true
 	return true
 }
 
@@ -176,19 +201,45 @@ func (s *Service) saveAcceptErrLocked(ctx context.Context) error {
 	if !s.accept.loaded {
 		return nil
 	}
-	if st := s.store(); st != nil {
-		asks := make(map[string]*acceptAsk, len(s.accept.asks))
-		for id, a := range s.accept.asks {
-			if a != nil && a.prepared != nil {
-				prepared := *a.prepared
-				prepared.Earlier = a.Earlier // an earlier round's in-flight retry may have added its card meanwhile
-				asks[id] = &prepared
-			} else {
-				asks[id] = a
-			}
+	asks := make(map[string]*acceptAsk, len(s.accept.asks))
+	for id, a := range s.accept.asks {
+		if a != nil && a.prepared != nil {
+			prepared := *a.prepared
+			prepared.Earlier = a.Earlier // an earlier round's in-flight retry may have added its card meanwhile
+			asks[id] = &prepared
+		} else {
+			asks[id] = a
 		}
-		return st.PutSetting(ctx, acceptanceKey, asks)
 	}
+	st := s.store()
+	if len(s.accept.outside) == 0 {
+		if st != nil {
+			return st.PutSetting(ctx, acceptanceKey, asks)
+		}
+		return nil
+	}
+	// The caller's history and the owner-facing card move together. Work on a
+	// copy: a failed transaction must not publish an answer only in memory.
+	outside := cloneOutsideDecisions(s.accept.outside)
+	for id, rec := range outside {
+		if a := asks[rec.AskTodoID]; a != nil && a.OutsideID == id && a.AskedAt.Equal(rec.Ask.AskedAt) {
+			rec.Ask = copyAcceptAsk(a)
+		}
+	}
+	if st == nil {
+		s.accept.outside = outside
+		return nil
+	}
+	batch, ok := st.(interface {
+		PutSettings(context.Context, map[string]any) error
+	})
+	if !ok {
+		return errors.New("outside decisions need atomic settings storage")
+	}
+	if err := batch.PutSettings(ctx, map[string]any{acceptanceKey: asks, outsideDecisionsKey: outside}); err != nil {
+		return err
+	}
+	s.accept.outside = outside
 	return nil
 }
 
@@ -252,6 +303,12 @@ func (s *Service) acceptAskLocked(id string) (*acceptAsk, error) {
 // supervisor passed ends once that acceptance no longer stands (the task was cancelled or reopened since): its card,
 // still to go out (acceptCardDue), would tell a result that is not one any more (#9253).
 func acceptAskEnded(a *acceptAsk, t Todo) bool {
+	if a.OutsideID != "" {
+		// An outside request has no supervisor whose review state could end it.
+		// Its own answer or withdrawal marks AcceptedAt; closing its backing row
+		// ends it too.
+		return t.DoneAt != nil
+	}
 	if a.BySupervisor && t.Supervision.state(t) != reviewAccepted {
 		return true
 	}
@@ -274,6 +331,12 @@ func decisionOpen(a *acceptAsk, t Todo) bool {
 // old card. A fresh needs_user review replaces that marker. Non-decision verification asks are unaffected.
 // A ReopenedAt the auto-judge's second close leaves is harmless (the new ask is younger); zero AskedAt is a claim.
 func acceptAskStale(a *acceptAsk, t Todo) bool {
+	// A saved rework review supersedes verification even if its work-round write failed.
+	if !a.AskedAt.IsZero() && !decideAsk(a) && !a.Conclusion {
+		if r := triageLatestReview(t.Supervision); r != nil && r.Verdict != reviewAccepted && r.At.After(a.AskedAt) {
+			return true
+		}
+	}
 	return !a.AskedAt.IsZero() && (t.ReopenedAt != nil && a.AskedAt.Before(*t.ReopenedAt) ||
 		decideAsk(a) && t.Supervision.legacyOwnerPriorityReview() != nil)
 }

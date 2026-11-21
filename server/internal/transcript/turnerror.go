@@ -75,6 +75,9 @@ func (m *Meta) claudeReply(e *entry, blocks []block, shown bool) {
 		return
 	}
 	kind, reset := claudeErrorKind(code, e)
+	if kind == "" {
+		kind, reset = GatewayErrorKind(text, e.Timestamp)
+	}
 	m.TurnErrorCode = ""
 	if m.ModelFallback != nil && (code == "model_not_found" || e.APIErrorStatus == 404 && fallbackModelError(text, m.ModelFallback.FallbackModel)) {
 		m.TurnErrorCode, kind = proto.TurnErrorModelFallbackUnavailable, proto.TurnErrorUser

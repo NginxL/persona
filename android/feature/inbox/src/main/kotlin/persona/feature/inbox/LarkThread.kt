@@ -29,7 +29,7 @@ fun larkThreadSource(data: JsonObject, transport: InboxAssistantTransport, feed:
     return object : LarkThreadSource {
         override val canReply = transport is LarkThreadReplyTransport
         override suspend fun reply(request: ReplyRequest): Boolean =
-            source.read { (transport as LarkThreadReplyTransport).replyInThread(root, request.text, request.clientId) }.flag("ok")
+            source.read { (transport as LarkThreadReplyTransport).replyInThread(root, request.text, request.clientId, request.mentions) }.flag("ok")
         override suspend fun page(before: String?): LarkThreadPage {
             val page = source.read { reader.thread(root, before) }
             return LarkThreadPage(page.messages().map { larkMessage(it, transport, feed, manager) },

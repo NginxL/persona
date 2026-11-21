@@ -6,12 +6,16 @@ import XCTest
 /// - the card's title row and fold are on the page, under the top bar, with conversation over it;
 /// - the conversation scrolls with the card open, and folded;
 /// - the card folds to one line (a question of several says how many are left, and keeps its page) and unfolds;
-/// - View in Chat brings the message the card is about into view and folds the card.
+/// - View in Chat brings the message the card is about into view and folds the card;
+/// - Skip is in the card's title row, with no row of its own under the options (#12306).
 /// Mock hubs (any free ports), each named by its environment variable (TEST_RUNNER_ prefix for xcodebuild):
 ///   PERSONA_CARD_HUB:  MOCK_AGENTS=1 MOCK_ASK_LONG=source  MOCK_CARD_SOURCE=1
 ///   PERSONA_CARD2_HUB: MOCK_AGENTS=1 MOCK_ASK_LONG=source2 MOCK_CARD_SOURCE=1
 ///   PERSONA_TASK_HUB:  MOCK_AGENTS=1 MOCK_TASKS=1 MOCK_CARD_SOURCE=1
 ///   PERSONA_BOTH_HUB:  MOCK_AGENTS=1 MOCK_TASKS=1 MOCK_ASK_LONG=source MOCK_CARD_SOURCE=1
+///   PERSONA_BOTH_LONG_HUB: MOCK_AGENTS=1 MOCK_TASKS=1 MOCK_ASK_LONG=source MOCK_CARD_SOURCE=1 MOCK_TASK_ASK_LONG=1
+/// The grabber (#12306): a folded card leaves its half to the task's question, and the grabber on the question's top edge
+/// makes it taller and shorter by dragging, the tallest and back by a tap, the choice kept after a relaunch.
 /// Screenshots: PERSONA_SHOTS=<dir> (PERSONA_SHOTS_DEVICE names the device in the file names; PERSONA_SHOTS_EXTERNAL=1
 /// asks the host for them, as the open Duo's own come out black: /tmp's shot watcher, `simctl io … screenshot`).
 final class QuestionCardFoldTests: XCTestCase {
@@ -33,11 +37,13 @@ final class QuestionCardFoldTests: XCTestCase {
         return hub
     }
 
-    @MainActor private func launch(_ hub: String, chat: String, scheme: String) {
+    /// `keepHeight`: the card height the user chose last stays (`CardHeight`); otherwise each launch starts from the default.
+    @MainActor private func launch(_ hub: String, chat: String, scheme: String, keepHeight: Bool = false) {
         _ = try? Data(contentsOf: URL(string: hub + "/mock/reset")!)
         app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-openChatsFresh", "YES", "-ui.scheme", scheme]
+        if !keepHeight { app.launchArguments += ["-ui.questionCardHeight", ""] }
         if chat == Self.main {
             // The Sidebar layout, as the report's (iPad and the open Duo).
             app.launchArguments += ["-app.tab", "assistant", "-tab", "assistant", "-openAssistant", chat, "-app.navigation", "sidebar"]
@@ -124,7 +130,13 @@ final class QuestionCardFoldTests: XCTestCase {
         let end = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: bottom))
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
         settle(0.8)
-        let after = strip(top, bottom, card)
+        var after = strip(top, bottom, card)
+        // Already at its start (a tall iPad, the card short: an earlier drag got there), the list moves the other way.
+        if after == before {
+            end.press(forDuration: 0.05, thenDragTo: start, withVelocity: .slow, thenHoldForDuration: 0.3)
+            settle(0.8)
+            after = strip(top, bottom, card)
+        }
         let moved = { XCTAssertNotEqual(before, after, "\(step): a drag over the conversation (\(Int(top))…\(Int(bottom))) did not move it",
                                         file: file, line: line) }
         // XCUITest's drags never reach the chat's list on the open iPhone Duo simulator, card or not (seen before #9392,
@@ -177,6 +189,7 @@ final class QuestionCardFoldTests: XCTestCase {
             settle(2)
             shot("main-open-\(look)")
             assertInPage(cards, "main, open (\(look))")
+            assertSkipInTitleRow(cards, "main, open (\(look))")
             assertConversationScrolls(above: cards, "main, open (\(look))")
 
             cards.buttons["interaction-fold"].firstMatch.tap()
@@ -273,5 +286,130 @@ final class QuestionCardFoldTests: XCTestCase {
         assertInPage(task, "both: the task's")
         let fold = cards.buttons["interaction-fold"].firstMatch
         XCTAssertTrue(fold.exists && fold.isHittable, "both: the conversation's card's fold is not on screen")
+    }
+
+    /// The report (#12306): on the open Duo held sideways a task's question beside the conversation's folded card showed one
+    /// option. The folded card gives its half back: folding it makes the question taller.
+    @MainActor func testAFoldedCardLeavesItsRoomToTheTasksQuestion() throws {
+        let hub = try hub("PERSONA_BOTH_LONG_HUB")
+        launch(hub, chat: Self.main, scheme: "light")
+        let task = app.otherElements["task-question"].firstMatch
+        let cards = app.scrollViews["pending-cards"]
+        XCTAssertTrue(task.waitForExistence(timeout: 20) && cards.waitForExistence(timeout: 5), "not both places")
+        dismissIconAlert()
+        settle(2)
+        let shared = task.frame.height
+        // A page tall enough for the whole question beside the open card (iPad) has nothing to give it.
+        if showsWhole(task) { throw XCTSkip("the question shows whole beside the open card: nothing to give") }
+        cards.buttons["interaction-fold"].firstMatch.tap()
+        settle()
+        shot("both-folded-light")
+        XCTAssertGreaterThan(task.frame.height, shared + 20,
+                             "the conversation's card folded, the task's question stayed \(task.frame.height) pt (was \(shared))")
+        assertInPage(task, "the other folded")
+    }
+
+    /// The grabber (#12306), light and dark, beside the conversation's folded card as in the report: down makes the task's
+    /// question shorter, up taller (past its default where the default cuts it), a tap gives it the tallest (the conversation keeps a sliver, the fold on the page)
+    /// and another the default; option descriptions wrap whole; a height chosen by hand stays after a relaunch.
+    @MainActor func testTheGrabberSizesTheQuestion() throws {
+        let hub = try hub("PERSONA_BOTH_LONG_HUB")
+        continueAfterFailure = true
+        for look in ["light", "dark"] {
+            launch(hub, chat: Self.main, scheme: look)
+            let task = app.otherElements["task-question"].firstMatch
+            let cards = app.scrollViews["pending-cards"]
+            XCTAssertTrue(task.waitForExistence(timeout: 20) && cards.waitForExistence(timeout: 5), "not both places (\(look))")
+            dismissIconAlert()
+            settle(2)
+            cards.buttons["interaction-fold"].firstMatch.tap()
+            settle()
+            let grabber = task.descendants(matching: .any)["interaction-grabber"].firstMatch
+            XCTAssertTrue(grabber.exists && grabber.isHittable, "no grabber on the task's question (\(look))")
+            XCTAssertFalse(cards.descendants(matching: .any)["interaction-grabber"].firstMatch.exists,
+                          "the conversation's card has a grabber beside the task's question (\(look))")
+            let start = task.frame.height
+            // On a tall page (iPad) the question shows whole: taller has nothing more to show, shorter still works.
+            let whole = showsWhole(task)
+            shot("grab-default-\(look)")
+
+            drag(grabber, by: 100)
+            let shorter = task.frame.height
+            XCTAssertLessThan(shorter, start - 30, "dragged down, the question is \(shorter) pt (was \(start)) (\(look))")
+
+            drag(grabber, by: -180)
+            let taller = task.frame.height
+            XCTAssertGreaterThan(taller, shorter + 40, "dragged up, the question is \(taller) pt (was \(shorter)) (\(look))")
+            if !whole { XCTAssertGreaterThan(taller, start + 20, "dragged up, the question is no taller than its default \(start) pt (\(look))") }
+            assertOnPage(task, "dragged up (\(look))")
+
+            // Off the tallest first: from there a tap goes back to the default, not to the tallest.
+            drag(grabber, by: 60)
+            grabber.tap()
+            settle()
+            let tallest = task.frame.height
+            XCTAssertGreaterThanOrEqual(tallest, taller - 1, "tapped, the question is \(tallest) pt, not the tallest (\(look))")
+            assertOnPage(task, "the tallest (\(look))")
+            let description = text("新代码统一用 @Test")
+            XCTAssertTrue(description.exists && description.label.hasSuffix("再看"), "the first description is cut: \(description.label) (\(look))")
+            XCTAssertTrue(task.frame.contains(description.frame), "at the tallest the first description (\(description.frame)) is not whole in the card (\(task.frame)) (\(look))")
+            XCTAssertGreaterThan(description.frame.height, 24, "the first description is one line (\(description.frame)) (\(look))")
+            shot("grab-tallest-\(look)")
+
+            grabber.tap()
+            settle()
+            XCTAssertEqual(task.frame.height, start, accuracy: 3, "tapped again, the question did not go back to the default (\(look))")
+
+            // A height by hand stays after a relaunch.
+            drag(grabber, by: 90)
+            let chosen = task.frame.height
+            app.terminate()
+            launch(hub, chat: Self.main, scheme: look, keepHeight: true)
+            XCTAssertTrue(task.waitForExistence(timeout: 20) && cards.waitForExistence(timeout: 5), "not both places, relaunched (\(look))")
+            dismissIconAlert()
+            settle(2)
+            cards.buttons["interaction-fold"].firstMatch.tap()
+            settle()
+            XCTAssertEqual(task.frame.height, chosen, accuracy: 4, "relaunched, the question is not the height chosen (\(look))")
+            app.terminate()
+        }
+    }
+
+    /// The task's question shows its last option whole: nothing of it is cut.
+    @MainActor private func showsWhole(_ task: XCUIElement) -> Bool {
+        let last = text("等这一版发布以后再补")
+        return last.exists && task.frame.contains(last.frame)
+    }
+
+    /// Skip is a word in the card's title row, beside its fold (#12306), still a finger's size, and nothing is left under
+    /// the options but the card's margin: Skip had a row of its own there, about 60 pt for one word.
+    @MainActor private func assertSkipInTitleRow(_ card: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        let skip = card.buttons["question-skip"].firstMatch
+        let fold = card.buttons["interaction-fold"].firstMatch
+        XCTAssertTrue(skip.exists && skip.isHittable, "\(step): no Skip", file: file, line: line)
+        XCTAssertEqual(skip.frame.midY, fold.frame.midY, accuracy: 4, "\(step): Skip (\(skip.frame)) is not in the title row (\(fold.frame))",
+                       file: file, line: line)
+        XCTAssertGreaterThanOrEqual(skip.frame.height, 44, "\(step): Skip is \(skip.frame.height) pt tall to a finger", file: file, line: line)
+        let other = card.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "其他回答")).firstMatch
+        XCTAssertTrue(other.exists, "\(step): no Other row", file: file, line: line)
+        XCTAssertLessThan(card.frame.maxY - other.frame.maxY, 44,
+                          "\(step): \(card.frame.maxY - other.frame.maxY) pt under the Other row (\(other.frame)) to the card's end (\(card.frame))",
+                          file: file, line: line)
+    }
+
+    /// Drags the grabber by `dy` (up is negative) and lets the card settle.
+    @MainActor private func drag(_ grabber: XCUIElement, by dy: CGFloat) {
+        let from = grabber.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        from.press(forDuration: 0.1, thenDragTo: from.withOffset(CGVector(dx: 0, dy: dy)), withVelocity: .slow, thenHoldForDuration: 0.2)
+        settle()
+    }
+
+    /// The card's grabber and fold are on the page under the top bar: made taller by hand the conversation may keep only a
+    /// sliver over it, never the card's top under the bar.
+    @MainActor private func assertOnPage(_ card: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
+        let fold = card.buttons["interaction-fold"].firstMatch
+        let bar = barBottom(left: card.frame.minX)
+        XCTAssertTrue(fold.exists && fold.isHittable, "\(step): the card's fold is not on screen", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(card.frame.minY, bar, "\(step): the card (\(card.frame)) is under the top bar (\(bar))", file: file, line: line)
     }
 }

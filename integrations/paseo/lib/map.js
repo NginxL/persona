@@ -517,6 +517,7 @@ export function agentRow(agent, o = {}) {
   const rewind = rewindOf(agent)
   row.capabilities = o.archived ? { rewind: false, rewind_code: false, modes: false, model: false }
     : { rewind: rewind.conversation, rewind_code: rewind.code }
+  if (!o.archived && !agent.archivedAt && agent.status === 'closed') row.capabilities.a2a_wake_on_send = true
   const modes = !o.archived && permissionModesOf(root, autoAcceptOf(agent) !== undefined)
   if (modes) row.capabilities.permission_modes = modes
   const t = transcriptOf(agent, roots)

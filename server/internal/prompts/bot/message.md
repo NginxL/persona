@@ -19,7 +19,8 @@ To-do title: {{ctx .Title}}
 {{ctx .Notes}}
 {{end}}{{end}}</persona-context>
 {{end}}{{with .Quote}}<persona-context kind="context" title="{{if eq $.Language "日本語"}}引用されたメッセージ{{else if $.Language}}Quoted message{{else}}引用的消息{{end}}" url="">
-{{ctx .Who}}{{if and $.Language (ne $.Language "日本語")}}: {{else}}：{{end}}{{ctx .Text}}
+{{if .ID}}{{if eq $.Language "日本語"}}メッセージ ID{{else if $.Language}}Message ID{{else}}消息 ID{{end}}: {{ctx .ID}}
+{{end}}{{ctx .Who}}{{if and $.Language (ne $.Language "日本語")}}: {{else}}：{{end}}{{ctx .Text}}
 </persona-context>
 {{end}}{{with .Forward}}<persona-context kind="context" title="{{if eq $.Language "日本語"}}転送されたチャット履歴{{else if $.Language}}Forwarded chat history{{else}}转发的聊天记录{{end}}" url="">
 {{ctx .}}

@@ -10,6 +10,8 @@ export interface ChatActions {
   draftKey: string;
   /** The conversation title for message context cards, separate from the reply's speaker. */
   title: string;
+  /** Source owner of the current transcript, included in a starred message deep link. */
+  sourceManager?: string;
   /** The composer can send here: "Quote" / "Use as context" / "Edit" / "Edit image" are offered only then. */
   canCompose: boolean;
   /** Who the replies are from, for "Quote"'s "Quote Persona · 16:45" (the assistant's name, or the agent). */

@@ -105,15 +105,46 @@ func (c Checker) Check(ctx context.Context, id Identity) error {
 	} else if id.InstanceURL == "https://github.com" {
 		endpoint = "https://api.github.com/repos/" + id.Path
 	}
+	raw, err := c.getJSON(ctx, id, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	var metadata struct {
+		ID       int64  `json:"id"`
+		FullName string `json:"full_name"`
+		Path     string `json:"path_with_namespace"`
+		HTMLURL  string `json:"html_url"`
+		WebURL   string `json:"web_url"`
+	}
+	if json.Unmarshal(raw, &metadata) != nil || metadata.ID <= 0 {
+		return &CheckError{"inconclusive"}
+	}
+	path, web := metadata.FullName, metadata.HTMLURL
+	if id.Provider == "gitlab" {
+		path, web = metadata.Path, metadata.WebURL
+	}
+	remote, err := Parse(web, id.Provider)
+	if err != nil || remote != id || !strings.EqualFold(path, id.Path) {
+		return &CheckError{"inconclusive"}
+	}
+	if ctx.Err() != nil {
+		return checkFailure(ctx, ctx.Err())
+	}
+	return nil
+}
+
+// getJSON is endpoint's bounded JSON body, asked of id's instance over the guarded transport (destinations checked as
+// for Check), with header added. A status other than 200 is a *CheckError.
+func (c Checker) getJSON(ctx context.Context, id Identity, endpoint string, header http.Header) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return &CheckError{"inconclusive"}
+		return nil, &CheckError{"inconclusive"}
 	}
 	tr := c.transport
 	if tr == nil {
 		upstream, err := c.proxyFor(req)
 		if err != nil {
-			return checkFailure(ctx, err)
+			return nil, checkFailure(ctx, err)
 		}
 		transport := &http.Transport{
 			// Proxying happens after destination validation, using numeric targets.
@@ -156,64 +187,46 @@ func (c Checker) Check(ctx context.Context, id Identity) error {
 		tr = transport
 	}
 	client := &http.Client{Transport: tr, Timeout: CheckTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for k, v := range header {
+		req.Header[k] = v
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "Persona-repository-verification")
 	res, err := client.Do(req)
 	if err != nil {
-		return checkFailure(ctx, err)
+		return nil, checkFailure(ctx, err)
 	}
 	defer res.Body.Close()
 	if ctx.Err() != nil {
-		return checkFailure(ctx, ctx.Err())
+		return nil, checkFailure(ctx, ctx.Err())
 	}
 	if res.StatusCode == 429 || res.StatusCode == 403 && (res.Header.Get("X-RateLimit-Remaining") == "0" || res.Header.Get("Retry-After") != "") {
-		return &CheckError{"rate_limited"}
+		return nil, &CheckError{"rate_limited"}
 	}
 	switch res.StatusCode {
 	case 401, 403:
-		return &CheckError{"authentication"}
+		return nil, &CheckError{"authentication"}
 	case 404:
-		return &CheckError{"unavailable"} // hidden/private is indistinguishable from missing
+		return nil, &CheckError{"unavailable"} // hidden/private is indistinguishable from missing
 	case 200:
 	default:
 		if res.StatusCode >= 300 && res.StatusCode < 400 {
-			return &CheckError{"inconclusive"}
+			return nil, &CheckError{"inconclusive"}
 		}
-		return &CheckError{"network"}
+		return nil, &CheckError{"network"}
 	}
 	media, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
 	if !slices.Contains([]string{"application/json", "application/vnd.github+json"}, media) {
-		return &CheckError{"inconclusive"}
+		return nil, &CheckError{"inconclusive"}
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, MaxBody+1))
 	if err != nil {
-		return checkFailure(ctx, err)
+		return nil, checkFailure(ctx, err)
 	}
 	if len(raw) > MaxBody {
-		return &CheckError{"inconclusive"}
+		return nil, &CheckError{"inconclusive"}
 	}
-	var metadata struct {
-		ID       int64  `json:"id"`
-		FullName string `json:"full_name"`
-		Path     string `json:"path_with_namespace"`
-		HTMLURL  string `json:"html_url"`
-		WebURL   string `json:"web_url"`
-	}
-	if json.Unmarshal(raw, &metadata) != nil || metadata.ID <= 0 {
-		return &CheckError{"inconclusive"}
-	}
-	path, web := metadata.FullName, metadata.HTMLURL
-	if id.Provider == "gitlab" {
-		path, web = metadata.Path, metadata.WebURL
-	}
-	remote, err := Parse(web, id.Provider)
-	if err != nil || remote != id || !strings.EqualFold(path, id.Path) {
-		return &CheckError{"inconclusive"}
-	}
-	if ctx.Err() != nil {
-		return checkFailure(ctx, ctx.Err())
-	}
-	return nil
+	return raw, nil
 }
 
 func checkFailure(ctx context.Context, err error) error {

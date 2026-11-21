@@ -67,6 +67,8 @@ beforeEach(() => {
     const url = String(input);
     if (url.includes("/model-config/purposes/")) return purpose ? json(purpose) : json({ error: "not found" }, 404);
     if (url.includes("/launchers/fast/models")) return json(fastList);
+    if (url.includes("/launchers/codex/models")) return json({ agent: "codex", models: [{ id: "gpt-5.5", name: "GPT-5.5", default: true }] });
+    if (url.includes("/launchers/grok/models")) return json({ agent: "grok", models: [{ id: "grok-4", name: "Grok 4", default: true }] });
     if (url.includes("/launchers/") && url.includes("/models")) return json(claudeList);
     if (url.includes("/launchers")) return json({ launchers, tiers, tiers_profile: tiers ? { id: "performance", name: "性能" } : undefined });
     return json({ path: "/code", entries: [] });
@@ -219,5 +221,114 @@ describe("New agent: presets (#2225)", () => {
     expect(launched[0]).toMatchObject({ launcher: "claude" });
     expect(launched[0]?.model).toBeUndefined();
     expect(launched[0]?.effort).toBeUndefined();
+  });
+
+  it("applies a preset's permission_mode when picked and launches with it", async () => {
+    tiers = [{ name: "guarded", launcher: "fast", model: "m-review", effort: "high", permission_mode: "plan" }];
+    await open();
+    await pick("preset:guarded");
+    act(() => button("启动").click());
+    expect(launched[0]).toMatchObject({ launcher: "fast", model: "m-review", effort: "high", permissionMode: "plan" });
+  });
+
+  it("respects explicit Follow launcher and filters unlisted preset modes on listed-mode launchers", async () => {
+    launchers = [
+      { name: "claude", agent: "claude" },
+      { name: "grok", agent: "grok", permission_modes: ["default", "bypassPermissions"] },
+    ];
+    tiers = [
+      { name: "grok-bypass", launcher: "grok", permission_mode: "bypassPermissions" },
+      { name: "grok-unlisted", launcher: "grok", permission_mode: "plan" },
+    ];
+    await open();
+
+    // Pick a listed-mode preset, then explicitly reset to Follow launcher: must NOT fall back to tier.permission_mode.
+    await pick("preset:grok-bypass");
+    const followBtn = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="new-agent-provider-modes"] button')]
+      .find((b) => b.textContent?.trim() === "跟随启动器")!;
+    act(() => followBtn.click());
+    await flush();
+    act(() => button("启动").click());
+    expect(launched[0]).toMatchObject({ launcher: "grok" });
+    expect(launched[0]?.permissionMode).toBeUndefined();
+
+    // Reopen and pick a preset carrying an unlisted mode: must NOT send the unlisted mode.
+    act(() => root.render(<><NewAgent open={false} onClose={() => {}} /><Toasts /></>));
+    await flush();
+    await open();
+    await pick("preset:grok-unlisted");
+    act(() => button("启动").click());
+    expect(launched[1]).toMatchObject({ launcher: "grok" });
+    expect(launched[1]?.permissionMode).toBeUndefined();
+  });
+
+  it("preserves explicit default mode from a listed-mode preset over agent.new bypassPermissions", async () => {
+    purpose = {
+      purpose: { id: "agent.new", effective: { provider: "launcher.grok", permission_mode: "bypassPermissions" } },
+      providers: [{ id: "launcher.grok", name: "Grok", kind: "launcher", agent: "grok", permission_modes: ["default", "bypassPermissions"] }],
+    };
+    launchers = [
+      { name: "claude", agent: "claude" },
+      { name: "grok", agent: "grok", permission_modes: ["default", "bypassPermissions"] },
+    ];
+    tiers = [
+      { name: "grok-default", launcher: "grok", permission_mode: "default" },
+    ];
+    await open();
+
+    // Picking a listed-mode preset with explicit "default" sends permissionMode: "default" so it overrides agent.new.
+    await pick("preset:grok-default");
+    act(() => button("启动").click());
+    expect(launched[0]).toMatchObject({ launcher: "grok", permissionMode: "default" });
+
+    // Reopen, pick preset, then explicitly click Follow launcher: clears permissionMode to undefined.
+    act(() => root.render(<><NewAgent open={false} onClose={() => {}} /><Toasts /></>));
+    await flush();
+    await open();
+    await pick("preset:grok-default");
+    const followBtn = [...document.body.querySelectorAll<HTMLButtonElement>('[data-testid="new-agent-provider-modes"] button')]
+      .find((b) => b.textContent?.trim() === "跟随启动器")!;
+    act(() => followBtn.click());
+    await flush();
+    act(() => button("启动").click());
+    expect(launched[1]).toMatchObject({ launcher: "grok" });
+    expect(launched[1]?.permissionMode).toBeUndefined();
+  });
+
+  it("passes permissionMode on Codex presets without leaking into Claude mode on manual switch", async () => {
+    localStorage.setItem("new.mode.mac", "default");
+    launchers = [
+      { name: "claude", agent: "claude" },
+      { name: "fast", agent: "claude" },
+      { name: "codex", agent: "codex", prompt_optional: true },
+    ];
+    tiers = [
+      { name: "codex-bypass", launcher: "codex", permission_mode: "bypassPermissions" },
+      { name: "fast-plan", launcher: "fast", permission_mode: "plan" },
+    ];
+    await open();
+
+    // Codex preset sends inlinePrompt + permissionMode, and does not overwrite Claude's remembered mode.
+    await pick("preset:codex-bypass");
+    act(() => button("启动").click());
+    expect(launched[0]).toMatchObject({ launcher: "codex", agentType: "codex", inlinePrompt: true, permissionMode: "bypassPermissions" });
+
+    // Reopen: pick Codex preset, then switch manually to Claude -> Claude keeps its remembered "default", NOT "bypassPermissions".
+    act(() => root.render(<><NewAgent open={false} onClose={() => {}} /><Toasts /></>));
+    await flush();
+    await open();
+    await pick("preset:codex-bypass");
+    await pick("model:claude\ndefault");
+    act(() => button("启动").click());
+    expect(launched[1]).toMatchObject({ launcher: "claude", permissionMode: "default" });
+
+    // Reopen: pick Claude preset with "plan", then drop preset by picking another Claude launcher -> restores prior "default".
+    act(() => root.render(<><NewAgent open={false} onClose={() => {}} /><Toasts /></>));
+    await flush();
+    await open();
+    await pick("preset:fast-plan");
+    await pick("model:claude\ndefault");
+    act(() => button("启动").click());
+    expect(launched[2]).toMatchObject({ launcher: "claude", permissionMode: "default" });
   });
 });

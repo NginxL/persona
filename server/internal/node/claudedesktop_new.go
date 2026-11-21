@@ -116,7 +116,7 @@ func (n *Node) withDesktopLauncher(list []proto.Launcher) (out []proto.Launcher,
 	if !n.desktopKeepsSessions() || slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == claudeDesktopLauncher }) {
 		return list, false
 	}
-	if _, err := claudeExecutable(); err != nil {
+	if _, err := desktopClaudeExecutable(n.home); err != nil {
 		return list, false
 	}
 	return append(slices.Clone(list), proto.Launcher{Name: claudeDesktopLauncher, Source: claudeDesktopSource, Agent: "claude"}), true
@@ -174,7 +174,14 @@ func (n *Node) newDesktopSession(ctx context.Context, p runtimeStartParams, name
 	if strings.HasPrefix(strings.TrimSpace(p.Prompt), "/") {
 		return nil, refusal(peerCommand, peerCommandMsg, nil) // the first message goes to the inbox, which runs no commands
 	}
-	claude, err := claudeExecutable()
+	model := strings.TrimSpace(p.Model)
+	if model != "" && !proto.ValidModelID(model) {
+		return nil, fmt.Errorf("invalid model %q", p.Model)
+	}
+	if err := validModes("", p.Effort); err != nil {
+		return nil, err
+	}
+	claude, err := desktopClaudeExecutable(n.home)
 	if err != nil {
 		return nil, fmt.Errorf("没找到 Claude Code（claude 命令），不能在桌面版里新开会话：%v", err)
 	}
@@ -194,6 +201,15 @@ func (n *Node) newDesktopSession(ctx context.Context, p runtimeStartParams, name
 		// The session still imports, in the app's own choice of mode (Accept edits where settings say bypass).
 		log.Printf("new desktop session %s: permission mode not written: %v", id, err)
 	}
+	if model != "" {
+		n.noteModel(id, model, "")
+	}
+	if p.Effort != "" {
+		n.noteModes(id, "", p.Effort)
+	}
+	if model != "" || p.Effort != "" {
+		n.queueCCPluginSettings(id, model, p.Effort)
+	}
 	if err := openDesktopLink(ctx, "claude://resume?session="+id); err != nil {
 		return nil, refusal(desktopOpenFailed, desktopOpenTimeoutMsg, nil)
 	}
@@ -207,6 +223,7 @@ func (n *Node) newDesktopSession(ctx context.Context, p runtimeStartParams, name
 	}
 	go n.notifySessions()
 	return &proto.Session{SessionID: id, Cwd: dir, Title: title, Agent: "claude", Status: proto.StatusIdle,
+		Model: model, Effort: p.Effort,
 		StartedByPersona: true, SourceKind: proto.SourceClaudeDesktop, UpdatedAt: time.Now().UTC()}, nil
 }
 

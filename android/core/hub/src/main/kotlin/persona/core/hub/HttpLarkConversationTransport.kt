@@ -2,6 +2,7 @@ package persona.core.hub
 
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.contracts.api.LarkConversationTransport
+import persona.core.contracts.api.LarkMention
 import persona.core.contracts.api.LarkThreadTransport
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.*
@@ -20,6 +21,8 @@ class HttpLarkConversationTransport(
 ) : LarkConversationTransport, LarkThreadTransport, LarkThreadReplyTransport, InboxAssistantTransport by delegate {
     override suspend fun replyInThread(messageId: String, text: String, clientId: String) =
         (delegate as LarkThreadReplyTransport).replyInThread(messageId, text, clientId)
+    override suspend fun replyInThread(messageId: String, text: String, clientId: String, mentions: List<LarkMention>) =
+        (delegate as LarkThreadReplyTransport).replyInThread(messageId, text, clientId, mentions)
     override suspend fun thread(messageId: String, before: String?) =
         (delegate as LarkThreadTransport).thread(messageId, before)
     private val base = baseUrl.toHttpUrl()

@@ -4,7 +4,7 @@ import { useAssistantTitle, useManagerOffline } from "../ManagerParts";
 import { LinkManager, useShownManager } from "../../lib/manager-choice";
 import { alsoOpenText } from "../../lib/engines";
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, errorText, fullItem, pastHub, sessionPath } from "../../lib/api";
+import { api, ApiError, errorText, pastHub, sessionPath } from "../../lib/api";
 import { attentionReason, externalLink, failureReason, isStoppedAgent, resumeCommand, sessionCan, sessionCanRename, sessionDisplayTab, sessionMenuActions, sourceSubtitle, sessionTitle, sessionTitleDetail, shortPath, stateOf, tabLabel, uuid } from "../../lib/format";
 import { useHerdrTabName } from "../../lib/agents-display";
 import { conversationPage } from "../../lib/conversation-page";
@@ -46,7 +46,7 @@ import { t as tr } from "../../i18n";
 import { lastEditablePrompt, promptsOf, rewindBlock, rewindDone, rewindSession, rewindTarget, type RewindRestore } from "../../lib/rewind";
 import { EDIT_SEND_SETTLE_MS } from "../../lib/edit-last-key";
 import { sendDraft } from "../../lib/drafts";
-import { chatLines, freshWords, insideFold, openRecap, parseUserText, segments, type ChatLine, type UserMessage } from "../../lib/turns";
+import { chatLines, freshWords, openRecap, parseUserText, segments, type ChatLine, type UserMessage } from "../../lib/turns";
 import { foldsBackgroundRounds } from "../../lib/background-fold";
 import type { Interaction, Item, Session, Subagent } from "../../lib/types";
 import { anchoredScroll, followsAgain, isScrollbarPress, jumpLabel, leavesOnKey, leavesOnScrollbarDrag, leavesOnTouch, leavesOnWheel, followsAfterUnfold, UNFOLD_PAUSE, type ScrollAnchor } from "../../lib/disclosure";
@@ -97,6 +97,7 @@ import { useRevealedInputSeq, useUserInputs } from "./useUserInputs";
 import { useChatScrollbar } from "./useChatScrollbar";
 import { ChatLineView, closedRecap, closeRecap, dismissedError, dismissError, ErrorBanner, errorKey, OpenRecapLine } from "./Lines";
 import { useTranscript } from "./useTranscript";
+import type { LandingProof } from "./land-message";
 import { publishTranscript, unpublishTranscript } from "./transcript-share";
 import { useEarlierStretches } from "./useEarlierStretches";
 import { dayRowKey, withDayDividers } from "./day-dividers";
@@ -208,8 +209,6 @@ const NO_RAIL_TICKS: NavRailTick[] = [];
  *  up, and how long it stays lit (Android: 3 s). */
 const FIND_MS = 400;
 const GIVE_UP_MS = 2000;
-/** How long landing on a message waits for the chat to stop loading before it pages back itself. */
-const LANDING_WAIT_MS = 5000;
 const HIT_MS = 3000;
 const SEARCH_NOTICE: Record<SearchLoadOutcome, string | null> = {
   start: null,
@@ -686,6 +685,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
     () => ({
       draftKey,
       title,
+      sourceManager: session?.manager ?? mainCache?.manager,
       canCompose,
       // `now`: the message menu's Select messages (#9469), Forward to's chunk starts picking with it, showing nothing
       forward: (p: ForwardPick, now?: boolean) => openForward({ from: { chat: forwardFrom(), picks: [p] }, select: { first: p, start: setPicker }, now }),
@@ -696,7 +696,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
       assistant: Boolean(assistant),
       rewind: canRewind ? { block: rewindLive, code: rewindCode, run: (messageId, text, restore) => rewindTo(mid, sid, draftKey, items.current, messageId, text, restore, rewindDeclared) } : undefined,
     }),
-    [draftKey, title, canCompose, canFork, canRewind, rewindCode, rewindDeclared, rewindLive, mid, sid, assistant, persona.name, forwardFrom, picker],
+    [draftKey, title, session?.manager, mainCache?.manager, canCompose, canFork, canRewind, rewindCode, rewindDeclared, rewindLive, mid, sid, assistant, persona.name, forwardFrom, picker],
   );
   // the assistant works on any computer, so its @ menu offers workspaces too
   const shownManager = useShownManager();
@@ -705,6 +705,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   const skillManager = useStore((s) => session?.manager ?? s.machines.find((m) => m.id === mid)?.manager) ?? shownManager;
   const skillEnvironment = JSON.stringify([session?.launcher, session?.model_pick, session?.pending_switch, session?.source_kind, assistantLauncher]);
   const mention = useMemo(() => ({ cwd: session?.cwd, self: draftKey, files: () => chatFiles(items.current), workspaces: Boolean(assistant),
+    repositories: assistant ? skillManager : undefined,
     skills: { manager: skillManager, session: sid, launcher: assistant ? skillLauncher : undefined, environment: skillEnvironment, agent: !assistant },
   }), [session?.cwd, skillManager, draftKey, assistant, sid, skillLauncher, skillEnvironment]);
 
@@ -1666,6 +1667,24 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   }, [linkedChild, session, tr.loading, tr.loadingEarlier, tr.hasMore, detail.loading, kids.loaded, childRows, places, mid, sid, jump]);
   // what runs its subagents: its own agent (a Paseo provider's subagent cards say "Grok", #8142)
   const harness = session && !assistant ? sessionAgentName(session) : undefined;
+  // Streaming makes the turn live again, but an Agent's existing wait / subagent bar stays as it was while the answer
+  // streams. Only the new command line is withheld there; in a quiet turn the four-kind order decides the bar.
+  const wait = streaming && !outgoing && !awaiting ? backgroundWaitLine(session) : backgroundState?.kind === "waiting" ? backgroundState.line : null;
+  const subtasks = streaming ? waitingOnSubagents(session, subagents) && !outgoing && !awaiting : backgroundState?.kind === "subtasks";
+  const command = backgroundState?.kind === "command" ? backgroundState.line : null;
+  // In a Persona conversation the message stream already carries the turn's state for its whole life — the sending /
+  // preparing feedback while the message is on its way, then the live work line ("Working…", spinner and clock) once the
+  // hub accepts it — so the dock never repeats the foreground turn (#6230). The dock bar stays only for work that outlives
+  // the turn (a background workflow, subagent, wait or working command: `backgroundOnly`, where the stream shows only
+  // quiet fold rows) and, unchanged, for Agent chats, whose dock keeps the full cindy status bar. Gating on the foreground/background
+  // phase (not on the live line being mounted) keeps the bar out even while a transcript loads or a state push is in flight.
+  // A Persona chat on either route — the Persona tab's prop, or on the generic /s route the session's own assistant
+  // flag — so the dock never repeats its foreground turn (#6230). Background work keeps the bar either way.
+  const dockBarShown = !(assistant || session?.assistant) || backgroundOnly;
+  const runningWorking = state === "working" || awaiting || streaming;
+  // When the dock bar renders this foreground turn's own status and elapsed timer, suppress the duplicate in-stream
+  // elapsed timer (and empty non-expandable live row) so only one Working… timer ticks on screen (#12380).
+  const dockTurnClock = Boolean(session && dockBarShown && runningWorking && !backgroundOnly && !wait && !subtasks && !command);
   const ctx = useMemo<ChatContextValue>(
     () => ({ tasks, subagents: assistant ? NO_SUBAGENTS : (subagents ?? NO_SUBAGENTS), scope: `${mid}/${sid}:`, jumpToCall: jump, workflowCalls: wfCalls, lineStyle, harness, opening: openingId && openingOrigin ? { id: openingId, origin: openingOrigin, opened_by: openingBy, manager: openingManager } : undefined, closeoutSegment: closeoutSegment?.id, children: places, embedded }),
     [tasks, subagents, assistant, mid, sid, jump, wfCalls, lineStyle, harness, openingId, openingOrigin, openingBy, openingManager, closeoutSegment, places, embedded],
@@ -1705,9 +1724,11 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
     if (!picked) origin.current = null;
   }, [picked]);
   // brings an item into view, opening what holds it, and lights it: a search hit, or a forward's original (#3899)
-  const seekItem = useCallback((itemId: string, quiet = false) => {
+  const seekItem = useCallback((itemId: string, quiet = false, proof?: LandingProof) => {
     const sc = scroller.current;
     if (!sc) return;
+    const sourceMatches = () => !proof || proof.matches(trNow.current.items);
+    if (!sourceMatches()) return proof?.unavailable();
     follow(false);
     revealItem(ctx.scope, itemId);
     const run = ++going.current;
@@ -1718,14 +1739,16 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
       giveUpMs: GIVE_UP_MS,
       // the rows that hold it take a few frames to open: the line it is on only once they had the time
       locate: (waited) => {
-        const exact = sc.querySelector<HTMLElement>(`[data-items~="${CSS.escape(itemId)}"]`);
-        const lineId = exact || waited <= FIND_MS ? undefined : lineOfItem(linesNow.current, trNow.current.items, itemId);
+        if (!sourceMatches()) return null;
+        const exact = sc.querySelector<HTMLElement>(`[data-items~="${CSS.escape(itemId)}"]${proof?.selector ?? ""}`);
+        const lineId = exact || proof || waited <= FIND_MS ? undefined : lineOfItem(linesNow.current, trNow.current.items, itemId);
         const el = exact ?? (lineId ? sc.querySelector<HTMLElement>(`[data-line="${CSS.escape(lineId)}"]`)?.firstElementChild : null);
         return el instanceof HTMLElement ? { y: el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop, value: el } : null;
       },
     }).then((r) => {
       if (r === "cancelled") return;
       clearReveal();
+      if (proof && (r === "missing" || !sourceMatches() || !r.value.matches(proof.selector))) return proof.unavailable();
       if (r === "missing") return void (quiet || toast(t("chat-chatview.search_not_found")));
       const el = r.value;
       const tall = el.getBoundingClientRect().height > sc.clientHeight;
@@ -1804,39 +1827,20 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   }, [mid, sid, landAt]);
   const msgLanding = useRef(0);
   useEffect(() => {
-    const item = peekJump(mid, sid);
-    if (!item || tr.loading) return;
+    const target = peekJump(mid, sid);
+    if (!target || tr.loading || target.startsWith("star:") && !tr.firstRead) return;
     takeJump(mid, sid);
     const run = ++msgLanding.current;
-    const holds = () => trNow.current.items.some((i) => i.id === item);
-    if (holds()) return void requestAnimationFrame(() => seekItem(item, true));
-    if (!trNow.current.hasMore) {
-      void (async () => {
-        // A folded assistant reply is not a raw item: resolve it, then open only the fold that holds it.
-        const whole = await fullItem(mid, sid, item);
-        if (run !== msgLanding.current) return;
-        const fold = trNow.current.items.find((f) => insideFold(whole, f));
-        if (!fold) return;
-        openFoldRange(ctx.scope, fold.seq, fold.fold!.through_seq);
-        await trNow.current.expandFold(fold);
-        if (run !== msgLanding.current) return;
-        requestAnimationFrame(() => seekItem(item));
-      })().catch(() => {});
-      return;
-    }
-    void (async () => {
-      // the chat may still be filling the screen with older pages: wait for that, then page back (again if it was busy)
-      for (let go = 0, until = performance.now() + LANDING_WAIT_MS; go < 3 && run === msgLanding.current && !holds(); go++) {
-        while ((trNow.current.loading || trNow.current.loadingEarlier) && performance.now() < until) await nextFrame();
-        await loadForSearch(() => {}, () => run !== msgLanding.current || holds());
-      }
-      if (run !== msgLanding.current) return;
-      if (holds()) requestAnimationFrame(() => seekItem(item));
-      else toast(t("chat-chatview.message_further_up"));
-    })().catch(() => {});
+    const current = () => run === msgLanding.current;
+    void import("./land-message").then(({ landMessage }) => {
+      void landMessage({
+        target, mid, sid, scope: ctx.scope, fromLink: Boolean(landAt), current,
+        transcript: () => trNow.current, seek: seekItem, loadEarlier: (stop) => loadForSearch(() => {}, stop),
+      });
+    }, () => { if (current()) toast(t("chat-chatview.search_not_found")); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new landing is a new item asked for, not the items changing
-  }, [mid, sid, tr.loading, landAt, seekItem, loadForSearch]);
-  useEffect(() => () => void msgLanding.current++, [mid, sid]); // another chat ends a landing on its way
+  }, [mid, sid, tr.loading, tr.firstRead, landAt, seekItem, loadForSearch]);
+  useEffect(() => () => void msgLanding.current++, [mid, sid, landAt]); // a different destination ends a pending landing
   const rounds = useMemo(() => segs.filter((x) => x.user).length, [segs]);
 
   // the newest plan of the chat (PlanCard.tsx planCardStep draws its card): while that card is out of view, a pill above the composer
@@ -1995,23 +1999,9 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
   ) : null;
   // Persona's own chats too (#3654), and from the moment the message is in, not from the hub's next push
   const background = useMemo(() => backgroundLine(session), [session]);
-  // Streaming makes the turn live again, but an Agent's existing wait / subagent bar stays as it was while the answer
-  // streams. Only the new command line is withheld there; in a quiet turn the four-kind order decides the bar.
-  const wait = streaming && !outgoing && !awaiting ? backgroundWaitLine(session) : backgroundState?.kind === "waiting" ? backgroundState.line : null;
-  const subtasks = streaming ? waitingOnSubagents(session, subagents) && !outgoing && !awaiting : backgroundState?.kind === "subtasks";
-  const command = backgroundState?.kind === "command" ? backgroundState.line : null;
   // ✓ Done only for a turn that finished: one waiting on you, stopped or cut off by an error keeps its last words
   const done = turnDone(state, session, lastLine, tr.items);
-  // In a Persona conversation the message stream already carries the turn's state for its whole life — the sending /
-  // preparing feedback while the message is on its way, then the live work line ("Working…", spinner and clock) once the
-  // hub accepts it — so the dock never repeats the foreground turn (#6230). The dock bar stays only for work that outlives
-  // the turn (a background workflow, subagent, wait or working command: `backgroundOnly`, where the stream shows only
-  // quiet fold rows) and, unchanged, for Agent chats, whose dock keeps the full cindy status bar. Gating on the foreground/background
-  // phase (not on the live line being mounted) keeps the bar out even while a transcript loads or a state push is in flight.
-  // A Persona chat on either route — the Persona tab's prop, or on the generic /s route the session's own assistant
-  // flag — so the dock never repeats its foreground turn (#6230). Background work keeps the bar either way.
-  const dockBarShown = !(assistant || session?.assistant) || backgroundOnly;
-  const running = session && dockBarShown ? <RunningStatusBar mid={mid} sid={sid} working={state === "working" || awaiting || streaming} done={done} startedAt={runStart} clock={barClock.current} plain={assistant} step={step} background={!backgroundState || backgroundState.kind === "workflow" ? background : null} wait={wait} subtasks={subtasks} command={command} /> : null;
+  const running = session && dockBarShown ? <RunningStatusBar mid={mid} sid={sid} working={runningWorking} done={done} startedAt={runStart} clock={barClock.current} plain={assistant} step={step} background={!backgroundState || backgroundState.kind === "workflow" ? background : null} wait={wait} subtasks={subtasks} command={command} /> : null;
   // at the top of the composer's card, as cindy's pending queue (#5327); a phone on its side keeps it to one line beside
   // the run's status. The same element while nothing in it changes: the composer is memoized.
   const hasQueue = queued.length > 0;
@@ -2233,6 +2223,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
                         assistant={assistant}
                         offscreen={offscreen(d.line)}
                         busy={d.line.id === busySegment || undefined}
+                        dockTurnClock={("live" in d.line && d.line.live && dockTurnClock) || undefined}
                       />
                     ),
                   ])
@@ -2256,6 +2247,7 @@ function ActiveChatView({ mid, sid, assistant, starting: launching, onToggleSide
                   assistant={assistant}
                   offscreen={offscreen(row.line)}
                   busy={row.line.id === busySegment || undefined}
+                  dockTurnClock={("live" in row.line && row.line.live && dockTurnClock) || undefined}
                 />
               )])}
               </CardConversation.Provider>

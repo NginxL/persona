@@ -40,13 +40,17 @@ func (s *Service) workTick(ctx context.Context, now time.Time) {
 	full := s.workOn(ctx) // off: only transient errors' "Continue" (transient_retry)
 	s.work.mu.Lock()
 	s.work.init()
-	var due, waits, cards [][2]string
+	var due, quotaDue, waits, cards [][2]string
 	agents := map[[2]string]proto.WorkAgent{}
 	for k, e := range s.work.entries {
 		switch {
 		case !full:
-			if e.WakeAt != nil && !e.WakeAt.After(now) && e.Work.On == proto.WaitTransient && e.Work.CI == nil {
-				due = append(due, k)
+			if e.WakeAt != nil && !e.WakeAt.After(now) && e.Work.CI == nil {
+				if e.Work.On == proto.WaitTransient {
+					due = append(due, k)
+				} else if e.Work.ResetsAt != nil {
+					quotaDue = append(quotaDue, k) // classify outside work.mu; ordinary workers remain untouched
+				}
 			}
 		case e.WakeAt != nil && !e.WakeAt.After(now):
 			due = append(due, k)
@@ -69,6 +73,11 @@ func (s *Service) workTick(ctx context.Context, now time.Time) {
 		s.work.backfillAt = now
 	}
 	s.work.mu.Unlock()
+	for _, k := range quotaDue {
+		if c, ok := v.session(k[0], k[1]); ok && s.protectedQuotaWait(ctx, k[0], c) {
+			due = append(due, k)
+		}
+	}
 	for _, k := range waits {
 		if s.agentStopped(v, agents[k]) {
 			due = append(due, k)
@@ -120,7 +129,8 @@ func (s *Service) wakeWaitersOn(machine, sid string) {
 }
 
 // workGuard: the manager may act on e now — the session is still stopped on the same turn, nothing pending or queued,
-// not looked at in herdr, its machine up, and its todo not completed. ownCard: the manager's card for it may be pending.
+// not looked at in herdr (apart from an open task's mechanical transient retry), its machine up, and its todo not
+// completed. ownCard: the manager's card for it may be pending.
 func (s *Service) workGuard(v *workView, e db.SessionWork, ownCard bool) (proto.Session, string) {
 	if d, ok := v.device(e.MachineID); !ok || !d.Reachable {
 		return proto.Session{}, "offline"
@@ -154,7 +164,14 @@ func (s *Service) workGuard(v *workView, e db.SessionWork, ownCard bool) (proto.
 	case c.Status == proto.StatusWorking || !sameTurn(c, e.TurnAt):
 		return c, "moved on"
 	case c.Status == proto.StatusIdle:
-		return c, "looked at in herdr"
+		// Herdr also reports an open task Agent idle after passively observing its failed turn. That is not the owner
+		// taking over, so only the mechanical transient retry survives; every other wake still yields to being seen.
+		if e.Work.On != proto.WaitTransient {
+			return c, "looked at in herdr"
+		}
+		if _, open := s.openTodoOfAgent(e.MachineID, e.SessionID); !open {
+			return c, "looked at in herdr"
+		}
 	case c.Status != proto.StatusDone:
 		return c, "not stopped"
 	case !ownCard && sessionTurnErrorCode(c) == proto.TurnErrorModelFallbackUnavailable:
@@ -226,7 +243,7 @@ func (s *Service) workWake(ctx context.Context, v *workView, k [2]string, now ti
 		s.putWork(ctx, e)
 		return
 	}
-	if !sw.wakes(e.Work) {
+	if !sw.wakes(e.Work) && !(!sw.Enabled && sw.transientOn() && e.Work.ResetsAt != nil && s.protectedQuotaWait(ctx, k[0], c)) {
 		before := e
 		e.WakeAt, e.Work.WakeAt = nil, nil // turned off since it was set
 		if before.Work.CI != nil {
@@ -340,7 +357,7 @@ func (s *Service) workWake(ctx context.Context, v *workView, k [2]string, now ti
 	if latest, ok := s.workEntry(k); !ok || latest.Work.RetiredAt != nil || latest.Work.Deferred || !latest.TurnAt.Equal(e.TurnAt) {
 		return
 	}
-	send := func() error { return s.sendToSession(ctx, k[0], c.SessionID, text) }
+	send := func() error { return s.sendWorkText(ctx, k[0], c.SessionID, text, kind == "limit_continued") }
 	if kind == "continued" {
 		send = func() error { return s.sendModelRetry(ctx, e, text) }
 	}
@@ -541,8 +558,8 @@ func (s *Service) backfillWork(ctx context.Context, v *workView, now time.Time) 
 			if n >= 3 {
 				return
 			}
-			if c.HiddenByDirectory() || c.Assistant && !turnErrorTransient(c) || c.State != proto.StateUnread || c.Work != nil || now.Sub(c.UpdatedAt) > workBackfill ||
-				now.Sub(c.UpdatedAt) < settle || !full && (c.TurnError == "" || !turnErrorTransient(c)) {
+			if c.HiddenByDirectory() || c.Assistant && !turnErrorTransient(c) && !s.protectedQuotaWait(ctx, d.ID, c) || c.State != proto.StateUnread || c.Work != nil || now.Sub(c.UpdatedAt) > workBackfill ||
+				now.Sub(c.UpdatedAt) < settle || !full && (c.TurnError == "" || !turnErrorTransient(c) && !s.protectedQuotaWait(ctx, d.ID, c)) {
 				continue
 			}
 			k := [2]string{d.ID, c.SessionID}

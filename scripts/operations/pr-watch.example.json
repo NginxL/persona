@@ -5,6 +5,7 @@
       "checkout": "<absolute path to a trusted local checkout>",
       "base": "main",
       "merge": false,
+      "respect_human_reviews": false,
       "verify": {
         "profile": "commands",
         "timeout_seconds": 3600,

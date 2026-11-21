@@ -18,6 +18,7 @@ class ShareActivityTest {
         val contextual = sender.sent.single()
         assertEquals(target, contextual.session)
         assertEquals("stable-id", contextual.id)
+        assertEquals(persona.core.contracts.api.MessageVia.Share, contextual.via)
         assertTrue(contextual.text.contains("title=\"标题 &quot;引用&quot;\" url=\"https://example.com/page\""))
         assertEquals(1, Regex("</persona-context>").findAll(contextual.text).count())
         assertFalse(persona.core.domain.parseContexts(contextual.text).first.single().body.contains("</persona-context>"))
@@ -26,6 +27,7 @@ class ShareActivityTest {
         sendSharedContent(sender, target, "", "https://example.com/page", emptyList<String>(),
             "请总结", false, "Shared content", "plain-id", { error("Unexpected upload") })
         assertEquals("https://example.com/page\n\n请总结", sender.sent.last().text)
+        assertTrue(sender.sent.all { it.via == persona.core.contracts.api.MessageVia.Share })
     }
 
     @Test fun closingTheSheetWithoutSendingDiscardsTheStagedCopyButRotationAndSendDoNot() {
@@ -86,13 +88,16 @@ class ShareActivityTest {
         }
     }
 
-    private data class Sent(val session: SessionKey, val text: String, val id: String)
+    private data class Sent(val session: SessionKey, val text: String, val id: String, val via: String?)
     private class RecordingSender(private val onSend: () -> Unit = {}) : MessageSender {
         override val outbox = MutableStateFlow<List<OutboxMessage>>(emptyList())
         val sent = mutableListOf<Sent>()
-        override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) {
+        override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?) =
+            error("A share must retain its provenance")
+        override suspend fun send(session: SessionKey, text: String, clientMessageId: String, clearDraft: String?,
+            launcher: String?, model: String?, via: String?) {
             onSend()
-            sent += Sent(session, text, clientMessageId)
+            sent += Sent(session, text, clientMessageId, via)
         }
     }
 }

@@ -110,7 +110,7 @@ export function UserBubble({ msg, mid, sid, pending, sendState, starting, onDele
   const forwards = msg.contexts.filter((c) => c.kind === "forward");
   const contexts = forwards.length ? msg.contexts.filter((c) => c.kind !== "forward") : msg.contexts;
   return (
-    <div className="ml-auto flex max-w-[min(100%,488px)] min-w-0 flex-col items-end gap-1.5 pl-[12%]" style={pending ? { animation: `fade-up 300ms ${EASE} both` } : undefined} data-user-bubble data-send-state={sendState} data-items={pending || starting ? undefined : [msg.id, ...msg.images.map((i) => i.id)].join(" ")}>
+    <div className="ml-auto flex max-w-[min(100%,488px)] min-w-0 flex-col items-end gap-1.5 pl-[12%]" style={pending ? { animation: `fade-up 300ms ${EASE} both` } : undefined} data-user-bubble data-source-fingerprint={msg.rawInput?.[0]?.source_fingerprint} data-send-state={sendState} data-items={pending || starting ? undefined : [msg.id, ...msg.images.map((i) => i.id)].join(" ")}>
       {msg.images.length > 0 && (
         <div className="flex flex-wrap justify-end gap-1.5">
           {msg.images.map((im) => (
@@ -128,6 +128,7 @@ export function UserBubble({ msg, mid, sid, pending, sendState, starting, onDele
           <BubbleText text={msg.text} blocks={msg.contexts} mid={mid} sid={sid} own={own} pending />
         ) : (
           <MessageActions text={msg.text} editText={skillEditText(msg.contexts, msg.text)} isUser ts={msg.ts} side messageId={onDelete ? undefined : msg.id} onDelete={onDelete}
+            starSource={!onDelete && !sendState ? { mid, sid, item: msg.id, fingerprint: msg.rawInput?.[0]?.source_fingerprint, userInputs: msg.rawInput } : undefined}
             images={msg.images} photos={msg.photos} className="max-w-full">
             <BubbleText text={msg.text} blocks={msg.contexts} ts={msg.ts} mid={mid} sid={sid} own={own} />
           </MessageActions>
@@ -266,15 +267,16 @@ export const Answer = memo(function Answer({ item, streaming, mid, sid, fade, st
   const cwd = mid && sid ? getSession(mid, sid)?.cwd : undefined;
   return (
     <MessageActions text={text} ts={item?.ts} itemId={item?.id} bar={bar} usage={bar ? usage : undefined} usageMs={bar ? usageMs : undefined}
+      starSource={!live && mid && sid && item?.id ? { mid, sid, item: item.id, fingerprint: item.source_fingerprint } : undefined}
       translationSource={item?.full_size ? {
-        key: JSON.stringify([mid, sid, item.id, item.text, item.full_size, Boolean(stripCloseout)]),
+        key: JSON.stringify([mid, sid, item.id, item.text, item.full_size, item.source_fingerprint, Boolean(stripCloseout)]),
         load: async () => {
           const complete = await full.getText();
           return stripCloseout ? stripCloseout(complete) : complete;
         },
       } : undefined}>
       {cut && <p className="mb-1 text-[13px] leading-[1.384615] text-ink-2" data-cut-short>{t("chat-messageactions.cut_short")}</p>}
-      <div className={ANSWER} data-answer={live ? "streaming" : true} data-items={item?.id}>
+      <div className={ANSWER} data-answer={live ? "streaming" : true} data-source-fingerprint={item?.source_fingerprint} data-items={item?.id}>
         {/* the cards in it are this item's blocks (ui/AssistantCard.tsx): `<item id>/<n>` */}
         <CardItem.Provider value={item?.id ? { id: item.id, text } : null}>
           <Markdown text={text} mid={mid} cwd={cwd} streaming={live || undefined} fade={fade || undefined} lineBreaks />
@@ -311,6 +313,7 @@ export const SegmentView = memo(function SegmentView({
   trace,
   offscreen,
   busy,
+  dockTurnClock,
 }: {
   seg: Segment;
   live: boolean;
@@ -333,6 +336,8 @@ export const SegmentView = memo(function SegmentView({
    *  answered): drawn finished for a moment when a send drops the live line, its words get no reply bar yet, so the
    *  bar does not come and go (#5314). */
   busy?: boolean;
+  /** The dock owns the live turn's elapsed clock; finished exchanges never receive this state. */
+  dockTurnClock?: boolean;
 }) {
   const { subagents, tasks, scope, workflowCalls = NO_WORKFLOW_CALLS, lineStyle, closeoutSegment, children } = useChatContext();
   const own = useMemo(() => exchangeSteps(seg), [seg]);
@@ -352,8 +357,8 @@ export const SegmentView = memo(function SegmentView({
   const p = useMemo<WorkProps>(() => {
     const agent = (s: ToolStep) =>
       isNestedSubagentStep(s) ? nestedSubagentStatus(subagentFor(subagents, s.use)) : agentStatus(s.result, subagentFor(subagents, s.use), live, s.use.tool_use_id ? tasks.notes.get(s.use.tool_use_id) : undefined);
-    return { mid, sid, scope, expandFold, agentStatus: agent, segment: seg.id, workflowCalls, trace, lineStyle, turnLive: live, plan };
-  }, [mid, sid, scope, expandFold, subagents, tasks, live, seg.id, workflowCalls, trace, lineStyle, plan]);
+    return { mid, sid, scope, expandFold, agentStatus: agent, segment: seg.id, workflowCalls, trace, lineStyle, turnLive: live, plan, hideClock: dockTurnClock };
+  }, [mid, sid, scope, expandFold, subagents, tasks, live, seg.id, workflowCalls, trace, lineStyle, plan, dockTurnClock]);
   const identity = segmentIdentity(seg);
   const last = steps.at(-1);
   const newWords = streaming !== undefined && (last?.kind !== "text" || last.item.text?.trimEnd() !== streaming.trimEnd());
@@ -374,7 +379,9 @@ export const SegmentView = memo(function SegmentView({
   // block, and not at all when the block was all they said.
   const noCloseout = closeoutSegment === seg.id && streaming === undefined;
   const working = live && (streaming === undefined || batchedWords) && !nodes.some((n) => n.kind === "group" && n.live);
-  const liveRow = working && <WorkGroup g={{ kind: "group", id: `work-live-${seg.id}`, children: [], live: true, startedAt: Date.parse(turnStart ?? "") || undefined }} p={p} />;
+  // When the dock bar already shows the foreground turn's Working… status and elapsed timer, skip the empty non-expandable
+  // stream placeholder unless batched live text is streaming above it (#12380).
+  const liveRow = working && (!dockTurnClock || streaming !== undefined) && <WorkGroup g={{ kind: "group", id: `work-live-${seg.id}`, children: [], live: true, startedAt: Date.parse(turnStart ?? "") || undefined }} p={p} />;
   const imageStrip = images.length > 0 && <TurnImages images={images} mid={mid} sid={sid} cwd={getSession(mid, sid)?.cwd} />;
   const box = useRef<HTMLElement>(null);
   useLayoutEffect(() => {

@@ -1,12 +1,15 @@
 package persona.feature.chat
 
 import android.content.res.Resources
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -27,6 +30,8 @@ import persona.core.contracts.Machine
 import persona.core.contracts.Resolution
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.contracts.Workflow
+import persona.core.contracts.WorkflowAgent
 import persona.core.contracts.api.ChatRepository
 import persona.core.contracts.api.ChatSnapshot
 import persona.core.contracts.api.InteractionCenter
@@ -85,12 +90,6 @@ class ChatActivityTest {
         assertEquals("1 h 5 min left", ChatActivity.until(res, now.plusSeconds(65 * 60), now))
         assertEquals("2 hours left", ChatActivity.until(res, now.plusSeconds(120 * 60), now))
         assertEquals("check the CI", ChatActivity.task(LoopInfo(kind = "wakeup", prompt = "/loop check the CI")))
-        assertEquals("42 s", ChatActivity.elapsed(res, now.minusSeconds(42), now))
-        assertEquals("3m 5s", ChatActivity.elapsed(res, now.minusSeconds(185), now))
-        assertEquals("1h 12m", ChatActivity.elapsed(res, now.minusSeconds(4320), now))
-        assertEquals("Loop", ChatActivity.title(res, loop = true, background = false))
-        assertEquals("Background Task", ChatActivity.title(res, loop = false, background = true))
-        assertEquals("Loop & Background Tasks", ChatActivity.title(res, loop = true, background = true))
     }
 
     private val key = SessionKey("macbook", "weather")
@@ -124,11 +123,11 @@ class ChatActivityTest {
     }
     private val opened = mutableListOf<String>()
 
-    private fun page(style: AppStyle) {
+    private fun page(style: AppStyle, historyReadOnly: () -> Boolean = { false }, onOpenSession: ((SessionKey) -> Unit)? = null) {
         rule.setContent {
             PersonaTheme(darkTheme = false, reduceMotion = true, style = style) {
-                ChatScreen(key, chats, sender, interactions, sessions, onBack = {},
-                    chrome = ChatChromeBindings(onOpenPath = { path, _ -> opened += path }))
+                ChatScreen(key, chats, sender, interactions, sessions, onBack = {}, historyReadOnly = historyReadOnly(),
+                    chrome = ChatChromeBindings(onOpenPath = { path, _ -> opened += path }, onOpenSession = onOpenSession))
             }
         }
         rule.waitUntil(20_000) { rule.onAllNodesWithText("Watch the CI", substring = true).fetchSemanticsNodes().isNotEmpty() }
@@ -154,7 +153,7 @@ class ChatActivityTest {
         page(AppStyle.Glass)
         rule.onNode(pill).performClick()
         rule.waitForIdle()
-        rule.onNode(isDialog() and androidx.compose.ui.test.hasAnyDescendant(hasText("Loop & Background Tasks"))).assertExists()
+        rule.onNode(isDialog() and androidx.compose.ui.test.hasAnyDescendant(hasText("Background tasks"))).assertExists()
         rule.onNode(hasText("Stop Loop") and hasClickAction()).performClick()
         rule.waitForIdle()
         assertTrue("nothing goes before the confirmation", sent.isEmpty())
@@ -165,11 +164,33 @@ class ChatActivityTest {
         assertEquals(listOf(ChatActivity.STOP_LOOP), sent)
     }
 
+    @Test fun aReadOnlyChatCanViewTheWorkflowWithoutOpeningItsAgents() {
+        val readOnly = mutableStateOf(true)
+        val agent = WorkflowAgent("verify", "weather@verify", label = "Verify forecast", phase = "Check", running = true)
+        val workflow = Workflow(taskId = "workflow", runId = "verify-run", name = "Verify the release", running = true,
+            status = "running", phase = "Check", phases = listOf("Check"), agents = listOf(agent))
+        sessions.sessions.value = listOf(session.copy(workflows = listOf(workflow)))
+        val destinations = mutableListOf<SessionKey>()
+        page(AppStyle.Glass, historyReadOnly = { readOnly.value }, onOpenSession = { destinations += it })
+        rule.onNode(pill).performClick()
+        rule.onNode(hasText("Verify the release") and hasClickAction()).performClick()
+        rule.onNodeWithTag("workflow-card").assertExists()
+        val row = rule.onNodeWithTag("workflow-agent:verify")
+        row.assertExists()
+        row.assert(!hasClickAction())
+        assertTrue(destinations.isEmpty())
+
+        rule.runOnIdle { readOnly.value = false }
+        row.performClick()
+        assertEquals(listOf(SessionKey(key.machineId, agent.sessionId)), destinations)
+    }
+
     @Test fun aTasksOutputOpensInTheFiles() {
         page(AppStyle.Glass)
         rule.onNode(pill).performClick()
         rule.waitForIdle()
         rule.onNode(hasText("Run the test suite", substring = true) and hasClickAction(), useUnmergedTree = false).performClick()
+        rule.onNodeWithText("Open as file").performClick()
         rule.waitForIdle()
         assertEquals(listOf("/tmp/tasks/b1.output"), opened)
     }

@@ -104,11 +104,13 @@ func readFields(c proto.Closeout, body string) (proto.Closeout, []proto.WorkArti
 				artifacts = append(artifacts, proto.WorkArtifact{Kind: kind, Ref: clip(ref, 300)})
 			}
 		case "delivery":
+			val = strings.ToLower(val)
 			switch val {
 			case "live", "pr", "merged", "off", "none":
 				c.Delivery = val
 			}
 		case "unblock":
+			val = strings.ToLower(val)
 			switch val {
 			case "user", "agent", "other":
 				c.Unblock = val

@@ -199,7 +199,7 @@ export function todoWorkspaceStatus(todo: TodoWorkspaceItem, sessions: ResourceR
   const askOutcome = Wire.text(todo.ask, 'outcome');
   const active = todo.activeAgents();
   const supervisionState = Wire.text(todo.supervision, 'state');
-  const ownerDecision = supervisionState === 'needs_user' || askIsOpen(todo) && (askOutcome === 'decide' || askOutcome === 'cannot');
+  const ownerDecision = supervisionState === 'user_check' || supervisionState === 'needs_user' || askIsOpen(todo) && (askOutcome === 'decide' || askOutcome === 'cannot');
   let checking: boolean = false;
   let working: boolean = false;
   let needsYou: boolean = false;

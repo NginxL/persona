@@ -99,9 +99,9 @@ func TestInboxClaudeUsesDefaultAndPersistsOrigin(t *testing.T) {
 	}
 }
 
-// Inbox may read its owner's installed Skills and knowledge base without a working-directory approval, including a
-// linked Skill checkout and a linked knowledge root. The launch gets no file-write allow rule, ordinary conversations
-// keep the old boundary, and Claude's health denies stay in force.
+// Inbox may read local files outside its working directory, including project instructions and installed Skills.
+// Directory-specific rules keep their linked-root coverage. Network, shell and mutation tools get no bare allow,
+// ordinary conversations keep the old boundary, and Claude's health denies stay in force.
 func TestInboxClaudeReadOnlyLocalResourceRules(t *testing.T) {
 	n, home := testNode(t)
 	n.dir = filepath.Join(home, ".persona")
@@ -132,6 +132,14 @@ func TestInboxClaudeReadOnlyLocalResourceRules(t *testing.T) {
 	n.state.put(id, sessionState{Origin: originInbox})
 	flags := n.claudeAssistantMCPAndTools(id, cwd, true)
 	allowed := strings.Split(mcpFlag(t, flags, "--allowedTools"), ",")
+	if !slices.Contains(allowed, "Read") {
+		t.Errorf("Inbox --allowedTools lacks the bare Read rule needed by project files and other installed Skill roots: %q", allowed)
+	}
+	for _, tool := range []string{"WebFetch", "WebSearch", "Bash", "Write", "Edit"} {
+		if slices.Contains(allowed, tool) {
+			t.Errorf("Inbox gained a bare %q allow rule: %q", tool, allowed)
+		}
+	}
 	fileRule := func(tool, dir string) string {
 		path := filepath.ToSlash(filepath.Clean(dir))
 		if path[0] != '/' {
@@ -153,6 +161,9 @@ func TestInboxClaudeReadOnlyLocalResourceRules(t *testing.T) {
 		}
 	}
 	ordinary := strings.Split(mcpFlag(t, n.claudeAssistantMCPAndTools("ordinary", cwd, true), "--allowedTools"), ",")
+	if slices.Contains(ordinary, "Read") {
+		t.Errorf("ordinary conversation gained the Inbox-only bare Read rule: %q", ordinary)
+	}
 	for _, rule := range readRules {
 		if slices.Contains(ordinary, rule) {
 			t.Errorf("ordinary conversation gained Inbox-only rule %q", rule)
@@ -171,17 +182,28 @@ func TestInboxClaudeReadOnlyLocalResourceRules(t *testing.T) {
 	}
 }
 
-// inboxPermissionCLI models the narrow Claude Code permission contract from the regression: Plan rejects Persona MCP
-// before allowedTools, while default runs calls covered by mcp__persona without asking. It records completion instead
-// of contacting a hub. TestInboxModelReadOnlyInvestigationAndSuggestion exercises the manager's real tool path.
+// inboxPermissionCLI models the narrow Claude Code permission contracts from the regressions: Plan rejects Persona MCP
+// before allowedTools, default runs calls covered by mcp__persona without asking, and built-in tools need their own bare
+// allow entry. It records completion and permission requests instead of contacting a hub. The manager test below
+// exercises the real read-only tool path.
 const inboxPermissionCLI = `printf '%s\n' "$*" >> "$CLI_FAKE_DIR/cli-argv"
 mode=default
 allowed=
-previous=
+denied=
+collect=
 for argument in "$@"; do
-  if [ "$previous" = "--allowedTools" ]; then allowed=$argument; fi
-  previous=$argument
+  case "$argument" in
+    --allowedTools) collect=allowed; continue ;;
+    --disallowedTools) collect=denied; continue ;;
+    --*) collect= ;;
+  esac
+  case "$collect" in
+    allowed) allowed=$argument ;;
+    denied) denied="${denied}${argument}
+" ;;
+  esac
 done
+printf '%s' "$denied" >> "$CLI_FAKE_DIR/denied-tools"
 echo '{"type":"system","subtype":"init"}'
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$CLI_FAKE_DIR/stdin.jsonl"
@@ -193,15 +215,40 @@ while IFS= read -r line; do
       esac
       echo "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$id\"}}" ;;
     *'"type":"user"'*)
-      if [ "$mode" = "plan" ]; then
-        printf '%s\n' 'Cannot call mcp__persona__lark_messages while in plan mode.' >> "$CLI_FAKE_DIR/permission-requests"
-      else
-        case ",$allowed," in
-          *",mcp__persona,"*)
-            printf '%s\n' 'mcp__persona__lark_messages' 'mcp__persona__inbox_suggest' >> "$CLI_FAKE_DIR/completed-tools" ;;
-          *) printf '%s\n' 'Persona MCP was not allowed without asking' >> "$CLI_FAKE_DIR/permission-requests" ;;
-        esac
-      fi
+      case "$line" in
+        *secret-read-replay*)
+          # Narrow fake: one exact Read(path) rule, supplied by the test, models deny-over-allow. This is not the real
+          # Claude permission engine; the static launch tests separately enumerate exact and glob rules.
+          case ",$allowed," in
+            *",Read,"*)
+              printf '%s\n' 'Read(public)' >> "$CLI_FAKE_DIR/completed-tools"
+              secret_rule=
+              if [ -f "$CLI_FAKE_DIR/secret-read-rule" ]; then IFS= read -r secret_rule < "$CLI_FAKE_DIR/secret-read-rule"; fi
+              if [ -n "$secret_rule" ] && printf '%s\n' "$denied" | grep -F -x -q -- "$secret_rule"; then
+                printf '%s\n' 'Read(secret)' >> "$CLI_FAKE_DIR/permission-requests"
+              else
+                printf '%s\n' 'Read(secret)' >> "$CLI_FAKE_DIR/completed-tools"
+              fi ;;
+            *) printf '%s\n' 'Read(public)' 'Read(secret)' >> "$CLI_FAKE_DIR/permission-requests" ;;
+          esac ;;
+        *permission-replay*)
+          for tool in Read WebFetch Write Edit Bash; do
+            case ",$allowed," in
+              *",$tool,"*) printf '%s\n' "$tool" >> "$CLI_FAKE_DIR/completed-tools" ;;
+              *) printf '%s\n' "$tool" >> "$CLI_FAKE_DIR/permission-requests" ;;
+            esac
+          done ;;
+        *)
+          if [ "$mode" = "plan" ]; then
+            printf '%s\n' 'Cannot call mcp__persona__lark_messages while in plan mode.' >> "$CLI_FAKE_DIR/permission-requests"
+          else
+            case ",$allowed," in
+              *",mcp__persona,"*)
+                printf '%s\n' 'mcp__persona__lark_messages' 'mcp__persona__inbox_suggest' >> "$CLI_FAKE_DIR/completed-tools" ;;
+              *) printf '%s\n' 'Persona MCP was not allowed without asking' >> "$CLI_FAKE_DIR/permission-requests" ;;
+            esac
+          fi ;;
+      esac
       echo '{"type":"result","subtype":"success","result":"done"}' ;;
   esac
 done
@@ -228,6 +275,59 @@ func TestInboxClaudeReadOnlyMCPAndSuggestionSkipPermission(t *testing.T) {
 	}
 	if got := len(f.fh.interactions()); got != 0 {
 		t.Fatalf("handling opened %d permission cards, want none", got)
+	}
+}
+
+// The same launch contract covers built-in tools: the Inbox-only bare Read completes, while network, shell and file
+// mutations still reach the permission prompt. The fake CLI records prompts rather than contacting a hub.
+func TestInboxClaudeBuiltInReadAndMutationPermissionReplay(t *testing.T) {
+	f := cliTestBash(t)
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+inboxPermissionCLI), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	id, err := f.n.assistantSend(context.Background(), "", t.TempDir(), "claude", "permission-replay", nil, proto.ModeBypass, "", modelExecution{Origin: originInbox})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	if got := f.file("completed-tools"); got != "Read\n" {
+		t.Fatalf("completed built-in tools = %q, want only Read", got)
+	}
+	const requests = "WebFetch\nWrite\nEdit\nBash\n"
+	if got := f.file("permission-requests"); got != requests {
+		t.Fatalf("built-in permission requests = %q, want %q", got, requests)
+	}
+	if got := len(f.fh.interactions()); got != 0 {
+		t.Fatalf("fake CLI contacted the hub with %d permission cards, want none", got)
+	}
+}
+
+// The fake CLI models the documented deny-over-allow contract for one exact synthetic path: a normal Read completes
+// under bare Read, while the same allow does not complete a credential Read covered by --disallowedTools. This checks
+// Persona's launch arguments, not the real Claude Code permission engine.
+func TestInboxClaudeSecretReadDenyOverridesBareAllow(t *testing.T) {
+	f := cliTestBash(t)
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+inboxPermissionCLI), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(f.n.dir, "hub.json")
+	rule := inboxTestReadRule(secret, false)
+	if err := os.WriteFile(filepath.Join(f.dir, "secret-read-rule"), []byte(rule+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	id, err := f.n.assistantSend(context.Background(), "", t.TempDir(), "claude", "secret-read-replay", nil, proto.ModeBypass, "", modelExecution{Origin: originInbox})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, id)
+	if got := f.file("completed-tools"); got != "Read(public)\n" {
+		t.Fatalf("completed tools = %q, want only an ordinary Read; rule=%q denied=%q argv=%s", got, rule, f.file("denied-tools"), f.file("cli-argv"))
+	}
+	if got := f.file("permission-requests"); got != "Read(secret)\n" {
+		t.Fatalf("permission requests = %q, want the denied credential Read", got)
+	}
+	if argv := f.file("cli-argv"); !strings.Contains(argv, rule) {
+		t.Fatalf("launch argv lacks exact credential deny %q: %s", rule, argv)
 	}
 }
 

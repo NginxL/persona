@@ -63,6 +63,7 @@ type pageCheck struct {
 	hubNames bool
 	images   int
 	withActs int
+	scenes   int
 }
 
 func (p *pageCheck) name(n string) error {
@@ -556,10 +557,11 @@ func checkChartV6(e Component) error {
 	return nil
 }
 
-// HasImageRef says whether a component shows a picture the extension serves (a ref): an image's src, a row's
-// thumbnail or avatar, a header's avatar, a tile's image, a comment's avatar.
+// HasImageRef says whether a component shows a picture the extension serves (a ref): an image's src, a scene's
+// poster, a row's thumbnail or avatar, a header's avatar, a tile's image, a comment's avatar.
 func HasImageRef(e *Component) bool {
-	if e.Src != nil && e.Src.Ref != "" || e.Thumbnail != nil && e.Thumbnail.Ref != "" || e.Avatar != nil && e.Avatar.Ref != "" {
+	if e.Src != nil && e.Src.Ref != "" || e.Poster != nil && e.Poster.Ref != "" || e.Thumbnail != nil && e.Thumbnail.Ref != "" ||
+		e.Avatar != nil && e.Avatar.Ref != "" {
 		return true
 	}
 	for _, t := range e.Tiles {

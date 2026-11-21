@@ -71,5 +71,7 @@
   "error_cron": "Write a cron expression, like 0 9 * * 1-5",
   "cron_example_work_hours": "Work hours, every 30 min",
   "cron_example_weekdays": "Weekdays at 9:00",
-  "cron_example_monthly": "1st of the month at 10:00"
+  "cron_example_monthly": "1st of the month at 10:00",
+  "skip_next_pending": "Will skip {when}",
+  "status_owner_skipped": "Skipped by you"
 }

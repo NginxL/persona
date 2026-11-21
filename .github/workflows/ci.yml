@@ -21,10 +21,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   changes:
-    name: Manual repository guards and path selection
+    name: Manual path selection
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
+      base: ${{ steps.base.outputs.base }}
       server: ${{ steps.paths.outputs.server }}
       web: ${{ steps.paths.outputs.web }}
       android: ${{ steps.paths.outputs.android }}
@@ -43,10 +44,6 @@ jobs:
         env:
           CI_BASE_INPUT: ${{ inputs.base }}
         run: python3 scripts/ci/paths.py --print-base --base "$CI_BASE_INPUT"
-      - name: Repository guards
-        env:
-          CI_BASE_SHA: ${{ steps.base.outputs.base }}
-        run: scripts/ci/guards.sh
       - id: paths
         name: Select platforms
         env:
@@ -59,6 +56,22 @@ jobs:
           else
             python3 scripts/ci/paths.py --lanes "$CI_LANES" --base "$CI_BASE_SHA"
           fi
+  # No platform lane needs this job: a failing guard says nothing about the platforms, so their results still
+  # come out and only CI required fails. It checks against the base path selection resolved, one per run.
+  guards:
+    name: Manual repository guards
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Repository guards
+        env:
+          CI_BASE_SHA: ${{ needs.changes.outputs.base }}
+        run: scripts/ci/guards.sh
   server:
     needs: changes
     if: needs.changes.outputs.server == 'true'
@@ -97,14 +110,14 @@ jobs:
   # An unselected manual lane is never represented as a passed platform test.
   required:
     name: CI required
-    needs: [changes, server, web, android, apple, core, runtimes, desktop, scripts]
+    needs: [changes, guards, server, web, android, apple, core, runtimes, desktop, scripts]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
+      # required.py reads only the needs JSON and never calls git, so the default shallow checkout is enough.
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
       - name: Verify selected platform results
         env:

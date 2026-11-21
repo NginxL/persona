@@ -524,8 +524,9 @@ func TestABroadcastSaysWhoseItIs(t *testing.T) {
 	got := broadcastsTo(t, app, b,
 		`{"type":"inbox","machine_id":"mb","note":"b-own"}`,
 		`{"type":"assistant_schedule","manager":"assistant","note":"b-claims-a"}`)
+	id := "o1_" + randomHex(6) // the hand-over record stays in the database for two hours: a test run again needs its own
 	if err := b.call(t, assistantwire.MethodOutbox, assistantwire.Outbox{Items: []assistantwire.OutboxItem{
-		{ID: "o1", At: time.Now(), Message: json.RawMessage(`{"type":"todos","note":"b-outbox"}`)}}}, nil); err != nil {
+		{ID: id, At: time.Now(), Message: json.RawMessage(`{"type":"todos","note":"b-outbox"}`)}}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	got = append(got, broadcastsTo(t, app, a,

@@ -420,4 +420,21 @@
     </plurals>
     <string name="settings_ext_graph_under">位于 %1$s 下</string>
     <string name="settings_ext_graph_progress">%1$d%%</string>
+    <string name="settings_ext_use_reference">使用引用</string>
+    <string name="settings_ext_reference_placeholder">op://vault/item/field</string>
+    <string name="settings_ext_reference_hint">这个扩展需要时由它的提供方给出值，Persona 只保存引用。</string>
+    <string name="settings_ext_from_provider">来自 %1$s</string>
+    <string name="settings_ext_secret_from_provider">来自 %1$s：%2$s</string>
+    <string name="settings_ext_secret_reference_saved">%1$s 已改用引用</string>
+    <string name="settings_ext_users_title">使用方</string>
+    <string name="settings_ext_users_footer">这些设置会从它这里取值；保存设置就等于长期允许它们取用。</string>
+    <string name="settings_ext_user_launcher">「%1$s」的 Key</string>
+    <string name="settings_ext_user_launcher_machine">%2$s 上「%1$s」的 Key</string>
+    <string name="settings_ext_rules_title">总是交给 Agent</string>
+    <string name="settings_ext_rules_footer">在这台电脑上用这个启动器、由你自己发起的 Agent 会直接拿到值，不再询问。</string>
+    <string name="settings_ext_rule_label">%2$s 上的「%1$s」</string>
+    <string name="settings_ext_rule_remove">移除</string>
+    <string name="settings_ext_rule_remove_title">移除这条规则？</string>
+    <string name="settings_ext_rule_remove_body">下次 %2$s 上的 %1$s 需要它时，会重新请你批准。</string>
+    <string name="settings_ext_rule_removed">规则已移除</string>
 </resources>

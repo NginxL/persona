@@ -15,4 +15,9 @@ internal class ReadOnlyMessageSender(source: MessageSender, private val refusal:
     ) {
         throw IllegalStateException(refusal)
     }
+    override suspend fun send(
+        session: SessionKey, text: String, clientMessageId: String, clearDraft: String?, launcher: String?, model: String?, via: String?,
+    ) {
+        throw IllegalStateException(refusal)
+    }
 }

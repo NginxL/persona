@@ -406,6 +406,16 @@ class HubChatRepository(
 
     override suspend fun modeChanges(session: SessionKey): List<ModeChange> = transport.modeChanges(session)
 
+    override suspend fun earlierEnginePage(session: SessionKey, beforeSeq: Int?): ItemsResponse? =
+        try {
+            transport.items(session, ItemsQuery(beforeSeq = beforeSeq))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (missingHistory(error) != null) null else throw error
+        }
+
+
     override suspend fun loadOlder(session: SessionKey) {
         val entry = existing(session) ?: return
         entry.ready.await()

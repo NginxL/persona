@@ -54,6 +54,7 @@ func TestRelayFailureClassification(t *testing.T) {
 		{"the manager's own localized refusal", i18n.Err("external-adapter.scope_required"), relayFailedLocal},
 
 		{"assistant_supervision_runtime", coded(assistantwire.CodeSupervisionRuntime), relayFailedRefused},
+		{"account not enabled", coded(assistantwire.CodeSupervisionAccount), relayFailedRefused},
 		{"conversation_deleted", coded("conversation_deleted"), relayFailedRefused},
 		{"an unknown code", coded("unheard_of"), relayFailedRefused},
 	}
@@ -323,6 +324,7 @@ func TestRefusedForGoodPushSaysWhy(t *testing.T) {
 		name, tool, from, code, body string
 	}{
 		{"supervision, runtime", superviseTool, superviseTool, runtime, "assistant-conversations.supervision_delivery_failed"},
+		{"supervision, account", superviseTool, superviseTool, assistantwire.CodeSupervisionAccount, "rpc-errors.assistant_supervision_account"},
 		{"supervision, other", superviseTool, superviseTool, "unheard_of", "assistant-conversations.supervision_delivery_refused"},
 		{"task end, runtime", taskEndTool, "todo_1", runtime, "rpc-errors.assistant_supervision_runtime"},
 		{"task end, other", taskEndTool, "todo_1", "unheard_of", "assistant-conversations.notice_delivery_refused"},
@@ -344,7 +346,7 @@ func TestRefusedForGoodPushSaysWhy(t *testing.T) {
 					t.Fatal("the refusal did not end the message")
 				}
 				waitFor(t, "the owner's push", func() bool { return len(f.pushList()) == 1 })
-				want := i18n.T(i18n.En, tc.body)
+				want := i18n.T(i18n.En, tc.body, s.supervisionLauncherArgs(ctx, "server", i18n.En))
 				if p := f.pushList()[0]; p.SessionID != "side1" || p.Body != want || p.Title != i18n.T(i18n.En, "assistant-conversations.relay_delivery_failed") {
 					t.Fatalf("push %q / %q about %s, want %q about side1", p.Title, p.Body, p.SessionID, want)
 				}
@@ -355,8 +357,8 @@ func TestRefusedForGoodPushSaysWhy(t *testing.T) {
 			})
 		}
 	}
-	if len(texts) != 4 {
-		t.Fatalf("%d different texts, want the four kinds of refusal told apart", len(texts))
+	if len(texts) != 5 {
+		t.Fatalf("%d different texts, want the five kinds of refusal told apart", len(texts))
 	}
 }
 

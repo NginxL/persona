@@ -101,6 +101,8 @@ class MetricSelectionUiTest {
         val selected = selectionText(MetricKind.Cpu)
         assertNotEquals("Now", selected)
         assertSharedSelection(selected)
+        rule.onNodeWithText("Load 5.6").assertExists()
+        rule.onNodeWithText("1.4 per core").assertExists()
 
         now += 10
         historyPoints = historyPoints + MetricPoint(now, cpu = 45.0, mem = 30.0, rx = 1_200.0, tx = 2_200.0, load = 1.6, disk = 50.0)
@@ -126,6 +128,8 @@ class MetricSelectionUiTest {
         rule.onNodeWithText("Back to now").performScrollTo().performClick()
         rule.waitForIdle()
         assertSharedSelection("Now")
+        rule.onNodeWithText("Load 1.5").assertExists()
+        rule.onNodeWithText("1.4 per core").assertDoesNotExist()
     }
 
     private fun assertSharedSelection(expected: String) {
@@ -148,7 +152,7 @@ class MetricSelectionUiTest {
     private companion object {
         fun points(end: Long): List<MetricPoint> = (0..360).map { index ->
             MetricPoint(end - 3_600 + index * 10, cpu = 40.0, mem = 30.0, rx = 1_000.0, tx = 2_000.0,
-                load = 1.5, disk = 50.0)
+                load = 5.6, disk = 50.0)
         }
     }
 }

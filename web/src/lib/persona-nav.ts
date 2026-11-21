@@ -1,28 +1,40 @@
 // The sidebar's entries around Persona (#1239): which row a route lights up, the pages under Persona, and how a long list
 // keeps the open row. Pure, so the order and the selection are tested without a DOM.
-import type { Route } from "./router";
+import { parse, type Route } from "./router";
 
-/** The sidebar row a route selects. Persona's main conversation is one row, under `/`, `/persona` and `/persona/<main>` alike. */
-export function sidebarActiveKey(route: Route, main?: string): string {
-  switch (route.name) {
+/** The route whose row the sidebar lights (#12055). An Agent's page opened from inside another page (a to-do, a
+ *  knowledge project, a meeting, a Persona conversation's card) is a drill-down: the sidebar keeps the row of the page it
+ *  was opened from (#9971). `from`: that page's address in the app, as the Agent's history entry names it (lib/handoff.ts
+ *  sidebarPageOf). Any other page lights its own row. */
+export function sidebarRoute(route: Route, from?: string): Route {
+  if (!from || (route.name !== "session" && route.name !== "tab")) return route;
+  const q = from.indexOf("?");
+  return q < 0 ? parse(from) : parse(from.slice(0, q), from.slice(q));
+}
+
+/** The sidebar row a route selects. Persona's main conversation is one row, under `/`, `/persona` and `/persona/<main>` alike.
+ *  An Agent's page opened from another page selects that page's row (`from`, sidebarRoute). */
+export function sidebarActiveKey(route: Route, main?: string, from?: string): string {
+  const r = sidebarRoute(route, from);
+  switch (r.name) {
     case "session":
-      return `s:${route.mid}/${route.sid}`;
+      return `s:${r.mid}/${r.sid}`;
     case "persona":
-      return !route.sid || route.sid === main ? "persona" : `j:${route.sid}`;
+      return !r.sid || r.sid === main ? "persona" : `j:${r.sid}`;
     case "persona-new":
       return "j:new";
     case "health":
       return "health";
     case "history":
-      return route.origin ? `auto:${route.origin}` : "history";
+      return r.origin ? `auto:${r.origin}` : "history";
     case "machine":
       return "machines";
     case "agents":
-      return route.id ? `a:${route.id}` : "agents";
+      return r.id ? `a:${r.id}` : "agents";
     case "extension":
-      return extensionNavKey(route.extension, route.ui);
+      return extensionNavKey(r.extension, r.ui);
     default:
-      return route.name;
+      return r.name;
   }
 }
 
@@ -38,7 +50,7 @@ export function firstAndCurrent<T>(list: readonly T[], n: number, isCurrent: (x:
 
 /** The page entries under Persona, in the sidebar's order (the app's "Assistant" first, then the rest of its drawer). "Messages" shows
  * only in a browser that turned on "Show messages on home" (lark-chats.ts), on a hub with feature `lark`. The extensions' pages (nav_page) go right before "Settings". */
-export const NAV_PAGES = ["home", "inbox", "health", "messages", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"] as const;
+export const NAV_PAGES = ["home", "inbox", "health", "messages", "starred", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"] as const;
 
 /**
  * Where the page goes when another assistant becomes the current one (the sidebar's switcher): a page about one thing

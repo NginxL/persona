@@ -105,6 +105,10 @@ type BotFeatures struct {
 	// TopicCot: a topic run also shows its thinking and tools in a native agent message, beside the progress card.
 	// On by default, including settings saved before it; off keeps the card's folded process panel.
 	TopicCot bool `json:"topic_cot"`
+	// ReadGroup: the owner's "@bot /read <task>" in a group the bot is in reads the group's recent messages, images and
+	// files as the owner, then does the task and answers under that message (#11803, bots_read.go). Off by default, and
+	// for settings saved before it: they have no such key.
+	ReadGroup bool `json:"read_group"`
 }
 
 var defaultBotFeatures = BotFeatures{Main: true, Cards: true, Reports: true, TopicCot: true}

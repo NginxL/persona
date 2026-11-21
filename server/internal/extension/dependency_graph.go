@@ -53,7 +53,8 @@ func (g *dependencyGraph) localMissing(p *Extension) []string {
 	if p.ReadOnly() {
 		return out
 	}
-	if len(p.Manifest.Secrets) > 0 || p.Manifest.Runtime != nil {
+	activeEntries := activeEntrySecrets(p)
+	if len(p.Manifest.Secrets) > 0 || len(activeEntries) > 0 || p.Manifest.Runtime != nil {
 		secrets, err := g.registry.Secrets(g.ctx, p.Record.ID)
 		if err != nil {
 			out = append(out, StatusErrorText(l, err))
@@ -72,6 +73,24 @@ func (g *dependencyGraph) localMissing(p *Extension) []string {
 				if !g.supplies(scheme) {
 					out = append(out, i18n.T(l, "extension-status.missing_secret_provider",
 						i18n.Args{"title": p.L10n.Secret(l, secret).Title, "scheme": scheme + "://"}))
+				}
+			}
+		}
+		for _, id := range sortedKeys(activeEntries) {
+			binding := activeEntries[id]
+			secret := *binding.List.Secret
+			title := p.L10n.Secret(l, secret).Title
+			if label := entryLabel(binding); label != "" {
+				title += " (" + label + ")"
+			}
+			if secret.Required && !set[id] {
+				out = append(out, i18n.T(l, "extension-status.missing_secret", i18n.Args{"title": title}))
+			}
+			if ref, ok := ReferenceOf(secrets[id]); ok {
+				scheme, _ := ReferenceScheme(ref)
+				if !g.supplies(scheme) {
+					out = append(out, i18n.T(l, "extension-status.missing_secret_provider",
+						i18n.Args{"title": title, "scheme": scheme + "://"}))
 				}
 			}
 		}

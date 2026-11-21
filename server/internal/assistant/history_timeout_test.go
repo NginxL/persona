@@ -166,7 +166,7 @@ func TestWriteEndedStuckDatabase(t *testing.T) {
 
 	start := time.Now()
 	w := httptest.NewRecorder()
-	s.writeEnded(context.Background(), w, "ix_gone", proto.Resolution{}, errNotPending)
+	s.writeEnded(context.Background(), w, "ix_gone", proto.Resolution{}, errNotPending, false)
 	if w.Code != http.StatusGone || time.Since(start) > 2*time.Second {
 		t.Fatalf("status %d after %v", w.Code, time.Since(start))
 	}
@@ -175,7 +175,7 @@ func TestWriteEndedStuckDatabase(t *testing.T) {
 	cancel()
 	start = time.Now()
 	w = httptest.NewRecorder()
-	s.writeEnded(ctx, w, "ix_gone", proto.Resolution{}, errNotPending)
+	s.writeEnded(ctx, w, "ix_gone", proto.Resolution{}, errNotPending, false)
 	if w.Code != http.StatusGone || time.Since(start) >= historyTimeout {
 		t.Fatalf("status %d after %v with the request gone", w.Code, time.Since(start))
 	}

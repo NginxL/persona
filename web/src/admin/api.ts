@@ -277,7 +277,7 @@ export const followExtensionLogs: LogFollower = (...args) => follower(...args);
 // ── usage sources (docs/server/usage-windows.md "Account-pool gateways"): the gateways whose usage windows join the sidebar's ──
 
 export const getUsageSources = () => adminApi<UsageSources>("/usage-sources");
-export const saveUsageSettings = (s: { enabled?: boolean; poll_minutes?: number }) => adminApi<UsageSources>("/usage-sources", "PUT", s);
+export const saveUsageSettings = (s: { enabled?: boolean; poll_minutes?: number; hidden_providers?: string[] }) => adminApi<UsageSources>("/usage-sources", "PUT", s);
 export const addUsageSource = (s: UsageSourceInput) => adminApi<{ source: UsageSource }>("/usage-sources", "POST", s);
 export const editUsageSource = (id: string, s: UsageSourceInput) => adminApi<{ source: UsageSource }>(`/usage-sources/${enc(id)}`, "PUT", s);
 export const removeUsageSource = (id: string) => adminApi<{ ok: boolean }>(`/usage-sources/${enc(id)}`, "DELETE");

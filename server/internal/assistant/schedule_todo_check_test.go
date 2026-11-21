@@ -375,6 +375,120 @@ func TestScheduledTodoCheckDecisionToldGoesToSupervisor(t *testing.T) {
 	}
 }
 
+// The check's decision answered off its card (#11705 review): with task_decided, whose reply said the choice "went to
+// the task's agent" though it went to the supervisor; and where the Agent already has the answer (task_decided
+// told_agent, or the option named in the Agent's chat), where the supervisor heard "not told" and the card, for the
+// recommended option, "not its Agent".
+func TestScheduledTodoCheckDecisionAnsweredOffTheCard(t *testing.T) {
+	for _, route := range []string{"task_decided", "told_agent", "agent_chat"} {
+		for _, pick := range []string{"recommended", "other"} {
+			t.Run(route+"/"+pick, func(t *testing.T) {
+				s, f, todo := newSupervisedService(t)
+				ctx := context.Background()
+				s.todoAskAfter = time.Nanosecond
+				s.superviseTimes.gather = time.Hour
+				task := todoProgressTask(todo.ID)
+				setTasks(s, task)
+				assessTodoBaseline(t, s, task.ID)
+				assessTodoRun(t, s, task.ID, nil)
+				assessTodoRun(t, s, task.ID, nil)
+				a := askOf(s, todo.ID)
+				if a == nil || a.Check != task.ID || len(a.Options) != 2 {
+					t.Fatalf("the check's decision is not marked as the check's: %+v", a)
+				}
+				agentAtWork(f, todo) // a send to the Agent would be delivered, not held as undelivered
+				label := a.Options[0].Label
+				if pick == "other" {
+					label = a.Options[1].Label
+				}
+				told := route != "task_decided"
+				sent := len(sentToAgent(f))
+				if route == "agent_chat" {
+					ag := todo.Agents[0]
+					agentChoiceMessage(t, s, SessionRef{MachineID: ag.MachineID, SessionID: ag.SessionID}, label)
+				} else {
+					got, isErr := tool(t, s, "task_decided", map[string]any{"todo_id": todo.ID, "option": label, "said": label,
+						"told_agent": told})
+					if isErr || !strings.Contains(got, "went to the task's supervisor") || strings.Contains(got, "went to the task's agent") {
+						t.Fatalf("task_decided says %q (error %v)", got, isErr)
+					}
+				}
+				if got := sentToAgent(f)[sent:]; len(got) != 0 {
+					t.Fatalf("the owner's answer to the check was sent to the Agent: %q", got)
+				}
+				s.supervise.mu.Lock()
+				g, ok := s.supervise.pending[todo.ID+"|"+sigCheck+":"+checkDecidedReport]
+				s.supervise.mu.Unlock()
+				if !ok || g.Detail != label || g.Told != told {
+					t.Fatalf("the supervisor's signal (told %v): %+v", told, g)
+				}
+				e, ok := s.digestEntry(ctx, g, "")
+				if !ok || e.Told != told {
+					t.Fatalf("the supervision entry (told %v): %+v", told, e)
+				}
+				text := prompts.RenderSupervise(prompts.Supervise{Entries: []prompts.SuperviseEntry{e}})
+				worker := prompts.RenderWorkerSupervise([]prompts.SuperviseEntry{e})
+				says, never := "没有转给 Agent", "已经在 Agent 的对话里" // i18n-ignore: the supervision message is Chinese
+				workerSays, workerNever := "the worker was not told", "already in the worker's chat"
+				if told {
+					says, never, workerSays, workerNever = never, says, workerNever, workerSays
+				}
+				if !strings.Contains(text, says) || strings.Contains(text, never) {
+					t.Fatalf("the supervisor's message should say %q:\n%s", says, text)
+				}
+				if !strings.Contains(worker, workerSays) || strings.Contains(worker, workerNever) {
+					t.Fatalf("the task leader's message should say %q:\n%s", workerSays, worker)
+				}
+				lang := s.botLang(ctx)
+				want := i18n.T(lang, "assistant-reports.decision_chosen_supervisor", i18n.Args{"option": label})
+				if !told && pick == "recommended" { // taken as OK takes it: nothing reached the Agent
+					want = i18n.T(lang, "assistant-reports.verdict_taken_supervisor")
+				}
+				if note := acceptedNote(lang, askOf(s, todo.ID)); note != want {
+					t.Fatalf("the card says %q, want %q", note, want)
+				}
+			})
+		}
+	}
+}
+
+// The owner's own words answering the check's decision go to its Agent, as any decision's do, and its supervisor gets
+// no check signal for them: the card says they went to the Agent, not to the supervisor (#11705 review).
+func TestScheduledTodoCheckDecisionInWordsGoesToItsAgent(t *testing.T) {
+	database := todoTestDB(t)
+	s, f, todo := newSupervisedServiceOn(t, database)
+	ctx := context.Background()
+	s.todoAskAfter = time.Nanosecond
+	s.superviseTimes.gather = time.Hour
+	task := todoProgressTask(todo.ID)
+	setTasks(s, task)
+	assessTodoBaseline(t, s, task.ID)
+	assessTodoRun(t, s, task.ID, nil)
+	assessTodoRun(t, s, task.ID, nil)
+	if a := askOf(s, todo.ID); a == nil || a.Check != task.ID {
+		t.Fatalf("the check's decision is not marked as the check's: %+v", a)
+	}
+	agentAtWork(f, todo)
+	sent := len(sentToAgent(f))
+	words := "Run only the unit tests first, then look again"
+	if result, err := s.answerDecisionText(ctx, todo.ID, "", words); err != nil || !result.taken || result.undelivered != nil {
+		t.Fatalf("the owner's words were not taken: %+v %v", result, err)
+	}
+	if got := sentToAgent(f)[sent:]; len(got) != 1 || !strings.Contains(got[0], words) {
+		t.Fatalf("the owner's words did not reach the Agent: %q", got)
+	}
+	for _, g := range pendingFor(s, todo.ID) {
+		if g.Kind == sigCheck && g.Report == checkDecidedReport {
+			t.Fatalf("the supervisor was handed the words as the check's decision: %+v", g)
+		}
+	}
+	lang := s.botLang(ctx)
+	want := i18n.T(lang, "assistant-reports.decision_chosen_noted", i18n.Args{"option": words})
+	if note := acceptedNote(lang, askOf(s, todo.ID)); note != want {
+		t.Fatalf("the card says %q, want %q", note, want)
+	}
+}
+
 // The decision row the owner's answer leaves on the to-do, with a database.
 func TestScheduledTodoCheckDecisionIsRecorded(t *testing.T) {
 	database := todoTestDB(t)

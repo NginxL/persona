@@ -22,8 +22,24 @@ import (
 // The hub's end-to-end tests of tasks (real todos, a real node) are hub/tasks_test.go; these need the assistant's own
 // state or timing.
 
-// toolTaskPlan is task_plan from the conversation sessionID on the main machine.
+// toolTaskPlan is task_plan from the conversation sessionID on the main machine. Valid fixtures get the ordinary
+// worker role centrally; the role-contract tests call MCP directly so an omitted role stays omitted.
 func (s *Service) toolTaskPlan(ctx context.Context, sessionID string, args json.RawMessage) (string, error) {
+	var in map[string]any
+	if json.Unmarshal(args, &in) == nil {
+		tasks, _ := in["tasks"].([]any)
+		for _, item := range tasks {
+			task, _ := item.(map[string]any)
+			if task != nil {
+				if _, ok := task["role"]; !ok {
+					task["role"] = "worker"
+				}
+			}
+		}
+		if raw, err := json.Marshal(in); err == nil {
+			args = raw
+		}
+	}
 	return s.toolTaskPlanFrom(ctx, s.mainMachine(ctx), sessionID, args)
 }
 
@@ -52,7 +68,7 @@ func planArgs(readonly bool) json.RawMessage {
 	}
 	raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{
 		"title": "修登录崩溃", "prompt": "iPad 横屏时登录页崩溃，修好并补测试", "machine": "box", "cwd": "/code/app",
-		"readonly": readonly, "why": "这个仓库最近在 box 上", "permission": permission,
+		"role": "worker", "readonly": readonly, "why": "这个仓库最近在 box 上", "permission": permission,
 	}}})
 	return raw
 }

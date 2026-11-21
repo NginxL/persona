@@ -24,7 +24,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  channel:
+    # A re-run of a manual dispatch is a push event, where `inputs` is absent. Resolve the requested channel once
+    # instead of letting a stable dispatch silently become beta on its second attempt.
+    if: github.actor == 'chyroc' && github.triggering_actor == 'chyroc'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      name: ${{ steps.select.outputs.name }}
+    steps:
+      - id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          REQUESTED: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          channel="$REQUESTED"
+          if [[ "$EVENT" = schedule ]]; then
+            test "$SCHEDULE" = '0 4 * * *' && channel=release || channel=beta
+          elif [[ "$EVENT" != workflow_dispatch ]]; then
+            channel="${RELEASE_RETRY_CHANNEL:-}"
+          fi
+          test "$channel" = release || test "$channel" = beta || { echo 'A manual release retry needs its original channel' >&2; exit 1; }
+          printf 'name=%s\n' "$channel" >> "$GITHUB_OUTPUT"
+
   plan:
+    needs: channel
     if: github.actor == 'chyroc' && github.triggering_actor == 'chyroc'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -41,7 +67,7 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
           RELEASE_PR_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-          CHANNEL: ${{ inputs.channel || (github.event.schedule == '0 4 * * *' && 'release' || 'beta') }}
+          CHANNEL: ${{ needs.channel.outputs.name }}
         run: |
           set -euo pipefail
           test -n "$GH_TOKEN" || { echo 'persona-release is missing RELEASE_PR_TOKEN; no release PR or branch was created' >&2; exit 1; }
@@ -79,20 +105,21 @@ jobs:
           branch="release/$version"
           title="release: v$version"
           if [[ "$(gh api "repos/$REPOSITORY/pulls?state=open&base=main&per_page=100" --jq --arg branch "$branch" "[.[] | select(.head.ref == \$branch)] | length")" -gt 0 ]]; then
-            echo "Release PR already exists for $version; do not duplicate it."
+            echo "Release PR already exists for $version; inspect its current source and verification instead of duplicating it."
             exit 0
           fi
+          # An earlier unmerged candidate keeps its immutable source. Give the replacement a fresh branch rather than
+          # rewriting that branch; its version is published only after the new candidate passes every platform check.
+          suffix=0
+          candidate="$branch"
+          while git ls-remote --exit-code "https://github.com/$REPOSITORY.git" "refs/heads/$candidate" >/dev/null 2>&1; do
+            suffix=$((suffix + 1))
+            candidate="$branch-r$suffix"
+          done
+          branch="$candidate"
           if git ls-remote --exit-code "https://github.com/$REPOSITORY.git" "refs/heads/$branch" >/dev/null 2>&1; then
-            # A previous failed scheduler owns this version. Never overwrite its different source: allocate the next one.
-            echo "$branch has no open PR; preserve its failed source and select a new immutable version."
-            git ls-remote --heads "https://github.com/$REPOSITORY.git" 'refs/heads/release/*' | cut -f2 | sed 's#refs/heads/release/##' > release-reserved.txt
-            version_command=(python3 scripts/operations/release_pr.py --repository "$REPOSITORY" --channel beta next-version --stable-tag "$stable" --reserved)
-            while IFS= read -r reserved_version || [[ -n "$reserved_version" ]]; do
-              version_command+=("$reserved_version")
-            done < release-reserved.txt
-            version="$("${version_command[@]}")"
-            branch="release/$version"
-            title="release: v$version"
+            echo "Concurrent release branch creation owns $branch; preserve its failed source and retry scheduling later." >&2
+            exit 1
           fi
           if git ls-remote --exit-code "https://github.com/$REPOSITORY.git" "refs/tags/v$version" >/dev/null 2>&1; then
             echo "Version tag v$version already exists; do not reuse it." >&2
@@ -114,11 +141,13 @@ jobs:
           TITLE: ${{ steps.select.outputs.title }}
           VERSION: ${{ steps.select.outputs.version }}
           COMMIT: ${{ steps.select.outputs.commit }}
-          CHANNEL: ${{ inputs.channel || (github.event.schedule == '0 4 * * *' && 'release' || 'beta') }}
+          CHANNEL: ${{ needs.channel.outputs.name }}
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
-          git switch -c "$BRANCH" 2>/dev/null || git switch "$BRANCH"
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          test "$(git rev-parse HEAD)" = "$COMMIT"
+          git switch -C "$BRANCH"
           mkdir -p .github/release-prs
           python3 - <<'PY'
           import json,os
@@ -128,7 +157,7 @@ jobs:
           PY
           git add ".github/release-prs/$VERSION.json"
           git diff --cached --quiet || git commit -m "$TITLE"
-          # Reuse the same release-PR branch on a bounded retry. Do not rewrite a release-PR source or move a tag.
+          # Reuse the selected candidate branch on a bounded retry. A different main source always gets a new branch.
           git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push "https://github.com/$REPOSITORY.git" "refs/heads/$BRANCH"
           python3 - <<'PY'
           import json,os

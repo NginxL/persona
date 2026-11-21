@@ -18,11 +18,17 @@ nonisolated enum ChatImageLoader {
         "\(p.identity)@\(side.map { Int($0) } ?? 0)" as NSString
     }
 
+    private static func key(_ f: FileRef, _ side: CGFloat?) -> NSString {
+        // A relative path is a different file in another session or after its cwd changes.
+        "machine-file:\(f.machineRef.path):\(f.cwd ?? ""):\(f.path)@\(side.map { Int($0) } ?? 0)" as NSString
+    }
+
     /// Settings › Storage cleared the files: drop the decoded copies too.
     static func clearMemory() { images.removeAllObjects() }
 
     /// Already decoded: lets a row that scrolls back into view show its image without a placeholder frame.
     static func cached(_ p: ImagePayload, side: CGFloat?) -> UIImage? { images.object(forKey: key(p, side)) }
+    static func cached(_ f: FileRef, side: CGFloat?) -> UIImage? { images.object(forKey: key(f, side)) }
 
     /// The image, scaled down to fit `side` × `side` (nil: full size). Decoding runs off the main thread.
     static func image(_ p: ImagePayload, side: CGFloat?) async -> UIImage? {
@@ -32,15 +38,39 @@ nonisolated enum ChatImageLoader {
         let fullPageLoad = FullPageLoads.shared.begin()
         defer { FullPageLoads.shared.end(fullPageLoad) }
         guard let data = await data(p) else { return nil }
-        let img: UIImage? = await Task.detached(priority: .userInitiated) {
-            guard let full = UIImage(data: data) else { return nil }
-            guard let side else { return full.preparingForDisplay() ?? full }
-            return full.preparingThumbnail(of: ZoomMath.fittedSize(image: full.size, in: CGSize(width: side, height: side))) ?? full
-        }.value
+        let img = await decode(data, side: side)
         if let img { images.setObject(img, forKey: k, cost: Int(img.size.width * img.size.height * img.scale * img.scale * 4)) }
         // Downloaded bytes that are not a picture (a proxy's page, a cut body) must not stay on disk: a retry fetches again.
         else if p.data.isEmpty, let ref = p.ref { await fetches.forget(ref) }
         return img
+    }
+
+    /// An image file on the session's machine. The whole path, cwd and hub group identify both the request and its cache entry.
+    /// File errors keep their localized reason for the caller; no attachment-image result or retry behavior changes.
+    static func image(_ f: FileRef, side: CGFloat?, api client: APIClient? = nil) async throws -> UIImage? {
+        let k = key(f, side)
+        if let img = images.object(forKey: k) { return img }
+        let fullPageLoad = FullPageLoads.shared.begin()
+        defer { FullPageLoads.shared.end(fullPageLoad) }
+        let api: APIClient?
+        if let client {
+            api = client
+        } else {
+            api = await MainActor.run { AppModel.shared.api(f.group) }
+        }
+        guard let api else { throw URLError(.userAuthenticationRequired) }
+        let data = try await api.fileBytes(machine: f.machineID, path: f.path, cwd: f.cwd)
+        let img = await decode(data, side: side)
+        if let img { images.setObject(img, forKey: k, cost: Int(img.size.width * img.size.height * img.scale * img.scale * 4)) }
+        return img
+    }
+
+    private static func decode(_ data: Data, side: CGFloat?) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            guard let full = UIImage(data: data) else { return nil }
+            guard let side else { return full.preparingForDisplay() ?? full }
+            return full.preparingThumbnail(of: ZoomMath.fittedSize(image: full.size, in: CGSize(width: side, height: side))) ?? full
+        }.value
     }
 
     /// The encoded bytes (for saving / sharing the original).
@@ -122,8 +152,13 @@ nonisolated enum ChatImageLoader {
     static let shared = ImageRetries()
     private var failures: Set<String> = []
     private var attempts: [String: Int] = [:]
+    private var reasons: [String: String] = [:]
+
+    private func key(_ f: FileRef) -> String { "machine-file:\(f.machineRef.path):\(f.cwd ?? ""):\(f.path)" }
 
     func didFail(_ p: ImagePayload) -> Bool { failures.contains(p.identity) }
+    func didFail(_ f: FileRef) -> Bool { failures.contains(key(f)) }
+    func failure(_ f: FileRef) -> String? { reasons[key(f)] }
 
     /// A tap on its tile asks it again: one fetched from the hub whose last load failed. Bytes already here that do not
     /// decode would only fail again; the viewer says why.
@@ -140,13 +175,35 @@ nonisolated enum ChatImageLoader {
         return true
     }
 
+    /// A local file's failed load belongs to its full scope, so recreating a tile never refetches it without a tap.
+    @discardableResult func retry(_ f: FileRef) -> Bool {
+        let k = key(f)
+        guard failures.contains(k) else { return false }
+        failures.remove(k)
+        reasons[k] = nil
+        attempts[k, default: 0] += 1
+        return true
+    }
+
     /// How many times it was asked again: keys the thumbnail's load, so a retry runs it once more.
     func attempt(_ p: ImagePayload) -> Int { attempts[p.identity] ?? 0 }
+    func attempt(_ f: FileRef) -> Int { attempts[key(f)] ?? 0 }
 
     /// Only a change is written: every tile on screen reads `failures`, and a write redraws them all.
     func loaded(_ p: ImagePayload, ok: Bool) {
         guard failures.contains(p.identity) == ok else { return }
         if ok { failures.remove(p.identity) } else { failures.insert(p.identity) }
+    }
+
+    func loaded(_ f: FileRef, reason: String?) {
+        let k = key(f)
+        if let reason {
+            failures.insert(k)
+            reasons[k] = reason
+        } else {
+            failures.remove(k)
+            reasons[k] = nil
+        }
     }
 }
 

@@ -10,6 +10,7 @@
     <string name="designsystem_modelpanel_favorites_empty">No favorites yet. Tap a model\'s star to keep it here.</string>
     <string name="designsystem_modelpanel_no_match">No matching models</string>
     <string name="designsystem_modelpanel_loading">Loading models…</string>
+    <string name="designsystem_modelpanel_empty">No models available</string>
     <string name="designsystem_modelpanel_retry">Retry</string>
     <string name="designsystem_modelpanel_save_favorite">Save to favorites</string>
     <string name="designsystem_modelpanel_remove_favorite">Remove from favorites</string>

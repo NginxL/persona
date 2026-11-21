@@ -30,6 +30,24 @@ test('a session id already in the file is replaced; servers that are not stdio a
   })
 })
 
+test('an A2A ticket belongs only to the separate server entry for its Paseo session', (t) => {
+  const path = configFile(t, { mcpServers: { persona: { command: 'personad', args: ['mcp'] } } })
+  const first = personaMcpServers(path, 'paseo-a1', undefined, 'test-ticket-one')
+  const second = personaMcpServers(path, 'paseo-a2', undefined, 'test-ticket-two')
+  assert.equal(first.persona.env.PERSONA_A2A_TOKEN, undefined)
+  assert.deepEqual(first.persona_a2a.env, { PERSONA_SESSION_ID: 'paseo-a1', PERSONA_A2A_TOKEN: 'test-ticket-one' })
+  assert.deepEqual(second.persona_a2a.env, { PERSONA_SESSION_ID: 'paseo-a2', PERSONA_A2A_TOKEN: 'test-ticket-two' })
+})
+
+test('an older MCP namespace remains a read-only A2A fallback', (t) => {
+  const legacy = 'jar' + 'vis'
+  const path = configFile(t, { mcpServers: { [legacy]: { command: 'personad', args: ['mcp'] } } })
+  const servers = personaMcpServers(path, 'paseo-legacy', undefined, 'test-ticket-legacy')
+  assert.deepEqual(servers.persona_a2a.env, { PERSONA_SESSION_ID: 'paseo-legacy', PERSONA_A2A_TOKEN: 'test-ticket-legacy' })
+  assert.equal(servers[legacy].env.PERSONA_A2A_TOKEN, undefined)
+  assert.equal(servers.persona, undefined)
+})
+
 test('nothing usable gives undefined and a logged reason', (t) => {
   const logs = []
   const log = (m) => logs.push(m)

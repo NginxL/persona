@@ -180,4 +180,12 @@
     <string name="assistant_settings_supervise_model">Background supervisor model</string>
     <string name="assistant_settings_unavailable">Assistant settings aren\'t available</string>
     <string name="assistant_settings_unavailable_detail">Pair with a hub first, or leave the demo.</string>
+    <string name="assistant_settings_owner_approval_header">Exact approval replies</string>
+    <string name="assistant_settings_owner_approval">Approve a batch with an exact reply</string>
+    <string name="assistant_settings_owner_approval_persistent">Keep unanswered proposals until answered</string>
+    <string name="assistant_settings_owner_approval_caption">Off by default. An exact reply approves only the displayed original text, recipients and actions, once. Edits need fresh approval; this never creates an Always rule.</string>
+    <string name="assistant_settings_owner_approval_phrases">Approval phrases</string>
+    <string name="assistant_settings_owner_approval_phrases_placeholder">One exact phrase per line</string>
+    <string name="assistant_settings_owner_approval_phrases_caption">The whole reply must match one phrase. An empty list disables reply approval; ordinary Allow and Deny still work.</string>
+    <string name="assistant_settings_owner_approval_save_phrases">Save phrases</string>
 </resources>

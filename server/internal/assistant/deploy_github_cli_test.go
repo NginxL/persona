@@ -22,6 +22,12 @@ func (f *noAnonymousGitHub) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, fmt.Errorf("anonymous HTTP must not be used")
 }
 
+const fakeGitHubCLIVersionScript = `if [ "$1" = "--version" ]; then
+printf 'gh version 2.0.0 (2024-01-01)\nhttps://github.com/cli/cli/releases/tag/v2.0.0\n'
+exit 0
+fi
+`
+
 func fakeDeliveryGH(t *testing.T, response string, exit int) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -29,7 +35,7 @@ func fakeDeliveryGH(t *testing.T, response string, exit int) string {
 	}
 	dir := t.TempDir()
 	args := filepath.Join(dir, "args")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PERSONA_TEST_GH_ARGS\"\n/bin/cat <<'RESPONSE'\n" + response + "\nRESPONSE\n" + fmt.Sprintf("exit %d\n", exit)
+	script := "#!/bin/sh\n" + fakeGitHubCLIVersionScript + "printf '%s\\n' \"$@\" > \"$PERSONA_TEST_GH_ARGS\"\n/bin/cat <<'RESPONSE'\n" + response + "\nRESPONSE\n" + fmt.Sprintf("exit %d\n", exit)
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +60,48 @@ func TestGitHubUsesAuthorizedCLIWhenConnectorUnavailable(t *testing.T) {
 	}
 	if string(args) != "api\n--include\n--method\nGET\n--hostname\ngithub.com\n/repos/o/r/pulls/9\n" {
 		t.Fatalf("not the fixed read-only authenticated CLI request: %q", args)
+	}
+}
+
+func TestGitHubSameNamedProgramUsesUnconfiguredPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	dir := t.TempDir()
+	script := `#!/bin/sh
+if [ "$1" = "--version" ]; then
+	printf 'different-tool version 1.0\n'
+	exit 0
+fi
+printf 'Error: unknown flag: --include\n' >&2
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	transport := &noAnonymousGitHub{}
+	s, _, todo := newSupervisedService(t)
+	ctx := context.Background()
+	s.setTaskStage(ctx, todo.ID, "review", "https://github.com/o/r/pull/9")
+	s.deploy.forge = githubForge{base: "https://api.github.com", client: &http.Client{Transport: transport}}
+	s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+	s.deploy.listPaths = []string{}
+
+	res, err := acceptReview(s, todo.ID, nil)
+	if err != nil {
+		t.Fatalf("same-named program blocked review instead of using the not-connected path: %v", err)
+	}
+	if !strings.Contains(res, "的交付没有核对") && !strings.Contains(res, "was not checked") {
+		t.Fatalf("missing not-connected delivery note: %q", res)
+	}
+	if got := todoNow(s, todo.ID); got.DoneAt == nil {
+		t.Fatal("not-connected delivery path did not accept the reviewed task")
+	}
+	if transport.calls != 0 {
+		t.Fatalf("anonymous HTTP calls = %d", transport.calls)
 	}
 }
 
@@ -161,6 +209,7 @@ func fakeCompareGH(t *testing.T) {
 	}
 	dir := t.TempDir()
 	script := `#!/bin/sh
+` + fakeGitHubCLIVersionScript + `
 for path; do :; done # gh's last argument is the API path
 printf 'HTTP/2.0 200 OK\nX-RateLimit-Limit: 5000\n\n'
 case "$path" in
@@ -184,4 +233,70 @@ func TestGitHubContainsDoesNotDownloadTheCompareContent(t *testing.T) {
 	if err != nil || !contains || !found {
 		t.Fatalf("ancestry of a merged PR behind a large main: contains=%v found=%v error=%v", contains, found, err)
 	}
+}
+
+func fakeDeliveryGHStderr(t *testing.T, stderrText string, exit int) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	dir := t.TempDir()
+	script := "#!/bin/sh\n" + fakeGitHubCLIVersionScript + "/bin/cat >&2 <<'STDERR'\n" + stderrText + "\nSTDERR\n" + fmt.Sprintf("exit %d\n", exit)
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+}
+
+func TestGitHubCLINetworkFailureIsNotUnconfigured(t *testing.T) {
+	t.Run("transient network errors fail closed under merged gate", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			stderr string
+		}{
+			{"dns", `error connecting to api.github.com: lookup api.github.com: no such host`},
+			{"tls", `Post "https://api.github.com/repos/o/r/pulls/9": tls: handshake failure`},
+			{"proxy", `Get "https://api.github.com/repos/o/r/pulls/9": proxyconnect tcp: dial tcp 127.0.0.1:8080: connect: connection refused`},
+			{"proxy_auth", `Get "https://api.github.com/repos/o/r/pulls/9": proxyconnect tcp: HTTP 407: Proxy Authentication Required`},
+			{"proxy_auth_plain", `HTTP 407: Proxy Authentication Required`},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				fakeDeliveryGHStderr(t, tc.stderr, 1)
+				var out json.RawMessage
+				err := githubCLIGet(context.Background(), "/repos/o/r/pulls/9", &out)
+				if err == nil {
+					t.Fatal("expected CLI network error")
+				}
+				if errors.Is(err, errGitHubUnconfigured) {
+					t.Fatalf("network error wrongly classified as unconfigured: %v", err)
+				}
+
+				// End-to-end check: under default merged gate, PR verification must fail closed with
+				// delivery_verification_unavailable rather than treating it as delivery_host_not_connected.
+				s, _, todo := newSupervisedService(t)
+				ctx := context.Background()
+				s.setTaskStage(ctx, todo.ID, "review", "https://github.com/o/r/pull/9")
+				s.deploy.forge = githubForge{base: "https://api.github.com", client: &http.Client{Transport: &noAnonymousGitHub{}}}
+				s.deploy.hubBuild = func(context.Context) (string, string, error) { return "dev", "", nil }
+				s.deploy.listPaths = []string{}
+
+				res, rerr := acceptReview(s, todo.ID, nil)
+				if rerr == nil || !strings.Contains(rerr.Error(), "暂时无法验证") && !strings.Contains(rerr.Error(), "temporarily cannot be verified") {
+					t.Fatalf("merged gate did not fail closed on CLI %s error: res=%q err=%v", tc.name, res, rerr)
+				}
+				if got := todoNow(s, todo.ID); got.DoneAt != nil {
+					t.Fatalf("task closed on transient CLI %s error", tc.name)
+				}
+			})
+		}
+	})
+
+	t.Run("missing auth stderr is classified as unconfigured", func(t *testing.T) {
+		fakeDeliveryGHStderr(t, "To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.", 4)
+		var out json.RawMessage
+		err := githubCLIGet(context.Background(), "/repos/o/r/pulls/9", &out)
+		if err == nil || !errors.Is(err, errGitHubUnconfigured) {
+			t.Fatalf("missing auth stderr = %v, want errors.Is(_, errGitHubUnconfigured)", err)
+		}
+	})
 }

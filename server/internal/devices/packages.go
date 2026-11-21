@@ -241,7 +241,7 @@ func (d *Devices) nodeTarget(info proto.NodeInfo) string {
 	if info.OS == "" || info.Arch == "" {
 		return hub
 	}
-	k := d.packageKey(info.OS, info.Arch, nodeProgram(info))
+	k := d.packageKey(info.OS, info.Arch, info.Program)
 	r, fresh, ok := d.rememberedPackage(k)
 	if !fresh {
 		d.lookupSoon(k) // what was remembered stands until the lookup lands, so a node does not flip out of date meanwhile
@@ -266,7 +266,7 @@ func (d *Devices) resolvedPackageKnown(ctx context.Context, info proto.NodeInfo)
 	if info.OS == "" || info.Arch == "" {
 		return nodePackage{Version: d.hubVersion()}, true
 	}
-	k := d.packageKey(info.OS, info.Arch, nodeProgram(info))
+	k := d.packageKey(info.OS, info.Arch, info.Program)
 	r, ok := d.cachedPackage(k)
 	if !ok {
 		r.pkg, r.err = d.lookupShared(ctx, k)
@@ -289,7 +289,7 @@ func (d *Devices) packageBlocked(info proto.NodeInfo) error {
 	if info.OS == "" || info.Arch == "" {
 		return nil
 	}
-	if r, _, ok := d.rememberedPackage(d.packageKey(info.OS, info.Arch, nodeProgram(info))); ok {
+	if r, _, ok := d.rememberedPackage(d.packageKey(info.OS, info.Arch, info.Program)); ok {
 		return r.err // the last lookup's, also while a newer one runs (nodeTarget starts it)
 	}
 	return nil
@@ -304,77 +304,57 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		return nodePackage{}, i18n.Err("devices-deploy.os_unknown")
 	}
 	plat := k.goos + "-" + k.arch
-	localBuildOK := func(path, program string) bool {
-		if err := checkPackagePlatform(path, k.goos, k.arch, program); err != nil {
-			d.logf("node package for %s: ignore local %s: %v", plat, filepath.Base(path), err)
-			return false
-		}
-		return true
-	}
-	local := func(path, program string) nodePackage {
-		// The hub's version, or what <name>.version beside it says (a build put there that is not the hub's own: a
-		// release's, on a Docker hub without internet access, docs/operations/docker.md "Node builds").
-		version := k.hub
-		if b, err := os.ReadFile(path + ".version"); err == nil && strings.TrimSpace(string(b)) != "" && program == nodeproto.ProgramPersonad {
-			version = strings.TrimSpace(string(b))
-		}
-		return nodePackage{Version: version, Program: program, goos: k.goos, arch: k.arch, path: path}
-	}
-	var personad string // the hub's own personad for the platform, if it has one
+	name := nodeBinaryName(k.program, plat)
+	// Resident preflight requires the running program's identity, even if it is installed under another name.
 	for _, dir := range localNodeDirs() {
+		path := filepath.Join(dir, name)
+		if !fileExists(path) {
+			continue
+		}
+		version := k.hub
+		b, err := os.ReadFile(path + ".version")
 		if k.program == nodeproto.ProgramPersonaNode {
-			// Only deploy.sh puts persona-node there, with the version it is in <name>.version: the hub's own updates
-			// replace personad-* alone, so one left from an earlier deploy is another build than the hub's.
-			node := filepath.Join(dir, nodeBinaryName(nodeproto.ProgramPersonaNode, plat))
-			if b, err := os.ReadFile(node + ".version"); err == nil && k.hub != "" && strings.TrimSpace(string(b)) == k.hub && fileExists(node) && localBuildOK(node, nodeproto.ProgramPersonaNode) {
-				return local(node, nodeproto.ProgramPersonaNode), nil
+			// A dedicated node left by an earlier release is only usable with a matching sidecar.
+			if err != nil || version == "" || strings.TrimSpace(string(b)) != version {
+				continue
 			}
+		} else if stamped := strings.TrimSpace(string(b)); err == nil && stamped != "" {
+			version = stamped // a packaged personad can be of another build (docs/operations/docker.md "Node builds")
 		}
-		if p := filepath.Join(dir, nodeBinaryName(nodeproto.ProgramPersonad, plat)); personad == "" && fileExists(p) && localBuildOK(p, nodeproto.ProgramPersonad) {
-			personad = p
+		if err := checkPackagePlatform(path, k.goos, k.arch, k.program); err != nil {
+			d.logf("node package for %s: ignore local %s: %v", plat, name, err)
+			continue
 		}
-	}
-	if personad != "" && k.program != nodeproto.ProgramPersonaNode {
-		return local(personad, nodeproto.ProgramPersonad), nil
+		return nodePackage{Version: version, Program: k.program, goos: k.goos, arch: k.arch, path: path}, nil
 	}
 	if k.base == "" || k.hub == "dev" || !safeVersion.MatchString(k.hub) {
 		// Nowhere to fetch from (a hub built without an update URL and no node_packages.url, or "off"; a dev build).
-		if personad != "" {
-			return local(personad, nodeproto.ProgramPersonad), nil // persona-node's node gets personad, which runs it
-		}
-		return nodePackage{}, i18n.Err("devices-deploy.no_binary", i18n.Args{"os": k.goos, "arch": k.arch, "name": "personad-" + plat})
+		return nodePackage{}, i18n.Err("devices-deploy.no_binary", i18n.Args{"os": k.goos, "arch": k.arch, "name": name})
 	}
 	m, err := d.fetchManifest(ctx, k.base+"/"+url.PathEscape(k.hub)+"/manifest.json")
 	switch {
 	case err == nil:
-		if f, ok := m.NodeFile(k.program, plat); ok && fileFor(f, plat) && (personad == "" || fileProgram(f) == k.program) {
+		if f, ok := m.NodeFile(k.program, plat); ok && f.Name == name+".gz" {
 			return remotePackage(k, m, k.hub, f, false), nil
 		}
 	case !errors.Is(err, errNoManifest):
-		// The site does not answer: what was fetched or found before, while it did, else the hub's own personad;
-		// each stands in for a minute (stale), then the site is asked again.
+		// The site does not answer: what was fetched or found before stands in for a minute.
 		if pkg, ok := cachedRelease(k, k.hub); ok {
 			return standIn(pkg), nil
 		}
 		if pkg, ok := d.lastFound(k); ok {
 			return pkg, nil
 		}
-		if personad != "" {
-			return standIn(local(personad, nodeproto.ProgramPersonad)), nil
-		}
 		if pkg, ok := cachedFallback(k); ok {
 			return standIn(pkg), nil
 		}
 		return nodePackage{}, i18n.Err("devices-deploy.package_unreachable", i18n.Args{"os": k.goos, "arch": k.arch, "err": err.Error()})
 	}
-	if personad != "" {
-		return local(personad, nodeproto.ProgramPersonad), nil
-	}
 	// No build of the hub's version anywhere: the newest release, when this manager drives its node.
 	latest, err := d.fetchManifest(ctx, k.base+"/latest.json")
 	if err != nil {
 		if errors.Is(err, errNoManifest) {
-			return nodePackage{}, i18n.Err("devices-deploy.no_release", i18n.Args{"os": k.goos, "arch": k.arch, "name": "personad-" + plat})
+			return nodePackage{}, i18n.Err("devices-deploy.no_release", i18n.Args{"os": k.goos, "arch": k.arch, "name": name})
 		}
 		if pkg, ok := d.lastFound(k); ok {
 			return pkg, nil
@@ -385,7 +365,8 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		return nodePackage{}, i18n.Err("devices-deploy.package_unreachable", i18n.Args{"os": k.goos, "arch": k.arch, "err": err.Error()})
 	}
 	f, ok := latest.NodeFile(k.program, plat)
-	if ok && fileFor(f, plat) && latest.Version == k.hub {
+	matches := ok && f.Name == name+".gz"
+	if matches && latest.Version == k.hub {
 		// The newest release is the hub's own version, from a source that keeps no dl/<version>/ (a GitHub
 		// repository's releases/latest/download): the release of the hub's version, not a fallback.
 		pkg := remotePackage(k, latest, k.hub, f, false)
@@ -393,13 +374,13 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 		return pkg, nil
 	}
 	why := releaseNodeIncompatible(latest)
-	if why == "" && (!ok || !fileFor(f, plat) || !safeVersion.MatchString(latest.Version)) {
+	if why == "" && (!matches || !safeVersion.MatchString(latest.Version)) {
 		why = "no build for " + plat
 	}
 	if why != "" {
 		d.logf("node package for %s: the newest release %s does not do (%s)", plat, latest.Version, why)
 		return nodePackage{}, i18n.Err("devices-deploy.no_package", i18n.Args{"os": k.goos, "arch": k.arch, "version": latest.Version,
-			"name": "personad-" + plat})
+			"name": name})
 	}
 	pkg := remotePackage(k, latest, latest.Version, f, true)
 	pkg.flat = true
@@ -431,16 +412,6 @@ func nodeBinaryName(program, plat string) string {
 		return program + "-" + plat + ".exe"
 	}
 	return program + "-" + plat
-}
-
-// fileFor: f is named as a release names a node build for plat (personad-<plat>[.exe].gz,
-// persona-node-<plat>[.exe].gz). Its name goes into a URL and the cache's paths, so nothing else is taken.
-func fileFor(f update.File, plat string) bool {
-	suffix := ""
-	if strings.HasPrefix(plat, "windows-") {
-		suffix = ".exe"
-	}
-	return f.Name == "personad-"+plat+suffix+".gz" || f.Name == nodeproto.ProgramPersonaNode+"-"+plat+suffix+".gz"
 }
 
 // fileProgram is the kind of program a release download is, by its name.
@@ -541,26 +512,17 @@ type packageCacheEntry struct {
 	NodeCapabilities []string `json:"node_capabilities,omitempty"`
 }
 
-// cacheNames are the cache's file names for k's builds, the ones of its own kind first: personad runs a persona-node
-// device's file too. The connector is its own build only.
-func cacheNames(k packageKey) []string {
+// readCacheEntry returns the cached build for the requested program, OS and architecture.
+func readCacheEntry(k packageKey, dir string) (nodePackage, packageCacheEntry, bool) {
 	plat := k.goos + "-" + k.arch
+	name := nodeBinaryName(k.program, plat)
 	if k.program == programConnector {
-		return []string{programConnector + "-" + plat}
+		name = programConnector + "-" + plat
 	}
-	names := []string{"personad-" + plat}
-	if k.program == nodeproto.ProgramPersonaNode {
-		names = append([]string{nodeproto.ProgramPersonaNode + "-" + plat}, names...)
-	}
-	return names
-}
-
-// readCacheEntry is the build the cache keeps as name in its version dir, if it is there whole and for k's platform.
-func readCacheEntry(k packageKey, dir, name string) (nodePackage, packageCacheEntry, bool) {
 	bin, entryPath := cachePaths(dir, update.File{Name: name + ".gz"})
 	var e packageCacheEntry
 	b, err := os.ReadFile(entryPath)
-	if err != nil || json.Unmarshal(b, &e) != nil || e.OS != k.goos || e.Arch != k.arch || !fileExists(bin) {
+	if err != nil || json.Unmarshal(b, &e) != nil || e.Program != k.program || e.OS != k.goos || e.Arch != k.arch || !fileExists(bin) {
 		return nodePackage{}, e, false
 	}
 	return nodePackage{Version: e.Version, Program: e.Program, goos: k.goos, arch: k.arch, path: bin,
@@ -576,12 +538,8 @@ func cachePaths(dir string, f update.File) (bin, entry string) {
 // cachedRelease is a build of the release dir fetched before, for k's platform and kind, when the site does not
 // answer now.
 func cachedRelease(k packageKey, dir string) (nodePackage, bool) {
-	for _, name := range cacheNames(k) {
-		if pkg, _, ok := readCacheEntry(k, dir, name); ok {
-			return pkg, true
-		}
-	}
-	return nodePackage{}, false
+	pkg, _, ok := readCacheEntry(k, dir)
+	return pkg, ok
 }
 
 // cachedFallback is the newest fallback build the cache keeps for k's platform and kind that this manager drives
@@ -594,26 +552,21 @@ func cachedFallback(k packageKey) (nodePackage, bool) {
 	}
 	var best nodePackage
 	found := false
-	for _, name := range cacheNames(k) {
-		for _, dir := range dirs {
-			if !dir.IsDir() || !safeVersion.MatchString(dir.Name()) || dir.Name() == k.hub {
-				continue
-			}
-			pkg, e, ok := readCacheEntry(k, dir.Name(), name)
-			if !ok || e.NodeProtocol == 0 || releaseNodeIncompatible(&update.Manifest{NodeProtocol: e.NodeProtocol,
-				NodeProtocolMin: e.NodeProtocolMin, NodeCapabilities: e.NodeCapabilities}) != "" {
-				continue
-			}
-			if !found || pkg.build > best.build {
-				best, found = pkg, true
-			}
+	for _, dir := range dirs {
+		if !dir.IsDir() || !safeVersion.MatchString(dir.Name()) || dir.Name() == k.hub {
+			continue
 		}
-		if found {
-			best.Fallback = true
-			return best, true
+		pkg, e, ok := readCacheEntry(k, dir.Name())
+		if !ok || e.NodeProtocol == 0 || releaseNodeIncompatible(&update.Manifest{NodeProtocol: e.NodeProtocol,
+			NodeProtocolMin: e.NodeProtocolMin, NodeCapabilities: e.NodeCapabilities}) != "" {
+			continue
+		}
+		if !found || pkg.build > best.build {
+			best, found = pkg, true
 		}
 	}
-	return nodePackage{}, false
+	best.Fallback = found
+	return best, found
 }
 
 // fetchPackage is p as a file on this machine: its own, the cache's, or downloaded into the cache and checked.

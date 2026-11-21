@@ -559,11 +559,13 @@ func (s *meshStore) MarkFeedSent(context.Context, string, string, time.Time, jso
 func (s *meshStore) FeedByRef(context.Context, string, []string, int) ([]db.FeedRow, error) {
 	return nil, nil
 }
-func (s *meshStore) LinkTodoSpace(context.Context, string, string, string, time.Time) (string, error) {
+func (s *meshStore) LinkTodoSpace(context.Context, string, string, string, time.Time, db.KeptLinks) (string, error) {
 	return "", nil
 }
-func (s *meshStore) UnlinkTodoSpace(context.Context, string, string, string) error { return nil }
-func (s *meshStore) RenameTodoSpace(context.Context, string, string, string) (bool, error) {
+func (s *meshStore) UnlinkTodoSpace(context.Context, string, string, string, db.KeptLinks) error {
+	return nil
+}
+func (s *meshStore) RenameTodoSpace(context.Context, string, string, string, db.KeptLinks) (bool, error) {
 	return false, nil
 }
 func (s *meshStore) LinkTodoAgent(context.Context, string, string, string, string, string, string, string, time.Time) ([]string, error) {

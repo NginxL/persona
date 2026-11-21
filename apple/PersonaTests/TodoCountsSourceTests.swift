@@ -21,6 +21,12 @@ private final class TodoSessionCell {
     }
 }
 
+/// The list's writes still on the device, as `TodoOutbox.pending` gives them: watched, as the outbox's entries are.
+@MainActor @Observable
+private final class TodoPendingWrites {
+    var value: [String: TodoCountsSource.Pending] = [:]
+}
+
 /// One number per place (#10465, docs/apple/ios.md "Filing and counts"): with one manager the hub's counts and places as
 /// sent; with several, counted from the current assistant's rows, with only its own project places; less the answers
 /// given on this device that the hub's view does not show yet.
@@ -166,5 +172,33 @@ struct TodoCountsSourceTests {
     private func waitForCount(_ condition: @MainActor () -> Bool) async throws {
         for _ in 0..<200 where !condition() { try await Task.sleep(for: .milliseconds(10)) }
         try #require(condition(), "not counted again")
+    }
+
+    /// The owner's writes still on the device (`TodoOutbox`) move the rows and every number at once, with the hub's
+    /// counts as with counts from the rows: a deleted to-do leaves, one put in Someday is filed there, a new one is a To
+    /// do row first in its section; and back when the writes go.
+    @Test func writesStillOnTheDeviceMoveTheNumbers() async throws {
+        let pending = TodoPendingWrites()
+        let source = TodoCountsSource(scope: { nil }, pending: { pending.value })
+        let rows = [TodoItem(id: "n", title: "N"), TodoItem(id: "a", title: "A"), TodoItem(id: "w", title: "W")]
+        let views = ["n": TodoSummary(phase: TodoPhase.needsYou, section: TodoListSection.needsYou, reason: "decision"),
+                     "a": TodoSummary(phase: TodoPhase.todo, section: TodoListSection.todo, reason: "rest"),
+                     "w": TodoSummary(phase: TodoPhase.working, section: TodoListSection.working, reason: "persona_working")]
+        let hubCounts = TodoCounts(open: 3, needsYou: 1, inProgress: 1,
+                                   sections: [TodoListSection.needsYou: 1, TodoListSection.todo: 1, TodoListSection.working: 1])
+        for counts in [hubCounts, nil] {
+            pending.value = [:]
+            source.update(.init(rows: rows, views: views, counts: counts, now: Date()))
+            try await waitForCount { source.counts.open == 3 }
+            #expect(source.needsYou == 1 && source.counts.inProgress == 1)
+            pending.value = ["n": .someday, "w": .gone, "x": .added(TodoItem(id: "x", title: "X", createdAt: Date()))]
+            try await waitForCount { source.needsYou == 0 }
+            #expect(source.counts.inProgress == 0, "the deleted one is out of every number")
+            #expect(source.counts.sections[TodoListSection.someday] == 1 && source.counts.sections[TodoListSection.todo] == 2)
+            #expect(source.counts.open == 2, "Someday is not open; the new one is")
+            #expect(source.filed.map(\.id) == ["x", "a", "n"], "the new one first in To do, then Someday")
+            pending.value = [:]
+            try await waitForCount { source.needsYou == 1 && source.counts.open == 3 }
+        }
     }
 }

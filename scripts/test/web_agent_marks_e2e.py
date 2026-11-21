@@ -27,9 +27,9 @@ AGENTS = {
     "给导出脚本加上进度条": ("pi", "pi"),
     "Gemini CLI": ("gemini", "Gemini CLI"),
     "补全设置页的单元测试": ("cursor", "Cursor"),
-    "TRAEX 的一个会话": ("letter", "TRAEX"),
+    "TRAE CLI 的一个会话": ("letter", "TRAE CLI"),
     "amp 的一个会话": ("letter", "amp"),
-    "TRAE CLI 的一个会话": ("trae", "TRAE（命令行版）"),
+    "TRAE 的一个会话": ("trae", "TRAE（命令行版）"),
     "Grok": ("grok", "Grok"),
     "Antigravity CLI": ("agy", "Antigravity CLI"),
     "DeepSeek Harness": ("dsh", "DSH"),
@@ -37,7 +37,7 @@ AGENTS = {
     "GitHub Copilot": ("copilot", "GitHub Copilot"),
 }
 TEMPLATES = ("codex", "opencode", "pi", "gemini", "cursor", "trae", "grok", "agy", "dsh", "kimi", "copilot")
-CLI = ("整理发布说明", "TRAE CLI 的一个会话")  # the ones the mock runs from the command line (#6390)
+CLI = ("整理发布说明", "TRAE 的一个会话")  # the ones the mock runs from the command line (#6390)
 
 
 def ok(msg):
@@ -79,9 +79,9 @@ def check_sidebar(page, theme, where):
         r, g, b = [int(v) for v in rgb[rgb.index("(") + 1:rgb.index(")")].split(",")[:3]]
         lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
         assert (lum < 0.5) == (theme == "light"), (kind, rgb, theme)
-    letters = rows["TRAEX 的一个会话"].locator("[data-agent-mark=letter]").inner_text()
+    letters = rows["TRAE CLI 的一个会话"].locator("[data-agent-mark=letter]").inner_text()
     assert letters == "T", letters
-    ok(f"{where} {theme}: {len(AGENTS)} rows, each mark named, 14 px, before its dot, one color follows the theme, letters for TRAEX and amp, </> on the command line's")
+    ok(f"{where} {theme}: {len(AGENTS)} rows, each mark named, 14 px, before its dot, one color follows the theme, letters for TRAE CLI and amp, </> on the command line's")
 
 
 def settle(page):
@@ -121,6 +121,12 @@ def run(browser, base, token, shots, session_marks_only):
             ok(f"{where} {theme}: the session header names Codex, its desktop app, without a badge")
             if shots:
                 page.screenshot(path=os.path.join(shots, f"header-{where}-{theme}.png"), clip={"x": 0, "y": 0, "width": width, "height": 70})
+
+            page.goto(base + "/s/server/marks-traex")
+            expect(header.locator("[data-agent-mark=letter]")).to_be_visible()
+            expect(header.locator("[data-agent-device]")).to_have_attribute("aria-label", re.compile(r"^TRAE CLI\b"))
+            if shots:
+                page.screenshot(path=os.path.join(shots, f"traecli-{where}-{theme}.png"), clip={"x": 0, "y": 0, "width": width, "height": 70})
 
             page.goto(base + "/s/server/marks-grok")
             expect(header.locator("[data-agent-mark=grok]")).to_be_visible()

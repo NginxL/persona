@@ -55,6 +55,21 @@ func (r *Registry) SnapshotExact(id string) *Extension {
 	return snapshotExtension(r.extensions[id])
 }
 
+// SnapshotExactWithSettingsEpoch takes the extension snapshot and the epoch that secret hand-off must retain together.
+func (r *Registry) SnapshotExactWithSettingsEpoch(id string) (*Extension, uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return snapshotExtension(r.extensions[id]), r.settingsEpoch[id]
+}
+
+// SettingsMoved reports whether id was already changing at an odd captured epoch, disappeared, or changed since capture.
+func (r *Registry) SettingsMoved(id string, epoch uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.extensions[id]
+	return !ok || epoch&1 != 0 || r.settingsEpoch[id] != epoch
+}
+
 func (r *Registry) storageKey(id string) string {
 	if p := r.Snapshot(id); p != nil {
 		return p.Record.StorageKey()

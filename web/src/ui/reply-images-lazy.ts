@@ -12,3 +12,5 @@ export const useReplyImages = chunk.use;
 export const loadReplyImages = chunk.load;
 /** A run, drawn by the chunk. */
 export const ReplyImagesRun = lazy(() => chunk.load().then((m) => ({ default: m.ReplyImages })));
+/** A single local image inside a quote, list, or table, drawn by the same chunk. */
+export const LocalImageRun = lazy(() => chunk.load().then((m) => ({ default: m.LocalImage })));

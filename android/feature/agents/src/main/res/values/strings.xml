@@ -276,11 +276,14 @@
     <string name="agents_dialog_rename_space">Rename space</string>
     <string name="agents_dialog_rename_space_text">This also renames the workspace in herdr.</string>
     <string name="agents_dialog_rename_space_text_tern">Also renames this session in Tern.</string>
+    <string name="agents_dialog_rename_space_text_rex">Also renames this session in Rex.</string>
     <string name="agents_dialog_rename_text">The tab name syncs to herdr; the session name uses Claude\'s /rename, so claude --resume on the Mac shows it too.</string>
     <string name="agents_dialog_rename_text_tern">The tab name syncs to Tern; the session name uses Claude\'s /rename, so claude --resume on the Mac shows it too.</string>
+    <string name="agents_dialog_rename_text_rex">The tab name syncs to Rex; the session name uses Claude\'s /rename, so claude --resume on the Mac shows it too.</string>
     <string name="agents_dialog_save">Save</string>
     <string name="agents_dialog_tab_name">Tab name (herdr tab)</string>
     <string name="agents_dialog_tab_name_tern">Tab name (Tern tab)</string>
+    <string name="agents_dialog_tab_name_rex">Tab name (Rex tab)</string>
     <string name="agents_dialog_space_name">Space name</string>
     <string name="agents_dialog_session_name">Session name</string>
     <string name="agents_space_actions">Space actions</string>
@@ -371,6 +374,8 @@
     <string name="agents_model_sheet_note">%2$s models in “%1$s”, the same as typing /model in the terminal. Only for this start.</string>
     <!-- The model list of a Paseo provider other than Claude Code and Codex, which has no terminal (#8143). -->
     <string name="agents_model_sheet_note_provider">The models “%1$s” offers. Only for this start.</string>
+    <string name="agents_model_sheet_note_omp">Choose a model or enter a model ID for this start in “%1$s”.</string>
+    <string name="agents_model_omp_machine_default">omp’s default on this computer</string>
     <string name="agents_model_configured">Model settings: %1$s</string>
     <string name="agents_new_error_pending">The last start isn\'t confirmed yet. Check the result.</string>
     <string name="agents_new_error_record">Couldn\'t read the start record. Close and try again.</string>
@@ -647,4 +652,5 @@
         <item quantity="one">1 without a due date</item>
         <item quantity="other">%1$d without a due date</item>
     </plurals>
+    <string name="agents_sidebar_heading">Agents</string>
 </resources>

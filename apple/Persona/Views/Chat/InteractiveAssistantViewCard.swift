@@ -24,6 +24,8 @@ struct InteractiveAssistantViewCard: View {
     @State private var openedWeb: LinkTarget?
     @Environment(AppModel.self) private var app
     @Environment(\.openLink) private var openLink
+    /// The conversation's stack: an Agent a card links to is pushed on it, with Back to the card (#12006).
+    @Environment(\.pushInboxChat) private var pushChat
 
     init(view: ExtensionView, version: Int64 = 1, complete: Bool = true, registered: Bool,
          location: AssistantCardLocation, deps: AssistantViewModel.Deps) {
@@ -126,7 +128,8 @@ struct InteractiveAssistantViewCard: View {
         let parts = components.percentEncodedPath.split(separator: "/").compactMap { String($0).removingPercentEncoding }
         switch components.host?.lowercased() {
         case "session" where parts.count == 2:
-            app.open(SessionKey(group: location.scope.group, machineID: parts[0], sessionID: parts[1]))
+            app.openInPage(SessionKey(group: location.scope.group, machineID: parts[0], sessionID: parts[1]),
+                           push: conversationAgentPush(pushChat))
         case "task" where parts.count == 1:
             app.selectHub(location.scope.group)
             TasksStore.shared.detailTask = parts[0]

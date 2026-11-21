@@ -126,6 +126,18 @@ class PlanCardConversationTest {
         rule.mainClock.advanceTimeBy(500)
     }
 
+    /** performScrollTo needs real choreographer frames; a frozen clock can otherwise fill the Robolectric heap. */
+    private fun scrollIntoView(node: SemanticsNodeInteraction) {
+        rule.mainClock.autoAdvance = true
+        try {
+            node.performScrollTo()
+            rule.waitForIdle()
+        } finally {
+            rule.mainClock.autoAdvance = false
+        }
+        settle()
+    }
+
     private fun capture(name: String): Int {
         val directory = File(System.getProperty("persona.shots") ?: "build/plan-card-shots").also { it.mkdirs() }
         val bitmap = rule.onNodeWithTag("plan-shot").captureToImage().asAndroidBitmap()
@@ -358,4 +370,161 @@ class PlanCardConversationTest {
 
     @Config(qualifiers = "ja-w400dp-h1200dp-xhdpi")
     @Test fun japanese() = words("ja", "2件に分けて、この内容で開始", "2件のタスクを開始", "編集", "開始しない", "今後このフォルダ以下はすぐに開始")
+
+    private val ownerRequest = "Please fix the sign-in crash before Friday, keep the existing session behavior, and add a landscape regression test."
+    private val reconstructedHandover = "Take over the existing branch, review the earlier agent's notes, and finish the repair without starting the work again."
+
+    /** One real open plan carries every brief provenance and one older task with none. All effective-scope values are distinct. */
+    private val briefMatrix = JsonCodec.decodeFromString(TaskPlan.serializer(), """{
+        "id":"brief-matrix","conversation":"main","state":"open","created_at":"2026-11-12T10:00:07Z",
+        "tasks":[
+            {"title":"Fix the sign-in crash","machine":"box","cwd":"/srv/owner","brief":{
+                "created_at":"2026-11-03T12:01:00Z","started_by":"owner",
+                "request":{"text":"$ownerRequest","at":"2026-11-03T12:00:00Z","conversation":"main","message_id":"message-owner"},
+                "goal":"Landscape sign-in works without crashing",
+                "done_when":["Original owner criterion"],"criteria":["Current landscape regression passes"],
+                "expect_minutes":30,"expect_minutes_now":150,"out_of_bounds":["Do not change payments"]}},
+            {"title":"Resume the worker repair","machine":"box","cwd":"/srv/worker","brief":{
+                "created_at":"2026-11-04T09:30:00Z","started_by":"assistant","reason":"The earlier repair stopped",
+                "goal":"The worker completes its repair","done_when":["The worker regression passes"],
+                "expect_minutes":45,"out_of_bounds":["Do not deploy the worker"]}},
+            {"title":"Finish the older repair","machine":"box","cwd":"/srv/older","brief":{
+                "created_at":"2026-11-05T08:00:00Z","started_by":"unknown","reconstructed":true,
+                "handover":"$reconstructedHandover","goal":"The older branch is finished",
+                "done_when":["The older branch passes its checks"],"expect_minutes":20,
+                "out_of_bounds":["Do not rewrite history"]}},
+            {"title":"Keep the existing card","machine":"box","cwd":"/srv/legacy","readonly":true,
+                "why":"Existing plan details stay visible"}
+        ]
+    }""")
+
+    private fun showBriefMatrix(style: AppStyle, dark: MutableState<Boolean>) {
+        if (style == AppStyle.Glass) show(style, dark, plans = listOf(briefMatrix),
+            items = listOf(FeedItem("brief-matrix-feed", "main", at(7), "plan", "brief-matrix")))
+        else show(style, dark, plans = listOf(briefMatrix), alone = briefMatrix)
+    }
+
+    /** Folded: provenance and a summary only. The fourth task proves that no brief leaves the existing task/card intact. */
+    private fun briefMatrixIsFolded(style: AppStyle) {
+        rule.onAllNodesWithTag("plan-brief").assertCountEquals(3)
+        rule.onAllNodesWithTag("plan-brief-toggle").assertCountEquals(3)
+        rule.onAllNodesWithText("Show All").assertCountEquals(3)
+        rule.onNode(hasText("You asked on", substring = true) and hasText("2026", substring = true)).assertIsDisplayed()
+        rule.onNodeWithText(ownerRequest, substring = true).assertIsDisplayed()
+        rule.onNode(hasText("Started by the assistant on", substring = true) and hasText("2026", substring = true)).assertIsDisplayed()
+        rule.onNodeWithText("The earlier repair stopped", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Reconstructed: the original request was not recorded").assertIsDisplayed()
+        rule.onNodeWithText("Hand-over Prompt").assertIsDisplayed()
+        rule.onNodeWithText(reconstructedHandover, substring = true).assertIsDisplayed()
+        // Current values win for the owner; the assistant's original criteria/time are its fallback.
+        rule.onNodeWithText("1 criterion · about 2.5 h · 1 out of bounds").assertIsDisplayed()
+        rule.onNodeWithText("1 criterion · about 45 min · 1 out of bounds").assertIsDisplayed()
+        rule.onNodeWithText("1 criterion · about 20 min · 1 out of bounds").assertIsDisplayed()
+        rule.onAllNodesWithText("Goal").assertCountEquals(0)
+        rule.onAllNodesWithText("Done When").assertCountEquals(0)
+        rule.onAllNodesWithText("Expected Time").assertCountEquals(0)
+        rule.onAllNodesWithText("Out of Bounds").assertCountEquals(0)
+        rule.onAllNodesWithText("Current landscape regression passes").assertCountEquals(0)
+        rule.onAllNodesWithText("The worker regression passes").assertCountEquals(0)
+        rule.onAllNodesWithText("Do not change payments").assertCountEquals(0)
+        rule.onAllNodesWithText("Original owner criterion").assertCountEquals(0)
+        // The task without a brief keeps its old content and the plan keeps all of its controls; there is no fourth disclosure.
+        rule.onNodeWithText("Keep the existing card", substring = true).assertIsDisplayed()
+        rule.onNodeWithText("Existing plan details stay visible").assertIsDisplayed()
+        rule.onNodeWithText("legacy").assertIsDisplayed()
+        rule.onNodeWithText("Read-only requested").let { chip ->
+            if (style == AppStyle.Glass) chip.assertIsDisplayed()
+            else {
+                // Brief/Board keep their old horizontal chip row; exercise the off-screen chip without leaving it scrolled.
+                scrollIntoView(chip)
+                chip.assertIsDisplayed()
+                scrollIntoView(rule.onNodeWithText("legacy"))
+                rule.onNodeWithText("legacy").assertIsDisplayed()
+            }
+        }
+        rule.onNodeWithText("Start directly here and in subfolders").assertIsDisplayed()
+        rule.onNodeWithText("Start 4 tasks").assertIsEnabled()
+        rule.onNodeWithText("Edit").assertIsEnabled()
+        rule.onNodeWithText("Don't start").assertIsEnabled()
+    }
+
+    private fun briefMatrixIsExpanded() {
+        rule.onAllNodesWithTag("plan-brief-toggle").assertCountEquals(3)
+        rule.onAllNodesWithText("Show less").assertCountEquals(3)
+        for (label in listOf("Goal", "Done When", "Expected Time", "Out of Bounds"))
+            rule.onAllNodesWithText(label).assertCountEquals(3)
+        for (text in listOf(
+            "Landscape sign-in works without crashing", "Current landscape regression passes", "About 2.5 h", "Do not change payments",
+            "The worker completes its repair", "The worker regression passes", "About 45 min", "Do not deploy the worker",
+            "The older branch is finished", "The older branch passes its checks", "About 20 min", "Do not rewrite history"))
+            rule.onNodeWithText(text).assertIsDisplayed()
+        // Scope changes never resurrect the owner's original criterion or original clock in the effective fields.
+        rule.onAllNodesWithText("Original owner criterion").assertCountEquals(0)
+        rule.onAllNodesWithText("About 30 min").assertCountEquals(0)
+        rule.onNodeWithText("Hand-over Prompt").assertIsDisplayed()
+        rule.onNodeWithText(reconstructedHandover, substring = true).assertIsDisplayed()
+    }
+
+    private fun briefTextHeight(text: String): Float {
+        val bounds = rule.onNodeWithText(text, substring = true).getBoundsInRoot()
+        return (bounds.bottom - bounds.top).value
+    }
+
+    /** Leave the legacy task's horizontal chip row at its natural leading position for review captures. */
+    private fun captureBriefMatrix(style: AppStyle, name: String): Int {
+        if (style != AppStyle.Glass) scrollIntoView(rule.onAllNodesWithText("Build server")[3])
+        return capture(name)
+    }
+
+    /** The real PlanCard in every style and theme, with one disclosure per brief; captures include folded and expanded forms. */
+    private fun everyStyleBriefMatrix(style: AppStyle, largeText: Boolean = false) {
+        val dark = mutableStateOf(false)
+        showBriefMatrix(style, dark)
+        val foldedColors = mutableListOf<Int>()
+        for (night in listOf(false, true)) {
+            dark.value = night; settle()
+            briefMatrixIsFolded(style)
+            val theme = if (night) "dark" else "light"
+            val size = if (largeText) "-large" else ""
+            if (!largeText) {
+                val ownerFolded = briefTextHeight(ownerRequest)
+                val handoverFolded = briefTextHeight(reconstructedHandover)
+                foldedColors += captureBriefMatrix(style, "plan-briefs-${style.name.lowercase()}-$theme-folded$size")
+                for (n in 0 until 3) {
+                    rule.onAllNodesWithTag("plan-brief-toggle")[n].assertTextEquals("Show All").performClick()
+                    settle()
+                }
+                briefMatrixIsExpanded()
+                assertTrue("Show All reveals the whole owner request", briefTextHeight(ownerRequest) > ownerFolded)
+                assertTrue("Show All reveals the whole hand-over", briefTextHeight(reconstructedHandover) > handoverFolded)
+                captureBriefMatrix(style, "plan-briefs-${style.name.lowercase()}-$theme-open$size")
+                for (n in 0 until 3) {
+                    rule.onAllNodesWithTag("plan-brief-toggle")[n].assertTextEquals("Show less").performClick()
+                    settle()
+                }
+                briefMatrixIsFolded(style)
+                assertEquals("Show less folds the request again", ownerFolded, briefTextHeight(ownerRequest), 1f)
+                assertEquals("Show less folds the hand-over again", handoverFolded, briefTextHeight(reconstructedHandover), 1f)
+            } else foldedColors += captureBriefMatrix(style, "plan-briefs-${style.name.lowercase()}-$theme-folded$size")
+        }
+        assertNotEquals("dark brief capture must differ from light", foldedColors[0], foldedColors[1])
+    }
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h2400dp-xhdpi")
+    @Test fun glassBriefMatrixFoldsExpandsAndCapturesLightAndDark() = everyStyleBriefMatrix(AppStyle.Glass)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h2400dp-xhdpi")
+    @Test fun briefStyleBriefMatrixFoldsExpandsAndCapturesLightAndDark() = everyStyleBriefMatrix(AppStyle.Brief)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h2400dp-xhdpi")
+    @Test fun boardBriefMatrixFoldsExpandsAndCapturesLightAndDark() = everyStyleBriefMatrix(AppStyle.Board)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h3200dp-xhdpi", fontScale = 2f)
+    @Test fun glassBriefMatrixAtLargestText() = everyStyleBriefMatrix(AppStyle.Glass, largeText = true)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h3200dp-xhdpi", fontScale = 2f)
+    @Test fun briefStyleBriefMatrixAtLargestText() = everyStyleBriefMatrix(AppStyle.Brief, largeText = true)
+
+    @Config(sdk = [35], qualifiers = "en-w400dp-h3200dp-xhdpi", fontScale = 2f)
+    @Test fun boardBriefMatrixAtLargestText() = everyStyleBriefMatrix(AppStyle.Board, largeText = true)
 }

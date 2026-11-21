@@ -39,6 +39,8 @@ data class OutboxRow(
     val model: String? = null,
     /** The message carries out the session's waiting launcher switch (`apply_switch`, #5035). */
     @ColumnInfo(defaultValue = "0") val apply_switch: Boolean = false,
+    /** External provenance; null for typed messages and rows restored from version 6. */
+    val via: String? = null,
 )
 
 @Entity(tableName = "drafts", primaryKeys = ["scope", "machine", "session"])
@@ -114,9 +116,9 @@ interface PersistentDao {
     suspend fun adoptMessage(row: OutboxRow): Long
 }
 
-@Database(entities = [OutboxRow::class, DraftRow::class, MainConversationRow::class], version = 6,
+@Database(entities = [OutboxRow::class, DraftRow::class, MainConversationRow::class], version = 7,
     autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
-        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6)],
+        AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7)],
     exportSchema = true)
 abstract class PersistentDatabase : RoomDatabase() {
     abstract fun records(): PersistentDao
@@ -133,7 +135,7 @@ class RoomOutboxStore(
         rows.map { row ->
             OutboxEntry(row.client_msg_id, SessionKey(row.machine, row.session), row.text, row.clear_draft,
                 OutboxState.entries.single { it.wire == row.state }, row.error, row.created_at, row.main_target, row.op_id,
-                row.launcher, row.model, applySwitch = row.apply_switch)
+                row.launcher, row.model, applySwitch = row.apply_switch, via = row.via)
                 .withAgentHandOff(handOffs[row.client_msg_id])
         }
     }
@@ -162,7 +164,7 @@ class RoomOutboxStore(
                 require(existing.main_target == entry.mainTarget &&
                     (entry.mainTarget || (existing.machine == entry.session.machineId && existing.session == entry.session.sessionId)) &&
                     existing.text == entry.text && existing.clear_draft == entry.clearDraft &&
-                    existing.launcher == entry.launcher && existing.model == entry.model) { "Operation id reused with different parameters" }
+                    existing.launcher == entry.launcher && existing.model == entry.model && existing.via == entry.via) { "Operation id reused with different parameters" }
             } else {
                 if (draft != null) {
                     val key = draft.key.storageKey()
@@ -176,7 +178,7 @@ class RoomOutboxStore(
                     session = target.sessionId, client_msg_id = entry.clientMessageId, text = entry.text,
                     clear_draft = entry.clearDraft, state = OutboxState.Queued.wire, error = null,
                     created_at = entry.createdAt, main_target = entry.mainTarget, op_id = entry.opId,
-                        launcher = entry.launcher, model = entry.model, apply_switch = entry.applySwitch))
+                        launcher = entry.launcher, model = entry.model, apply_switch = entry.applySwitch, via = entry.via))
             }
         }
     }

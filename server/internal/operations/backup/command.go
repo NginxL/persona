@@ -24,8 +24,8 @@ const Usage = `personad backup create --output <file> --writes-quiesced [databas
   personad backup restore --bundle <file> --writes-quiesced [--allow-external-kb] [database options]
                            stage both databases and runtime files, preserve the previous databases, and roll back on failure
 
-  Put create's --output outside the knowledge base and the runtime's managers/assistant, extensions, skills and
-  hub.machines_kept directories: they are collected, so create refuses it (a case-insensitive file system may let a
+  Put create's --output outside the knowledge base and the runtime's managers/assistant, extensions, skills,
+  hub.machines_kept and tls directories: they are collected, so create refuses it (a case-insensitive file system may let a
   differently-cased path through, so spell the path as it is).
   Needs pg_dump/pg_restore of the server's major version on PATH, or (for a loopback server) docker with the
   persona-postgres container. The shipped Docker Compose deployment (database host "postgres", hub image without

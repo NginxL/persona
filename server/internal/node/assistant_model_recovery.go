@@ -8,13 +8,12 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // Visible, reversible model recovery for the main and leader/supervisor conversations (#7824).
@@ -48,52 +47,20 @@ func ModelRecoveryReason(result string) string {
 	}
 }
 
-var (
-	// "an account becomes available again at 15:48 UTC (in 32m)" and the dated form
-	// "... available again at 2026-11-17 04:03 UTC (in 2d3h)". The words are a gateway's, so the match stays narrow.
-	gatewayAvailableRe      = lazyre.New(`(?i)available again at (?:(\d{4})-(\d{2})-(\d{2})\s+)?(\d{2}):(\d{2})\s*UTC`)
-	modelRecoveryProbeEvery = time.Minute
-)
+const modelRecoveryProbeEvery = time.Minute
 
-// GatewayAvailableAgain reads the UTC moment a gateway says an account becomes available again. A bare clock time is
-// placed at its first future occurrence relative to at; a dated form is read literally in UTC. False when the words do
-// not name such a time: callers then show a manual Retry without a countdown.
+// GatewayAvailableAgain shares the transcript parser used by worker usage-limit waits.
 func GatewayAvailableAgain(text string, at time.Time) (time.Time, bool) {
-	m := gatewayAvailableRe.FindStringSubmatch(text)
-	if m == nil {
-		return time.Time{}, false
-	}
-	hour, min := atoiOr(m[4]), atoiOr(m[5])
-	if hour > 23 || min > 59 {
-		return time.Time{}, false
-	}
-	if m[1] != "" {
-		t, err := time.Parse("2006-01-02 15:04", m[1]+"-"+m[2]+"-"+m[3]+" "+fmt.Sprintf("%02d:%02d", hour, min))
-		if err != nil {
-			return time.Time{}, false
-		}
-		return t.UTC(), true
-	}
-	now := at.UTC()
-	t := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, time.UTC)
-	if !t.After(now) {
-		t = t.Add(24 * time.Hour)
-	}
-	return t, true
-}
-
-func atoiOr(s string) int {
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return 0
-	}
-	return n
+	return transcript.GatewayAvailableAgain(text, at)
 }
 
 // recoveryProtected says the conversation is the main one or a leader/supervisor one, the only conversations the
 // owner's auto-switch-and-return rule applies to. The manager marks both through follows_setting (assistant/start.go);
 // worker Agents have neither flag and keep their own fallback behavior.
 func (n *Node) recoveryProtected(id string) bool {
+	if n.state == nil {
+		return false
+	}
 	st, ok := n.state.get(id)
 	return ok && (st.IsMain || st.FollowsSetting)
 }

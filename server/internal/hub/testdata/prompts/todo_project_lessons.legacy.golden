@@ -1,0 +1,7 @@
+<persona-context kind="context" title="项目 · Weather &quot;direction&quot; · 经验" url="">
+这是这个项目之前验收过的任务里学到的经验（重复次数多的在前）。用它们少走已知的弯路；和这次任务的要求不一致时，以这次的要求为准。
+- 该知道的背景：Use the stock simulator for layout bugs. · 3 次 · 2026-11-21
+- 反复出现的错误：Run the landscape screenshot test before handing in. · 2026-11-20
+- 浪费时间的步骤：Skip the full rebuild; the focused target is enough.
+- 更好的做法：Ask which device first. · 2 次 · 2026-11-19
+</persona-context>

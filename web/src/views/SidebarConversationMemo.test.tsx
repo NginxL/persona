@@ -40,6 +40,7 @@ const agent: Session = { machine_id: "mac", session_id: "agent", title: "Build",
 const hubAgent: Session = { machine_id: "hub", session_id: "hub-agent", title: "Deploy", cwd: "/srv", status: "working", state: "working" };
 const answers: Record<string, unknown> = {
   "/api/v1/assistant": { machine_id: "hub", online: true, main: "main", leaders: ["pinned", "recent"], conversations: [main, pinned, recent] },
+  "/api/v1/agents/display-settings": { show_botmux: true, configured: true, use_herdr_tab_name: false },
   "/api/v1/sessions": { sessions: [main, pinned, recent, agent, hubAgent] },
   "/api/v1/machines": { machines: [{ id: "hub", name: "Hub", online: true }, { id: "mac", name: "MacBook", online: true }] },
 };
@@ -161,9 +162,11 @@ describe("the Persona conversation rows", () => {
     expect(reads("hub/pinned")).toBe(0);
     expect(reads("hub/recent")).toBe(0);
 
+    const beforeSnapshot = getState().assistant?.conversations;
     // the machine's full list, every session in it parsed anew
     hubPush({ type: "sessions", machine_id: "hub", sessions: [main, pinned, recent, { ...hubAgent, title: "Deploy 4" }] });
     await flush();
+    expect(getState().assistant?.conversations).toBe(beforeSnapshot);
     expect(host.textContent).toContain("Deploy 4");
     expect(reads("hub/main")).toBe(0);
     expect(reads("hub/pinned")).toBe(0);
@@ -189,6 +192,7 @@ describe("the Persona conversation rows", () => {
     // the main row's ⋯: the main conversation's menu (no pin, rename or archive), with End while it is live
     act(() => more().click());
     await flush();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
     expect(menu()?.textContent).toContain(t("conversation-menu.copy_id"));
     expect(menu()?.textContent).not.toContain(t("conversation-menu.make_leader"));
     expect(menu()?.textContent).toContain(t("conversation-menu.end"));
@@ -201,6 +205,7 @@ describe("the Persona conversation rows", () => {
     await flush();
     act(() => more().click());
     await flush();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
     expect(menu()?.textContent).toContain(t("conversation-menu.copy_id"));
     expect(menu()?.textContent).not.toContain(t("conversation-menu.end"));
     await close();
@@ -208,6 +213,7 @@ describe("the Persona conversation rows", () => {
     // a right click on the pinned row: that conversation's menu (pinned), as it is now
     act(() => row("pinned").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })));
     await flush();
+    await vi.waitFor(() => expect(menu()).not.toBeNull());
     expect(menu()?.textContent).toContain(t("conversation-menu.end_leader"));
     expect(menu()?.textContent).toContain(t("conversation-menu.rename"));
     expect(menu()?.textContent).not.toContain(t("conversation-menu.end"));

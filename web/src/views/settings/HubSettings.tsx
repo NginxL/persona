@@ -73,7 +73,9 @@ function HubUpdates() {
       if (!updateWorking(status)) void loadBackups();
     }
     else { setBackups([]); setSelectedVersion(""); setConfirmBackup(false); }
-  }, [status?.source, status?.state, status?.backup?.id, loadBackups]);
+    // The effective folder too: after a change the list must come from the new
+    // one, or a selection would name a snapshot the hub cannot find there.
+  }, [status?.source, status?.state, status?.backup?.id, status?.development?.backup_directory, loadBackups]);
 
   useEffect(() => {
     void load();
@@ -194,7 +196,7 @@ function HubUpdates() {
               <option value="web-dev" disabled={!status.development.configured}>{t("settings-hubsettings.web_dev")}</option>
             </select>
           </Row>
-          {!status.development.configured && <SettingsHint>{t("settings-hubsettings.dev_setup")}</SettingsHint>}
+          {!status.development.configured && <SettingsHint>{status.development.why || t("settings-hubsettings.dev_setup")}</SettingsHint>}
         </>}
         {status.source === "beta" && <SettingsHint>{t("settings-hubsettings.beta_scope")}</SettingsHint>}
         {status.source === "web-dev" && <>
@@ -278,6 +280,8 @@ function HubUpdates() {
         {status.error && !working && <p className={cx("px-4 py-2.5 text-[12px] break-words", status.state === "rolled_back" ? "text-orange" : "text-red")}>{status.error}</p>}
       </Group>
 
+      {status.source === "web-dev" && status.development && <DevelopmentBackup s={status} onSaved={apply} />}
+
       {status.can_update && (
         <Group footer={t(status.source === "web-dev" ? "settings-hubsettings.dev_auto_footer" : "settings-hubsettings.auto_footer")} anchor="hub-auto-update">
           <Row label={t("settings-hubsettings.auto_update")}>
@@ -338,6 +342,51 @@ function HubUpdates() {
         </p>
       </Dialog>
     </>
+  );
+}
+
+/** Web development backups: where snapshots go and how many are kept. Only a
+ *  folder and a count — the hub pauses its own writers; no command is accepted. */
+function DevelopmentBackup({ s, onSaved }: { s: HubUpdateStatus; onSaved: (s: HubUpdateStatus) => void }) {
+  const d = s.development!;
+  const recommended = d.backup_default_directory ?? "";
+  const effective = d.backup_directory ?? recommended;
+  const [dir, setDir] = useState("");
+  const [retain, setRetain] = useState(String(d.backup_retain ?? 3));
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setDir(effective && effective !== recommended ? effective : "");
+    setRetain(String(d.backup_retain ?? 3));
+  }, [effective, recommended, d.backup_retain]);
+  const save = async () => {
+    setSaving(true);
+    try {
+      onSaved(await setHubUpdateSettings({ development_backup_directory: dir.trim(), development_backup_retain: Number(retain) }));
+      toast(t("settings-hubsettings.backup_saved"), "ok");
+    } catch (e) {
+      toast(t("settings-hubsettings.save_failed", { error: errorText(e) }), "error");
+    } finally { setSaving(false); }
+  };
+  return (
+    <Group title={t("settings-hubsettings.dev_backup")} anchor="hub-dev-backup" footer={t("settings-hubsettings.dev_backup_footer")}>
+      <Row label={t("settings-hubsettings.backup_folder")} stackOnNarrow>
+        <input aria-label={t("settings-hubsettings.backup_folder")} spellCheck={false}
+          className={cx(settingsInputClass, "w-[320px] max-w-full font-mono text-xs")}
+          placeholder={recommended} value={dir} onChange={(e) => setDir(e.target.value)} />
+      </Row>
+      <SettingsHint>{t("settings-hubsettings.backup_folder_hint", { path: recommended })}</SettingsHint>
+      <Row label={t("settings-hubsettings.backup_retain")} wrapHint>
+        <select aria-label={t("settings-hubsettings.backup_retain")} className={settingsInputClass} value={retain} disabled={saving}
+          onChange={(e) => setRetain(e.target.value)}>
+          {[...new Set([1, 2, 3, 5, 10, 20, 50, Number(retain)])].sort((a, b) => a - b).map((n) => <option key={n} value={String(n)}>{n}</option>)}
+        </select>
+      </Row>
+      <SettingsHint>{t(d.builtin_quiesce ? "settings-hubsettings.backup_builtin" : "settings-hubsettings.backup_external")}</SettingsHint>
+      <div className="flex justify-end gap-2 px-4 py-2.5">
+        <Button tone="quiet" disabled={saving || dir === ""} onClick={() => setDir("")}>{t("settings-hubsettings.use_recommended")}</Button>
+        <Button busy={saving} disabled={saving} onClick={() => void save()}>{t("settings-hubsettings.save_backup")}</Button>
+      </div>
+    </Group>
   );
 }
 

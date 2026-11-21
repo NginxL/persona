@@ -483,11 +483,11 @@ func (s *Service) endAutoReview(ctx context.Context, todoID, id string, e review
 		}
 		switch {
 		case a.State == autoCancelled:
-		case a.State == autoBlocking && v.Round < maxReworkRounds:
-			v.Round++
+		case a.State == autoBlocking && v.stalledReworkRounds() < maxReworkRounds && v.Round < maxTotalReworkRounds:
+			round, stalled := v.applyReworkAccounting("")
 			v.State = reviewRework
-			v.Reviews = append(v.Reviews, TaskReview{At: now, Verdict: reviewRework, By: reviewerBy, Round: v.Round,
-				Note: clip(a.Findings, 2000)})
+			v.Reviews = append(v.Reviews, TaskReview{At: now, Verdict: reviewRework, By: reviewerBy, Round: round,
+				StalledReworkRounds: stalled, Note: clip(a.Findings, 2000)})
 			if len(v.Reviews) > 20 {
 				v.Reviews = v.Reviews[len(v.Reviews)-20:]
 			}
@@ -509,7 +509,11 @@ func (s *Service) endAutoReview(ctx context.Context, todoID, id string, e review
 	s.logf("task %s: review %s: %s (%d findings, %d blocking) %s", todoID, id, ended.State, ended.Count, ended.Blocking, ended.Error)
 	switch {
 	case rework:
-		text := prompts.RenderSuperviseReviewRework(prompts.SuperviseReviewRework{Round: v.Round, Max: maxReworkRounds,
+		displayMax := maxReworkRounds
+		if v.Round > maxReworkRounds {
+			displayMax = maxTotalReworkRounds
+		}
+		text := prompts.RenderSuperviseReviewRework(prompts.SuperviseReviewRework{Round: v.Round, Max: displayMax,
 			Count: ended.Count, Blocking: ended.Blocking, Findings: ended.Findings})
 		if t, ok := s.todoNow(todoID); !ok {
 			break

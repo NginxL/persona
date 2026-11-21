@@ -31,6 +31,9 @@ import kotlinx.coroutines.flow.*
 private fun <T> GroupStack.mapped(flow: Flow<T>, transform: GroupNames.(T) -> T): Flow<T> =
     if (names.plain) flow else flow.map { names.transform(it) }
 
+internal suspend fun refreshOwnedSessions(machineId: String, call: suspend (namespace: String?, rawMachineId: String) -> Unit) =
+    call(GroupKeys.namespaceOf(machineId), GroupKeys.raw(machineId))
+
 internal fun mergedSessions(stacks: GroupStacks): SessionsRepository = object : SessionsRepository, VerifiedSessionsRepository {
     override fun supportsFeature(machineId: String, feature: String) =
         feature in stacks.of(machineId)?.connection?.serverFeatures?.value.orEmpty()
@@ -92,6 +95,10 @@ internal fun mergedSessions(stacks: GroupStacks): SessionsRepository = object : 
         }
     }
     override suspend fun refresh() = stacks.forEach { it.repositories.sessions.refresh() }
+    override suspend fun refreshMachine(machineId: String) = refreshOwnedSessions(machineId) { namespace, raw ->
+        // Unlike the all-hubs refresh, this read proves this machine's own hub answered (#10671).
+        stacks.use(namespace) { it.repositories.sessions.refreshMachine(raw) }
+    }
     override fun verifiedSessions(): Map<String, List<Session>> = stacks.stacks.value.flatMap { stack ->
         stack.repositories.sessions.verifiedSessions().map { (machine, sessions) ->
             stack.names.machineId(machine) to sessions.map { stack.names.session(it) }
@@ -125,7 +132,13 @@ internal fun mergedInteractions(stacks: GroupStacks): InteractionCenter = object
         stacks.use(GroupKeys.namespaceOf(id)) { it.repositories.interactions.resolve(GroupKeys.raw(id), resolution) }
     }
     override suspend fun resolveOutcome(id: String, resolution: Resolution) =
-        stacks.use(GroupKeys.namespaceOf(id)) { it.repositories.interactions.resolveOutcome(GroupKeys.raw(id), resolution) }
+        resolveOutcome(id, resolution, handoffCard = false)
+    override suspend fun resolveOutcome(id: String, resolution: Resolution, handoffCard: Boolean) =
+        stacks.use(GroupKeys.namespaceOf(id)) { it.repositories.interactions.resolveOutcome(GroupKeys.raw(id), resolution, handoffCard) }
+    override suspend fun replyOwnerApproval(interaction: Interaction, phrase: String) =
+        stacks.use(GroupKeys.namespaceOf(interaction.id)) {
+            it.repositories.interactions.replyOwnerApproval(it.names.rawInteraction(interaction), phrase)
+        }
     override suspend fun discardLocal(id: String) =
         stacks.use(GroupKeys.namespaceOf(id)) { it.repositories.interactions.discardLocal(GroupKeys.raw(id)) }
     override val delegated = stacks.merged(emptyList<DelegatedAnswer>(), { s ->
@@ -162,6 +175,8 @@ internal fun mergedChats(stacks: GroupStacks, storage: ChatLocalStorage): ChatRe
                     ?: flowOf(ChatSnapshot(loading = false, verified = false))
             }
         override suspend fun loadOlder(session: SessionKey) = stacks.use(session) { it.repositories.chats.loadOlder(it.names.raw(session)) }
+        override suspend fun earlierEnginePage(session: SessionKey, beforeSeq: Int?) =
+            stacks.use(session) { it.repositories.chats.earlierEnginePage(it.names.raw(session), beforeSeq) }
         override suspend fun modeChanges(session: SessionKey): List<ModeChange> =
             stacks.use(session) { it.repositories.chats.modeChanges(it.names.raw(session)) }
         override suspend fun expandFold(session: SessionKey, fromSeq: Int, toSeq: Int) =
@@ -214,6 +229,7 @@ internal fun mergedMachineManagement(
     override suspend fun launcherQuota(machineId: String, name: String, refresh: Boolean) =
         routes.on(machineId) { it.launcherQuota(machineId, name, refresh) }
     override suspend fun reconnect(machineId: String) = routes.on(machineId) { it.reconnect(machineId) }
+    override suspend fun startLinkSwitch(machineId: String) = routes.on(machineId) { it.startLinkSwitch(machineId) }
     override suspend fun rename(machineId: String, name: String) = routes.on(machineId) { it.rename(machineId, name) }
     override suspend fun deploy(machineId: String) = routes.on(machineId) { it.deploy(machineId) }
     override suspend fun herdr(machineId: String) = routes.on(machineId) { it.herdr(machineId) }
@@ -373,6 +389,8 @@ internal fun routedFiles(lookup: (machineId: String) -> SessionFiles?): SessionF
     override suspend fun stat(machineId: String, cwd: String, paths: List<String>) = of(machineId).stat(machineId, cwd, paths)
     override suspend fun download(machineId: String, cwd: String, path: String, into: java.io.File) =
         of(machineId).download(machineId, cwd, path, into)
+    override suspend fun readLogTail(machineId: String, cwd: String, path: String, manager: String?) =
+        of(machineId).readLogTail(machineId, cwd, path, manager)
     override fun comparesVersions(machineId: String) = lookup(machineId)?.comparesVersions(machineId) == true
     override suspend fun blob(machineId: String, cwd: String, path: String, rev: String) = of(machineId).blob(machineId, cwd, path, rev)
     override suspend fun thumbnail(machineId: String, cwd: String, path: String, size: Int) = of(machineId).thumbnail(machineId, cwd, path, size)
@@ -462,6 +480,8 @@ internal fun mergedAgentsState(list: List<GroupNames>, states: List<AgentsWiring
         override suspend fun newAgentModel() = creations.getOrNull(chosen)?.newAgentModel()
         override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean) =
             creation(of(machineId)).launcherModels(machineId, launcher, refresh)
+        override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean, host: String?) =
+            creation(of(machineId)).launcherModels(machineId, launcher, refresh, host)
         override suspend fun worktreeStatus(machineId: String, cwd: String, kind: String?) = creation(of(machineId)).worktreeStatus(machineId, cwd, kind)
         override suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String, kind: String?) =
             creation(of(machineId)).addWorktree(machineId, cwd, nameHint, branch, kind)

@@ -1,4 +1,5 @@
 import persona.buildlogic.FileContentProperty
+import persona.buildlogic.LocationProperty
 
 plugins {
     id("persona.jvm.library")
@@ -91,6 +92,18 @@ tasks.named("test") { dependsOn(shadowCounterTest) }
 tasks.named("check") { dependsOn(shadowTest) }
 // The repository's standard root `test` and Android CI must run the observer and its real-JNI fixture replay too.
 tasks.named("test") { dependsOn(shadowTest) }
+
+// The counts report switch (spec/fixtures/counts/README.md, "Lane reports"): with PERSONA_COUNTS_REPORT set to a
+// directory (relative to the repository root, or absolute), the needs-you replay writes the Android lane's report there.
+// A run with the switch on always runs, and leaves nothing in the build cache, so the report is that run's own.
+providers.environmentVariable("PERSONA_COUNTS_REPORT").orNull?.takeIf { it.isNotBlank() }?.let { report ->
+    val directory = rootProject.layout.projectDirectory.dir("..").asFile.resolve(report).normalize()
+    tasks.named<Test>("test") {
+        jvmArgumentProviders.add(LocationProperty("persona.counts.report", directory))
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf("the counts report is written outside the build") { true }
+    }
+}
 
 // The app's DEBUG variant uses the same observer class as host tests, without putting it in domain.jar. Kotlin's friend
 // path grants access to domain internals without making shadow or native types part of the public production contract.

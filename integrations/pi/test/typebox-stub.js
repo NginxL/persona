@@ -2,6 +2,7 @@
 export const Type = {
   Object: (properties) => ({ type: 'object', properties }),
   String: (o = {}) => ({ type: 'string', ...o }),
+  Boolean: () => ({ type: 'boolean' }),
   Array: (items, o = {}) => ({ type: 'array', items, ...o }),
   Optional: (s) => ({ ...s, optional: true }),
 }

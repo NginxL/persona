@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.runtime.snapshotFlow
@@ -292,7 +293,12 @@ class ListTapMotion {
 
     fun shiftPx(key: Any): Int {
         ticks[key]
-        return shifts[key]?.anim?.value?.toInt() ?: 0
+        val shift = shifts[key] ?: return 0
+        if (shift.job.isCompleted) {
+            shifts.remove(key)
+            return 0
+        }
+        return shift.anim.value.toInt()
     }
 
     /** Keys disposed this frame. A row the list composes again keeps its y; one that stays gone does not. */
@@ -409,11 +415,20 @@ class ListTapMotion {
         placed.forEach { shiftedEpoch[it] = shiftEpoch }
     }
 
+    /** Bound by [BindListTapMotion] so row springs survive transient LazyColumn item disposal during a cross-list jump. */
+    internal var hostScope: CoroutineScope? = null
+
     private fun launchShift(
         key: Any, from: Float, y: Float, scope: CoroutineScope, spec: FiniteAnimationSpec<Float>, assumed: Float,
     ) {
+        val runScope = hostScope?.takeIf { it.isActive } ?: scope
+        if (!runScope.isActive) {
+            shifts.remove(key)
+            poke(key)
+            return
+        }
         val anim = Animatable(from)
-        val job = scope.launch {
+        val job = runScope.launch {
             try {
                 anim.animateTo(0f, spec) { poke(key) }
             } finally {
@@ -423,7 +438,14 @@ class ListTapMotion {
                 }
             }
         }
-        shifts[key] = RowShift(anim, y, job, from, assumed, scope, spec)
+        shifts[key] = RowShift(anim, y, job, from, assumed, runScope, spec)
+        // If runScope cancelled before the coroutine body started, finally never runs; invokeOnCompletion runs immediately.
+        job.invokeOnCompletion {
+            if (shifts[key]?.anim === anim) {
+                shifts.remove(key)
+                poke(key)
+            }
+        }
         poke(key)
     }
 
@@ -571,12 +593,17 @@ fun BindListTapMotion(motion: ListTapMotion, keys: List<Any>? = null) {
     val latest = rememberUpdatedState(live)
     val reduce = PersonaTheme.reduceMotion
     val theme = PersonaTheme.motion
+    val hostScope = rememberCoroutineScope()
     // Read here, not in each row. Arming recomposes this binding and not the list.
     val fade = listTapSpecs(motion.kind, theme, reduce).fade
     SideEffect {
+        motion.hostScope = hostScope
         motion.themeMotion = theme
         motion.themeReduce = reduce
         motion.placedSpec = fade
+    }
+    DisposableEffect(motion, hostScope) {
+        onDispose { if (motion.hostScope === hostScope) motion.hostScope = null }
     }
     SideEffect {
         motion.flushStaged()
@@ -748,6 +775,12 @@ private class RowMoveNode(
     private var stuck = false
 
     override fun onAttach() { observe() }
+    override fun onDetach() {
+        if (stuck) {
+            stuck = false
+            motion.setStuck(key, false)
+        }
+    }
     override fun onObservedReadsChanged() {
         observe()
         invalidatePlacement()

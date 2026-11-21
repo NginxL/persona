@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings › Connectors › Lark › Show messages on home: the optional all-chats page. -->
+<resources>
+    <string name="inbox_lark_messages_title">Messages</string>
+    <string name="inbox_lark_messages_loading">Loading Lark chats</string>
+    <string name="inbox_lark_messages_empty_title">No chats yet</string>
+    <string name="inbox_lark_messages_empty_text">Your Lark direct and group chats will show up here.</string>
+    <string name="inbox_lark_messages_load_failed">Couldn\'t load Lark chats: %1$s</string>
+    <string name="inbox_lark_messages_unavailable">Messages are unavailable on this connection.</string>
+    <string name="inbox_lark_messages_preview_mine">Me: %1$s</string>
+    <string name="inbox_lark_messages_preview_sender">%1$s: %2$s</string>
+</resources>

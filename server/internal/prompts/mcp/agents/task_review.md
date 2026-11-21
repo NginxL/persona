@@ -1,10 +1,10 @@
-Verify handed-out work. accepted closes it. If the owner opted in at Start, accepted done cleans up the saved idle tab. Report closed, skipped or pending; never close it yourself or ask to. rework sends gaps to the Agent twice; a third needs a complete owner decision. Replace a stopped Agent via agent_start. External waits use parked with source evidence. needs_user requires an owner-only decision with why_owner, reason, recommend, 2–4 options and cost_of_waiting. Otherwise act, rework or close.
+accepted closes work after the delivery gate (default delivery_gate=merged: park verified open PRs; linked issues must close). user_check keeps the task and Agent open until owner Pass and routes feedback to that Agent. If opted in at Start, accepted done cleans up the idle tab unless user_check. Report closed/skipped/pending; never close the tab yourself. rework caps stalled/low-ROI churn at 2 rounds (external_input/substantive_new cap at 10 total); accept with a brief note instead of bouncing for low-ROI edge cases or style nitpicks. Replace stopped Agents via agent_start. Use parked with evidence for external waits and needs_user for owner decisions.
 
-accepted with outcome done (default) and current done_when requires every criterion exactly once in checks, met=true with nonblank evidence. Refuse missing/duplicate/unknown/unmet checks before writing; user_check cannot bypass this. outcome cannot, cancelled and no-criteria tasks are unchanged. Other verdicts may omit checks without erasing progress. Report each criterion as met, not met or dropped (logged scope change), then also_done. Judge the scoped brief, not a later handover or the Agent's word; review every task supervision asks you to.
+accepted (outcome=done) with done_when needs every criterion once in checks (met=true + nonblank evidence); user_check cannot bypass. outcome=cannot, cancelled and no-criteria tasks are unchanged. Other verdicts may omit checks without losing progress. Report each criterion met/not_met/dropped, then also_done. Judge the scoped brief, not a handover or Agent claims.
 
 Give accepted's outcome/reason/link. The hub handles conclusion cards and passes “Please verify” on acceptance unless user_check. needs_user can default to recommend at 24h/deadline; irreversible or visible_to_others only reminds. Recheck at 24h. can_wait needs low cost, nobody blocked today and no deadline within 12h. “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision. Clarify without repeating or taking irreversible/external action.
 
-A non-main conversation reviewing another supervisor's task may only accept/cancel; send gaps with agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and waiting cards end.
+A non-main conversation reviewing another supervisor's task may only accept/cancel; send gaps with agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and waiting cards end.{{template "shared/mcp_language" .}}
 
 ```json
 {
@@ -18,6 +18,11 @@ A non-main conversation reviewing another supervisor's task may only accept/canc
     "verdict": {
       "type": "string",
       "enum": ["accepted", "rework", "needs_user", "parked", "cancelled"]
+    },
+    "rework_kind": {
+      "type": "string",
+      "enum": ["external_input", "substantive_new", "repeated_error", "low_roi_edge"],
+      "description": "rework, optional: external_input (external review/conflict/owner input; skips 2-round stalled cap), substantive_new (prior gap fixed, new defect found; resets stalled cap), repeated_error/low_roi_edge (default when omitted; cap 2 stalled, 10 total)"
     },
     "checks": {
       "type": "array",
@@ -34,7 +39,7 @@ A non-main conversation reviewing another supervisor's task may only accept/canc
     },
     "note": {
       "type": "string",
-      "description": "rework: what the agent is to do (Chinese, concrete); needs_user: what the user is to decide; parked: anything more than reason, for your own record; cancelled: why; accepted: the result in a line"
+      "description": "{{if eq .Lang "en"}}rework: what the agent is to do (English, concrete); needs_user: what the user is to decide; parked: anything more than reason, for your own record; cancelled: why; accepted: the result in a line{{else if eq .Lang `ja`}}rework は Agent が行う具体的な作業を日本語で記述します。needs_user はユーザーが決めること、parked は reason 以外に記録する補足、cancelled は理由、accepted は結果を一行で記述します{{else}}rework: what the agent is to do (Chinese, concrete); needs_user: what the user is to decide; parked: anything more than reason, for your own record; cancelled: why; accepted: the result in a line{{end}}"
     },
     "outcome": {
       "type": "string",
@@ -48,24 +53,24 @@ A non-main conversation reviewing another supervisor's task may only accept/canc
     "waiting_on": {
       "type": "string",
       "enum": ["someone_else", "external_event", "date"],
-      "description": "parked (required): the external wait. someone_else: another person must act or answer; external_event: an outside event must happen; date: wait only until a date. New owner decisions use needs_user; legacy owner_priority parks remain readable and retain their digest behavior"
+      "description": "parked (required): someone_else (person acts/answers), external_event (outside event), or date. Owner decisions use needs_user; legacy owner_priority parks stay readable"
     },
     "until": {
       "type": "string",
-      "description": "parked, optional: duration (\"3d\", \"36h\", \"90m\") or RFC 3339 time, 1 minute to 30 days ahead; default 24h. For waiting_on date, give an explicit RFC 3339 time (no duration or default). At that time the task returns to supervision"
+      "description": "parked, optional: duration (\"3d\", \"36h\", \"90m\") or RFC 3339 time, 1m–30d ahead; default 24h. waiting_on=date requires explicit RFC 3339"
     },
     "link": {
       "type": "string",
-      "description": "accepted and needs_user: the one link to the evidence (the PR, the page, the document); default the task's PR, a link in the note or checks, or the agent's conversation"
+      "description": "accepted/needs_user: one evidence link (PR/page/doc); defaults to task PR, note/checks link, or agent chat"
     },
     "recommend": {
       "type": "string",
-      "description": "needs_user (required): the option you recommend, the label of the first of options; the user's \"OK\" takes it and it goes to the task's agent"
+      "description": "needs_user (required): recommended option label (first in options); owner OK sends it to the agent"
     },
     "why_owner": {
       "type": "string",
       "enum": ["irreversible", "visible_to_others", "priority", "acceptance", "only_owner_knows"],
-      "description": "needs_user (required): why only the user can decide. irreversible: a step that cannot be undone (deleting, a production release or write, spending money); visible_to_others: something other people will see (a message, a comment, a review request); priority: whether to do it or what comes first; acceptance: a result they have to judge by eye; only_owner_knows: a fact only they have. Anything else is yours to decide"
+      "description": "needs_user (required): irreversible (delete/prod write/spend), visible_to_others (external message/comment/review), priority (whether/order), acceptance (visual check), only_owner_knows (private fact); decide anything else yourself"
     },
     "options": {
       "type": "array",
@@ -91,7 +96,7 @@ A non-main conversation reviewing another supervisor's task may only accept/canc
     },
     "can_wait": {
       "type": "boolean",
-      "description": "needs_user, optional: true when the decision can wait for the next daily briefing (no deadline within 12 hours, a low cost_of_waiting): it is not pushed and has no card, and is in the user's Needs you at once. Ignored (the answer says why) for why_owner irreversible and visible_to_others, a deadline within 12 hours or with reversible false, and when no daily briefing with facts is due within 24 hours and at least 12 hours before the deadline (24 hours by default: give a longer deadline for what can wait longer); default false (pushed as usual)"
+      "description": "needs_user, optional: defer to next daily briefing (no deadline <12h, low cost_of_waiting); no push/card, listed in Needs you. Ignored for irreversible/visible_to_others, deadline <12h, reversible=false, or no briefing with facts due within 24h and >=12h before deadline; default false"
     },
     "deadline": {
       "type": "string",

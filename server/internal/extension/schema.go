@@ -20,8 +20,8 @@ import (
 // ConfigMost is the largest configuration value kept.
 const ConfigMost = 64 << 10
 
-// Schema is a plugin's configuration: the subset of JSON Schema every client can draw as a form
-// (docs/plans/plan-extensions.md "configuration"), its properties in the order the manifest has them.
+// Schema is a plugin's configuration in the settings-form subset, its properties in manifest order. Entry lists are
+// editable only for clients that opt in; other clients receive a compatibility projection.
 type Schema struct {
 	Fields []Field `json:"fields"`
 }
@@ -46,11 +46,19 @@ type Field struct {
 	MaxLength   *int     `json:"max_length,omitempty"`
 	Minimum     *float64 `json:"minimum,omitempty"`
 	Maximum     *float64 `json:"maximum,omitempty"`
-	Items       *Field   `json:"items,omitempty"` // array: its items (a string field)
+	Items       *Field   `json:"items,omitempty"` // array: its string or flat-entry object field
 	MinItems    *int     `json:"min_items,omitempty"`
 	MaxItems    *int     `json:"max_items,omitempty"`
 	UniqueItems bool     `json:"unique_items,omitempty"`
 	Fields      []Field  `json:"fields,omitempty"` // object: its properties
+	// Secret (x-secret) is the one write-only secret each entry of an object list owns.
+	Secret *SecretSpec `json:"secret,omitempty"`
+	// From (x-from) maps entry fields to the fixed top-level fields an upgrade moves into its first entry.
+	From map[string]string `json:"-"`
+	// Entry marks the flat object held by an entry list; its reserved _id is host-owned.
+	Entry bool `json:"-"`
+	// ClearsSecret marks an entry address whose configured-network target change clears that entry's secret on save.
+	ClearsSecret bool `json:"clears_secret,omitempty"`
 	// Step (x-step) is an integer stepper's increment, not a constraint on configuration values.
 	Step *int64 `json:"step,omitempty"`
 
@@ -70,7 +78,7 @@ var (
 		"integer": {"enum", "oneOf", "minimum", "maximum", "x-step"},
 		"number":  {"enum", "oneOf", "minimum", "maximum"},
 		"boolean": {},
-		"array":   {"items", "minItems", "maxItems", "uniqueItems"},
+		"array":   {"items", "minItems", "maxItems", "uniqueItems", "x-secret", "x-from"},
 		"object":  {"properties", "required"},
 	}
 	// machine: one of the hub's machines, by id: a form draws a list of them as a switch each and one of them as a
@@ -99,6 +107,9 @@ func ParseSchema(raw json.RawMessage) (*Schema, error) {
 	}
 	fields, err := parseProperties(root, "", 0)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateEntryMigrationSources(fields); err != nil {
 		return nil, err
 	}
 	return &Schema{Fields: fields}, nil
@@ -171,6 +182,10 @@ func ordered(raw json.RawMessage) ([]string, []json.RawMessage, error) {
 var fieldName = lazyre.New(`^[A-Za-z_][A-Za-z0-9_-]{0,63}$`)
 
 func parseField(name string, raw json.RawMessage, at string, depth int) (Field, error) {
+	return parseFieldMode(name, raw, at, depth, false)
+}
+
+func parseFieldMode(name string, raw json.RawMessage, at string, depth int, entryItem bool) (Field, error) {
 	f := Field{Name: name}
 	fail := func(format string, args ...any) (Field, error) {
 		return Field{}, fmt.Errorf(strings.TrimSuffix(at, ".")+": "+format, args...)
@@ -255,6 +270,19 @@ func parseField(name string, raw json.RawMessage, at string, depth int) (Field, 
 	if raw, ok := m["uniqueItems"]; ok && json.Unmarshal(raw, &f.UniqueItems) != nil {
 		errs = append(errs, errors.New("uniqueItems: true or false"))
 	}
+	if raw, ok := m["x-secret"]; ok {
+		var spec SecretSpec
+		if err := strict(raw, &spec); err != nil {
+			errs = append(errs, fmt.Errorf("x-secret: %v", err))
+		} else {
+			f.Secret = &spec
+		}
+	}
+	if raw, ok := m["x-from"]; ok {
+		if err := json.Unmarshal(raw, &f.From); err != nil {
+			errs = append(errs, errors.New("x-from: an object of entry field to old field names"))
+		}
+	}
 	if err := errors.Join(errs...); err != nil {
 		return fail("%v", err)
 	}
@@ -308,25 +336,29 @@ func parseField(name string, raw json.RawMessage, at string, depth int) (Field, 
 		if !ok {
 			return fail("items: required")
 		}
-		item, err := parseField("items", raw, at+"items.", depth+1)
+		item, err := parseFieldMode("items", raw, at+"items.", depth+1, depth == 0)
 		if err != nil {
 			return Field{}, err
 		}
-		if item.Type != "string" {
-			return fail("items: only strings (a list of objects is not in the subset)")
+		if item.Type != "string" && !(item.Type == "object" && depth == 0) {
+			return fail("items: only strings, or one flat object in a top-level entry list")
+		}
+		if item.Type == "object" {
+			item.Entry = true
 		}
 		f.Items = &item
 	case "object":
-		if depth > 0 {
-			return fail("an object only at the first level")
+		if depth > 0 && !entryItem {
+			return fail("an object only at the first level or as a top-level array's entry")
 		}
+		f.Entry = entryItem
 		var err error
 		if f.Fields, err = parseProperties(m, at, depth+1); err != nil {
 			return Field{}, err
 		}
 		for _, sub := range f.Fields {
 			if sub.Type == "object" {
-				return fail("an object only at the first level")
+				return fail("an object only at the first level or as a top-level array's entry")
 			}
 		}
 	}
@@ -340,6 +372,9 @@ func parseField(name string, raw json.RawMessage, at string, depth int) (Field, 
 			return fail("default: %v", err)
 		}
 		f.Default = raw
+	}
+	if err := validateEntryList(f); err != nil {
+		return fail("%v", err)
 	}
 	return f, nil
 }
@@ -366,7 +401,10 @@ func (s *Schema) Check(raw json.RawMessage) error {
 	if s != nil {
 		fields = s.Fields
 	}
-	return checkObject(fields, raw, "")
+	if err := checkObject(fields, raw, "", false); err != nil {
+		return err
+	}
+	return checkEntryNamespace(fields, raw)
 }
 
 // CheckSaved checks the saved values but lets required fields added by a new version be missing, leaving them to
@@ -396,14 +434,49 @@ func (s *Schema) CheckSaved(raw json.RawMessage) error {
 	return copy.Check(raw)
 }
 
-func checkObject(fields []Field, raw json.RawMessage, at string) error {
+// CheckPreservingEntries checks an older client's ordinary fields strictly while applying CheckSaved's missing-required
+// allowance only to entry lists it cannot edit. Their saved values are still type-, identity- and bounds-checked.
+func (s *Schema) CheckPreservingEntries(raw json.RawMessage) error {
+	if s == nil {
+		return s.Check(raw)
+	}
+	copy := *s
+	copy.Fields = slices.Clone(s.Fields)
+	for i, field := range copy.Fields {
+		if !field.EntryList() {
+			continue
+		}
+		field.Required = false
+		item := *field.Items
+		item.Required = false
+		item.Fields = slices.Clone(item.Fields)
+		for j := range item.Fields {
+			item.Fields[j].Required = false
+		}
+		field.Items = &item
+		copy.Fields[i] = field
+	}
+	return copy.Check(raw)
+}
+
+func checkObject(fields []Field, raw json.RawMessage, at string, entry bool) error {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
 		return fieldError(strings.TrimSuffix(at, "."), i18n.Err("extension-status.schema_object"))
 	}
 	for k := range m {
+		if entry && k == entryIDField {
+			continue
+		}
 		if !slices.ContainsFunc(fields, func(f Field) bool { return f.Name == k }) {
 			return fieldError(at+k, i18n.Err("extension-status.schema_unknown_field"))
+		}
+	}
+	if entry {
+		var id string
+		rawID, ok := m[entryIDField]
+		if !ok || json.Unmarshal(rawID, &id) != nil || !secretPattern.MatchString(id) {
+			return fieldError(at+entryIDField, i18n.ErrEnglish("extension-status.schema_entry_id"))
 		}
 	}
 	for _, f := range fields {
@@ -429,7 +502,7 @@ func checkObject(fields []Field, raw json.RawMessage, at string) error {
 func (f *Field) check(raw json.RawMessage, at string) error {
 	switch f.Type {
 	case "object":
-		return checkObject(f.Fields, raw, at+".")
+		return checkObject(f.Fields, raw, at+".", f.Entry)
 	case "array":
 		var items []json.RawMessage
 		if err := json.Unmarshal(raw, &items); err != nil {
@@ -441,13 +514,30 @@ func (f *Field) check(raw json.RawMessage, at string) error {
 		if f.MaxItems != nil && len(items) > *f.MaxItems {
 			return i18n.Err("extension-status.schema_max_items", i18n.Args{"count": *f.MaxItems})
 		}
+		entryList := f.EntryList()
 		seen := map[string]bool{}
+		seenIDs := map[string]bool{}
 		for i, item := range items {
 			if err := f.Items.check(item, fmt.Sprintf("%s[%d]", at, i)); err != nil {
+				if entryList {
+					var fe *FieldError
+					if errors.As(err, &fe) {
+						return fe
+					}
+				}
 				return i18n.Err("extension-status.schema_item", i18n.Args{"count": i + 1, "err": err})
 			}
 			if f.UniqueItems && seen[string(item)] {
 				return i18n.Err("extension-status.schema_duplicate", i18n.Args{"count": i + 1})
+			}
+			if entryList {
+				var row map[string]json.RawMessage
+				_ = json.Unmarshal(item, &row)
+				id := string(row[entryIDField])
+				if seenIDs[id] {
+					return fieldError(fmt.Sprintf("%s[%d].%s", at, i, entryIDField), i18n.ErrEnglish("extension-status.schema_entry_id_duplicate"))
+				}
+				seenIDs[id] = true
 			}
 			seen[string(item)] = true
 		}

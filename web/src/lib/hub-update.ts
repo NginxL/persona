@@ -14,7 +14,20 @@ export interface BusyItem {
 
 export interface HubUpdateStatus {
   source?: "release" | "beta" | "web-dev";
-  development?: { configured: boolean; branch: string; current_commit?: string; current_updated_at?: string };
+  development?: {
+    configured: boolean;
+    /** Why it cannot be selected (localized by the hub). */
+    why?: string;
+    branch: string;
+    current_commit?: string;
+    current_updated_at?: string;
+    /** The snapshot folder in effect, the recommended one, and how many are kept. */
+    backup_directory?: string;
+    backup_default_directory?: string;
+    backup_retain?: number;
+    /** The hub pauses its own writers instead of running hub.json hooks. */
+    builtin_quiesce?: boolean;
+  };
   backup?: { id: string; retained: number; pruned: string[] | null };
   version: string;
   build: number;
@@ -78,7 +91,15 @@ export const hubUpdate = () => api<HubUpdateStatus>("/hub/update");
 export const checkHubUpdate = () => api<HubUpdateStatus>("/hub/update/check", { method: "POST" });
 /** `now`: don't wait for the assistant and the agents to be idle. */
 export const startHubUpdate = (now: boolean) => api<HubUpdateStatus>("/hub/update", { method: "POST", json: now ? { now: true } : {} });
-export const setHubUpdateSettings = (s: { auto?: boolean; auto_notice_seen?: boolean; auto_update_nodes?: boolean; source?: "release" | "beta" | "web-dev" }) => api<HubUpdateStatus>("/hub/update/settings", { method: "PUT", json: s });
+export const setHubUpdateSettings = (s: {
+  auto?: boolean;
+  auto_notice_seen?: boolean;
+  auto_update_nodes?: boolean;
+  source?: "release" | "beta" | "web-dev";
+  /** Declarative snapshot settings; "" restores the recommended folder. */
+  development_backup_directory?: string;
+  development_backup_retain?: number;
+}) => api<HubUpdateStatus>("/hub/update/settings", { method: "PUT", json: s });
 export const hubUpdateHistory = () => api<{ history: HubUpdateRecord[] | null }>("/hub/update/history").then((r) => r.history ?? []);
 export interface HubUpdateBackup {
   id: string;

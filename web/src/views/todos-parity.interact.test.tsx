@@ -26,10 +26,11 @@ vi.hoisted(() => {
   })) as typeof window.matchMedia;
 });
 
+const { credentialOwner, getToken } = await import("../lib/api");
 const api = vi.fn(async (_path: string, _init?: unknown): Promise<unknown> => ({}));
 vi.mock("../lib/api", async (orig) => ({
   ...(await orig<typeof import("../lib/api")>()),
-  api: (path: string, init?: unknown) => api(path, init),
+  api: (...args: Parameters<typeof import("../lib/api").api>) => api(...args),
 }));
 
 const startPlan = vi.fn(async (..._args: unknown[]) => {});
@@ -90,6 +91,15 @@ afterEach(async () => {
 describe("a routine row's menu", () => {
   const withTasks = (tasks: Task[]) =>
     api.mockImplementation(async (path: string) => (path === "/assistant/tasks" ? { tasks } : path === "/assistant/runs" ? { runs: [] } : { session_id: "run-1" }));
+  const mutation = (path: string, body: { method: string; json?: unknown }) => {
+    const call = api.mock.calls.find(([called]) => called === path);
+    expect(call?.[0]).toBe(path);
+    const init = call?.[1] as Record<string, unknown> | undefined;
+    expect(init && Object.keys(init).sort()).toEqual([...Object.keys(body), "headers", "isAuthContextCurrent", "token", "tokenOwner"].sort());
+    for (const [key, value] of Object.entries(body)) expect(init?.[key]).toEqual(value);
+    expect(init).toMatchObject({ headers: undefined, token: getToken(), tokenOwner: credentialOwner() });
+    expect((init?.isAuthContextCurrent as () => boolean)()).toBe(true);
+  };
 
   it("right click offers 立即运行 / 编辑 / 删除, and 删除 asks once more", async () => {
     withTasks([routine()]);
@@ -105,7 +115,7 @@ describe("a routine row's menu", () => {
     const asking = [...document.querySelectorAll("[role=menuitem]")].find((m) => m.textContent?.startsWith("确认删除"));
     expect(asking).toBeTruthy();
     await click(asking);
-    expect(api).toHaveBeenCalledWith("/assistant/tasks/r1", { method: "DELETE" });
+    mutation("/assistant/tasks/r1", { method: "DELETE" });
   });
 
   it("立即运行 drops a one-off from the list as it runs", async () => {
@@ -116,7 +126,7 @@ describe("a routine row's menu", () => {
     await flush();
     withTasks([]); // the hub has run it
     await click(byText("立即运行"));
-    expect(api).toHaveBeenCalledWith("/assistant/tasks/r1/run", { method: "POST", json: {} });
+    mutation("/assistant/tasks/r1/run", { method: "POST", json: {} });
     expect(document.body.textContent).not.toContain("回头看看 CI");
   });
 

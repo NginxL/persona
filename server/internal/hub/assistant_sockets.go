@@ -3,6 +3,7 @@ package hub
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"sync"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
@@ -18,7 +19,9 @@ import (
 func (h *Hub) assistantSocketRoutesRelayed(api *http.ServeMux) {
 	for _, pattern := range assistantwire.SocketRoutes {
 		api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			if principalOf(r.Context()).Role != roleFull {
+			p := principalOf(r.Context())
+			a2a := pattern == assistantwire.A2ARPC || pattern == assistantwire.A2ACard
+			if p.Role != roleFull && !(a2a && p.Role == roleScoped && slices.Contains(p.Scopes, assistantwire.ScopeA2A)) {
 				writeErr(w, http.StatusForbidden, errors.New(http.StatusText(http.StatusForbidden)))
 				return
 			}

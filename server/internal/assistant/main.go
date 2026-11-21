@@ -344,7 +344,8 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 	var ext *extmgr.Manager
 	// ConfigFile: its usage section (the account-pool gateways and their keys) is the devices', read and written there.
 	devs := devices.New(devices.Options{Store: database, ConfigFile: o.ConfigFile, TailcatKey: o.TailcatKey, ManagerID: o.ID,
-		Logf: log.New(stderr, "devices: ", log.LstdFlags).Printf,
+		Logf:         log.New(stderr, "devices: ", log.LstdFlags).Printf,
+		ProjectState: func(st devicewire.States) devicewire.States { return svc.logicalProjectStates(st) },
 		Answer: func(ctx context.Context, machine, method string, params json.RawMessage) (any, bool, error) {
 			if !waitsOnPerson(method) && method != "mcp.tools" { // discovery watches reconnect after restart; actual tool calls hold idle
 				svc.nodeAnswering.Add(1)
@@ -378,7 +379,16 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 			return bus.DialAt(ctx, hub, token, httpClient, devicewire.RelayPath, query)
 		},
 		Connected: func() bool { return bh.Client().Peer() != nil },
-		Hub:       lazyHost{c: func() *bus.Client { return bh.Client() }}})
+		// The official DeepSeek launchers' prepaid balances (#11825): the manager holds their sealed keys.
+		LauncherBalances: func(ctx context.Context) ([]proto.UsageAccount, bool) { return svc.LauncherBalances(ctx) },
+		// Usage sources of type extension (#12402): the extensions are made below; ext is read when a source is due.
+		UsageExtension: func(ctx context.Context, id, launcher string) (json.RawMessage, error) {
+			if ext == nil {
+				return nil, errors.New("extensions are not running")
+			}
+			return ext.UsageQuery(ctx, id, launcher)
+		},
+		Hub: lazyHost{c: func() *bus.Client { return bh.Client() }}})
 	// The extensions, connectors and bots (internal/extmgr): the data directory here, its own sections in manager.json
 	// (as moveConfig read and checked them) and its own secret.key.
 	ext = extmgr.New(extmgr.Options{Dir: home, ConfigFile: o.ConfigFile, Config: o.ExtConfig, SecretKey: o.SecretKey,

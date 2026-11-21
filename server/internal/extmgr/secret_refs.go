@@ -39,6 +39,7 @@ type SecretUserView struct {
 	ExtensionName string `json:"extension_name,omitempty"`
 	Secret        string `json:"secret,omitempty"`
 	SecretTitle   string `json:"secret_title,omitempty"`
+	EntryTitle    string `json:"entry_title,omitempty"`
 	Launcher      string `json:"launcher,omitempty"`
 	LauncherName  string `json:"launcher_name,omitempty"`
 	Machine       string `json:"machine,omitempty"`
@@ -111,13 +112,12 @@ func (ps *extensions) secretUsers(ctx context.Context, p *extension.Extension, l
 	var out []SecretUserView
 	for _, r := range ps.reg.ReferencesTo(ctx, schemes) {
 		u := SecretUserView{Kind: "extension", Extension: r.Extension, ExtensionName: r.Extension, Secret: r.Name, SecretTitle: r.Name, Reference: r.Reference}
-		if holder := ps.reg.Get(r.Extension); holder != nil {
+		if holder := ps.reg.Snapshot(r.Extension); holder != nil {
 			u.ExtensionName = holder.L10n.Name(l, holder.Full.Name)
-			for _, s := range holder.Full.Secrets {
-				if s.Name == r.Name {
-					u.SecretTitle = holder.L10n.Secret(l, s).Title
-				}
+			if spec, ok := holder.SecretDeclaration(r.Name); ok {
+				u.SecretTitle = holder.L10n.Secret(l, spec).Title
 			}
+			u.EntryTitle, _ = holder.EntrySecretTitle(r.Name, l)
 		}
 		out = append(out, u)
 	}

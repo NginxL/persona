@@ -110,29 +110,29 @@ describe("a sidebar row's ⋯", () => {
     expect(button).not.toBeNull();
 
     await press(button!);
-    expect(menus()).toHaveLength(1);
+    await vi.waitFor(() => expect(menus()).toHaveLength(1));
 
     await press(more(row())!);
-    expect(menus()).toHaveLength(0);
+    await vi.waitFor(() => expect(menus()).toHaveLength(0));
 
     // and opens it again on a third
     await press(more(row())!);
-    expect(menus()).toHaveLength(1);
+    await vi.waitFor(() => expect(menus()).toHaveLength(1));
   });
 
   it("moves the menu to another row's ⋯, and a press elsewhere still closes it", async () => {
     await renderSidebar();
     await press(more(personaRow())!);
-    expect(menus()).toHaveLength(1);
+    await vi.waitFor(() => expect(menus()).toHaveLength(1));
     expect(menus()[0].textContent).toContain(t("conversation-menu.end"));
 
     await press(more(link("Release notes"))!);
-    expect(menus()).toHaveLength(1);
+    await vi.waitFor(() => expect(menus()).toHaveLength(1));
     expect(menus()[0].textContent).toContain(t("conversation-menu.end_leader"));
 
     act(() => void document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 })));
     await flush();
-    expect(menus()).toHaveLength(0);
+    await vi.waitFor(() => expect(menus()).toHaveLength(0));
   });
 
   it("on a right-clicked row's ⋯ moves the menu there instead of closing it", async () => {
@@ -140,12 +140,12 @@ describe("a sidebar row's ⋯", () => {
     const row = link("Release notes")!;
     act(() => void row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })));
     await flush();
-    expect(menus()).toHaveLength(1);
+    await vi.waitFor(() => expect(menus()).toHaveLength(1));
 
     await press(more(row)!);
-    expect(menus()).toHaveLength(1);
+    await vi.waitFor(() => expect(menus()).toHaveLength(1));
     await press(more(row)!);
-    expect(menus()).toHaveLength(0);
+    await vi.waitFor(() => expect(menus()).toHaveLength(0));
   });
 });
 
@@ -195,8 +195,8 @@ describe("a paged Agents row's ⋯", () => {
     expect(button).not.toBeNull();
 
     await press(button!);
-    expect(menus()).toHaveLength(1);
+    await vi.waitFor(() => expect(menus()).toHaveLength(1));
     await press(more(link("Build docs"))!);
-    expect(menus()).toHaveLength(0);
+    await vi.waitFor(() => expect(menus()).toHaveLength(0));
   });
 });

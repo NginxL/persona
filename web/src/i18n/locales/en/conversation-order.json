@@ -1,0 +1,12 @@
+{
+  "arrange_title": "Arrange chats",
+  "arrange_hint": "Drag a row by its handle, or use Move up / Move down. This order syncs to your other devices.",
+  "arrange_done": "Done",
+  "drag_conversation": "Drag to reorder",
+  "move_up": "Move {title} up",
+  "move_down": "Move {title} down",
+  "order_reset": "Use activity time",
+  "order_reset_done": "Chats are ordered by activity time again",
+  "order_undo_stale": "A newer arrangement is already in place",
+  "order_save_failed": "Couldn't save the chat order: {error}"
+}

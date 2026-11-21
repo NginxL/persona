@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -20,8 +21,24 @@ type agentLauncher struct {
 	AgentType string `json:"agent_type,omitempty"`
 }
 
-// ompOptionsRefusal: omp's model and thinking level come from its own config.yml, not from a start's arguments.
-const ompOptionsRefusal = "omp 的模型和思考强度由 omp 自己的配置决定，这次没有启动。"
+func ompOptionsRefusal(ctx context.Context) error {
+	return refusal("omp_options", i18n.T(i18n.From(ctx), "rpc-errors.omp_options"), nil)
+}
+
+// Both the model picker and the start verify that this launcher runs omp and forwards the requested model.
+func (n *Node) checkOmpStartModel(ctx context.Context, launcher, model string) error {
+	if launcher != ompAgent || n.startKind(ctx) != proto.EngineHerdr {
+		return ompOptionsRefusal(ctx)
+	}
+	if _, managed := n.managedLauncher(launcher); managed || n.runtimeOfIn(ctx, launcher) != nil {
+		return ompOptionsRefusal(ctx)
+	}
+	agent, err := n.launcherModelCheck(ctx, launcher, model)
+	if err == nil && agent != ompAgent {
+		return ompOptionsRefusal(ctx)
+	}
+	return err
+}
 
 // launcherAgentType is the agent a launcher starts when nothing else says: pi, the Cursor CLI and the Antigravity CLI
 // by name (workagent.go), codex, traex and omp by name, else claude.
@@ -93,7 +110,7 @@ func typedArg(text string, shells ...string) string {
 // startOtherAgent opens a new tab in ws (a new space when ""), runs the launcher there (resuming a session when
 // resume is set, with the first message as its argument) and waits until the host reports an agent of that kind in
 // the tab with a session id that was not running before (or the one resumed).
-func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, launcher, kind, prompt, resume, ws, tabName string) (*proto.Session, error) {
+func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, launcher, kind, prompt, resume, ws, tabName string, options ...modelExecution) (*proto.Session, error) {
 	created, err := n.newTab(ctx, launch, cwd, ws, tabName, resume) // retire.go
 	if err != nil {
 		return nil, err
@@ -127,7 +144,16 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 	if !n.typesStartFile(launch, shells...) {
 		argShells = nil
 	}
-	cmd := withHerdrAgent(typedHerdrAgent(launch, kind, shells...), otherAgentCommand(n.launcherCommand(launcher), resume, prompt, argShells...))
+	command := n.launcherCommand(launcher)
+	var model string
+	if selected := executionOption(options).Model; kind == ompAgent && resume == "" && selected != "" {
+		model = selected
+		command += " --model " + shellQuote(model)
+		if prompt != "" {
+			command += " --" // omp takes the first message as positional text, even when it begins with a dash.
+		}
+	}
+	cmd := withHerdrAgent(typedHerdrAgent(launch, kind, shells...), otherAgentCommand(command, resume, prompt, argShells...))
 	// Not in the agent sandbox (agentsandbox.go).
 	n.notePaneStart(launcher)
 	done, err := n.runAgentCommand(ctx, launch, created, ws, "", n.agentStartCommand(cmd, shellQuote, shells...), shells...) // typedstart.go
@@ -176,11 +202,11 @@ func (n *Node) startOtherAgent(ctx context.Context, launch host.Launcher, cwd, l
 				continue
 			}
 		}
-		n.putAgentState(ctx, launch, id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: time.Now().UTC()})
+		n.putAgentState(ctx, launch, id, sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, Model: model, StartedAt: time.Now().UTC()})
 		n.bindPane(pane, id)
 		session := n.sessionFor(id, agent)
 		session.Agent = kind
-		n.holdResume(ctx, launch, pane, id, agentLaunch{Agent: kind, Launcher: launcher, ID: id})
+		n.holdResume(ctx, launch, pane, id, agentLaunch{Agent: kind, Launcher: launcher, ID: id, Model: model})
 		return session, nil
 	}
 }

@@ -382,6 +382,15 @@ func (h *Hub) browserLoginRoutes(mux *http.ServeMux) {
 			writeErrCode(w, http.StatusForbidden, code, err)
 			return
 		}
+		// Approving a sign-in writes a device token in the hub's database: a
+		// snapshot must not see it, and the sign-in works again after the update.
+		if isWriteRequest(r) {
+			if !h.quiesce.begin() {
+				writeErr(w, http.StatusServiceUnavailable, i18n.Err("hub-selfupdate.err_quiesced"))
+				return
+			}
+			defer h.quiesce.end()
+		}
 		if h.store == nil {
 			writeErrCode(w, http.StatusServiceUnavailable, "unavailable", i18n.Err("hub-browser_login.unavailable"))
 			return

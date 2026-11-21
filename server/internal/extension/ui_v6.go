@@ -458,7 +458,7 @@ func checkCompact6(v *View) error {
 					return fmt.Errorf("a card's carousel has at most %d tiles", CompactCarouselTiles)
 				}
 			}
-			if e.Thumbnail != nil || e.Avatar != nil && (e.Avatar.URL != "" || e.Avatar.Ref != "") {
+			if e.Thumbnail != nil || e.Poster != nil || e.Avatar != nil && (e.Avatar.URL != "" || e.Avatar.Ref != "") {
 				images++
 			}
 			for _, t := range e.Tiles {

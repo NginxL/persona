@@ -3,7 +3,7 @@
 // the file in the side panel.
 import { memo, useMemo } from "react";
 import { useExpanded } from "./expanded";
-import { diffLines, type Op } from "../../lib/compare";
+import { diffLines, type Op } from "../../lib/diff-lines";
 import { fileName, toolFile } from "../../lib/files";
 import { openPanel } from "../../lib/panel";
 import { getSession } from "../../lib/store";

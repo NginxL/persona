@@ -72,6 +72,9 @@ refresh replaces it, including removals. There is no new setting or model depend
   Resuming a retained Codex Agent requires its original provider to remain enabled; it never imports that thread through a different provider.
   - A message to one goes to the Agent: Paseo takes it back from the archive first, keeping its labels, and it goes on under the same ID. `session.start` with `resume` set
     to that ID does the same through `import_agent` (see "Take over").
+  - Past those limits node still keeps its record of an Agent Persona started (launcher, folder and `engine_runtime`, written when Paseo answers the start and kept by the hub, #10941): an
+    extension's resume of it, which the hub hands to the computer once it is not listed, is checked against that folder and goes on through `import_agent` as
+    the owner's does (`docs/extensions/extensions.md` "Resuming a chat"). An Agent started in Paseo's App, or before that record, has none: only the owner resumes it then.
   - While it is archived, interrupting and closing it do nothing, and its permission mode, effort and model cannot be changed, nor can it be rewound (Paseo changes them only on an Agent it has loaded).
     Its row offers none of them (#8133): `capabilities` says `rewind`, `rewind_code`, `modes` and `model` false whatever the record it was archived with
     could do, and it lists no `efforts`; node narrows the row's capabilities by them (`docs/integrations/runtimes.md`).
@@ -528,6 +531,7 @@ launcher ran on another account, and a provider added in Persona never applied i
     Each server's environment gets `PERSONA_SESSION_ID` set to that Agent's own `persona.session` label (the ID the hub named, else `paseo-<uuid>` from the first Paseo agent ID of that start), not the provider's session ID, so `report_to_supervisor` and the other
     tools resolve the same task link as for terminal Agents. Paseo keeps `mcpServers` when it reloads the Agent. If `mcp.json` is missing or has no stdio server, the Agent is created without the tools and the bridge logs why.
     Only new Agents are given them: taken-over sessions (`import_agent`) and Agents created in Paseo itself are left as they are.
+    An A2A ticket creates the additional `persona_a2a` server from the current `persona` configuration, or from the legacy MCP namespace when an older generated `mcp.json` still has only that key. This is a read-only compatibility fallback; no new legacy server is generated.
   - **Own tools preapproved** (#6293): on a provider running Claude Code, the request also carries `config.toolPolicy.preapproved`: the Agent's own Persona tools (`--allow-tools`) of the servers it is given, as `{kind: "mcp", server, tool}`.
     Paseo adds them to Claude Code's allowed tools, so they run without a permission request. Not on Codex (Paseo would limit that server to the listed tools), nor OpenCode (Paseo 0.15 takes a policy there, but then leaves that agent's Auto Accept off), nor other providers (Paseo refuses the policy there): the bridge answers their asks for these tools (above).
     A provider Paseo says cannot preapprove gets the Agent again, once, with the tools and without the policy (the bridge then answers those asks, as above).

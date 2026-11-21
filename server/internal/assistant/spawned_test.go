@@ -28,9 +28,14 @@ type spawnHarness struct {
 
 func newSpawnHarness(t *testing.T) *spawnHarness {
 	t.Helper()
+	return newSpawnHarnessOn(t, &memStore{})
+}
+
+// newSpawnHarnessOn is newSpawnHarness with st as its database.
+func newSpawnHarnessOn(t *testing.T, st Store) *spawnHarness {
+	t.Helper()
 	h := &spawnHarness{f: newFakeHub().withMachine()}
 	h.f.settings = &Settings{MachineID: "server", Timezone: "Asia/Shanghai"}
-	st := &memStore{}
 	h.s = withSettings(t, h.f, New(Options{Hub: h.f, Store: func() Store { return st }, Logf: func(format string, args ...any) {
 		h.mu.Lock()
 		h.logs = append(h.logs, fmt.Sprintf(format, args...))

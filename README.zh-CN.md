@@ -70,7 +70,7 @@ github:nwverse/persona-extensions
 
 ## 怎么工作
 
-在一台常开的机器上跑一个小小的 hub，你的设备只连它，它再连到你的每台电脑。Agent 跑在那里的 herdr、Orca、Herdr App、Paseo 或 Cindy 里，也可以通过运行时集成接入。各引擎和运行时的能力不同；Cindy 的数据库回退模式只读，发送和中断需要 host API。数据留在你自己的机器上。
+在一台常开的机器上跑一个小小的 hub，你的设备只连它，它再连到你的每台电脑。Agent 跑在那里的 herdr、Orca、Herdr App、Paseo、Cindy 或 T3 Code 里，也可以通过运行时集成接入。各引擎和运行时的能力不同；Cindy 的数据库回退模式只读，发送和中断需要 host API。数据留在你自己的机器上。
 [架构](docs/server/architecture.md) · [网络与安全](docs/operations/network.md)
 
 ## 开始使用

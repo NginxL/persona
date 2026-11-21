@@ -57,11 +57,12 @@ private fun selectedMetricPoint(points: List<MetricPoint>, time: Long, step: Int
 internal fun MetricChart(
     title: String, points: List<MetricPoint>, kinds: List<MetricKind>, nowValues: List<Double?>,
     end: Long, span: Long, step: Int, selection: Long?, onSelect: (Long?) -> Unit,
-    reference: Double? = null,
+    loadCores: Int? = null,
 ) {
     val picked = remember(points, kinds, selection, step) { selection?.let { selectedMetricPoint(points, it, step, kinds) } }
     val locale = currentLocale
     val metricColors = MetricColor.current
+    val reference = loadCores?.takeIf { it > 0 }?.toDouble()
     JCard(Modifier.fillMaxWidth().padding(bottom = 12.dp.dense)) {
         Text(title, style = PersonaTheme.type.title, color = PersonaTheme.palette.ink)
         Text(selection?.let { MetricFormat.time(it, locale) } ?: stringResource(R.string.machines_now),
@@ -70,7 +71,12 @@ internal fun MetricChart(
             val value = if (selection != null) picked?.let(kind::value) else nowValues.getOrNull(index)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
                 Box(Modifier.padding(top = 6.dp.dense).size(8.dp).background(kind.color(metricColors), PersonaTheme.shapes.controlShape))
-                Text("${stringResource(kind.label)} ${kind.format(value, locale)}", style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink)
+                Column {
+                    Text("${stringResource(kind.label)} ${kind.format(value, locale)}", style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink)
+                    if (kind == MetricKind.Load) loadPerCoreText(value, loadCores, locale)?.let {
+                        Text(it, style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink2)
+                    }
+                }
             }
         }
         if (selection != null && picked == null) Text(stringResource(R.string.machines_chart_no_sample), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)

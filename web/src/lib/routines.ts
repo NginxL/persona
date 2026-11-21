@@ -99,6 +99,12 @@ export interface Task {
   last_status?: string;
   last_error?: string;
   next_run?: string;
+  /** Permission for this manager's viewer to select or cancel a schedule skip. */
+  can_skip_next?: boolean;
+  /** The exact occurrence selected to skip by the owner. */
+  skip_next_at?: string;
+  /** Distinguishes two successive skip requests for the same occurrence. */
+  skip_next_token?: string;
   run_machine_id?: string;
   run_session_id?: string;
   run_launcher?: string;
@@ -146,6 +152,7 @@ export interface Run {
   status: string;
   error?: string;
   manual?: boolean;
+  owner_skipped?: boolean;
   machine_id?: string;
   session_id?: string;
 }
@@ -278,9 +285,26 @@ export function nextRun(t: Task): Date | null {
   return t.enabled ? parseTime(t.next_run) ?? parseTime(t.at) : null;
 }
 
-/** "Next Today 09:00 · in 2 hours" / "Off" / "". */
+export type SkipNextTarget = { at: string; time: Date } & ({ cancel: false; token?: never } | { cancel: true; token: string });
+
+/** Keep the server's timestamp intact for the compare-and-write request, including its fractional seconds. */
+export function skipNextTarget(task: Task): SkipNextTarget | undefined {
+  if (!task.enabled || task.repeat === "once") return;
+  const at = task.skip_next_at || task.next_run;
+  const time = parseTime(at);
+  if (!at || !time) return;
+  if (task.skip_next_at) {
+    if (task.skip_next_token) return { cancel: true, at, time, token: task.skip_next_token };
+    return;
+  }
+  if (task.can_skip_next === true) return { cancel: false, at, time };
+}
+
+/** "Next Today 09:00 · in 2 hours" / "Will skip Today 09:00" / "Off" / "". */
 export function nextText(task: Task, now: Date): string {
   if (!task.enabled) return t("lib-routines.off");
+  const skipped = parseTime(task.skip_next_at);
+  if (skipped) return t("lib-routines.skip_next_pending", { when: momentLabel(skipped, now) });
   const n = nextRun(task);
   return n ? t("lib-routines.next", { moment: momentLabel(n, now), until: untilLabel(n, now) }) : "";
 }
@@ -609,7 +633,7 @@ export function upcoming(tasks: Task[], limit = 3): Upcoming[] {
   const out: Upcoming[] = [];
   for (const task of tasks) {
     const at = nextRun(task);
-    if (!at) continue;
+    if (!at || parseTime(task.skip_next_at)) continue;
     out.push({ id: task.id, at, title: taskTitle(task), repeating: task.repeat !== "once", detail: task.repeat === "once" ? (task.session_id ? t("lib-routines.follow_up_same_chat") : t("lib-routines.follow_up_new_chat")) : ruleText(task) });
   }
   return out.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, limit);
@@ -617,13 +641,14 @@ export function upcoming(tasks: Task[], limit = 3): Upcoming[] {
 
 // ── runs ────────────────────────────────────────────────
 
-export function runStatusWord(r: Pick<Run, "status">): string {
+export function runStatusWord(r: Pick<Run, "status" | "owner_skipped">): string {
+  if (r.status === "skipped" && r.owner_skipped) return t("lib-routines.status_owner_skipped");
   return r.status === "ok" ? t("lib-routines.status_ran") : r.status === "skipped" ? t("lib-routines.status_skipped") : t("lib-routines.status_failed");
 }
 
 /** "Run manually" / the error / "On time" / "21 seconds late" / "3 minutes late" / "2 hours late". */
 export function runDetail(r: Run): string {
-  if (r.status !== "ok") return r.error || runStatusWord(r);
+  if (r.status !== "ok") return r.owner_skipped ? runStatusWord(r) : r.error || runStatusWord(r);
   if (r.manual) return t("lib-routines.run_manual");
   const at = parseTime(r.at), due = parseTime(r.due);
   if (!at || !due) return runStatusWord(r);

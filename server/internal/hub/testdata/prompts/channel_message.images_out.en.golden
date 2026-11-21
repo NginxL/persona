@@ -1,0 +1,4 @@
+<persona-context kind="context" title="WeChat bot" url="">
+The user sent this private message to the Persona bot on WeChat. The final answer for this turn goes back to WeChat as the bot, in plain text. Lead with the conclusion, keep it short, use no tables (to show a picture, put it on a line of its own as ![description](https://…); it arrives as a picture), and keep headings and bold text to a minimum. Do not call notify_user again. Use ask_user as usual when you need confirmation. The user can reply with a number or text in WeChat.
+</persona-context>
+Show me the chart

@@ -15,14 +15,14 @@
     <string name="settings_search_placeholder">搜索设置</string>
     <string name="settings_search_empty">没有找到相关设置</string>
     <string name="settings_search_empty_detail">换个名称搜索，或清空搜索内容。</string>
-    <string name="settings_search_models_aliases">供应商 模型配置 用途 密钥 API Key 运行方式</string>
+    <string name="settings_search_models_aliases">供应商 模型配置 模型设置 模型档位 档位 用途 密钥 API Key 运行方式</string>
     <string name="settings_search_agents_aliases">Claude Code Codex Antigravity agy 会话分诊 编码 运行时</string>
     <string name="settings_search_notifications_aliases">通知设置 通知 通知渠道 电池 保活 自启动 胶囊 悬浮 静音 电脑 锁屏 后台</string>
     <string name="settings_search_connectors_aliases">邮箱 邮件 手机 飞书 Lark 以你的名义发出</string>
     <string name="settings_search_extensions_aliases">扩展 插件 市场</string>
     <string name="settings_search_about_aliases">App 版本 检查更新 APK 安装</string>
     <string name="settings_search_connection_aliases">Hub hub 服务器 状态 诊断 网络 配对 地址</string>
-    <string name="settings_search_appearance_aliases">风格 主题 颜色 深色 浅色 外观 密度 紧凑 边距</string>
+    <string name="settings_search_appearance_aliases">风格 主题 颜色 深色 浅色 外观 密度 紧凑 边距 侧边栏 分开 合并</string>
     <string name="settings_model_add_provider">添加供应商</string>
     <string name="settings_model_how_runs">模型运行方式</string>
     <string name="settings_model_how_runs_detail">在模型供应商中管理凭据和连接方式。更换模型不会改变界面或已开启的功能。</string>

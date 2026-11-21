@@ -1,0 +1,4 @@
+{
+  "alias_match_conflict": "when 和 applies_when 不一致，请只指定一个匹配条件。",
+  "alias_candidates_conflict": "presets 和 candidates 不一致，请只指定一个候选列表。"
+}

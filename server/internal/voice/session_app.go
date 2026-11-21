@@ -53,6 +53,9 @@ func (c *conversation) readApp() {
 		if json.Unmarshal(b, &msg) != nil {
 			continue
 		}
+		if c.dictation {
+			continue // dictation takes microphone audio only: no call controls, typed turns, holds or resends
+		}
 		switch msg.Type {
 		case "interrupt":
 			c.mu.Lock()

@@ -53,7 +53,7 @@ var migrationName = regexp.MustCompile(`^([0-9]{4}|[0-9]{14})_[a-z0-9_]+\.sql$`)
 // sharedTables are the tables both sets make (a database the hub and the default manager share has one of each).
 var sharedTables = []string{"sent_messages"}
 
-var createTable = regexp.MustCompile(`(?i)CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)`)
+var createTable = regexp.MustCompile(`(?i)CREATE TABLE (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)`)
 
 // setFiles are each part's migration names, sorted.
 func setFiles(t *testing.T) map[string][]string {

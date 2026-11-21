@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/assistantskills"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -126,17 +127,18 @@ func (n *Node) localAssistantRoots() map[int]string {
 // mcpSession is the session and the assistant's word an MCP server's request (mcp.tools, mcp.call) goes to the hub
 // with. The server's word that it is the assistant's is taken only when the node says so too (mcpAssistantOf, for the
 // process at the other end of c); a request it refuses goes as an agent's, with the session it names. A request that
-// does not say so is not made one.
-func (n *Node) mcpSession(c net.Conn, req sockRequest) (string, bool) {
+// does not say so is not made one. rt is the connected runtime whose assistant conversation it is (Antigravity's, whose
+// MCP server is `personad mcp` too), nil for one this node runs itself.
+func (n *Node) mcpSession(c net.Conn, req sockRequest) (string, bool, *runtimeConn) {
 	if !req.Assistant {
-		return req.SessionID, false
+		return req.SessionID, false, nil
 	}
 	pid, err := peerPID(c)
-	if id, ok := n.mcpAssistantOf(pid, err, parentPID, req.SessionID); ok {
-		return id, true
+	if id, rt, ok := n.mcpAssistantOf(pid, err, parentPID, req.SessionID); ok {
+		return id, true, rt
 	}
 	n.logf("%s: the caller (pid %d) says it is the assistant, but its process is not one Persona runs for the assistant: answered as an agent's", req.Kind, pid)
-	return req.SessionID, false
+	return req.SessionID, false, nil
 }
 
 // mcpAssistantOf is the session of the assistant conversation whose MCP server is the process pid (err: why it is not
@@ -149,28 +151,46 @@ func (n *Node) mcpSession(c net.Conn, req sockRequest) (string, bool) {
 //   - the system does not tell who is at the other end of a socket (errNoPeer): the request's session, if it is one
 //     this node runs for the assistant, or an assistant conversation of a connected runtime that runs them.
 //
-// Any other caller is not the assistant.
-func (n *Node) mcpAssistantOf(pid int, err error, parent func(int) (int, error), session string) (string, bool) {
+// Any other caller is not the assistant. The runtime is the one that vouches (nil: a process of this node's).
+func (n *Node) mcpAssistantOf(pid int, err error, parent func(int) (int, error), session string) (string, *runtimeConn, bool) {
 	if errors.Is(err, errNoPeer) {
 		if n.assistantSession(session) {
-			return session, true
+			return session, nil, true
 		}
 		if h, _, _ := n.runtimes.belongs(session); n.runtimeAssistantChat(h, session) {
-			return session, true
+			return session, h, true
 		}
-		return "", false
+		return "", nil, false
 	}
 	if err != nil {
-		return "", false
+		return "", nil, false
 	}
 	line := lineage(pid, parent)
 	if id, ok := assistantIn(line, n.localAssistantRoots()); ok {
-		return id, true
+		return id, nil, true
 	}
 	if h := n.runtimes.assistantIn(line); h != nil && n.runtimeMayName(h, session) {
-		return session, true
+		return session, h, true
 	}
-	return "", false
+	return "", nil, false
+}
+
+// runtimeWorkerCaller: the process at the other end of c is session's own, when runtime rt reported the worker that
+// runs it (runtime.assistant_pids, verified): one of the worker's descendants. Another process of rt's (an Agent's
+// chat, another assistant conversation) does not get to name it. Without a report for session, or where the system
+// does not tell who is at the other end (errNoPeer), the runtime's word stands, as in mcpAssistantOf.
+func (n *Node) runtimeWorkerCaller(c net.Conn, rt *runtimeConn, session string) bool {
+	for _, w := range n.runtimes.assistantWorkers() {
+		if w.host != rt || w.session != session {
+			continue
+		}
+		pid, err := peerPID(c)
+		if errors.Is(err, errNoPeer) {
+			return true
+		}
+		return err == nil && slices.Contains(lineage(pid, parentPID), w.pid)
+	}
+	return true
 }
 
 // assistantSession: session is the one a process this node runs for the assistant goes to the hub with.
@@ -222,26 +242,34 @@ func (n *Node) mayCall(cwd, tool string) bool {
 	return slices.ContainsFunc(n.signedInConnectors(cwd), func(id string) bool { return strings.HasPrefix(tool, id+"_") })
 }
 
-// cliCall runs a scoped task_spawn as the Agent's, or a connector call as the assistant's. No Agent-side exception
-// grants connector access.
+// cliCall runs one of an Agent's own tools (callerTools) as the Agent its pane or Codex thread names, or a connector
+// call as the assistant's. The Agent's tools go to the hub as an Agent's call (assistant false), as `personad mcp`
+// sends them for the same pane (hooks.go mcpCaller): the hub decides each one for that session (a task leader's
+// task_plan, the decisions of the Agent's own to-do, …). A call that names no known Agent session gets the assistant's
+// check below, unchanged; no Agent-side exception grants connector access.
 func (n *Node) cliCall(ctx context.Context, c net.Conn, req sockRequest) proto.ToolResult {
-	if req.Name == "task_spawn" {
-		session := n.paneCaller(req.Pane)
-		if req.CodexThreadID != "" {
-			session = n.taskCodexCaller(req.CodexThreadID)
+	if slices.Contains(callerTools, req.Name) {
+		session, assistant := n.cliAgentCaller(req), false
+		if assistantwire.IsA2ATool(req.Name) {
+			session, assistant = n.a2aCaller(c, req, session)
+			if session == "" {
+				return proto.ErrorResult(proto.ToolErrorUnavailable, "A2A requires a verified local session", 0)
+			}
 		}
-		if session == "" {
+		if session != "" {
+			if n.peer == nil {
+				return proto.ErrorResult(proto.ToolErrorUnavailable, "Persona hub error: not connected", 0)
+			}
+			var res proto.ToolResult
+			if err := n.peer.Call(ctx, "mcp.call", map[string]any{"name": req.Name, "args": req.Args, "session_id": session,
+				"assistant": assistant, "guest": n.guestOf(session) != nil}, &res); err != nil {
+				return proto.ErrorResult(proto.ToolErrorUnavailable, "Persona hub error: "+err.Error(), 0)
+			}
+			return res
+		}
+		if req.Name == "task_spawn" {
 			return proto.ErrorResult(proto.ToolErrorUnavailable, "task_spawn is not available: no Agent session is known for this pane or Codex thread", 0)
 		}
-		if n.peer == nil {
-			return proto.ErrorResult(proto.ToolErrorUnavailable, "Persona hub error: not connected", 0)
-		}
-		var res proto.ToolResult
-		if err := n.peer.Call(ctx, "mcp.call", map[string]any{"name": req.Name, "args": req.Args, "session_id": session,
-			"assistant": false, "guest": n.guestOf(session) != nil}, &res); err != nil {
-			return proto.ErrorResult(proto.ToolErrorUnavailable, "Persona hub error: "+err.Error(), 0)
-		}
-		return res
 	}
 	session, ok := n.assistantCaller(c)
 	if !ok {
@@ -282,6 +310,53 @@ func (n *Node) cliCall(ctx context.Context, c net.Conn, req sockRequest) proto.T
 		return proto.ErrorResult(proto.ToolErrorUnavailable, "Persona hub error: "+err.Error(), 0)
 	}
 	return res
+}
+
+// a2aCaller binds a shell or MCP process to a local execution session. The
+// requested session alone is never sufficient to read another agent's mailbox.
+func (n *Node) a2aCaller(c net.Conn, req sockRequest, claimed string) (string, bool) {
+	if id, ok := n.assistantCaller(c); ok {
+		n.mu.Lock()
+		p := n.procs[id]
+		round := p != nil && p.toolSet == roundToolSet
+		n.mu.Unlock()
+		if round {
+			return "", false
+		}
+		return id, true
+	}
+	pid, err := peerPID(c)
+	if err != nil {
+		return "", false
+	}
+	if req.CodexThreadID != "" {
+		if paneEnvOfPID(pid)["CODEX_THREAD_ID"] != req.CodexThreadID {
+			return "", false
+		}
+		return n.taskCodexCaller(req.CodexThreadID), false
+	}
+	for _, ancestor := range lineage(pid, parentPID) {
+		if req.Pane != "" && slices.Contains(n.panesOfPID(ancestor), req.Pane) {
+			id := n.paneCaller(req.Pane)
+			if id != "" && (claimed == "" || claimed == id) {
+				return id, false
+			}
+		}
+		if id := readClaudeSessionID(n.claudeSessionFile(ancestor)); id != "" && (claimed == "" || claimed == id) {
+			return id, false
+		}
+	}
+	return "", false
+}
+
+// cliAgentCaller is the Agent session a command line's call of an Agent's own tool comes from: the one its Codex
+// thread names when it names one, else the one in its pane (paneCaller); "" when none is known. The request's own
+// session and assistant fields are never read: the node, not the caller, says whose call it is.
+func (n *Node) cliAgentCaller(req sockRequest) string {
+	if req.CodexThreadID != "" {
+		return n.taskCodexCaller(req.CodexThreadID)
+	}
+	return n.paneCaller(req.Pane)
 }
 
 // Codex's shared daemon can inherit a different pane's environment. A tool's per-turn thread id takes precedence;

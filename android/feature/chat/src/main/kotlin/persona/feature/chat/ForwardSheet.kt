@@ -24,6 +24,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.contracts.isTraeCliId
 import persona.core.designsystem.AgentMarkSpec
 import persona.core.designsystem.AgentRow
 import persona.core.designsystem.GroupPosition
@@ -184,7 +185,7 @@ private fun TargetRow(s: Session, position: GroupPosition, machine: String?, tit
     AgentRow(title, status, onClick = { if (enabled) onClick() }, Modifier.testTag("forward-session-${s.sessionId}"),
         position = position, statusText = if (s.assistant) null else status.localizedLabel,
         preview = if (s.assistant) persona else s.spaceName?.takeIf { it.isNotBlank() } ?: s.folderName,
-        agent = s.agentLabel.takeIf { !s.assistant && (s.isCodex || s.agent == "traex") },
+        agent = s.agentLabel.takeIf { !s.assistant && (s.isCodex || isTraeCliId(s.agent)) },
         facts = machine?.let { listOf(RowFact(it)) }.orEmpty(),
         agentMark = if (s.assistant) AgentMarkSpec(null, persona, null) else s.agentMark, muted = !enabled,
         end = if (busy) ({ JSpinner() }) else null)

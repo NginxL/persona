@@ -10,5 +10,6 @@
   "bad_minutes_days": "minutes_daysは0（無期限）または1〜3650の整数日数で指定してください。",
   "bad_idle_auto_compact_minutes": "idle_auto_compact_minutesは1〜1440の整数分で指定してください。",
   "bad_idle_auto_compact_tokens": "idle_auto_compact_tokensは10000〜10000000の整数で指定してください。",
+  "bad_idle_release_minutes": "idle_release_minutesは5〜55の整数分で指定してください。",
   "bad_supervision_batch_minutes": "supervision_batch_minutesは0〜1440の整数分で指定してください。"
 }

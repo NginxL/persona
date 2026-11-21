@@ -23,6 +23,7 @@ function sessionManager(id, cwd, entries = [], name = '') {
       for (let e = byId.get(sm.leaf); e; e = byId.get(e.parentId)) out.unshift(e)
       return out
     },
+    appendCustomEntry(customType, data) { sm.append({ type: 'custom', id: `c${sm.entries.length}`, parentId: sm.leaf, customType, data }) },
     append(e) {
       sm.entries = [...sm.entries, e]
       sm.leaf = e.id
@@ -292,6 +293,8 @@ test('the pi-web companion lists sessions on disk, opens one to send to it, and 
   await n.ready
   assert.equal(n.hello.runtime, 'pi-files')
   assert.equal(n.hello.launcher, 'pi-web')
+  assert.deepEqual(n.hello.launchers[0].models, [{ id: 'default', name: 'pi', default: true }], 'the display label must not become a model argument')
+  assert.deepEqual(n.hello.launchers[0].permission_modes, ['default', 'bypassPermissions'])
   await until('listed', () => n.last('runtime.sessions')?.sessions.length === 2)
   const old = n.last('runtime.sessions').sessions.find((s) => s.session_id === 's-old')
   assert.equal(old.status, 'offline')
@@ -401,6 +404,22 @@ async function askSetup(t, opts = {}) {
   const ask = (id, params) => tool.execute(id, params, a.ctx.signal, undefined, a.ctx)
   return { ...env, a, tool, status, ask }
 }
+
+test('A2A tools send and report from the active pi session', async (t) => {
+  const { Type } = await import('./typebox-stub.js')
+  const { n, host } = await setup(t)
+  const a = piSession('s-a2a')
+  host.register(a.pi, { A2AType: Type })
+  await a.fire('session_start')
+  await n.ready
+  await until('A2A session listed', () => n.last('runtime.sessions')?.sessions.some(s => s.session_id === 's-a2a'))
+  assert.ok(!a.pi.tools.some(t => t.name === 'ask_user'))
+  const report = a.pi.tools.find(t => t.name === 'a2a_report')
+  const args = { task_id: 'task', message_id: 'report', state: 'completed', text: 'Test result' }
+  const result = await report.execute('call', args, a.ctx.signal, undefined, a.ctx)
+  assert.equal(result.details.error, false)
+  assert.deepEqual(n.toolCalls.at(-1), { name: 'a2a_report', args, session_id: 's-a2a' })
+})
 
 /** A phone that has not answered yet: resolve(answer) answers the card it holds. */
 function heldPhone(n) {
@@ -784,4 +803,51 @@ test('a host can serve another agent of the same extension API (omp)', async (t)
   n.resolve = () => ({ allow: true })
   await a.fire('tool_call', { toolName: 'bash', toolCallId: 'c1', input: { command: 'ls' } })
   assert.match(n.asked.at(-1).id, /^omp-/, 'its cards carry its own id prefix')
+})
+
+test('Assistant native shell gates survive bypass mode and unavailable rules; ordinary pi stays unchanged', async (t) => {
+  const { n, host } = await setup(t, { web: true })
+  const assistant = piSession('guarded'), ordinary = piSession('ordinary')
+  host.register(assistant.pi)
+  host.register(ordinary.pi)
+  await assistant.fire('session_start')
+  await ordinary.fire('session_start')
+  await n.ready
+  n.tools = [{ name: 'send_message', shell: ['send-message'], input_schema: { type: 'object' } }]
+  await n.peer.call('session.send', { session_id: 'guarded', assistant: true, text: 'continue', mode: 'bypassPermissions' })
+  const direct = await assistant.fire('tool_call', { toolName: 'bash', input: { command: 'send-message --to example' } })
+  assert.equal(direct.block, true)
+  const nested = await assistant.fire('tool_call', { toolName: 'bash', input: { command: `bash -lc 'send-"message" --to example'` } })
+  assert.equal(nested.block, true)
+  assert.equal(await assistant.fire('tool_call', { toolName: 'bash', input: { command: 'pwd' } }), undefined)
+  assert.equal(await ordinary.fire('tool_call', { toolName: 'bash', input: { command: 'send-message --to example' } }), undefined)
+  n.setHub(false)
+  await until('hub disconnected', () => !host.runtime.hubConnected)
+  assert.equal((await assistant.fire('tool_call', { toolName: 'bash', input: { command: 'pwd' } })).block, true)
+  n.setHub(true)
+  await until('hub connected', () => host.runtime.hubConnected)
+  Object.defineProperty(n, 'tools', { get() { throw new Error('rules unavailable') }, configurable: true })
+  const unavailable = await assistant.fire('tool_call', { toolName: 'bash', input: { command: 'pwd' } })
+  assert.equal(unavailable.block, true)
+  assert.equal(n.toolCalls.length, 0, 'a native permission check never executes a Persona action')
+})
+
+test('Assistant messages wait for a fresh turn context; ordinary steering remains available', async (t) => {
+  const { n, host } = await setup(t, { web: true })
+  const a = piSession('context-turn')
+  host.register(a.pi)
+  await a.fire('session_start')
+  await n.ready
+  await n.peer.call('session.send', { session_id: 'context-turn', assistant: true, text: 'first', context: 'snapshot one', supervision_instructions: 'role', mode: 'default' })
+  await a.fire('agent_start')
+  const count = a.sm.getEntries().length
+  await assert.rejects(n.peer.call('session.send', { session_id: 'context-turn', assistant: true, text: 'second', context: 'snapshot two', supervision_instructions: 'role', mode: 'default' }), (error) => error.code === 'busy' && error.data?.delivered === 'none')
+  assert.equal(a.pi.sent.length, 1)
+  assert.equal(a.sm.getEntries().length, count, 'busy input cannot mutate an active turn’s state')
+  await a.fire('agent_settled')
+  await n.peer.call('session.send', { session_id: 'context-turn', assistant: true, text: 'second', context: 'snapshot two', supervision_instructions: 'role', mode: 'default' })
+  const applied = await a.fire('before_agent_start', { systemPrompt: 'base' })
+  assert.equal(applied.systemPrompt, 'base\n\nrole')
+  assert.equal(applied.message.content, 'snapshot two')
+  assert.equal(a.pi.sent.length, 2)
 })

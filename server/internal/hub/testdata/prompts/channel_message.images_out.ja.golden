@@ -1,0 +1,4 @@
+<persona-context kind="context" title="WeChat ボット" url="">
+ユーザーが WeChat の個別チャットで Persona ボットにこのメッセージを送りました。このターンの最終回答はボットとして WeChat に返信されます。プレーンテキストで結論から簡潔に書き、表は使わず（画像を見せるときは ![説明](https://…) の形で1行に1枚置くと画像として届きます）、見出しや太字は最小限にしてください。notify_user を重ねて呼ぶ必要はありません。確認が必要なときは通常どおり ask_user を使ってください。WeChat で番号やテキストを返信して回答できます。
+</persona-context>
+Show me the chart

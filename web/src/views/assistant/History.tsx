@@ -33,6 +33,12 @@ import { PHONE, useMedia } from "../../lib/viewport";
 import { saveRecentTaskChats } from "../../lib/recent-task-chats";
 import { RECENT_COUNTS, setRecentCount, useRecentCount } from "../../lib/sidebar-recent";
 import { composing } from "../../lib/send-history";
+import { useConversationArrange } from "../../lib/use-conversation-arrange";
+import { ConversationArrangeBar } from "./ConversationArrangeBar";
+import { ConversationOrderRow } from "./ConversationOrderRow";
+import { ConversationTagFilterBar } from "./ConversationTagFilterBar";
+import { tagFilterEntries } from "../../lib/conversation-tag-filters";
+import { saveConversationTagFilters } from "../../lib/conversation-tag-filters-save";
 
 const NONE: Session[] = [];
 // A row's line under its title: the matching words of a search, or else its last message.
@@ -59,6 +65,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   const [renaming, setRenaming] = useState<Conversation | null>(null);
   /** The tag whose chip narrows the list ("" = no tag filter). */
   const [activeTag, setActiveTag] = useState("");
+  const [editingTagFilters, setEditingTagFilters] = useState(false);
   /** The conversation whose tag editor is open. */
   const [tagging, setTagging] = useState<Conversation | null>(null);
   /** Tag sets saved here before the hub has pushed them back: shown until the reload after the save settles. */
@@ -100,7 +107,7 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   useLayoutEffect(() => {
     reads.current++;
     if (priorAccount.current !== account) { priorAccount.current = account; setQuery(""); }
-    setFetched(null); setError(""); setTitles({}); setMarked({}); setRenaming(null); setActiveTag(""); setTagEdits({}); setTagging(null);
+    setFetched(null); setError(""); setTitles({}); setMarked({}); setRenaming(null); setActiveTag(""); setEditingTagFilters(false); setTagEdits({}); setTagging(null);
   }, [manager, account]);
   useEffect(() => {
     void load();
@@ -159,8 +166,13 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   const sources = useMemo(() => autoConversations(all, assistant?.main, background).groups, [all, assistant?.main, background]);
   // the labels in use, each once: the tag chips narrow the list the same way the origin chips do
   const tagChoices = useMemo(() => inUseTags(all), [all]);
+  const tagEntries = useMemo(() => tagFilterEntries(tagChoices, assistant?.conversation_tag_filters), [tagChoices, assistant?.conversation_tag_filters]);
+  const tagFiltersCustomized = Array.isArray(assistant?.conversation_tag_filters);
+  const tagFiltersSupported = assistant?.conversation_tag_filters !== undefined;
   const visible = useMemo(() => withTag(hits, activeTag), [hits, activeTag]);
-  const { main, days, archived } = useMemo(() => arrange(visible, assistant?.main, new Date(nowMs)), [visible, assistant?.main, nowMs]);
+  const orderRows = useMemo(() => visible.filter((s) => !s.archived && s.session_id !== assistant?.main), [visible, assistant?.main]);
+  const { saved: conversationOrder, arranging, start: startArranging, done: doneArranging, move, step, reset } = useConversationArrange(orderRows);
+  const { main, days, archived } = useMemo(() => arrange(visible, assistant?.main, new Date(nowMs), conversationOrder), [visible, assistant?.main, nowMs, conversationOrder]);
   const total = all.filter((s) => !s.archived).length;
   const searching = query.trim() !== "";
 
@@ -203,6 +215,18 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
     await after();
   };
 
+  const saveTagFilters = async (next: string[] | null): Promise<boolean> => {
+    try {
+      await saveConversationTagFilters(next);
+      // An explicitly removed/reset selected entry must not leave an invisible filter behind.
+      if (activeTag && !(next ?? tagChoices).includes(activeTag)) setActiveTag("");
+      return true;
+    } catch (e) {
+      toast(t("conversation-tag-filters.save_failed", { error: errorText(e) }), "error");
+      return false;
+    }
+  };
+
   const loading = fetched === null && !error;
   const options = useMenu();
   const recentCount = useRecentCount();
@@ -210,6 +234,8 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
   // that has it) and how many it lists (this browser's), the same settings as Settings has.
   const recentTaskChats = assistant?.recent_task_chats;
   const optionItems: MenuItem[] = [
+    ...(orderRows.length ? [{ key: "arrange", label: t("conversation-menu.arrange_chats"), icon: "menu" as const, onSelect: startArranging }] : []),
+    ...(tagFiltersSupported ? [{ key: "tag-filters", label: t("conversation-tag-filters.customize"), icon: "tag" as const, onSelect: () => setEditingTagFilters(true) }] : []),
     ...(typeof recentTaskChats === "boolean"
       ? [{
           key: "task-chats", label: t("settings-assistantsettings.recent_task_chats"), checked: recentTaskChats,
@@ -265,19 +291,17 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
             </div>
           )}
 
-          {/* The labels actually in use: one chip per tag, click to narrow the list to chats carrying it. */}
-          {tagChoices.length > 0 && (
-            <div role="group" aria-label={t("assistant-history.tag_filter")} className="-mt-2 mb-5 flex flex-wrap gap-1.5">
-              {tagChoices.map((tag) => (
-                <Chip key={tag} on={activeTag === tag} onClick={() => setActiveTag((cur) => (cur === tag ? "" : tag))}>
-                  <span className="inline-flex items-center gap-1">
-                    <Icon name="tag" size={11} stroke={2} />
-                    {tag}
-                  </span>
-                </Chip>
-              ))}
-            </div>
-          )}
+          <ConversationTagFilterBar
+            entries={tagEntries}
+            active={activeTag}
+            customized={tagFiltersCustomized}
+            editing={editingTagFilters}
+            onSelect={(tag) => setActiveTag((cur) => (cur === tag ? "" : tag))}
+            onChange={saveTagFilters}
+            onDone={() => setEditingTagFilters(false)}
+          />
+
+          {arranging && <ConversationArrangeBar custom={!!conversationOrder?.length} onReset={reset} onDone={doneArranging} />}
 
           {loading && (
             <div className="flex justify-center py-16">
@@ -320,9 +344,15 @@ export function History({ origin, onToggleSidebar }: { origin?: string; onToggle
             <section key={d.title} className="mb-5">
               <SectionTitle>{d.title}</SectionTitle>
               <div className="divide-y divide-line overflow-hidden rounded-card bg-surface shadow-card">
-                {d.items.map((s) => (
-                  <ConvRow key={s.session_id} s={s} now={nowMs} said={searching ? saidBy.get(s.session_id) : undefined} fit={fit} onRename={setRenaming} onArchive={archive} onEditTags={setTagging} />
-                ))}
+                {d.items.map((s) => {
+                  const row = <ConvRow key={s.session_id} s={s} now={nowMs} said={searching ? saidBy.get(s.session_id) : undefined} fit={fit} onRename={setRenaming} onArchive={archive} onEditTags={setTagging} />;
+                  if (!arranging) return row;
+                  return (
+                    <ConversationOrderRow key={s.session_id} id={s.session_id} title={conversationTitle(s)} index={orderRows.findIndex((x) => x.session_id === s.session_id)} count={orderRows.length} onMove={move} onStep={step}>
+                      {row}
+                    </ConversationOrderRow>
+                  );
+                })}
               </div>
             </section>
           ))}

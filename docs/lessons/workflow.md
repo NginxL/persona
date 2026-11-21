@@ -116,6 +116,14 @@ SDK synchronization intentionally replaces only the selected SDK subtree (#1471)
 
 ## Hosted CI path aggregation
 
+- Repository-wide caller guards should shortlist tracked files with a literal Git search, then inspect non-comment command
+  lines (#12258). An optional greedy prefix in the XcodeGen expression backtracked on long unrelated source lines and
+  exceeded 60 seconds; keep the same path exclusions, inspect working-tree edits, and fail on Git errors rather than
+  returning an empty inventory. Synthetic paths must not look like real dependency literals to the check-fast input
+  inventory; extensionless fixture scripts still exercise the same tracked-path scan. Build-mode guards must check
+  actual arguments per lane: the iOS 18.6 lane intentionally
+  requests only the simulator Rust-core slice, while release and the other Apple CI lanes still require the full framework.
+
 - The web lane's inputs outside `web/` are derived, not listed (#10619): `scripts/ci/paths.py` scans `web/src` and the web tests for the paths they name relative to themselves, and both CI's web lane and `check-fast` use that scan. The hand list it replaced named 6 of the ~25 fixture directories the tests read. Read a fixture by a path relative to the file (an import, `new URL("../…", import.meta.url)`, `join(__dirname, "../…")` or `".."` elements); a path built from the working directory or a variable root is invisible to the scan. Legacy JSON fixture members must be composed from their existing compatibility carrier, not repeated in a new test file or allowed by broadening the identifier registry. Fix the source of failures rather than weakening portable guards.
 
 - Native workflow-level PR path filters leave individually required checks pending when no run is created. Keep one always-triggered

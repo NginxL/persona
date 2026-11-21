@@ -8,7 +8,7 @@ import persona.core.contracts.Todo
 // criterion was found, for the task card, the todo page and the conversation's review lines.
 
 /** Where a supervised task's review stands. */
-enum class ReviewStage { Ongoing, Pending, Rework, NeedsUser, Accepted, Cancelled }
+enum class ReviewStage { Ongoing, Pending, UserCheck, Rework, NeedsUser, Accepted, Cancelled }
 
 /**
  * Whether its supervisor's acceptance still stands: the latest review accepted it and no review came since. That holds
@@ -27,6 +27,7 @@ val Todo.acceptanceStands: Boolean get() = supervision?.acceptanceStands() == tr
 val Todo.reviewState: String
     get() {
         val st = supervision?.state.orEmpty()
+        if (isDone && st == "user_check") return "accepted"
         if (!isDone && st == "accepted" && !acceptanceStands) return ""
         if (!isDone && st == "cancelled") return ""
         return st
@@ -41,6 +42,7 @@ val Todo.reviewStage: ReviewStage?
         val sup = supervision ?: return null
         return when (sup.state) {
             "pending_review" -> ReviewStage.Pending
+            "user_check" -> if (isDone) ReviewStage.Accepted else ReviewStage.UserCheck
             "rework" -> ReviewStage.Rework
             "needs_user" -> ReviewStage.NeedsUser
             "accepted" -> if (isDone || sup.acceptanceStands()) ReviewStage.Accepted else ReviewStage.Ongoing

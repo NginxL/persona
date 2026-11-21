@@ -23,6 +23,8 @@ export interface BotFeatures {
   answer_new_card?: boolean;
   /** A topic run also shows thinking and tools in a native agent message beside the progress card. */
   topic_cot?: boolean;
+  /** The owner's "@bot /read <task>" in a group reads the group's recent messages, images and files first (#11803); off by default, and a hub from before leaves it out. */
+  read_group?: boolean;
 }
 
 export interface BotTopicChat {
@@ -90,7 +92,7 @@ export interface FeishuBotUpdate {
   larkcli_profile?: string;
 }
 
-export const DEFAULT_FEATURES: BotFeatures = { main: true, cards: true, all_cards: false, pushes: false, sync: false, agents: false, reports: true, board: false, only_conclusions: false, workbench: false, report_steps: false, answer_new_card: false, topic_cot: true };
+export const DEFAULT_FEATURES: BotFeatures = { main: true, cards: true, all_cards: false, pushes: false, sync: false, agents: false, reports: true, board: false, only_conclusions: false, workbench: false, report_steps: false, answer_new_card: false, topic_cot: true, read_group: false };
 
 /** What a hub from before the setting does: nudge after an hour. */
 export const DEFAULT_NUDGE_AFTER = 60;

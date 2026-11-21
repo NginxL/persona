@@ -422,7 +422,8 @@ fun JTopBar(
     onTitleClick: (() -> Unit)? = null,
     showTitle: Boolean = true,
 ) {
-    LocalHomeChrome.current?.takeIf { onBack == null }?.let { home ->
+    val home = LocalHomeChrome.current?.takeIf { onBack == null }
+    if (home?.showSwitch == true) {
         CompositionLocalProvider(LocalIconsRaised provides true) {
             HomeNavigation(home.items, home.selected, home.onSelect, home.leading,
                 modifier = home.barHeight?.let { height -> Modifier.onSizeChanged { height.intValue = it.height } } ?: Modifier,
@@ -433,13 +434,16 @@ fun JTopBar(
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
     val compactHeight = 56.dp
+    val barModifier = home?.barHeight?.let { height -> Modifier.onSizeChanged { height.intValue = it.height } } ?: Modifier
+    val rootLeading = LocalRootLeading.current
     val splitLeading = resolveDetailLeading(LocalSplitDetail.current, onBack)
     val leading: @Composable () -> Unit = {
-        when (splitLeading) {
+        if (home != null) home.leading()
+        else when (splitLeading) {
             is DetailLeading.ShowList -> JIconButton(persona.core.designsystem.icons.PersonaIcons.sidebar, stringResource(R.string.designsystem_sidebar), splitLeading.onClick)
             is DetailLeading.Back -> JBackButton(onClick = splitLeading.onClick)
             DetailLeading.Hidden -> Spacer(Modifier.width(if (style == AppStyle.Brief) Tokens.Space.s else Tokens.Space.sm))
-            null -> LocalRootLeading.current?.invoke()
+            null -> rootLeading?.invoke()
         }
     }
     val titleBlock: @Composable RowScope.() -> Unit = {
@@ -462,7 +466,7 @@ fun JTopBar(
     when (style) {
         AppStyle.Glass -> {
             val shape = RoundedCornerShape(30.dp.corner)
-            Box(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp.dense, vertical = 6.dp.dense)) {
+            Box(barModifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 10.dp.dense, vertical = 6.dp.dense)) {
                 Crossfade(showTitle, label = "bar") { full ->
                     if (full) Row(
                         Modifier.fillMaxWidth().height(60.dp).floatingSurface(shape).padding(horizontal = 6.dp.dense),
@@ -482,7 +486,7 @@ fun JTopBar(
         else -> Row(
             // Board keeps its summary beside the title here. Let their measured lines grow the bar; PageFrame uses
             // that same measured height to place the list and its pull-refresh content. Brief keeps its fixed bar.
-            Modifier.fillMaxWidth().background(palette.background).statusBarsPadding()
+            barModifier.fillMaxWidth().background(palette.background).statusBarsPadding()
                 .then(if (style == AppStyle.Board) Modifier.heightIn(min = compactHeight) else Modifier.height(compactHeight))
                 .padding(horizontal = 4.dp.dense),
             verticalAlignment = Alignment.CenterVertically,

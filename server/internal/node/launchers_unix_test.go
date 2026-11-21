@@ -113,22 +113,22 @@ func TestLaunchersRefreshReplacesTheCachedList(t *testing.T) {
 	})
 	n := &Node{}
 	first, err := n.launchers(context.Background())
-	if err != nil || len(first) != 1 || first[0].Name != "custom-a" {
+	if err != nil || byName(first)["custom-a"].Name != "custom-a" {
 		t.Fatalf("initial discovery: %v, %v", first, err)
 	}
 	if err := os.WriteFile(rc, []byte("alias custom-b='claude'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cached, err := n.launchers(context.Background())
-	if err != nil || len(cached) != 1 || cached[0].Name != "custom-a" {
+	if err != nil || !slices.Equal(cached, first) {
 		t.Fatalf("ordinary read did not use the cache: %v, %v", cached, err)
 	}
 	refreshed, err := n.launchers(context.Background(), true)
-	if err != nil || len(refreshed) != 1 || refreshed[0].Name != "custom-b" {
+	if names := byName(refreshed); err != nil || names["custom-b"].Name != "custom-b" || names["custom-a"].Name != "" {
 		t.Fatalf("refresh did not replace discovery: %v, %v", refreshed, err)
 	}
 	cached, err = n.launchers(context.Background())
-	if err != nil || len(cached) != 1 || cached[0].Name != "custom-b" {
+	if err != nil || !slices.Equal(cached, refreshed) {
 		t.Fatalf("refreshed list was not cached: %v, %v", cached, err)
 	}
 }
@@ -172,10 +172,13 @@ func TestLaunchersQueuedRefreshUsesDiscoveryCompletedWhileWaiting(t *testing.T) 
 		launcherCache.Unlock()
 	})
 
-	n := &Node{}
+	n, _ := testNode(t)
 	if _, err := n.launchers(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	launcherCache.Lock()
+	launcherCache.at = time.Now().Add(-2 * time.Minute)
+	launcherCache.Unlock()
 	started, release := filepath.Join(home, "discovery-started"), filepath.Join(home, "discovery-release")
 	gated := "alias custom-b='claude'\nprint -r -- started > \"$HOME/discovery-started\"\n" +
 		"while [[ ! -f \"$HOME/discovery-release\" ]]; do sleep 0.02; done\n"
@@ -202,6 +205,33 @@ func TestLaunchersQueuedRefreshUsesDiscoveryCompletedWhileWaiting(t *testing.T) 
 		}
 		return false
 	})
+	// A cache-only request must avoid desktop executable discovery as well as launcher discovery.
+	desktop, _ := useDesktopDirs(t)
+	if err := os.MkdirAll(filepath.Join(desktop, "claude-code-sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hideMachineAgents(t)
+	t.Setenv("PERSONA_NODEJS", "")
+	snapshotDone := make(chan answer, 1)
+	go func() {
+		raw, err := nodeCall(t, n, "launchers.list", map[string]any{"cache_only": true})
+		var listed struct {
+			Launchers []proto.Launcher `json:"launchers"`
+		}
+		if err == nil {
+			err = json.Unmarshal(raw, &listed)
+		}
+		snapshotDone <- answer{list: listed.Launchers, err: err}
+	}()
+	select {
+	case got := <-snapshotDone:
+		names := byName(got.list)
+		if got.err != nil || names["custom-a"].Name != "custom-a" || names[claudeDesktopLauncher].Name != "" {
+			t.Errorf("snapshot during refresh = %v, %v; want the previous shell launchers", got.list, got.err)
+		}
+	case <-time.After(time.Second):
+		t.Error("snapshot waited for the unfinished discovery")
+	}
 	cancel() // The RPC caller may give up; node discovery deliberately finishes and publishes its result.
 	if err := os.WriteFile(rc, []byte("alias custom-c='claude'\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -213,7 +243,7 @@ func TestLaunchersQueuedRefreshUsesDiscoveryCompletedWhileWaiting(t *testing.T) 
 		list, err := n.launchers(secondCtx, true)
 		secondDone <- answer{list: list, err: err}
 	}()
-	// Keep the first shell blocked until the queued refresh has recorded the old generation and reached the fetch lock.
+	// Keep the first shell blocked until the queued refresh has recorded the old generation and joined the shared scan.
 	select {
 	case <-queued:
 	case <-time.After(5 * time.Second):
@@ -225,7 +255,7 @@ func TestLaunchersQueuedRefreshUsesDiscoveryCompletedWhileWaiting(t *testing.T) 
 	for i, done := range []chan answer{firstDone, secondDone} {
 		select {
 		case got := <-done:
-			if got.err != nil || len(got.list) != 1 || got.list[0].Name != "custom-b" {
+			if names := byName(got.list); got.err != nil || names["custom-b"].Name != "custom-b" || names["custom-c"].Name != "" {
 				t.Fatalf("discovery %d = %v, %v; want the result completed while queued", i+1, got.list, got.err)
 			}
 		case <-time.After(5 * time.Second):
@@ -397,21 +427,23 @@ func TestLaunchersListShellDiscoveryErrorWithRuntimeOnlyWhenForced(t *testing.T)
 		launcherCache.codex, launcherCache.settings, launcherCache.scripts = codex, settings, scripts
 		launcherCache.Unlock()
 	})
-	if _, err := nodeCall(t, n, "launchers.list", map[string]any{"refresh": true}); err == nil {
-		t.Fatal("a runtime overlay hid the forced shell discovery error")
-	}
-	raw, err := nodeCall(t, n, "launchers.list", map[string]any{})
-	if err != nil {
-		t.Fatalf("an ordinary picker lost its independently usable runtime: %v", err)
-	}
-	var listed struct {
-		Launchers []proto.Launcher `json:"launchers"`
-	}
-	if err := json.Unmarshal(raw, &listed); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.ContainsFunc(listed.Launchers, func(l proto.Launcher) bool { return l.Name == "dsh" }) {
-		t.Fatalf("ordinary picker lost the runtime after shell discovery failed: %s", raw)
+	for _, cacheOnly := range []bool{false, true} {
+		if _, err := nodeCall(t, n, "launchers.list", map[string]any{"refresh": true, "cache_only": cacheOnly}); err == nil {
+			t.Fatalf("cache_only=%v: forced shell discovery should report its failure", cacheOnly)
+		}
+		raw, err := nodeCall(t, n, "launchers.list", map[string]any{"cache_only": cacheOnly})
+		if err != nil {
+			t.Fatalf("cache_only=%v: picker lost its independently usable runtime: %v", cacheOnly, err)
+		}
+		var listed struct {
+			Launchers []proto.Launcher `json:"launchers"`
+		}
+		if err := json.Unmarshal(raw, &listed); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := byName(listed.Launchers)["dsh"]; !ok {
+			t.Fatalf("cache_only=%v: picker lost the runtime after shell discovery failed: %s", cacheOnly, raw)
+		}
 	}
 }
 
@@ -451,13 +483,15 @@ func TestLaunchersKeepTheLastListWhenTheShellEndsBeforeListing(t *testing.T) {
 		launcherCache.at = time.Time{}
 		launcherCache.Unlock()
 	}
-	n := &Node{}
+	n, _ := runtimeNode(t)
 	ctx := context.Background()
 	ending := "echo 'Welcome back'\nexit 1\n"
 
-	write(ending)
-	if ls, err := n.launchers(ctx); err == nil {
-		t.Fatalf("no list yet and the shell ended before listing: launchers %v, want an error", ls)
+	for _, defs := range []string{ending, "_claude_launchers() { echo 'Starting discovery'; exit 0; }\n"} {
+		write(defs)
+		if ls, err := n.launchers(ctx); err == nil {
+			t.Fatalf("no list yet and the shell ended before completing the list: launchers %v, want an error", ls)
+		}
 	}
 
 	write("_claude_launchers() { printf '%-26s%-40s%s\\n' mycc - demo-model; }\n")
@@ -474,5 +508,21 @@ func TestLaunchersKeepTheLastListWhenTheShellEndsBeforeListing(t *testing.T) {
 	}
 	if !n.knownLauncher(ctx, "mycc") {
 		t.Error("mycc is unknown after a read that ended before listing; want it still known")
+	}
+
+	write("alias recovered='claude --model new-model'\n")
+	if got := launchersFor(t, n, "").names(); !slices.Contains(got, "mycc/") || slices.Contains(got, "recovered/zshrc") {
+		t.Fatalf("ordinary launcher list after fallback = %v, want cached mycc", got)
+	}
+	raw, err := nodeCall(t, n, "launchers.list", map[string]any{"refresh": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refreshed listedLaunchers
+	if err := json.Unmarshal(raw, &refreshed); err != nil {
+		t.Fatal(err)
+	}
+	if got := refreshed.names(); !slices.Contains(got, "recovered/zshrc") || slices.Contains(got, "mycc/") {
+		t.Fatalf("refreshed launcher list = %v, want recovered without mycc", got)
 	}
 }

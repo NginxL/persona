@@ -128,6 +128,7 @@ var catalogItemTypes = map[string]reflect.Type{
 	"looks":            reflect.TypeFor[LookItem](),
 	"connectors":       reflect.TypeFor[ConnectorItem](),
 	"quota":            reflect.TypeFor[QuotaItem](),
+	"usage":            reflect.TypeFor[UsageItem](),
 	"agent_sources":    reflect.TypeFor[AgentSourceItem](),
 	"providers":        reflect.TypeFor[ProviderItem](),
 	"api":              reflect.TypeFor[APIItem](),

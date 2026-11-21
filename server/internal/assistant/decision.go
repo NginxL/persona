@@ -214,6 +214,19 @@ func (s *Service) decisionStands(t Todo) string {
 // backgroundText is a decision's one line of background: where its task came from, when, and where it stands. "" for
 // an ask that has none (not a decision, or one from before #3804).
 func backgroundText(l i18n.Lang, loc *time.Location, a *acceptAsk) string {
+	if a.OutsideID != "" {
+		kind := a.OutsideKind
+		switch kind {
+		case "script", "extension":
+		default:
+			kind = "app"
+		}
+		line := i18n.T(l, "assistant-reports.decision_outside_source_"+kind, i18n.Args{"source": a.OutsideSource})
+		if a.OutsideBackground != "" {
+			line += " · " + a.OutsideBackground
+		}
+		return line
+	}
 	f := a.From
 	if f == nil {
 		return ""
@@ -261,7 +274,7 @@ func decisionLines(l i18n.Lang, loc *time.Location, a *acceptAsk) []string {
 	if a.CostOfWaiting != "" {
 		out = append(out, i18n.T(l, "assistant-reports.decision_cost", i18n.Args{"cost": a.CostOfWaiting}))
 	}
-	if neverDefault(a.WhyOwner) && a.Deadline.IsZero() {
+	if (neverDefault(a.WhyOwner) || a.OutsideID != "" && !a.DefaultAllowed) && a.Deadline.IsZero() {
 		out = append(out, i18n.T(l, "assistant-reports.decision_never_default"))
 	}
 	return out
@@ -309,9 +322,15 @@ func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (ac
 	}
 	label = strings.TrimSpace(label)
 	i := slices.IndexFunc(a.Options, func(o DecisionOption) bool { return o.Label == label })
+	if a.OutsideID != "" {
+		if i < 0 {
+			return acceptResult{}, errDecisionOption
+		}
+		return s.answerOutside(ctx, id, asked, outsideAnswer{Option: label}, false)
+	}
 	switch {
 	case label == a.Recommend && label != "":
-		return s.acceptTryAsDismissalLocked(ctx, id, "", false)
+		return s.acceptTryAsDismissalLocked(ctx, id, "", a.AskedAt, false)
 	case i < 0:
 		return acceptResult{}, errDecisionOption
 	}
@@ -349,7 +368,7 @@ func (s *Service) chooseOption(ctx context.Context, id, asked, label string) (ac
 	result := acceptSucceeded()
 	switch {
 	case a.Check != "":
-		s.checkDecided(ctx, t, a, label)
+		s.checkDecided(ctx, t, a, label, false)
 	case sendErr != nil:
 		result = s.decisionNotDelivered(ctx, id, a.AskedAt, label, sendErr)
 	default:
@@ -390,6 +409,11 @@ func (s *Service) routeDecisionAnswer(ctx context.Context, conversation, id, ask
 func (s *Service) answerDecisionText(ctx context.Context, id, asked, text string) (acceptResult, error) {
 	s.reviewDismissals.actions.acquire(id)
 	defer s.reviewDismissals.actions.release(id)
+	if a, err := s.askRound(id, asked); err != nil {
+		return acceptResult{}, err
+	} else if a != nil && a.OutsideID != "" {
+		return s.answerOutside(ctx, id, asked, outsideAnswer{Text: decisionText(text)}, false)
+	}
 	st := s.todoDB()
 	if st == nil {
 		return acceptResult{}, errAcceptStore
@@ -414,6 +438,10 @@ func (s *Service) answerDecisionTextLocked(ctx context.Context, st todoStore, t 
 	a, err := s.askRound(id, asked)
 	if err != nil || a == nil {
 		return FeedItem{}, acceptResult{}, err
+	}
+	if a.OutsideID != "" {
+		result, err := s.answerOutside(ctx, id, asked, outsideAnswer{Text: decisionText(text)}, false)
+		return FeedItem{}, result, err
 	}
 	completeDismissal, err := s.prepareDismissalForAnswer(ctx, t)
 	if err != nil {
@@ -497,6 +525,10 @@ func (s *Service) ownerCannotAnswer(ctx context.Context, id, asked, response str
 	a, err := s.askRound(id, asked)
 	if err != nil || a == nil {
 		return false, err
+	}
+	if a.OutsideID != "" {
+		result, err := s.answerOutside(ctx, id, asked, outsideAnswer{Response: response}, false)
+		return result.taken, err
 	}
 	t, _ := s.todoNow(id)
 	completeDismissal, err := s.prepareDismissalForAnswer(ctx, t)
@@ -601,7 +633,7 @@ func ownerDecisionReturned(v *Supervision) bool {
 // decisionRecheckDue says a complete decision is old enough that it must not be pushed again before its supervisor
 // confirms the facts. The sweep persists the hand-back; owner projections also honor an already-persisted marker.
 func decisionRecheckDue(a *acceptAsk, now time.Time) bool {
-	return a != nil && decideAsk(a) && a.AgentReply == nil && a.Recommend != "" && now.Sub(a.AskedAt) >= decisionRecheckAfter
+	return a != nil && a.OutsideID == "" && decideAsk(a) && a.AgentReply == nil && a.Recommend != "" && now.Sub(a.AskedAt) >= decisionRecheckAfter
 }
 
 // ---- old and unanswerable decisions ----

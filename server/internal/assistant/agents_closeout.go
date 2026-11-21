@@ -84,7 +84,7 @@ func (s *Service) checkCloseout(ctx context.Context, c *proto.Closeout, artifact
 		if a.Kind != "pr" || ciPRURL.FindString(a.Ref) == "" {
 			continue
 		}
-		c.Checked = closeoutChecked(s.checkDeployed(ctx, a.Ref))
+		c.Checked = closeoutChecked(s.checkPRDeployment(ctx, a.Ref, true))
 		return
 	}
 }
@@ -92,7 +92,7 @@ func (s *Service) checkCloseout(ctx context.Context, c *proto.Closeout, artifact
 func closeoutChecked(r deployResult) *proto.CloseoutChecked {
 	switch r.State {
 	case deployIn:
-		checked := &proto.CloseoutChecked{Deployed: proto.CloseoutYes, LocalDeployment: r.Receipt != "" && r.Receipt != r.Merge}
+		checked := &proto.CloseoutChecked{Deployed: proto.CloseoutYes, LocalDeployment: r.Receipt.byHead && !strings.EqualFold(r.Receipt.sha, r.Merge)}
 		if r.Merge != "" {
 			checked.Merged = proto.CloseoutYes
 		} else if r.NotMerged {

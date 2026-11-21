@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstAndCurrent, NAV_PAGES, extensionNavKey, sidebarActiveKey } from "./persona-nav";
+import { firstAndCurrent, NAV_PAGES, extensionNavKey, sidebarActiveKey, sidebarRoute } from "./persona-nav";
 import { href, parse, routePath } from "./router";
 
 describe("Persona is the front door (#1239)", () => {
@@ -46,6 +46,35 @@ describe("Persona is the front door (#1239)", () => {
     expect(sidebarActiveKey({ name: "session", mid: "mac", sid: "s" }, "main")).toBe("s:mac/s");
   });
 
+  it("keeps the row of the page an Agent's page was opened from, a drill-down (#12055, #9971)", () => {
+    const agent = { name: "session", mid: "mac", sid: "s" } as const;
+    // a to-do's Agent rows and hand-off, a knowledge project's Agents and a meeting's hand-off, the workflow board
+    expect(sidebarActiveKey(agent, "main", "/todos?id=t1")).toBe("todos");
+    expect(sidebarActiveKey(agent, "main", "/todos?view=calendar&mode=week&id=t1")).toBe("todos");
+    expect(sidebarActiveKey(agent, "main", "/kb/projects/p1")).toBe("kb");
+    expect(sidebarActiveKey(agent, "main", "/kb/recordings/r1")).toBe("kb");
+    expect(sidebarActiveKey(agent, "main", "/workspace-board")).toBe("workspace-board");
+    // a Persona conversation's card with How Agents open = Full page: the conversation's own row
+    expect(sidebarActiveKey(agent, "main", "/")).toBe("persona");
+    expect(sidebarActiveKey(agent, "main", "/persona/main")).toBe("persona");
+    expect(sidebarActiveKey(agent, "main", "/persona/c2?machine=mac")).toBe("j:c2");
+    // an Agent opened from another Agent's page keeps that Agent's row
+    expect(sidebarActiveKey(agent, "main", "/s/mac/first")).toBe("s:mac/first");
+    // a tab's page follows where it came from too
+    expect(sidebarActiveKey({ name: "tab", mid: "mac", space: "w", slot: "1", sid: "s" }, "main", "/todos?id=t1")).toBe("todos");
+    expect(sidebarRoute(agent, "/todos?id=t1")).toEqual({ name: "todos", id: "t1" });
+  });
+
+  it("lights an Agent's own row when nothing opened it, and every other page its own whatever it carries", () => {
+    const agent = { name: "session", mid: "mac", sid: "s" } as const;
+    expect(sidebarActiveKey(agent, "main")).toBe("s:mac/s");
+    expect(sidebarActiveKey(agent, "main", undefined)).toBe("s:mac/s");
+    expect(sidebarRoute(agent)).toBe(agent);
+    // only an Agent's page is a drill-down here: a to-do opened from a conversation lights To-dos, not the conversation
+    expect(sidebarActiveKey({ name: "todos", id: "t1" }, "main", "/persona/c2")).toBe("todos");
+    expect(sidebarActiveKey({ name: "persona", sid: "c2" }, "main", "/todos")).toBe("j:c2");
+  });
+
   it("shortens a list to its first n and the open item after them (#2283)", () => {
     const isFour = (x: number) => x === 4;
     expect(firstAndCurrent([1, 2, 3, 4, 5], 2, isFour)).toEqual([1, 2, 4]);
@@ -54,7 +83,7 @@ describe("Persona is the front door (#1239)", () => {
   });
 
   it("orders the pages under Persona like the app", () => {
-    expect(NAV_PAGES).toEqual(["home", "inbox", "health", "messages", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"]);
+    expect(NAV_PAGES).toEqual(["home", "inbox", "health", "messages", "starred", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"]);
   });
 });
 

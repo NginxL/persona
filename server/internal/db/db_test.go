@@ -52,7 +52,8 @@ func open(t testing.TB) *DB {
 var openTables = []string{"push_device_retirements", "lock_tests", "client_ops", "devices", "device_tokens", "pair_tokens",
 	"device_sessions", "live_activities", "phone_tools", "node_sessions", "mail_accounts", "interactions", "settings",
 	"inbox_items", "kb_entities", "connector_secrets", "machine_systems", "machine_metrics", "machine_usage",
-	"sent_messages", "todos", "todo_agents", "assistant_always", "sent_as_user", "hub_push_sent", "urgent_calls", "model_usage"}
+	"sent_messages", "todos", "todo_agents", "assistant_always", "sent_as_user", "hub_push_sent", "urgent_calls", "model_usage",
+	"conversation_histories", "assistant_conversation_spaces", "logical_conversations", "conversation_segment_closures", "conversation_prepared_candidates"}
 
 // open empties what TRUNCATE openTables CASCADE did, a table only the cascade reaches included, and leaves a table
 // that had no row in that cascade its files: it truncates only what has a row.
@@ -1892,6 +1893,23 @@ func TestSentEcho(t *testing.T) {
 	_, _ = d.pool.Exec(ctx, `UPDATE sent_messages SET created_at = now() - interval '2 days' WHERE client_msg_id = 'm2'`)
 	if got, _ := d.Echoes(ctx, "box"); len(got) != 1 {
 		t.Fatalf("a send older than a day was handed back: %s", got)
+	}
+}
+
+func TestA2AEchoRestoresWithoutAppSend(t *testing.T) {
+	d, ctx := open(t), t.Context()
+	id := proto.A2ADeliveryPrefix + "task-1"
+	receipt := func(line string) json.RawMessage {
+		return json.RawMessage(fmt.Sprintf(`{"session_id":"child","client_msg_id":%q,"line":%q,"source":{"kind":"conversation","conversation_id":"parent"}}`, id, line))
+	}
+	for _, entry := range []json.RawMessage{receipt(""), receipt("first"), receipt("")} {
+		if err := d.RecordEcho(ctx, id, "box", entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restored, err := d.Echoes(ctx, "box")
+	if err != nil || len(restored) != 1 || !strings.Contains(string(restored[0]), `"line": "first"`) || !strings.Contains(string(restored[0]), `"conversation_id": "parent"`) {
+		t.Fatalf("restored A2A receipts: %s %v", restored, err)
 	}
 }
 

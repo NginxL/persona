@@ -27,12 +27,15 @@ import java.time.Instant
  */
 internal fun spaceTabs(session: Session?, sessions: List<Session>): List<Session> {
     if (session == null) return emptyList()
-    val space = session.spaceId?.takeIf(String::isNotBlank) ?: session.workspaceId?.takeIf(String::isNotBlank) ?: return emptyList()
+    val space = session.spaceId?.takeIf(String::isNotBlank) ?: return emptyList()
+    val listed = (sessions + session).mapTo(HashSet()) { it.key }
     val byPane = LinkedHashMap<String, Session>()
     val rest = mutableListOf<Session>()
     for (other in sessions + session) {
         if (other.machineId != session.machineId || other.assistant || other.agentState == AgentState.Offline) continue
-        if ((other.spaceId?.takeIf(String::isNotBlank) ?: other.workspaceId) != space) continue
+        if (other.spaceId?.takeIf(String::isNotBlank) != space) continue
+        if (other.key != session.key &&
+            other.foldedUnder?.takeIf(String::isNotBlank)?.let { SessionKey(other.machineId, it) in listed } == true) continue
         val pane = other.paneId?.takeIf(String::isNotBlank)
         if (pane == null) { if (rest.none { it.key == other.key }) rest += other; continue }
         val had = byPane[pane]
@@ -86,9 +89,15 @@ internal fun ChatSiblingTabs(
 ) {
     val labels = remember(tabs) { siblingTabs(tabs) }
     var all by remember { mutableStateOf(false) }
-    val list = rememberLazyListState()
     val at = tabs.indexOfFirst { it.key == session.key }
-    LaunchedEffect(session.key) { if (at > 0) list.animateScrollToItem(at - 1) }
+    val list = rememberLazyListState(initialFirstVisibleItemIndex = (at - 1).coerceAtLeast(0))
+    var anchoredSession by remember { mutableStateOf(session.key) }
+    LaunchedEffect(session.key) {
+        if (anchoredSession != session.key) {
+            anchoredSession = session.key
+            if (at >= 0) list.animateScrollToItem((at - 1).coerceAtLeast(0))
+        }
+    }
     val waiting = tabs.any { it.key != session.key && it.agentState == AgentState.NeedsYou }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.l, vertical = Tokens.Space.xs),

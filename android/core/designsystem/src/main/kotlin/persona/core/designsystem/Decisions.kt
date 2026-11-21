@@ -386,7 +386,8 @@ fun MarkerText(text: String, style: TextStyle, modifier: Modifier = Modifier) {
 
 /**
  * One answer to choose. The [recommended] one stands out by its label, icon and outline,
- * not a second solid action or a colored backing. A [multiSelect] option is read as a checkbox (ticked or not), otherwise as a
+ * not a second solid action or a colored backing; [recommendedText] names who recommends it when the default is not enough.
+ * A [multiSelect] option is read as a checkbox (ticked or not), otherwise as a
  * radio button; [position] ("current" of "total") is read after the label so a screen reader hears how many there are.
  * The label keeps to 2 lines and the [detail] to 3, unless [fullText] (a full-page view, where an option must be readable
  * in full before it is picked).
@@ -398,6 +399,7 @@ fun DecisionOption(
     modifier: Modifier = Modifier,
     detail: String? = null,
     recommended: Boolean = false,
+    recommendedText: String? = null,
     selected: Boolean = false,
     enabled: Boolean = true,
     multiSelect: Boolean = false,
@@ -408,7 +410,7 @@ fun DecisionOption(
     val type = PersonaTheme.type
     val style = PersonaTheme.style
     val shape = RoundedCornerShape(when (style) { AppStyle.Glass -> 18.dp.corner; AppStyle.Brief -> 16.dp.corner; AppStyle.Board -> 8.dp.corner })
-    val recommendedLabel = stringResource(R.string.designsystem_decision_recommended)
+    val recommendedLabel = recommendedText ?: stringResource(R.string.designsystem_decision_recommended)
     val separator = stringResource(R.string.designsystem_separator)
     val haptics = rememberHaptics()
     val spoken = position?.let { (current, total) ->
@@ -439,7 +441,7 @@ fun DecisionOption(
             Spacer(Modifier.width(8.dp.dense))
             JIcon(PhIcons.Sparkle, null, size = 14.dp, tint = if (style == AppStyle.Board) palette.accent else ink, selected = true)
             Spacer(Modifier.width(3.dp.dense))
-            Text(stringResource(R.string.designsystem_decision_recommended), style = type.micro.copy(fontWeight = FontWeight.Bold), color = if (style == AppStyle.Board) palette.accent else ink, maxLines = 1)
+            Text(recommendedLabel, style = type.micro.copy(fontWeight = FontWeight.Bold), color = if (style == AppStyle.Board) palette.accent else ink, maxLines = 1)
         }
     }
 }

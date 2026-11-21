@@ -1,4 +1,4 @@
-Main only: adopt an Agent opened manually or by agent_start without a task. Creates a to-do/card, supervision signals and task_review closeout, as task_plan does. The background supervisor reviews it unless assistant.main_supervises_own_tasks is on; the answer names the supervisor, and main can still review. Already your task: done_when/expect_minutes change its brief scope (prefer task_scope). Another conversation's task stays theirs; use agent_transfer to move it.
+Main only: adopt an Agent opened manually or by agent_start without a task. Creates a to-do/card, supervision signals and task_review closeout, as task_plan does. The background supervisor reviews it unless assistant.main_supervises_own_tasks is on; the answer names the supervisor, and main can still review. Already your task: done_when/expect_minutes change its brief scope (prefer task_scope). Another conversation's task stays theirs; use agent_transfer to move it.{{template "shared/mcp_language" .}}
 
 ```json
 {
@@ -18,7 +18,7 @@ Main only: adopt an Agent opened manually or by agent_start without a task. Crea
     },
     "title": {
       "type": "string",
-      "description": "Chinese task title, under 20 characters; empty: Agent title"
+      "description": "{{if eq .Lang "en"}}the task in a short line (English, under 20 characters); empty: the agent's title{{else if eq .Lang "ja"}}短いタスク名（日本語、20文字未満）。空の場合は Agent のタイトルを使います{{else}}Chinese task title, under 20 characters; empty: Agent title{{end}}"
     },
     "done_when": {
       "type": "array",

@@ -65,10 +65,19 @@ func (s *Service) applyStartTier(ctx context.Context, params map[string]any) err
 	model, _ := params["model"].(string)
 	effort, _ := params["effort"].(string)
 	speed, _ := params["speed"].(string)
-	if layTier(t, &launcher, &model, &effort) && speed == "" && (model == "" || model == t.Model) {
-		speed = t.Speed
+	mode, _ := params["permission_mode"].(string)
+	if layTier(t, &launcher, &model, &effort) {
+		if speed == "" && (model == "" || model == t.Model) {
+			speed = t.Speed
+		}
+		if mode == "" && t.PermissionMode != "" {
+			mode = t.PermissionMode
+		}
 	}
 	params["launcher"], params["model"], params["effort"], params["speed"] = launcher, model, effort, speed
+	if mode != "" {
+		params["permission_mode"] = mode
+	}
 	return nil
 }
 
@@ -87,7 +96,7 @@ func layTier(t ModelTier, launcher, model, effort *string) bool {
 }
 
 func (s *Service) applyTaskTier(ctx context.Context, t *PlanTask) error {
-	p := map[string]any{"tier": t.Tier, "launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "speed": t.Speed}
+	p := map[string]any{"tier": t.Tier, "launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "speed": t.Speed, "permission_mode": t.Permission}
 	if err := s.applyStartTier(ctx, p); err != nil {
 		return err
 	}
@@ -95,6 +104,9 @@ func (s *Service) applyTaskTier(ctx context.Context, t *PlanTask) error {
 	t.Model, _ = p["model"].(string)
 	t.Effort, _ = p["effort"].(string)
 	t.Speed, _ = p["speed"].(string)
+	if mode, _ := p["permission_mode"].(string); mode != "" && !t.Readonly {
+		t.Permission = mode
+	}
 	return nil
 }
 
@@ -115,7 +127,7 @@ func (s *Service) modelProfileContext(ctx context.Context) *prompts.SnapshotProf
 	out := &prompts.SnapshotProfile{ID: p.ID, Name: p.Name}
 	for _, name := range slices.Sorted(maps.Keys(p.Tiers)) {
 		t := p.Tiers[name]
-		out.Tiers = append(out.Tiers, prompts.SnapshotTier{Name: name, Launcher: t.Launcher, Model: t.Model, Effort: t.Effort, Speed: t.Speed, Description: t.Description})
+		out.Tiers = append(out.Tiers, prompts.SnapshotTier{Name: name, Launcher: t.Launcher, Model: t.Model, Effort: t.Effort, Speed: t.Speed, PermissionMode: t.PermissionMode, Description: t.Description})
 	}
 	return out
 }

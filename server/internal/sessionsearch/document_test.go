@@ -104,6 +104,57 @@ func TestDocumentUsesFullFieldsAndDoesNotInventTranscript(t *testing.T) {
 	}
 }
 
+func TestSearchFindsTraeCLIByDisplayName(t *testing.T) {
+	var items []sessionlist.Item
+	var cliIDs, ideIDs []string
+	for _, tc := range []struct{ id, agent, launcher, originLabel, originName, harness, label string }{
+		{"legacy", "traex", "", "", "", "traex", "TRAE CLI"},
+		{"unhyphenated", "traecli", "", "TRAEX", "", "traex", "TRAE CLI"},
+		{"hyphenated", "trae-cli", "", "Team relay", "", "traex", "Team relay"},
+		{"older-row", "", "trae-cli", "", "", "traex", "TRAE CLI"},
+		{"paseo-cli", "paseo", "traex", "Paseo", "", "traex", "TRAE CLI"},
+		{"paseo-custom", "paseo", "traecli", "Workspace agent", "", "traex", "Workspace agent"},
+		{"paseo-custom-name", "paseo", "trae-cli", "Paseo", "Local CLI", "traex", "Local CLI"},
+		{"ide", "trae", "", "", "", "trae", "Trae"},
+		{"paseo-ide", "paseo", "trae", "", "", "trae", "Trae"},
+	} {
+		row := proto.Session{MachineID: "computer", SessionID: tc.id, Agent: tc.agent, Launcher: tc.launcher, AgentLabel: tc.originLabel, AgentName: tc.originName, State: "idle"}
+		item := sessionlist.Item{ID: tc.id, Machine: row.MachineID, State: row.State, Full: row, Summary: row}
+		doc, err := Document(item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.Harness != tc.harness || doc.HarnessLabel != tc.label {
+			t.Errorf("%q has harness %q and label %q, want %q and %q", tc.id, doc.Harness, doc.HarnessLabel, tc.harness, tc.label)
+		}
+		if tc.harness == "traex" {
+			cliIDs = append(cliIDs, tc.id)
+		} else {
+			ideIDs = append(ideIDs, tc.id)
+		}
+		items = append(items, item)
+	}
+	var index sessionlist.Index
+	index.Replace("fixture", items)
+	for query, want := range map[string][]string{
+		"TRAE CLI": cliIDs, "traecli": cliIDs, "harness:traecli": cliIDs, "harness:traex": cliIDs, "harness:trae-cli": cliIDs,
+		"harness:trae": ideIDs, "Team relay": {"hyphenated"}, "harness:relay": {"hyphenated"},
+		"Workspace agent": {"paseo-custom"}, "harness:workspace": {"paseo-custom"}, "Local CLI": {"paseo-custom-name"},
+	} {
+		page, err := index.Query(sessionlist.Options{Search: query, SearchContext: &sessionlist.SearchContext{Document: Document}, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, row := range page.Sessions {
+			got = append(got, row.(proto.Session).SessionID)
+		}
+		if !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(want))) {
+			t.Errorf("%q got %v, want %v", query, got, want)
+		}
+	}
+}
+
 func BenchmarkRuntimeSearch8000(b *testing.B) {
 	var items []sessionlist.Item
 	for n := range 8000 {

@@ -111,6 +111,9 @@ func TestCheckView(t *testing.T) {
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a"}, {"id": "b", "title": "b"}], "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "a"}]}]}]}`, false, "cycle"},
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a"}, {"id": "a", "title": "b"}]}]}]}`, false, "twice"},
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "tone": "positive", "color": "green"}]}]}]}`, false, "a tone or a color"},
+		{`{"sections": [{"items": [{"type": "scene", "alt": "a", "shapes": [{"kind": "box", "center": [0, 0], "size": [1, 1], "bottom": 0, "top": 1}], "pins": [{"id": "a", "at": [0, 0], "label": "a"}]}]}]}`, false, ""},
+		{`{"sections": [{"items": [{"type": "scene", "alt": "a", "shapes": [{"kind": "box", "center": [0, 0], "size": [1, 1], "bottom": 0, "top": 1}], "pins": [{"id": "a", "at": [0, 0], "label": "a"}, {"id": "a", "at": [0, 0], "label": "b"}]}]}]}`, false, "twice"},
+		{`{"sections": [{"items": [{"type": "scene", "alt": "a", "shapes": [{"kind": "box", "center": [0, 0], "size": [1, 1], "bottom": 0, "top": 1}]}, {"type": "scene", "alt": "b", "shapes": [{"kind": "box", "center": [0, 0], "size": [1, 1], "bottom": 0, "top": 1}]}]}]}`, false, "at most one scene"},
 		// node inspector links take the same credential-free https check as a top-level link
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "links": [{"title": "x", "url": "http://hub.example.com/x"}]}]}]}]}`, false, "https"},
 		{`{"sections": [{"items": [{"type": "graph", "nodes": [{"id": "a", "title": "a", "links": [{"title": "x", "url": "https://user:pass@hub.example.com/x"}]}]}]}]}`, false, "https"},

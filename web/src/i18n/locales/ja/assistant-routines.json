@@ -37,5 +37,10 @@
   "chat_at": "{when} {time} のチャット",
   "chat_n": "チャット {n}",
   "chats_label": "「{title}」のチャット",
-  "until": "終了 {when}"
+  "until": "終了 {when}",
+  "menu_actions": "「{title}」の操作",
+  "menu_skip_next": "次回の実行をスキップ",
+  "menu_cancel_skip": "スキップを取り消す",
+  "skip_conflict": "スケジュールが変更されました。次回の予定を確認してから再試行してください。",
+  "skip_failed": "スキップの設定を更新できませんでした。{error}"
 }

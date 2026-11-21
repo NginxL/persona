@@ -9,18 +9,21 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import persona.android.ShareTargetRow
+import persona.android.ui.ComponentActivityHostRule
 import persona.core.contracts.SessionKey
 import persona.core.designsystem.PersonaTheme
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [35], qualifiers = "en-w400dp-h900dp-xhdpi")
 class DiagnosticsShareSheetTest {
-    @get:Rule val rule = createComposeRule()
+    private val rule = createComposeRule()
+    @get:Rule val host = RuleChain.outerRule(ComponentActivityHostRule()).around(rule)
     private val target = SessionKey("machine", "session")
 
     @Test fun archiveHasAnAccessibleNameAndOpenChatUsesTheChosenTarget() {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // Concerns (concerns.go, #3561): the owner's concern is a to-do of kind concern that closes only once the main
@@ -20,6 +21,8 @@ func newConcernEnv(t *testing.T) *todoEventEnv {
 	t.Helper()
 	e := newTodoEventEnv(t, todoTestDB(t))
 	setSettings(t, e.s, func(v *Settings) { v.Main = "conv1" })
+	// Listed outside the health space: an extension is told of the concerns it records (todo_scope.go).
+	e.sessions("server", proto.Session{SessionID: "conv1", Title: "Persona", Assistant: true})
 	return e
 }
 

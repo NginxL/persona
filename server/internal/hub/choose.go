@@ -51,6 +51,12 @@ func (h *Hub) serveChoose(w http.ResponseWriter, r *http.Request) {
 		scopedPermissionDenied(w, "")
 		return
 	}
+	// A pending card the token may not act on (health space, private) is answered as if it did not exist, the same 404
+	// its read routes give, before the option is forwarded (#12216).
+	if principalOf(r.Context()).Role == roleExtension && h.actionCardHiddenFromExtensions(ix) {
+		writeErr(w, http.StatusNotFound, errDeleteUnknown)
+		return
+	}
 	q, ok := askQuestion(ix)
 	if !ok || ix.ToolName == proto.SecretHandoffTool { // a hand-off card is approved on the card only (secret_handoff.go)
 		refuse(http.StatusBadRequest, "not_choosable")

@@ -1,3 +1,4 @@
 {
+  "dictation_lost": "听写连接断了，请重新开始听写（{reason}）",
   "unavailable": "实时语音服务暂时不可用，稍后再试，或换一个语音模型（{reason}）"
 }

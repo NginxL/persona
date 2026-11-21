@@ -162,7 +162,8 @@ fun Todo.triage(
         return at(TriageSection.Done, TriageRule.FailedStart)
     }
     if (status == TriageStatus.NeedsYou || status == TriageStatus.Interrupted) return at(TriageSection.Waiting, TriageRule.AgentAsks)
-    if (!isDone && (hold?.unblock == HoldUnblock.User || review == "needs_user" || ask?.outcome == "decide" || ask?.outcome == "cannot")) {
+    if (!isDone && (review == "user_check" || hold?.unblock == HoldUnblock.User ||
+            review == "needs_user" || ask?.outcome == "decide" || ask?.outcome == "cannot")) {
         return at(TriageSection.Waiting, TriageRule.OwnerDecides)
     }
     if (status == TriageStatus.Working) return at(TriageSection.Working, TriageRule.AgentRunning)

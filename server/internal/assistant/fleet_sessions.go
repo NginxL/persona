@@ -119,6 +119,7 @@ func (s *Service) setSessions(machine string, list []proto.Session) {
 	s.ownerRoundsSeen(list) // the owner-turn gates end with their rounds (relay_presence.go, #6394)
 	s.sessionsChanged(machine)
 	s.searchWake() // the chat search index reads what changed (search_index.go)
+	s.historyWake()
 	// Messages from other conversations, for those no longer running; the todos' links and herdr marks.
 	d := DeviceSessions{MachineID: machine, Sessions: list, Connected: connected}
 	s.inOrder(func() { s.SessionsChanged(context.Background(), d) })
@@ -503,7 +504,7 @@ func (s *Service) decorateInventory(machine string, list []proto.Session, comple
 		list[i].MachineID = machine
 		list[i].PendingInteractions = counts[list[i].SessionID]
 		list[i].Assistant = isAssistantSession(&list[i], dir, m.manager)
-		if list[i].Assistant {
+		if list[i].Assistant && list[i].Space == "" {
 			list[i].Space = identity.SpaceOf(list[i].Cwd)
 		}
 		if t := shown[list[i].SessionID].Title; t != "" && list[i].Assistant {

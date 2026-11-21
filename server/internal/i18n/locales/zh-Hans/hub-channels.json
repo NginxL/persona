@@ -57,6 +57,8 @@
   "register_failed": "飞书没能创建应用。请改为填写你自己创建的应用的 App ID 和 App Secret。",
   "feature_answer_new_card": "回复发成新卡片",
   "feature_answer_new_card_description": "一轮结束时，回复作为新卡片发在对话最下面，飞书会提醒你，进度卡原地折叠；关闭时回复写进原来的进度卡",
+  "feature_read_group": "在群里用 /read 读群",
+  "feature_read_group_description": "在机器人所在的任意群里，你本人发「@机器人 /read 任务」时，先以你的身份读这个群最近的消息（没说范围就是最近 40 条）和其中的图片、附件，再完成任务，回答回复在你那条消息下。别人的消息不会触发",
   "feature_topic_cot": "话题里显示智能体过程",
   "feature_topic_cot_description": "在飞书原生的可折叠智能体消息里显示话题这一轮的思考和工具调用，同时保留进度卡；关闭后过程仍放在卡片的折叠面板里"
 }

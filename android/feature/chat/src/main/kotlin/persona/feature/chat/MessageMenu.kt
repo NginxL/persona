@@ -121,16 +121,21 @@ internal fun Modifier.messageMenu(target: MessageTarget?): Modifier {
     if (menu == null || target == null || target.text.isBlank() || rememberSelecting(menu, target.id)) return this
     val haptics = LocalHapticFeedback.current
     val largeWindow = LocalLargeWindowInput.current
-    val open = remember(menu, target) {
+    val linkMenu = LocalChatLinkMenu.current
+    val open = remember(menu, target, linkMenu) {
         {
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            menu.open(target)
+            if (linkMenu?.isPressingLink != true && linkMenu?.target == null) {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                menu.open(target)
+            }
         }
     }
-    val openSecondary = remember(menu, target, largeWindow) {
+    val openSecondary = remember(menu, target, largeWindow, linkMenu) {
         { anchor: Offset ->
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            if (largeWindow) menu.openAt(target, anchor) else menu.open(target)
+            if (linkMenu?.isPressingLink != true && linkMenu?.target == null) {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                if (largeWindow) menu.openAt(target, anchor) else menu.open(target)
+            }
         }
     }
     val quote = menu.quote

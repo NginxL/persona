@@ -1,14 +1,10 @@
 package nodecmd
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
-	"os/exec"
 	"runtime"
 	"time"
 
@@ -16,14 +12,9 @@ import (
 	"github.com/nwverse/persona/server/internal/nodeupdate"
 )
 
-type residentCheckOutput struct{ bytes.Buffer }
-
-func (b *residentCheckOutput) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > 4096 {
-		return 0, errors.New("resident preflight output exceeds its budget")
-	}
-	return b.Buffer.Write(p)
-}
+// residentCheckLimits bound the replacement's node-update-check before a reload or at startup. A new file gets a
+// first run long enough for endpoint protection to scan it (#12528); a file that already passed here gets 5 s.
+var residentCheckLimits = nodeupdate.CheckLimits{FirstRun: 60 * time.Second, Repeat: 5 * time.Second}
 
 func checkResidentReplacement(ctx context.Context, path, program string) (*nodeupdate.Check, error) {
 	check, err := residentReplacementInfo(ctx, path, program)
@@ -53,23 +44,12 @@ func preflightResidentReload(ctx context.Context, logger *log.Logger, path, prog
 
 // residentReplacementInfo returns the reported identity even if it fails validation.
 func residentReplacementInfo(ctx context.Context, path, program string) (*nodeupdate.Check, error) {
-	var check *nodeupdate.Check
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, path, "node-update-check")
-	var out residentCheckOutput
-	cmd.Stdout, cmd.Stderr = &out, io.Discard
-	cmd.WaitDelay = time.Second
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			err = fmt.Errorf("%w: %w", ctx.Err(), err)
-		}
+	info, err := nodeupdate.RunCheck(ctx, path, residentCheckLimits)
+	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(out.Bytes(), &check); err != nil {
-		return nil, err
-	}
-	if check == nil || check.OS != runtime.GOOS || check.Arch != runtime.GOARCH || check.Version == "" ||
+	check := &info
+	if check.OS != runtime.GOOS || check.Arch != runtime.GOARCH || check.Version == "" ||
 		(check.Program != "" && program != "" && check.Program != program) {
 		return check, errors.New("resident replacement identity does not match this node")
 	}

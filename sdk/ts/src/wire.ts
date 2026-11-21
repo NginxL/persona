@@ -46,7 +46,8 @@ export interface Manifest {
    */
   extension_pack?: PackMember[];
   /**
-   * The configuration's JSON Schema, in the subset every app draws as a form (docs "Configuration: the form subset").
+   * The configuration's JSON Schema, in the settings-form subset (docs "Configuration: the form subset"). Capable
+   * clients draw declared entry lists after opting in; other clients receive compatibility projections.
    */
   configuration?: unknown;
   secrets?: SecretSpec[];
@@ -321,6 +322,7 @@ export interface Contributes {
   browser?: NamedItem[];
   iphone?: NamedItem[];
   quota?: QuotaItem[];
+  usage?: UsageItem[];
   providers?: ProviderItem[];
   api?: APIItem[];
   assistant?: AssistantItem[];
@@ -574,7 +576,18 @@ export interface RepositoryProviderItem {
    * kinds stay issue and pull_request.
    */
   link_kinds?: RepositoryLinkLabel[];
+  /**
+   * What else the program answers (#11584): pr_status, the state of a pull request for delivery checks
+   * (repo.pr_status). Without it the manager reads repo.describe's state. Each at most once.
+   */
+  capabilities?: RepositoryCapability[];
 }
+
+/**
+ * A repository provider's optional answer: pr_status (repo.pr_status).
+ */
+export type RepositoryCapability = "pr_status" | (string & {});
+export const REPOSITORY_CAPABILITIES = ["pr_status"] as const;
 
 /**
  * The word a repository provider shows for one kind of its links (MR for a pull_request).
@@ -674,6 +687,12 @@ export interface NamedItem {
 }
 
 export interface QuotaItem {
+  id: string;
+  name: string;
+  hosts?: string[];
+}
+
+export interface UsageItem {
   id: string;
   name: string;
   hosts?: string[];
@@ -800,6 +819,11 @@ export interface ChannelItem {
 
 export interface ChannelCapabilities {
   images_in?: boolean;
+  /**
+   * It can send pictures: the hub puts an answer's pictures in channel.send's images instead of leaving them as
+   * Markdown in the text.
+   */
+  images_out?: boolean;
   files_in?: boolean;
   voice_in?: boolean;
   format?: string;
@@ -1627,9 +1651,10 @@ export type Component =
   | ImageComponent
   | GridComponent
   | CarouselComponent
-  | GraphComponent;
-export const COMPONENT_TYPES = ["text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel", "graph"] as const;
-export const COMPONENT_SINCE: Record<string, number> = { text: 1, metric: 1, progress: 1, row: 1, button: 1, link: 1, field: 1, divider: 1, chart: 2, stat_grid: 2, segmented: 2, markdown: 3, table: 3, empty: 3, loading: 3, html: 4, header: 4, breadcrumb: 4, file_tree: 4, code: 4, diff: 4, comment_thread: 4, composer: 4, image: 6, grid: 6, carousel: 6, graph: 10 };
+  | GraphComponent
+  | SceneComponent;
+export const COMPONENT_TYPES = ["text", "metric", "progress", "row", "button", "link", "field", "divider", "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "html", "header", "breadcrumb", "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel", "graph", "scene"] as const;
+export const COMPONENT_SINCE: Record<string, number> = { text: 1, metric: 1, progress: 1, row: 1, button: 1, link: 1, field: 1, divider: 1, chart: 2, stat_grid: 2, segmented: 2, markdown: 3, table: 3, empty: 3, loading: 3, html: 4, header: 4, breadcrumb: 4, file_tree: 4, code: 4, diff: 4, comment_thread: 4, composer: 4, image: 6, grid: 6, carousel: 6, graph: 10, scene: 11 };
 
 /**
  * A paragraph.
@@ -2107,6 +2132,154 @@ export const GRAPH_LAYOUTS = ["tree", "layered"] as const;
  */
 export type GraphDirection = "right" | "down" | (string & {});
 export const GRAPH_DIRECTIONS = ["right", "down"] as const;
+
+/**
+ * A small 3D model the person can turn, zoom and tap (UI version 11): a home with its rooms and furniture as simple
+ * shapes, each device pinned where it is with its state, and a light in the model for lamps that are on. The app
+ * builds it with its own engine; the extension sends shapes, never a model file or code. Metres; plan coordinates [x,
+ * y] with x east and y north, heights up from the floor; angles in degrees counter-clockwise from +x seen from above.
+ * Each pin counts as a component of the page; a view has at most one scene. In a card it is a still preview that
+ * opens full screen. An older app gets the poster as an image, or without one a row per pin.
+ */
+export interface SceneComponent {
+  type: "scene";
+  /** Keeps the person's camera across redraws of the page. */
+  key?: string;
+  /** What the model shows, in a sentence: read out first, and shown when it cannot be drawn. */
+  alt: string;
+  caption?: string;
+  /**
+   * A picture of the model for an older app (an image in its place) and for share as image. Without it an older app
+   * gets a row per pin.
+   */
+  poster?: ImageSource;
+  camera?: SceneCamera;
+  shapes: SceneShape[];
+  labels?: SceneLabel[];
+  pins?: ScenePin[];
+}
+
+/**
+ * Where the model is first seen from (UI version 11), orthographic, around the centre of the shapes' bounding box.
+ * Each field has its default when absent.
+ */
+export interface SceneCamera {
+  /**
+   * The camera's direction from the centre, in degrees counter-clockwise from +x (east): 225 (the default) stands
+   * south-west, looking north-east.
+   */
+  yaw?: number;
+  /** Degrees above the floor plane: 35 by default, 90 straight down. */
+  pitch?: number;
+  /** 1 (the default) fits the shapes' bounding box in the view; 2 draws it twice as large. */
+  zoom?: number;
+}
+
+/**
+ * One shape of a scene (UI version 11), told apart by kind: a box, a cylinder or a prism, standing from bottom to top
+ * (metres above the floor, at least 0.005 apart). Without color, the material's own.
+ */
+export type SceneShape =
+  | SceneBox
+  | SceneCylinder
+  | ScenePrism;
+export const SCENE_SHAPE_KINDS = ["box", "cylinder", "prism"] as const;
+
+/**
+ * A box (UI version 11): at yaw 0, size[0] along +x and size[1] along +y. round rounds its corners seen from above
+ * (at most half the smaller size); the app bevels its upright edges no more than half its height.
+ */
+export interface SceneBox {
+  kind: "box";
+  center: number[];
+  size: number[];
+  yaw?: number;
+  round?: number;
+  bottom: number;
+  top: number;
+  color?: string;
+  material?: SceneMaterial;
+}
+
+/**
+ * An upright cylinder (UI version 11): a round table's top, a stool, a lamp's stem.
+ */
+export interface SceneCylinder {
+  kind: "cylinder";
+  center: number[];
+  radius: number;
+  bottom: number;
+  top: number;
+  color?: string;
+  material?: SceneMaterial;
+}
+
+/**
+ * A floor plan's polygon raised from bottom to top (UI version 11): a room's floor, an L-shaped counter. The hub
+ * refuses a polygon that is not simple: a point twice, an edge shorter than 0.005, an edge folding back, edges that
+ * touch, an area under 0.0001.
+ */
+export interface ScenePrism {
+  kind: "prism";
+  points: (number[])[];
+  bottom: number;
+  top: number;
+  color?: string;
+  material?: SceneMaterial;
+}
+
+/**
+ * How a shape's surface looks (UI version 11): matte (the default), glass (see-through), metal, screen (dark and
+ * glossy), tile and wood (the app's own pattern, in metres, in the shape's color).
+ */
+export type SceneMaterial = "matte" | "glass" | "metal" | "screen" | "tile" | "wood" | (string & {});
+export const SCENE_MATERIALS = ["matte", "glass", "metal", "screen", "tile", "wood"] as const;
+
+/**
+ * A quiet name on the floor (UI version 11): a room's. Not tappable and not a component of the page; read out after
+ * alt.
+ */
+export interface SceneLabel {
+  text: string;
+  at: number[];
+  height?: number;
+}
+
+/**
+ * A device in the model (UI version 11): a pin at its place with its label and state, in tone's role color or color's
+ * named color (never both); with light on, the model lights up around it. Tapping it does its action, as a tile's.
+ * state is required when a tone other than neutral, a color or a light that is on says something, so it never rides
+ * on color or light alone. A scene has at most 16 pins with a light on.
+ */
+export interface ScenePin {
+  id: string;
+  at: number[];
+  /** Metres above the floor: a ceiling lamp's 2.4, an AC's 2.2. 0 when absent. */
+  height?: number;
+  label: string;
+  /** In plain words: On, Off, 26 °C. */
+  state?: string;
+  icon?: NavIcon;
+  tone?: Tone;
+  color?: Color;
+  light?: SceneLight;
+  action?: Action;
+}
+
+/**
+ * A lamp's light (UI version 11): when on, the model is lit around the pin, warm or cool. Off (the default) adds no
+ * light.
+ */
+export interface SceneLight {
+  on?: boolean;
+  warmth?: SceneWarmth;
+}
+
+/**
+ * warm (the default): a lamp's yellow light; cool: a white one.
+ */
+export type SceneWarmth = "warm" | "cool" | (string & {});
+export const SCENE_WARMTHS = ["warm", "cool"] as const;
 
 /**
  * Where a picture comes from (UI version 6): an https url the app loads without credentials, or a ref the extension
@@ -4875,6 +5048,12 @@ export interface ChannelMessage {
   forward?: string;
   /** The chat app's id of the message it answers. */
   reply_to?: string;
+  /**
+   * The chat app's thread the message is in, as an opaque key. For a channel with capabilities.threads, each thread
+   * has a conversation of its own: its first message starts a new one (the channel's target stays as it is), later
+   * ones continue it. Without it, or without threads, the message goes to the channel's target.
+   */
+  thread?: string;
   /** What it had that the channel cannot bring, for people (a voice message, a sticker). */
   unsupported?: string[];
 }
@@ -4920,6 +5099,11 @@ export interface ChannelSendParams {
   kind: ChannelSendKind;
   /** The owner's message it answers (ChannelMessage.id). */
   reply_to?: string;
+  /**
+   * Pictures to send after text, in order, to a channel with capabilities.images_out only: JPEG or PNG of at most 3
+   * MB each. text may then be empty. They belong to this ref: sent once with it, like the text.
+   */
+  images?: ChannelBlob[];
 }
 
 /**
@@ -6000,6 +6184,18 @@ export interface StorageClaimResult {
   job?: StorageJob;
 }
 
+/**
+ * Extend only the current run's unexpired lease on this exact key, job and token. The host sets lease_until to the
+ * later of its current value and renewal time plus lease_seconds; job state and attempts do not change.
+ */
+export interface StorageRenewParams {
+  request_id: string;
+  key: string;
+  id: string;
+  lease: string;
+  lease_seconds: number;
+}
+
 export interface StorageSettleParams {
   request_id: string;
   key: string;
@@ -6579,6 +6775,38 @@ export interface RepoDescribeResult {
   state?: string;
 }
 
+/**
+ * repo.pr_status (optional; capabilities pr_status, #11584): where a pull request the manager has stored stands, for
+ * delivery checks and the status sweep, by its canonical address. Asked about pull_request links only, at most about
+ * once a minute each. Answer with the program's own credentials; nothing of the answer reaches a model but its state.
+ */
+export interface RepoPRStatusParams {
+  /** The repository_providers item's id. */
+  contribution: string;
+  /** The link's canonical_url as repo.link answered it. */
+  canonical_url: string;
+}
+
+/**
+ * The pull request's state; the rest when the source says it. A value that breaks its rule is dropped, a state
+ * outside the enum fails the answer.
+ */
+export interface RepoPRStatusResult {
+  state: string;
+  /** The commit its merge made (merged only). */
+  merge_commit?: string;
+  /** Its head commit. */
+  head_sha?: string;
+  /** Its source branch. */
+  head_ref?: string;
+  /** Its target branch. */
+  base_ref?: string;
+  /** Who opened it, as the source names accounts. */
+  author?: string;
+  /** Whether the account the program uses opened it; left out when it cannot tell. */
+  viewer_is_author?: boolean;
+}
+
 /** One call or event of an extension point's protocol: who sends it, and the definitions its params and
  * its answer hold to (no result: any JSON; an event has no answer). */
 export interface Call {
@@ -6665,6 +6893,7 @@ export const CALLS: Record<string, Call> = {
   "storage.queue.list": { from: "program", params: "StorageQueueListParams", result: "StorageQueueListResult" },
   "storage.queue.enqueue": { from: "program", params: "StorageEnqueueParams", result: "StorageJobResult" },
   "storage.queue.claim": { from: "program", params: "StorageClaimParams", result: "StorageClaimResult" },
+  "storage.queue.renew": { from: "program", params: "StorageRenewParams", result: "StorageJobResult" },
   "storage.queue.ack": { from: "program", params: "StorageSettleParams", result: "StorageJobResult" },
   "storage.queue.forget": { from: "program", params: "StorageSettleParams", result: "StorageDeleteResult" },
   "storage.queue.retry": { from: "program", params: "StorageRetryParams", result: "StorageJobResult" },
@@ -6681,4 +6910,5 @@ export const CALLS: Record<string, Call> = {
   "repo.check": { from: "hub", params: "RepoCheckParams", result: "Empty" },
   "repo.link": { from: "hub", params: "RepoLinkParams", result: "RepoLinkResult" },
   "repo.describe": { from: "hub", params: "RepoDescribeParams", result: "RepoDescribeResult" },
+  "repo.pr_status": { from: "hub", params: "RepoPRStatusParams", result: "RepoPRStatusResult" },
 };

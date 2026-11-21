@@ -1,8 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { byAttention } from "../lib/format";
-import { agentSort, byUpdated } from "../lib/agent-sort";
-import { storedValue } from "../lib/compatibility";
 import { NO_PINS, isPinned, pinnedSessions } from "../lib/pins";
 import { api, credentialOwner } from "../lib/api";
 import { MANAGER_HEADER } from "../lib/manager-choice";
@@ -110,8 +108,7 @@ export function ActiveWorktreeActions({ request, registry, onOpenWorkspace, sess
       if (seen.has(key)) return false;
       seen.add(key); return true;
     });
-    const compare = agentSort(storedValue("persona.agentSort")) === "updated" ? byUpdated : byAttention;
-    return [...pinnedSessions(unique, pins), ...unique.filter((session) => !isPinned(session, pins)).sort(compare)];
+    return [...pinnedSessions(unique, pins), ...unique.filter((session) => !isPinned(session, pins)).sort(byAttention)];
   }, [sessions, storeSessions, pins]);
   const agent = firstDirectWorktreeAgent(target, catalog, ordered);
   const changeView = (next: "rename" | "delete" | "close") => {

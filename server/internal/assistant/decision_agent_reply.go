@@ -216,6 +216,17 @@ func (s *Service) agentDecisionSpoke(ctx context.Context, r SessionRef, at time.
 	s.reviewDismissals.actions.acquire(id)
 	defer s.reviewDismissals.actions.release(id)
 	t, ok := s.todoNow(id)
+	if ok && t.Supervision.state(t) == reviewUserCheck {
+		a, err := s.acceptAskLocked(id)
+		if err != nil || a == nil || !at.After(a.AskedAt) || acceptAskStale(a, t) {
+			return
+		}
+		// The owner is asking the same Agent for more, not passing the verification card.
+		if err := s.reopenTodo(ctx, id); err != nil {
+			s.logf("task %s: personal verification feedback: %v", id, err)
+		}
+		return
+	}
 	if !ok || t.DoneAt != nil || t.Supervision == nil || t.Supervision.State != reviewNeedsUser {
 		return
 	}

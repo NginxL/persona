@@ -21,6 +21,8 @@ func outcomeEnv(t *testing.T, st Store, reply string) (*Service, *fakeHub, Todo)
 	t.Helper()
 	f := newFakeHub().withMachine()
 	f.setSessions("box", proto.Session{SessionID: "s1", Title: "修登录", Cwd: "/code/weather/ios"})
+	// The conversation that hands the task out, outside the health space: its outcome goes to a project (todo_scope.go).
+	f.setSessions("server", proto.Session{SessionID: "conv1", Title: "Persona", Assistant: true})
 	f.setItems(proto.Item{Kind: proto.KindText, Role: "assistant", Text: reply})
 	var s *Service
 	if st == nil {

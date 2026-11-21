@@ -1,0 +1,479 @@
+[
+  {
+    "name": "report_to_supervisor",
+    "description": "Report to the Persona assistant that handed you this task and reviews it (your supervisor), not to the user: a decision you need from it (question), that you are stuck (blocked), that you finished with the evidence for each acceptance criterion (done), or where you are in a long task (progress). It reads it within minutes, and answers or redirects you by message. Only for a task Persona supervises; elsewhere nobody receives it and it says so. Don't use it for every small step, and keep asking the user what only the user can decide the usual way. A question that does not hold you up (you can go on with other work, and a late answer costs nothing: which name to prefer, a style choice) can be sent with `urgent: false`: nobody is woken for it, and the owner sees it in their next morning or evening briefing, under \"Can wait\", and answers you in your chat. If no briefing is switched on it goes as an urgent question, and the answer says so. Ask what blocks you without it. `urgent` is for kind `question` only.\n\nReport individual done_when entries as they change with `criteria`: `number` is the one-based position in the task's ordered done_when, `state` is pending / met / not_met, and evidence is required for met and not_met (a command plus output, a link or the gap). Omitted entries keep their previous state; pending resets an entry. This persists immediately and updates the task's count, but is an agent report, not the supervisor's acceptance. The supervisor receives the entries and evidence in its supervision message and still reviews the task itself.\n\nFor a to-do handoff, copy handoff_receipt from the request and report the head you checked. Use done with the result and evidence, or blocked for a failed check. The report goes to the originating to-do’s supervisor.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "text"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "progress",
+            "question",
+            "blocked",
+            "done"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "description": "what you report, in a few lines: the question with its options, what blocks you, what you did"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          },
+          "description": "links, command output, file paths that show it (a PR, CI, a screenshot)"
+        },
+        "handoff_receipt": {
+          "type": "object",
+          "required": [
+            "todo_id",
+            "id",
+            "head",
+            "check"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "todo_id": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "head": {
+              "type": "string"
+            },
+            "check": {
+              "type": "string"
+            }
+          }
+        },
+        "criteria": {
+          "type": "array",
+          "maxItems": 6,
+          "description": "only the done_when entries you are updating; does not accept or close the task",
+          "items": {
+            "type": "object",
+            "required": [
+              "number",
+              "state"
+            ],
+            "properties": {
+              "number": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "one-based position in the task's done_when"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "met",
+                  "not_met"
+                ]
+              },
+              "evidence": {
+                "type": "string",
+                "maxLength": 600,
+                "description": "required for met/not_met; command + output, link, or what is missing"
+              }
+            }
+          }
+        },
+        "step": {
+          "type": "integer",
+          "description": "the step you are on (progress)"
+        },
+        "steps": {
+          "type": "integer",
+          "description": "how many steps there are in all"
+        },
+        "urgent": {
+          "type": "boolean",
+          "description": "question only; default true. false: it can wait for the owner's next morning or evening briefing and you go on meanwhile; nobody is woken"
+        }
+      }
+    }
+  },
+  {
+    "name": "todo_decisions",
+    "description": "The decisions in force on the Persona todo you work on: the calls the user made on it (written in the todo, or answered in your question cards) and the ones agents noted, each with who made it (`by`: user or agent). They are what was settled before or while you worked: read them before choosing again, and again after your context was compacted. Only the todo you work on; elsewhere it says there is none.",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "todo_decision_add",
+    "description": "Note a call you made on the Persona todo you work on, so whoever picks it up next (another agent, you after compaction, the user) does not decide it again: a choice between ways of doing it, a default you settled on, something you ruled out. It shows in the todo as noted by an agent, not as the user's. Not for progress (that is report_to_supervisor) and not for what only the user can decide: ask them. To change an earlier decision an agent made, name it in supersedes_id (its id from todo_decisions); the user's own decisions you cannot replace: ask them.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "question",
+        "choice"
+      ],
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "what was to decide, in one line"
+        },
+        "choice": {
+          "type": "string",
+          "description": "what you chose"
+        },
+        "reason": {
+          "type": "string",
+          "description": "why, in a line or two"
+        },
+        "supersedes_id": {
+          "type": "string",
+          "description": "the earlier decision of this todo this one replaces"
+        }
+      }
+    }
+  },
+  {
+    "name": "todo_bind_thread",
+    "description": "Bind the Persona todo you work on to a chat thread (a topic in a group chat or a conversation), so the thread and the todo are known to belong together. One thread per todo, and a thread can belong to one todo only. It only records the link: it posts nothing to the thread. Use it when you were given the thread to work in or opened it for this todo; the identifiers are the ones the thread's own messages carry, never guessed. Only the todo you work on: naming another todo in todo_id is refused. A todo that already has another thread keeps it: changing it is the user's call, ask them. Binding the same thread again only updates its title.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "channel",
+        "chat_id",
+        "thread_id"
+      ],
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "the todo you work on; leave it out, or give the id you know it by (any other id is refused)"
+        },
+        "channel": {
+          "type": "string",
+          "description": "the channel the thread is on, by its channel id: feishu for a Feishu chat (not the app name written otherwise, not a guess)"
+        },
+        "chat_id": {
+          "type": "string",
+          "description": "the chat the thread is in; for feishu the chat id (oc_…)"
+        },
+        "thread_id": {
+          "type": "string",
+          "description": "the thread in that chat; for feishu the thread_id of the message events (omt_…), not the root message's message_id (om_…)"
+        },
+        "title": {
+          "type": "string",
+          "description": "a short label for the thread, shown beside the todo"
+        }
+      }
+    }
+  },
+  {
+    "name": "todo_repositories_get",
+    "description": "Read a to-do's saved repository/issue/PR associations and catalog status. No Git/network calls.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "todo_repositories_set",
+    "description": "Replace atomically using revisions from todo_repositories_get/repositories_list. [] removes metadata. Frozen source snapshots: remove/reselect to adopt catalog identity changes. Editable after execution. Omit links to keep; [] clears. Omitted/empty titles keep. Reread/reconcile conflicts. No files, progress or completion changes.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "expected_revision",
+        "expected_catalog_revision",
+        "repositories"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_catalog_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "repositories": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": [
+              "repo_id"
+            ],
+            "properties": {
+              "repo_id": {
+                "type": "string"
+              },
+              "directory_alias": {
+                "type": "string"
+              },
+              "requested_ref": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "default",
+                      "branch",
+                      "tag",
+                      "commit",
+                      "ref"
+                    ]
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "default"
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "value"
+                    ]
+                  }
+                ]
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "issue",
+                        "pull_request"
+                      ]
+                    },
+                    "number": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,19}$"
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
+                      "maxLength": 1024
+                    }
+                  },
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "required": [
+                        "url"
+                      ],
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "number"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "required": [
+                        "kind",
+                        "number"
+                      ],
+                      "not": {
+                        "required": [
+                          "url"
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "maxItems": 50
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "todo_repository_links_set",
+    "description": "Set saved-source links. [] clears; absent/empty titles keep. Reread conflicts. Metadata only.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "repo_id",
+        "expected_revision",
+        "links"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "repo_id": {
+          "type": "string"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue",
+                  "pull_request"
+                ]
+              },
+              "number": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,19}$"
+              },
+              "title": {
+                "type": "string",
+                "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
+                "maxLength": 1024
+              },
+              "role": {
+                "type": "string",
+                "description": "delivery (default): this task's own deliverable, verified by the delivery gate; reference: related work, shown but never verified at acceptance.",
+                "enum": [
+                  "delivery",
+                  "reference"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": [
+                  "url"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "number"
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "kind",
+                  "number"
+                ],
+                "not": {
+                  "required": [
+                    "url"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "todo_repository_links_add",
+    "description": "Atomically add 1–50 exact issue/PR URLs across links:[{url,title}] and legacy urls, at least one in total. Auto-group even unlisted repositories; no manual entry. Actual titles only: nonempty refreshes, omitted/empty keeps. Deduplicate; explicit adds can restore removed links. Preserve aliases, refs and source snapshots. Replace/remove via todo_repositories_get and revision-checked set tools. Associations never prove completion.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "urls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "string"
+          }
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string",
+                "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
+                "maxLength": 1024
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+]

@@ -169,9 +169,9 @@ func TestCodexResumeChecksHoldersAgain(t *testing.T) {
 func TestCodexUnconfirmedResumeIsNotStartedAgain(t *testing.T) {
 	n, f, cwd := codexHistoryNode(t)
 	listSessions(t, n)
-	old := codexStartWait
-	codexStartWait = 300 * time.Millisecond
-	t.Cleanup(func() { codexStartWait = old; codexResumes.Delete(startThread) })
+	old := codexResumeWait
+	codexResumeWait = 300 * time.Millisecond
+	t.Cleanup(func() { codexResumeWait = old; codexResumes.Delete(startThread) })
 	f.reset()
 	f.reply("workspace.list", map[string]any{"workspaces": []any{map[string]any{"workspace_id": "w1", "label": "proj"}}})
 	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))

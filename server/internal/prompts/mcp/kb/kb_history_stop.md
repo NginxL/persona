@@ -1,4 +1,4 @@
-Stop the history import now: it makes no further call until the user resumes it (the call in flight, if any, finishes; nothing is cancelled). Use it whenever the user says to stop or pause importing history.
+Stop the history import now: it makes no further call until the user resumes it (the call in flight, if any, finishes; nothing is cancelled). Use it whenever the user says to stop or pause importing history.{{template "shared/mcp_language" .}}
 
 ```json
 {

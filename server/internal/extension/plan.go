@@ -20,8 +20,8 @@ import (
 // preview_id/permissions_digest/bundle fields stay unchanged.
 type PreviewRef struct{ PreviewID, Digest string }
 
-// PlanStore commits the records as one batch; a plain error means nothing was committed, and a lost
-// confirmation must return CommitUnknownError.
+// PlanStore commits the records and their requested secret deletions as one batch; a plain error means nothing was
+// committed, and a lost confirmation must return CommitUnknownError.
 // The registry prepares the packages; recovering from a failure never deletes user data or rewrites sealed
 // secrets.
 type PlanStore interface {
@@ -83,10 +83,11 @@ func ManifestsEqual(a, b *Manifest) bool {
 var errPlanDigest = errors.New("权限摘要对不上：装的不是你看过的那一份")
 
 type plannedRecord struct {
-	preview *Preview
-	old     *Extension
-	row     Record
-	next    *Extension
+	preview               *Preview
+	old                   *Extension
+	row                   Record
+	next                  *Extension
+	mutation, oldMutation *settingsMutation
 }
 type packageMove struct {
 	preview        *Preview
@@ -98,7 +99,7 @@ type packageMove struct {
 // tool that does not install leaves the extension as it was. It answers the manifests it installed tools for.
 func (r *Registry) planTools(ctx context.Context, id, previewID, digest string, refs []PreviewRef, complete bool) ([]plannedRecord, error) {
 	r.mu.Lock()
-	plans, err := r.validatePlan(id, previewID, digest, refs, complete)
+	plans, err := r.validatePlan(ctx, id, previewID, digest, refs, complete)
 	r.mu.Unlock()
 	if err != nil {
 		return nil, nil // commitPlan says why
@@ -180,7 +181,8 @@ func (r *Registry) applyPlan(ctx context.Context, id, previewID, digest string, 
 		}
 		r.dropStaging(plan.preview)
 		r.audit(ctx, plan.row.ID, action, actor, detail)
-		r.changed(Change{ID: plan.row.ID, Kind: kind, Old: plan.old})
+		plan.oldMutation.finish()
+		plan.mutation.changed(Change{ID: plan.row.ID, Kind: kind, Old: plan.old})
 	}
 	return main, nil
 }
@@ -196,7 +198,7 @@ func (r *Registry) commitPlan(ctx context.Context, id, previewID, digest string,
 	}
 	r.expire()
 	r.mu.Lock()
-	plans, err = r.validatePlan(id, previewID, digest, refs, complete)
+	plans, err = r.validatePlan(ctx, id, previewID, digest, refs, complete)
 	r.mu.Unlock()
 	if err != nil {
 		return nil, nil, &PlanError{"校验", err}
@@ -236,7 +238,7 @@ func (r *Registry) commitPlan(ctx context.Context, id, previewID, digest string,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Recheck previews after callbacks; callbacks may read the registry, but no operation can update installed rows.
-	plans, err = r.validatePlan(id, previewID, digest, refs, complete)
+	plans, err = r.validatePlan(ctx, id, previewID, digest, refs, complete)
 	if err != nil {
 		return nil, nil, &PlanError{"校验", err}
 	}
@@ -310,14 +312,25 @@ func (r *Registry) commitPlan(ctx context.Context, id, previewID, digest string,
 	for _, plan := range plans {
 		rows = append(rows, plan.row)
 	}
+	for i := range plans {
+		plan := &plans[i]
+		plan.mutation = r.settingsWriteLocked(plan.row.ID)
+		if plan.old != nil && plan.old.Record.ID != plan.row.ID {
+			plan.oldMutation = r.settingsWriteLocked(plan.old.Record.ID)
+		}
+	}
 	if store, ok := r.store.(PlanStore); ok {
 		err = store.PutExtensionPlan(ctx, rows)
 	} else if len(rows) == 1 {
 		err = r.store.PutExtension(ctx, rows[0])
 	} else {
-		err = errors.New("数据库没有整份计划事务能力")
+		err = i18n.Err("extension-status.plan_transaction")
 	}
 	if err != nil {
+		for i := range plans {
+			plans[i].oldMutation.finishLocked()
+			plans[i].mutation.finishLocked()
+		}
 		var unknown *CommitUnknownError
 		if errors.As(err, &unknown) {
 			r.planProblem = &PlanError{"提交确认丢失，未激活；已保留包和备份，请重新加载 hub 后核对", err}
@@ -345,7 +358,7 @@ func (r *Registry) commitPlan(ctx context.Context, id, previewID, digest string,
 }
 
 // validatePlan is called with r.mu held. It validates the complete candidate graph and namespace before any write.
-func (r *Registry) validatePlan(id, previewID, digest string, refs []PreviewRef, complete bool) ([]plannedRecord, error) {
+func (r *Registry) validatePlan(ctx context.Context, id, previewID, digest string, refs []PreviewRef, complete bool) ([]plannedRecord, error) {
 	main := r.previews[previewID]
 	if main == nil || !r.now().Before(main.ExpiresAt) {
 		return nil, errors.New("预览过期了，重新预览一次")
@@ -495,8 +508,23 @@ func (r *Registry) validatePlan(id, previewID, digest string, refs []PreviewRef,
 		} else {
 			row.Remote = nil
 		}
+		if pv.Upgrade && pv.migrating {
+			sealed, err := r.store.ExtensionSecrets(ctx, old.Record.StorageKey())
+			if err != nil {
+				return nil, err
+			}
+			migrated, declared, err := migrateFixedSlots(old.Full, m, old.Record.Config, sealed)
+			if err != nil {
+				return nil, err
+			}
+			if !declared || !sameJSON(compactConfig(old.Record.Config), pv.migrationBase) || !sameJSON(migrated, pv.config) {
+				return nil, i18n.Err("extension-status.entry_migration_moved")
+			}
+			row.Config = migrated
+			row.ExpectedConfig = compactConfig(old.Record.Config)
+		}
 		if !json.Valid(row.Config) {
-			return nil, errors.New("已保存配置不是有效的 JSON")
+			return nil, i18n.Err("extension-status.saved_config_json")
 		}
 		candidate := &Extension{Record: row, Full: m, Manifest: m.Without(row.DisabledContributions)}
 		var err error
@@ -507,13 +535,16 @@ func (r *Registry) validatePlan(id, previewID, digest string, refs []PreviewRef,
 		if err = candidate.Schema.CheckSaved(row.Config); err != nil {
 			return nil, fmt.Errorf("扩展 %s 的已保存配置不符合新清单：%w", m.ID, err)
 		}
+		if err = checkEntrySecretNamespace(m, candidate.Schema, row.Config); err != nil {
+			return nil, err
+		}
 		combined[m.ID] = candidate
 		plans = append(plans, plannedRecord{preview: pv, old: old, row: row})
 		manifests = append(manifests, m)
 	}
 	if len(all) > 1 {
 		if _, ok := r.store.(PlanStore); !ok {
-			return nil, errors.New("数据库没有整份计划事务能力")
+			return nil, i18n.Err("extension-status.plan_transaction")
 		}
 	}
 	baseline := maps.Clone(r.extensions)

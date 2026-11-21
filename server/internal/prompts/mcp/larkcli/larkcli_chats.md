@@ -1,4 +1,4 @@
-The user's Lark chats read through lark-cli. The Open Platform does not expose unread counts, so the default and `recent` filter list chats by recent activity; `at_me` searches messages that mention the user. Each result includes a chat id and name for `larkcli_messages`.
+The user's Lark chats read through lark-cli. The Open Platform does not expose unread counts, so the default and `recent` filter list chats by recent activity; `at_me` searches messages that mention the user. Each result includes a chat id and name for `larkcli_messages`.{{template "shared/mcp_language" .}}
 
 ```json
 {

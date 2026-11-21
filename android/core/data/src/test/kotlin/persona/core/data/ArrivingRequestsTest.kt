@@ -58,6 +58,37 @@ class ArrivingRequestsTest {
         assertEquals(emptyList<Interaction>(), center.pending.value)
     }
 
+    @Test fun aDelegatingCardIsSilentUntilItsHandoverReplacesItById() = runTest {
+        fun card(delegating: Boolean, delegate: String? = null) = JsonCodec.decodeFromString<Interaction>(
+            """{"id":"ix1","machine_id":"mac","session_id":"a","kind":"question","delegating":$delegating,""" +
+                """"questions":[{"question":"Which driver?","options":[{"label":"pgx"},{"label":"sqlc"}]}]""" +
+                (delegate?.let { ""","delegate":$it""" } ?: "") + "}",
+        )
+        val looking = card(true)
+        val handed = card(false, """{"what":"Choose the database driver","recommend":"pgx"}""")
+        val connection = Connection()
+        val center = HubInteractionCenter(Transport(emptyList()), connection, backgroundScope)
+        val arrived = mutableListOf<String>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { center.arrivals.collect { arrived += it.id } }
+
+        connection.events.emit(InteractionEvent(looking))
+        runCurrent()
+        assertEquals(listOf(looking), center.pending.value)
+        // This flow drives the arrival sound, haptic and notification: looking is not news yet.
+        assertEquals(emptyList<String>(), arrived)
+
+        connection.events.emit(InteractionEvent(handed))
+        runCurrent()
+        assertEquals(listOf(handed), center.pending.value)
+        assertEquals(listOf("ix1"), arrived)
+
+        // Repeating or editing the handed-over copy is not another arrival.
+        connection.events.emit(InteractionEvent(handed))
+        runCurrent()
+        assertEquals(listOf(handed), center.pending.value)
+        assertEquals(listOf("ix1"), arrived)
+    }
+
     private class Connection : HubConnection {
         override val state = MutableStateFlow(ConnectionState.WaitingForNetwork)
         override val events = MutableSharedFlow<ServerEvent>()

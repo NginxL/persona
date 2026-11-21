@@ -1,15 +1,20 @@
 package persona.feature.assistant
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.contracts.api.AssistantConfig
+import persona.core.contracts.api.AssistantConfigUpdate
 import persona.core.contracts.api.AssistantManagement
+import persona.core.contracts.api.ConversationTagFilters
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ConversationTagsHistoryTest {
@@ -28,6 +33,123 @@ class ConversationTagsHistoryTest {
             release?.await()
             if (refuse) throw IllegalStateException("Hub refused tags")
         }
+    }
+
+    private class FiltersApi(hub: HistoryHub) : AssistantManagement by hub {
+        val writes = mutableListOf<ConversationTagFilters>()
+        var refuse = false
+        var omitResponse = false
+        var answer: ConversationTagFilters? = null
+        var entered: CompletableDeferred<Unit>? = null
+        var release: CompletableDeferred<Unit>? = null
+
+        override suspend fun updateConfig(update: AssistantConfigUpdate): AssistantConfig {
+            val value = requireNotNull(update.conversationTagFilters)
+            writes += value
+            entered?.complete(Unit)
+            release?.await()
+            if (refuse) throw IllegalStateException("Hub refused tag filters")
+            return AssistantConfig(conversationTagFilters = when {
+                omitResponse -> ConversationTagFilters.Unsupported
+                else -> answer ?: value
+            })
+        }
+    }
+
+    @Test fun filterWritesAreOptimisticOrderedAndAuthoritativelyReconciled() = runTest {
+        val hub = HistoryHub(original).apply {
+            assistant.value = assistant.value.copy(conversationTagFilters = ConversationTagFilters(null))
+        }
+        val api = FiltersApi(hub).apply {
+            entered = CompletableDeferred()
+            release = CompletableDeferred()
+            answer = ConversationTagFilters(listOf("first", "second", "normalized-by-hub"))
+        }
+        val history = ConversationHistory(api, hub)
+
+        val saving = async { history.saveConversationTagFilters(listOf(" second ", "first", "second")) }
+        api.entered!!.await()
+        assertEquals(listOf("second", "first"), hub.assistant.value.conversationTagFilters.entries)
+        assertEquals(listOf("second", "first"), api.writes.single().entries)
+        assertTrue(history.tagFiltersBusy)
+
+        api.release!!.complete(Unit)
+        assertTrue(saving.await().isSuccess)
+        assertEquals(listOf("first", "second", "normalized-by-hub"), hub.assistant.value.conversationTagFilters.entries)
+        assertFalse(history.tagFiltersBusy)
+    }
+
+    @Test fun refusedFilterRemovalRestoresEntriesSelectionAndReloads() = runTest {
+        val hub = HistoryHub(original).apply {
+            assistant.value = assistant.value.copy(
+                conversationTagFilters = ConversationTagFilters(listOf("before", "kept")))
+        }
+        val api = FiltersApi(hub).apply { refuse = true }
+        val history = ConversationHistory(api, hub)
+        history.selectTag("before")
+
+        val result = history.saveConversationTagFilters(listOf("kept"))
+
+        assertTrue(result.isFailure)
+        assertEquals(listOf("before", "kept"), hub.assistant.value.conversationTagFilters.entries)
+        assertEquals("before", history.activeTag)
+        assertEquals(1, hub.refreshes)
+        assertFalse(history.tagFiltersBusy)
+    }
+
+    @Test fun refusedResetRestoresAnUnusedSelectionClearedByAutomaticSettling() = runTest {
+        val hub = HistoryHub(original).apply {
+            assistant.value = assistant.value.copy(
+                conversationTagFilters = ConversationTagFilters(listOf("unused")))
+        }
+        val api = FiltersApi(hub).apply {
+            refuse = true
+            entered = CompletableDeferred()
+            release = CompletableDeferred()
+        }
+        val history = ConversationHistory(api, hub)
+        history.selectTag("unused")
+
+        val saving = launch { history.saveConversationTagFilters(null) }
+        api.entered!!.await()
+        history.settle(listOf(other))
+        assertNull(history.activeTag)
+        api.release!!.complete(Unit)
+        saving.join()
+
+        assertEquals(listOf("unused"), hub.assistant.value.conversationTagFilters.entries)
+        assertEquals("unused", history.activeTag)
+    }
+
+    @Test fun missingFilterFieldInThePutAnswerIsAFailedWriteAndRollsBack() = runTest {
+        val hub = HistoryHub(original).apply {
+            assistant.value = assistant.value.copy(conversationTagFilters = ConversationTagFilters(null))
+        }
+        val api = FiltersApi(hub).apply { omitResponse = true }
+        val history = ConversationHistory(api, hub)
+
+        val result = history.saveConversationTagFilters(emptyList())
+
+        assertTrue(result.isFailure)
+        assertEquals(ConversationTagFilters(null), hub.assistant.value.conversationTagFilters)
+        assertEquals(1, hub.refreshes)
+    }
+
+    @Test fun customSelectionSurvivesHavingNoMatchingConversationAndResetWritesNull() = runTest {
+        val hub = HistoryHub(original).apply {
+            assistant.value = assistant.value.copy(
+                conversationTagFilters = ConversationTagFilters(listOf("unused", "before")))
+        }
+        val api = FiltersApi(hub)
+        val history = ConversationHistory(api, hub)
+        history.selectTag("unused")
+        history.settle(listOf(other))
+        assertEquals("unused", history.activeTag)
+
+        assertTrue(history.saveConversationTagFilters(null).isSuccess)
+        assertNull(api.writes.single().entries)
+        assertTrue(hub.assistant.value.conversationTagFilters.supported)
+        assertNull(hub.assistant.value.conversationTagFilters.entries)
     }
 
     @Test fun saveIsOptimisticAndSettlesOnlyWhenTheHubCarriesTheWholeSet() = runTest {

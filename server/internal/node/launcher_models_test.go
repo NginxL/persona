@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/nodeclient"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -75,6 +77,171 @@ func TestClaudeModelListErrors(t *testing.T) {
 		if _, err := claudeModelList(io.Discard, strings.NewReader(out+"\n")); err == nil {
 			t.Errorf("%s: no error", name)
 		}
+	}
+}
+
+func TestManagedClaudeModelListWithNode(t *testing.T) {
+	for _, setup := range []string{
+		"NVM", "Homebrew prefix", "Node on service PATH", "Node from shell startup", "Claude shell wrapper",
+	} {
+		t.Run(setup, func(t *testing.T) {
+			testManagedClaudeWithNode(t, setup, false)
+		})
+	}
+}
+
+func TestManagedClaudeLaunchPreservesPath(t *testing.T) {
+	testManagedClaudeWithNode(t, "Homebrew prefix", true)
+}
+
+func testManagedClaudeWithNode(t *testing.T, setup string, ordinaryLaunch bool) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("uses Unix npm launchers and node sockets")
+	}
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("no zsh")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("no Node.js to run the npm launcher fixture")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := launchKeyHome(t)
+	n, _ := testNode(t)
+	n.home, n.dir = home, filepath.Dir(nodeclient.SocketPath())
+	programDir := filepath.Join(home, "Persona Link")
+	if err := os.MkdirAll(programDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	n.bin = filepath.Join(programDir, "personad")
+	if err := os.Symlink(self, n.bin); err != nil {
+		t.Fatal(err)
+	}
+	serviceBin := filepath.Join(home, "service-bin")
+	link := func(target, path string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link(zsh, filepath.Join(serviceBin, "zsh"))
+	t.Setenv("NVM_DIR", "")
+	t.Setenv("PERSONA_NODEJS", "")
+	t.Setenv("PATH", serviceBin)
+	localClaude := filepath.Join(home, ".local", "bin", "claude")
+	cli := localClaude
+	var prefix string
+	if setup == "NVM" {
+		root := filepath.Join(home, "custom NVM")
+		prefix = filepath.Join(root, "versions", "node", "v22.1.0")
+		t.Setenv("NVM_DIR", root)
+		// The service knows one Node installation; a different interpreter on PATH must not win.
+		t.Setenv("PERSONA_NODEJS", filepath.Join(prefix, "bin", "node"))
+		writeExecutable(t, filepath.Join(serviceBin, "node"), "#!/bin/sh\nexit 17\n")
+	} else if setup == "Homebrew prefix" {
+		prefix = filepath.Join(home, "opt", "homebrew")
+	}
+	if prefix != "" {
+		cli = filepath.Join(prefix, "lib", "node_modules", "@anthropic-ai", "claude-code", "cli.js")
+		bin := filepath.Join(prefix, "bin")
+		rel, err := filepath.Rel(bin, cli)
+		if err != nil {
+			t.Fatal(err)
+		}
+		link(rel, filepath.Join(bin, "claude"))
+		link(node, filepath.Join(bin, "node"))
+		if setup == "Homebrew prefix" {
+			link(filepath.Join(bin, "claude"), localClaude)
+		}
+	} else if setup == "Node on service PATH" {
+		link(node, filepath.Join(serviceBin, "node"))
+	}
+	if ordinaryLaunch {
+		writeExecutable(t, filepath.Join(serviceBin, "node"),
+			"#!/bin/sh\nFIXTURE_NODE=service exec "+shellQuote(node)+` "$@"`+"\n")
+		writeExecutable(t, filepath.Join(serviceBin, "fixture-tool"), "#!/bin/sh\nexit 0\n")
+		writeExecutable(t, filepath.Join(prefix, "bin", "fixture-tool"), "#!/bin/sh\nexit 17\n")
+	}
+
+	shellWrapper := setup == "Claude shell wrapper"
+	if shellWrapper {
+		cli = filepath.Join(home, "wrapped Claude", "cli.js")
+		writeExecutable(t, localClaude, "#!/bin/sh\nexec node "+shellQuote(cli)+` "$@"`+"\n")
+	}
+	shellSetup := setup == "Node from shell startup" || shellWrapper
+	wantPath := serviceBin
+	rc := `: > "$HOME/rc-ran"` + "\n/bin/sleep 20\n"
+	if shellSetup {
+		shellBin := filepath.Join(home, "shell runtime", "bin")
+		link(node, filepath.Join(shellBin, "node"))
+		wantPath = shellBin + ":" + serviceBin
+		rc = `: > "$HOME/rc-ran"` + "\nexport PATH=" + shellQuote(shellBin) + `:"$PATH"` + "\n"
+	}
+	t.Setenv("FIXTURE_EXPECTED_PATH", wantPath)
+	writeFile(t, filepath.Join(home, ".zshrc"), rc)
+	writeExecutable(t, cli, `#!/usr/bin/env node
+const fs = require('node:fs');
+const readline = require('node:readline');
+const args = process.argv.slice(2);
+if (process.env.PATH !== process.env.FIXTURE_EXPECTED_PATH || process.env.PERSONA_MANAGED_MODEL_PROBE !== undefined) {
+  throw new Error('Managed Claude inherited a changed PATH or the internal probe marker');
+}
+if (args.includes('--version')) {
+  const {spawnSync} = require('node:child_process');
+  if (process.env.FIXTURE_NODE !== 'service' || process.env.ANTHROPIC_AUTH_TOKEN !== 'probe-fixture' ||
+      spawnSync('fixture-tool').status !== 0) {
+    throw new Error('Managed Claude did not use the Node.js and tool from the service PATH');
+  }
+  process.exit(0);
+}
+const settings = JSON.parse(fs.readFileSync(args[args.indexOf('--settings') + 1]));
+const rl = readline.createInterface({input: process.stdin});
+rl.on('line', (line) => {
+  const req = JSON.parse(line);
+  if (req.type !== 'control_request' || req.request.subtype !== 'initialize' ||
+      !settings.disableAllHooks || settings.env.ANTHROPIC_AUTH_TOKEN !== 'probe-fixture' ||
+      process.env.ANTHROPIC_AUTH_TOKEN !== 'probe-fixture' ||
+      !args.includes('stream-json') || !args.includes('--verbose')) {
+    throw new Error('Missing managed model probe configuration');
+  }
+  console.log(JSON.stringify({type: 'control_response', response: {
+    subtype: 'success', request_id: req.request_id, response: {models: [
+      {value: 'npm-model', displayName: 'NPM model'}
+    ]}
+  }}));
+});
+`)
+	t.Setenv("ZDOTDIR", home)
+	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("NODE_OPTIONS", "")
+	t.Setenv("NODE_TEST_LAUNCH", "1")
+	n.setManaged([]proto.ManagedLauncher{{Name: "store", APIKey: "probe-fixture", Auth: "bearer"}})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := n.listenOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ordinaryLaunch {
+		out, err := exec.CommandContext(ctx, n.bin, "launch", "store", "--version").CombinedOutput()
+		if err != nil {
+			t.Fatalf("managed launch: %v: %s", err, out)
+		}
+	} else {
+		models, err := n.listAgentModels(ctx, "store", "claude")
+		if err != nil || len(models) != 1 || models[0].ID != "npm-model" {
+			t.Fatalf("managed models = %+v, %v", models, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, "rc-ran")); (shellSetup && err != nil) || (!shellSetup && !os.IsNotExist(err)) {
+		t.Fatalf("shell initialization: expected ran=%t, stat error=%v", shellSetup, err)
 	}
 }
 

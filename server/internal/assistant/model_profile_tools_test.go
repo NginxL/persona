@@ -136,7 +136,7 @@ func dispatchProfilePlan(t *testing.T, s *Service, st *profileTaskStore, task Pl
 }
 
 func profilePlanTask() PlanTask {
-	return PlanTask{Title: "Fix the login crash", Prompt: "Fix the login crash and verify the change", Machine: "box", Cwd: "/code/app", Tier: "standard", Permission: "bypassPermissions"}
+	return PlanTask{Title: "Fix the login crash", Prompt: "Fix the login crash and verify the change", Role: "worker", Machine: "box", Cwd: "/code/app", Tier: "standard", Permission: "bypassPermissions"}
 }
 
 func profileNodeStarts(f *fakeHub) []DeviceCall {

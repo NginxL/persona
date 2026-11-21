@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -18,6 +18,12 @@ const records = [
   { step_index: 2, type: 'USER_INPUT', content: 'Repeat' },
   { step_index: 3, type: 'PLANNER_RESPONSE', content: 'Second answer' },
 ].map((step) => ({ ...step, status: 'DONE', created_at: at }))
+const nativeRecord = (step) => ({
+  type: `CORTEX_STEP_TYPE_${step.type}`,
+  metadata: { source: step.type === 'USER_INPUT' ? 'CORTEX_STEP_SOURCE_USER_EXPLICIT' : 'MODEL', createdAt: step.created_at },
+  ...(step.type === 'USER_INPUT' ? { userInput: { items: [{ text: step.content }] } } : {}),
+  ...(step.type === 'PLANNER_RESPONSE' ? { plannerResponse: { response: step.content } } : {}),
+})
 
 async function fixture(t, extra = {}) {
   const home = mkdtempSync(join(tmpdir(), 'agy-rewind-'))
@@ -29,10 +35,7 @@ async function fixture(t, extra = {}) {
   writeFileSync(join(home, 'calls.jsonl'), '')
   const nativeFile = join(home, 'trajectory.json')
   const snapshot = {
-    status: 'CASCADE_RUN_STATUS_IDLE', trajectory: { cascadeId: RAW, steps: records.map((step) => ({
-      type: `CORTEX_STEP_TYPE_${step.type}`, metadata: { source: step.type === 'USER_INPUT' ? 'CORTEX_STEP_SOURCE_USER_EXPLICIT' : 'MODEL' },
-      ...(step.type === 'USER_INPUT' ? { userInput: { items: [{ text: step.content }] } } : {}),
-    })) }, ...extra,
+    status: 'CASCADE_RUN_STATUS_IDLE', trajectory: { cascadeId: RAW, steps: records.map(nativeRecord) }, ...extra,
   }
   writeFileSync(nativeFile, JSON.stringify(snapshot))
   const db = new DatabaseSync(join(config, 'conversation_summaries.db'))
@@ -196,4 +199,234 @@ test('a companion restart preserves an empty native trajectory with no steps fie
   const page = await node.peer.call('session.items', { session_id: SESSION })
   assert.deepEqual(page.items, [])
   assert.ok(page.history.endsWith(':cut:0'))
+})
+
+const later = '2026-01-01T00:01:00Z'
+const texts = (page) => page.items.map((item) => item.text)
+
+test('a sent turn appends to the history, its export changes it once and a rewind still replaces it (#12014)', async (t) => {
+  const { node, transcript, db, nativeFile, rewind } = await fixture(t, { promptPlan: [{ reply: 'Third answer' }] })
+  const idle = await node.peer.call('session.items', { session_id: SESSION })
+  await node.peer.call('session.watch', { session_id: SESSION, since_seq: idle.to_seq })
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Third' })
+  await until('the settled reply is pushed', () => node.last('session.items')?.items.some((item) => item.text === 'Third answer'))
+  for (const batch of node.all('session.items')) {
+    assert.equal(batch.history, idle.history, 'the send and its reply append')
+    assert.ok(batch.from_seq >= idle.to_seq)
+  }
+
+  const turn = [{ step_index: 4, type: 'USER_INPUT', content: 'Third' }, { step_index: 5, type: 'PLANNER_RESPONSE', content: 'Third answer' }]
+    .map((step) => ({ ...step, status: 'DONE', created_at: later }))
+  appendFileSync(transcript, turn.map((step) => JSON.stringify(step)).join('\n') + '\n')
+  const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  snapshot.trajectory.steps.push(
+    { type: 'CORTEX_STEP_TYPE_USER_INPUT', metadata: { source: 'CORTEX_STEP_SOURCE_USER_EXPLICIT' }, userInput: { items: [{ text: 'Third' }] } },
+    { type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE', metadata: { source: 'MODEL' } })
+  writeFileSync(nativeFile, JSON.stringify(snapshot))
+  db.exec('UPDATE conversation_summaries SET step_count = 6')
+  await until('the export replaces the projected turn', () => node.last('session.items')?.history !== idle.history)
+  const exported = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(texts(exported), [...records.map((step) => step.content), 'Third', 'Third answer'])
+  assert.equal(node.last('session.items').history, exported.history)
+  assert.equal(node.last('session.items').from_seq, 0)
+
+  await rewind({ prompt: 'Third' })
+  const rewound = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(texts(rewound), records.map((step) => step.content))
+  assert.notEqual(rewound.history, exported.history)
+  await until('the rewind is pushed', () => node.last('session.items')?.history === rewound.history)
+})
+
+test('a restart changes the history only when projected steps were outstanding (#12014)', async (t) => {
+  const { node, home, restart } = await fixture(t, { promptPlan: [{ reply: 'Third answer' }] })
+  const items = () => node.peer.call('session.items', { session_id: SESSION })
+  const idle = await items()
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Third' })
+  await until('the reply waits for its export', async () => texts(await items()).includes('Third answer'))
+  assert.equal((await items()).history, idle.history)
+  const epoch = join(home, 'config/brain', RAW, '.persona-history-epoch')
+  if (process.platform !== 'win32') assert.equal(statSync(epoch).mode & 0o777, 0o600)
+
+  await restart()
+  const restarted = await items()
+  assert.notEqual(restarted.history, idle.history, 'clients drop the projected steps they hold')
+  assert.deepEqual(texts(restarted), records.map((step) => step.content))
+  await restart()
+  assert.equal((await items()).history, restarted.history, 'nothing was outstanding')
+})
+
+test('a restart with an unreadable history epoch does not reuse the history of projected steps (#12014)', {
+  skip: process.platform === 'win32' || process.getuid?.() === 0,
+}, async (t) => {
+  const { node, home, restart } = await fixture(t, { promptPlan: [{ reply: 'Third answer' }] })
+  const items = () => node.peer.call('session.items', { session_id: SESSION })
+  const idle = await items()
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Third' })
+  await until('the reply waits for its export', async () => texts(await items()).includes('Third answer'))
+  const sent = await items()
+  assert.equal(sent.history, idle.history)
+  const epoch = join(home, 'config/brain', RAW, '.persona-history-epoch')
+  chmodSync(epoch, 0o000)
+  try {
+    await restart()
+    assert.notEqual((await items()).history, sent.history, 'clients drop the projected steps they hold')
+  } finally {
+    chmodSync(epoch, 0o600)
+  }
+})
+
+test('a send changes the history at once when its brain directory is read-only (#12014)', {
+  skip: process.platform === 'win32' || process.getuid?.() === 0,
+}, async (t) => {
+  const { node, home, restart } = await fixture(t, { promptPlan: [{ reply: 'Third answer' }] })
+  const items = () => node.peer.call('session.items', { session_id: SESSION })
+  const brain = join(home, 'config/brain', RAW)
+  const idle = await items()
+  chmodSync(brain, 0o500)
+  try {
+    await node.peer.call('session.send', { session_id: SESSION, text: 'Third' })
+    await until('the reply waits for its export', async () => texts(await items()).includes('Third answer'))
+    const sent = await items()
+    assert.notEqual(sent.history, idle.history, 'no restart can report the history of these projected steps')
+    assert.equal(existsSync(join(brain, '.persona-history-epoch')), false)
+    await restart()
+    assert.notEqual((await items()).history, sent.history)
+  } finally {
+    chmodSync(brain, 0o700)
+  }
+})
+
+test('an inventory refresh revalidates an existing cut after native work advances', async (t) => {
+  const { node, transcript, rewind, db, nativeFile, calls } = await fixture(t)
+  const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  const fullTrajectory = [...snapshot.trajectory.steps,
+    nativeRecord({ ...records[2], step_index: 4, content: 'New question' }),
+    nativeRecord({ ...records[3], step_index: 5, content: 'Recovered answer' })]
+  await rewind()
+  await until('rewound inventory', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'First answer')
+
+  appendFileSync(transcript, [
+    { ...records[2], step_index: 4, content: 'New question' },
+    { ...records[3], step_index: 5, content: 'Recovered answer' },
+  ].map((step) => JSON.stringify(step)).join('\n') + '\n')
+  writeFileSync(nativeFile, JSON.stringify({ ...snapshot, trajectory: { ...snapshot.trajectory, steps: fullTrajectory } }))
+  db.prepare('UPDATE conversation_summaries SET step_count = 6, last_modified_time = ?').run(new Date().toISOString())
+  const checks = calls().filter((call) => call.method === 'GetCascadeTrajectory').length
+  await node.peer.call('session.rename', { session_id: SESSION, title: 'Renamed' })
+  await until('recovered last reply in the inventory', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'Recovered answer')
+  assert.equal(calls().filter((call) => call.method === 'GetCascadeTrajectory').length, checks + 1)
+  const page = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(page.items.at(-1).text, 'Recovered answer')
+})
+
+test('a changed summary cannot expose the abandoned tail while the native trajectory is still rewound', async (t) => {
+  const { node, transcript, rewind, db, nativeFile, calls } = await fixture(t)
+  await rewind()
+  await until('rewound inventory', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'First answer')
+  appendFileSync(transcript, [
+    { ...records[2], step_index: 4, content: 'Unexported question' },
+    { ...records[3], step_index: 5, content: 'Abandoned answer' },
+  ].map((step) => JSON.stringify(step)).join('\n') + '\n')
+  db.prepare('UPDATE conversation_summaries SET step_count = 6, last_modified_time = ?').run(new Date().toISOString())
+  const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  assert.equal(snapshot.trajectory.steps.length, 2)
+  const checks = calls().filter((call) => call.method === 'GetCascadeTrajectory').length
+  const before = node.all('runtime.sessions').length
+  await node.peer.call('session.rename', { session_id: SESSION, title: 'Renamed' })
+  await until('inventory refreshed', () => node.all('runtime.sessions').length > before)
+  const page = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(page.items.map((item) => item.text), ['Repeat', 'First answer'])
+  assert.equal(calls().filter((call) => call.method === 'GetCascadeTrajectory').length, checks + 1)
+  assert.equal(node.last('runtime.sessions').sessions[0].last_text, 'First answer')
+})
+
+test('native progress cannot clear a cut until the replacement export catches up', async (t) => {
+  const { node, transcript, rewind, db, nativeFile } = await fixture(t)
+  const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  const replacement = [
+    records[0], records[1],
+    { ...records[2], content: 'Replacement question', created_at: '2026-01-02T00:00:00Z' },
+    { ...records[3], content: 'Replacement answer', created_at: '2026-01-02T00:00:01Z' },
+  ]
+  await rewind()
+  await until('rewound inventory', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'First answer')
+  writeFileSync(nativeFile, JSON.stringify({ ...snapshot, trajectory: { ...snapshot.trajectory, steps: replacement.map(nativeRecord) } }))
+  db.prepare('UPDATE conversation_summaries SET step_count = 4, last_modified_time = ?').run(new Date().toISOString())
+  const before = node.all('runtime.sessions').length
+  await node.peer.call('session.rename', { session_id: SESSION, title: 'Renamed' })
+  await until('inventory refreshed', () => node.all('runtime.sessions').length > before)
+  const lagging = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(lagging.items.map((item) => item.text), ['Repeat', 'First answer'])
+  assert.ok(lagging.history.endsWith(':cut:2'))
+  assert.equal(node.last('runtime.sessions').sessions[0].last_text, 'First answer')
+
+  writeFileSync(transcript, replacement.map((step) => JSON.stringify(step)).join('\n') + '\n')
+  await node.peer.call('session.rename', { session_id: SESSION, title: 'Renamed again' })
+  await until('replacement export is visible', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'Replacement answer')
+  const caughtUp = await node.peer.call('session.items', { session_id: SESSION })
+  assert.deepEqual(caughtUp.items.map((item) => item.text), replacement.map((step) => step.content))
+})
+
+test('a stale native check cannot erase a cut installed by a newer rewind', async (t) => {
+  const { node, home, transcript, rewind, db, nativeFile } = await fixture(t)
+  await rewind()
+  await until('first rewound inventory', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'First answer')
+  const watching = await node.peer.call('session.items', { session_id: SESSION })
+  await node.peer.call('session.watch', { session_id: SESSION, since_seq: watching.to_seq })
+  const abandoned = [
+    { ...records[2], step_index: 4, content: 'Abandoned question' },
+    { ...records[3], step_index: 5, content: 'Abandoned answer' },
+  ]
+  appendFileSync(transcript, abandoned.map((step) => JSON.stringify(step)).join('\n') + '\n')
+  const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  writeFileSync(nativeFile, JSON.stringify({ ...snapshot, holdTrajectoryOnce: true,
+    trajectory: { ...snapshot.trajectory, steps: [...records.map(nativeRecord), ...abandoned.map(nativeRecord)] } }))
+  db.prepare('UPDATE conversation_summaries SET step_count = 6, last_modified_time = ?').run(new Date().toISOString())
+  await node.peer.call('session.rename', { session_id: SESSION, title: 'Start stale check' })
+  await until('stale native check is held', () => existsSync(join(home, 'trajectory-held')))
+
+  await rewind({ occurrence: 1, prompts_after: 1 })
+  await until('second rewound inventory', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'First answer')
+  writeFileSync(join(home, 'release-trajectory'), '')
+  await until('stale native response is sent', () => existsSync(join(home, 'trajectory-response-sent')))
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  const page = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(node.all('session.items').some((event) => event.items?.some((item) => item.text === 'Abandoned answer')), false)
+  assert.equal(node.all('runtime.sessions').some((event) => event.sessions?.[0]?.last_text === 'Abandoned answer'), false)
+  assert.deepEqual(page.items.map((item) => item.text), records.slice(0, 2).map((step) => step.content))
+  assert.equal(node.last('runtime.sessions').sessions[0].last_text, 'First answer')
+})
+
+test('a stale check cannot publish while a newer rewind is installing its cut', async (t) => {
+  const { node, home, transcript, rewind, db, nativeFile } = await fixture(t)
+  await rewind()
+  await until('first rewound inventory', () => node.last('runtime.sessions')?.sessions[0]?.last_text === 'First answer')
+  const watching = await node.peer.call('session.items', { session_id: SESSION })
+  await node.peer.call('session.watch', { session_id: SESSION, since_seq: watching.to_seq })
+  const abandoned = [
+    { ...records[2], step_index: 4, content: 'Abandoned question' },
+    { ...records[3], step_index: 5, content: 'Abandoned answer' },
+  ]
+  appendFileSync(transcript, abandoned.map((step) => JSON.stringify(step)).join('\n') + '\n')
+  const snapshot = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  writeFileSync(nativeFile, JSON.stringify({ ...snapshot, holdTrajectoryOnce: true,
+    trajectory: { ...snapshot.trajectory, steps: [...records.map(nativeRecord), ...abandoned.map(nativeRecord)] } }))
+  db.prepare('UPDATE conversation_summaries SET step_count = 6, last_modified_time = ?').run(new Date().toISOString())
+  await node.peer.call('session.rename', { session_id: SESSION, title: 'Start stale check' })
+  await until('stale native check is held', () => existsSync(join(home, 'trajectory-held')))
+
+  const armed = JSON.parse(readFileSync(nativeFile, 'utf8'))
+  writeFileSync(nativeFile, JSON.stringify({ ...armed, holdAfterRevertOnce: true }))
+  const second = rewind({ occurrence: 1, prompts_after: 1 })
+  await until('second rewind is installing its cut', () => existsSync(join(home, 'after-trajectory-held')))
+  writeFileSync(join(home, 'release-trajectory'), '')
+  await until('stale native response is sent', () => existsSync(join(home, 'trajectory-response-sent')))
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  writeFileSync(join(home, 'release-after-trajectory'), '')
+  await second
+  const page = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(node.all('session.items').some((event) => event.items?.some((item) => item.text === 'Abandoned answer')), false)
+  assert.equal(node.all('runtime.sessions').some((event) => event.sessions?.[0]?.last_text === 'Abandoned answer'), false)
+  assert.deepEqual(page.items.map((item) => item.text), records.slice(0, 2).map((step) => step.content))
+  assert.equal(node.last('runtime.sessions').sessions[0].last_text, 'First answer')
 })

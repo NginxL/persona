@@ -8,6 +8,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/lazyre"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // Subscription usage limits in Claude Code's words (docs/assistant/agent-work.md "Usage limits"). Its own record
@@ -46,6 +47,9 @@ var months = map[string]time.Month{"jan": time.January, "feb": time.February, "m
 // fiveHourWindow, so when tomorrow's is further off the time is the reset that has just passed (the line was read a
 // little after it, #9386), returned as it is: past, the limit is over.
 func UsageLimitReset(text string, at time.Time) (time.Time, bool) {
+	if assistantwire.GatewayQuotaText(text) {
+		return GatewayAvailableAgain(text, at)
+	}
 	m := usageLimitReset.FindStringSubmatch(text)
 	if m == nil || at.IsZero() {
 		return time.Time{}, false
@@ -91,6 +95,44 @@ func UsageLimitReset(text string, at time.Time) (time.Time, bool) {
 		t = time.Date(year+1, month, day, hour, minute, 0, 0, loc) // "Jan 2" written on Dec 30
 	}
 	return t.UTC(), true
+}
+
+var gatewayAvailable = lazyre.New(`(?i)available again at (?:(\d{4}-\d{2}-\d{2})\s+)?(\d{2}:\d{2})\s*UTC\b`)
+
+// GatewayAvailableAgain reads the UTC reset given by a gateway. Undated clocks are anchored to the error's
+// timestamp, never the time a stopped session happens to be listed after its reset.
+func GatewayAvailableAgain(text string, at time.Time) (time.Time, bool) {
+	m := gatewayAvailable.FindStringSubmatch(text)
+	if m == nil {
+		return time.Time{}, false
+	}
+	date := m[1]
+	if date == "" {
+		if at.IsZero() {
+			return time.Time{}, false
+		}
+		date = at.UTC().Format("2006-01-02")
+	}
+	t, err := time.Parse("2006-01-02 15:04", date+" "+m[2])
+	if err != nil {
+		return time.Time{}, false
+	}
+	if m[1] == "" && !t.After(at) {
+		t = t.Add(24 * time.Hour)
+	}
+	return t, true
+}
+
+// GatewayErrorKind classifies only the two known gateway 429 shapes. Other rate limits keep their existing policy.
+func GatewayErrorKind(text string, at time.Time) (string, time.Time) {
+	if assistantwire.GatewayQuotaText(text) {
+		reset, _ := GatewayAvailableAgain(text, at)
+		return proto.TurnErrorUsageLimit, reset
+	}
+	if assistantwire.GatewayCapacityText(text) {
+		return proto.TurnErrorTransient, time.Time{}
+	}
+	return "", time.Time{}
 }
 
 // namesFiveHourLimit: the line of text that holds the reset words match names the 5-hour limit before them.

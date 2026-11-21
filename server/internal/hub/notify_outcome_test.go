@@ -23,7 +23,7 @@ func TestNotifyRequestSaysWhereThePushWent(t *testing.T) {
 		}
 		return string(raw)
 	}
-	push := func() assistantwire.Notification { return lnNotification("", "", "Report ready") }
+	push := func() assistantwire.Notification { return gradingNotification("", "", "Report ready") }
 
 	if got, want := answer(push()), `{"devices":0,"ok":true,"reason":"no_device"}`; got != want {
 		t.Fatalf("no device: %s, want %s", got, want)

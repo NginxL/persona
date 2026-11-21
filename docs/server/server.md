@@ -28,6 +28,76 @@ The hub and the managers apart:
 - **One container in Docker.** The hub image runs the hub and the built-in manager as two processes under `personad supervise`, each restarted on its own, as `persona-hub run` and `persona-manager assistant` unless `PERSONA_SPLIT_PROGRAMS=0` ([docker.md](../operations/docker.md) ("Programs")).
 - **Two services on a new install.** `hub setup` installs the hub's service and the built-in manager's own (`persona-manager-assistant.service` running `persona-manager assistant`, or on a Mac the launchd agent `com.persona.manager.assistant`, running `persona-manager assistant` on a new install, each with `PERSONA_ASSISTANT_DEPLOY=service`), and binds the second to the first with a one-time code. Existing installs keep the hub's child until `hub setup --manager-service` ([upgrade.md](../operations/upgrade.md): every install type, step by step). See [managers.md](../assistant/managers.md) ("The built-in manager as its own service").
 
+## Send an Agent message and check its receipt
+
+Use `personad agent send` to hand a message to an existing Agent from a script or terminal. Use a full paired-device
+token file and either an HTTPS hub address or loopback HTTP. The hub must advertise `client_ops` and `agent_terminal_send`.
+
+```sh
+personad agent send --hub '<hub URL>' --token-file '<private token file>' \
+  --message-file instructions.txt --json '<computer ID>' '<session ID>'
+
+personad agent receipt --hub '<hub URL>' --token-file '<same private token file>' \
+  --wait --json '<request ID>'
+```
+
+The CLI checks the exact target before submitting. A listed Agent may be on an offline computer. Persona
+conversations, archived sessions and unknown targets are refused by the hub.
+
+Pass `--message-file -` to read stdin. Text must be nonempty UTF-8 and fit in 64 KiB. The command prints a generated
+request UUID on stderr before the POST. Scripts can supply their own stable UUID using `--request-id`. Keep the UUID
+with the chosen hub, device credential, target, text and hold choice. A reused ID with different input is a conflict. The CLI
+makes one POST and can recover a lost answer by reading the matching receipt. The recovery read gets a separate
+deadline of up to five seconds. It reuses the same hub and credential and verifies the stored target and input digest.
+
+Add `--hold` to opt in to the hub's existing hold for an Agent whose computer is away. A `held` receipt records admission
+to the outbox. It does not report eventual delivery or change when the outbox retries or discards the message. Use
+`personad outbox list` and the existing recovery actions to check what is still held. An Agent may also accept a message
+into its own queue, reported as `queued`. Delivery and queueing are transport outcomes and do not indicate that the
+Agent finished the work.
+
+`receipt --wait` polls a pending receipt and can continue through a transient read failure. The network deadline defaults to 30 seconds and accepts up to five minutes
+with `--timeout`. A missing or unusable receipt cannot establish whether a message was sent. Keep the same request
+ID and check the existing chat and outbox before making a new send decision.
+
+With `--json`, an outcome is one stdout object containing `request_id` and `state`, plus `http_status` or `reason` when
+known. Exit 0 means `delivered`, `queued`, or `held`. Exit 1 covers `pending`, `refused`, `conflict`, `unknown` and
+`unavailable`, plus connection setup failures. Exit 2 signals invalid usage. The command does not print message text,
+raw receipt bodies or credentials.
+
+## Export a conversation from the terminal
+
+People who work in a terminal can save an Agent or Persona conversation as Markdown for handoffs, tickets,
+or personal archives. Address one conversation using the computer ID and current session ID in the hub's session list.
+Use the hub's HTTPS address, including its mount path when applicable. Local HTTP also works. Keep the paired
+device's credential in a private file (see [Authentication](../protocol/protocol.md#authentication)).
+
+```sh
+personad chat export --hub '<hub URL>' --token-file '<private token file>' \
+  --output conversation.md '<computer ID>' '<current session ID>'
+
+personad chat export --hub '<hub URL>' --token-file '<private token file>' \
+  --output conversation-with-steps.md --include-steps '<computer ID>' '<current session ID>'
+```
+
+By default the export includes the visible conversation, with images and visualizations identified by placeholders.
+Add `--include-steps` to also keep tool calls, results, thinking and intermediate narration in collapsible sections.
+As in the Web export, tool inputs and results show up to 4,000 characters each and mark any omitted continuation.
+Tool inputs retain any size-limit markers already added by the runtime. In a conversation that switched engines, each
+session is read once and its items are placed inside the recorded switch windows. Existing chat permissions still apply.
+
+The command requires a hub that advertises `sessions_lookup` and a hub and node that confirm strict transcript reads.
+This currently means a readable local transcript, including a runtime session whose transcript the node reads locally.
+Export declines terminal-only views and transcripts reconstructed from Codex App or TRAE CLI databases. It captures each source's last sequence on the first page. New messages after
+that point stay out, and an observed rewrite or changed switch history triggers one fresh attempt. An unreadable
+page, incomplete full message, or exhausted budget fails without publishing a document. An attempt can read up to
+400 pages, 20,000 items, 512 full items, 64 conversation segments and 96 MiB of responses. Individual responses have a
+16 MiB limit and the command allows up to five minutes for the operation.
+
+Use a new path in an existing local folder that supports hard links. The document is published only after every
+read and the file write succeed, and an existing file is never replaced. On platforms with Unix file permissions the
+file is created with owner-only access. The credential is sent only to the supplied hub and never added to the export.
+
 ## Held Agent messages from the terminal
 
 Use `personad outbox` to check and recover messages waiting for one computer, even when the computer is offline or
@@ -437,7 +507,7 @@ Script steps:
 
 ### Whole-install backup (`personad backup`)
 
-`personad backup create|verify|restore` backs up the hub and the built-in manager together: both databases, `secret.key` files, runtime files and the knowledge base (`personad backup <command> -h`). Stop the hub and the built-in manager first (`--writes-quiesced`).
+`personad backup create|verify|restore` backs up the hub and the built-in manager together: both databases, `secret.key` files, the hub's TLS identity (`tls/`, so certificate pins saved by managers and clients still match after a restore), runtime files and the knowledge base (`personad backup <command> -h`). A bundle therefore holds private keys: keep it private. Stop the hub and the built-in manager first (`--writes-quiesced`).
 
 - **The writes-stopped check must see every session.** With `--writes-quiesced`, `create` and `restore` refuse while another client session is connected to either database. PostgreSQL hides the kind of another role's session from a role without `pg_read_all_stats`, so such a session counts as a possible writer: if the database role in `hub.json` is not a superuser and other roles connect to the databases, the check fails and says so; stop those sessions, or grant the role `pg_read_all_stats` (`GRANT pg_read_all_stats TO <role>`). Background processes with no role (autovacuum) are not counted; a subscription's apply worker is not counted when the role can see it (with `pg_read_all_stats`, as a superuser, or as its owner), and blocks the check otherwise. A logical-replication walsender (the hub database as a publisher, under a replication role) likewise blocks an unprivileged role's check: it fails closed.
 - **It needs `pg_dump` and `pg_restore` of the server's major version**, on `PATH` where `personad backup` runs. They connect as Persona does: every host of a multi-host URL, in order with its own port, and an encrypted TLS client key's `sslpassword` (which libpq takes from no environment variable) through a private libpq service file deleted when they exit, never their arguments. A query parameter given twice counts once, with its first value, as for pgx. The service file is mode 0600 in a mode-0700 directory of its own under `TMPDIR`; if `personad backup` is killed (SIGKILL, power loss) while a client runs it stays there, still private: delete the `persona-backup-libpq-*` directory. An `sslpassword` with trailing white space or a line break is refused (a service file cannot hold it). The encrypted key must be in traditional PEM form (`-----BEGIN RSA PRIVATE KEY-----` with `Proc-Type: 4,ENCRYPTED`, as `openssl rsa -aes256 -traditional` writes it): pgx cannot open an encrypted PKCS#8 key (`BEGIN ENCRYPTED PRIVATE KEY`). Without them, it falls back to `docker exec` into `persona-postgres` only when the database host is a loopback address (the native Docker deployment); `--hub-docker-container` / `--manager-docker-container` name another container. The clients inside a container connect over its own loopback without TLS, so they are given no `sslpassword` or other TLS settings.
@@ -448,7 +518,7 @@ Script steps:
 - **`create` warns when the knowledge base is not there.** A missing or unreadable knowledge-base path (an install without one yet, but also an unmounted drive or a mistyped `kb_dir`) is recorded as no knowledge base, and `create` prints `warning: the knowledge base … does not exist …`; such a bundle restores no knowledge base and leaves the install's in place. Fix the path and create the backup again if it should be there. The manifest always states `present`: a manifest without it, or one that records no knowledge base but lists knowledge-base files, is refused.
 - **Where the knowledge base may be.** The default `data`, any other directory of its own, and a directory inside `managers/assistant` (a relative `kb_dir` such as `kb` is relative to the manager's directory), `extensions`, `skills` or `hub.machines_kept` are all fine: the knowledge base is collected once, not also as part of that directory, and restored after it. `create` (before it stages or dumps anything) and `restore` (before any database is staged or file moved) refuse a knowledge base that holds the runtime directory (the runtime itself, its parent or any directory above it, `/`: restoring it would move the whole install, the previous files with it, into the knowledge base's previous copy), one that is or holds a runtime file or directory restore also replaces (`hub.json`, `docker`, `managers`, `managers/assistant`, `extensions`, `skills`, `hub.machines_kept`, …), and one inside a previous-files directory. Paths are compared as written and with symbolic links resolved.
 - **If restoring the files cannot be undone completely**, the originals that could not be put back stay in the previous-files directory (`.persona-backup-previous-<id>` in the runtime directory, or `.<name>.persona-backup-previous-<id>` beside an external knowledge base), each as `NNN-<name>`; the error names the directory and each file, and the directory is deleted only once it is empty. Move each back by hand.
-- **`--output` must be outside the collected trees** (the knowledge base, `managers/assistant`, `extensions`, `skills`, `hub.machines_kept`); `create` refuses it with a message, since the bundle and its staging directory would be copied into themselves. `~/.persona/backups/` is fine. On a case-insensitive file system (macOS) a differently-cased spelling of such a path is not recognised; spell the path as it is.
+- **`--output` must be outside the collected trees** (the knowledge base, `managers/assistant`, `extensions`, `skills`, `hub.machines_kept`, `tls`); `create` refuses it with a message, since the bundle and its staging directory would be copied into themselves. `~/.persona/backups/` is fine. On a case-insensitive file system (macOS) a differently-cased spelling of such a path is not recognised; spell the path as it is.
 - **If a restore cannot put the databases back** (for example the server goes away during the swap), what happens to the runtime files follows what restore could establish. If a database from the bundle may be live (it could not be moved back, or the checks that would show it was not installed failed), the files stay as restored, so they match it, and the error names every database that may be the bundle's, the previous databases that may still exist (`persona_previous_*`), any staged copy that may remain (`persona_staged_*`, not in use; when something outside the restore changed the databases, so that what a staged name holds cannot be confirmed, the error says so instead of calling it safe to drop: check it before dropping), the directory with the previous files and, for an external knowledge base, its previous copy. Otherwise the files are rolled back, and the error still names any previous database left parked and any staged copy that could not be dropped. The files can therefore stay as restored while both live databases are in fact the install's own only when every check that would tell failed; when one database was put back and the other could not be, the files stay as restored while one live database is the install's own. Running restore again converges, and nothing is lost either way.
 
 ### Inspect a backup offline
@@ -699,20 +769,20 @@ Pairing: hub `~/.persona/bin/personad hub pair` calls running hub via loopback H
   - Running background commands / sub-Agents defer push until reports are processed and that Claude turn ends; no standalone `WokeByTask` turn push.
   - Duration = first working to final completion. Per-device `prefs.done` off / long / always; long receives turns at least `long_turn_seconds`; `prefs.input` off suppresses Needs you.
   - Hidden Agents and assistant turns already pushed by `notify_user` are skipped. Hub restart measures ongoing turns from first post-restart observation.
-  - A session hosted in a Lark chat bridge that finished normally gets no push and no Lark card: the bridge answered in the topic it was asked in (#8592, `chatBridgeFinish` in `server/internal/assistant/fleet_push.go`). Hosted means origin `feishu` (`server/internal/sessionorigin/origin.go`, the Agents rows' "Lark group"), or a pane of the herdr session the bridge runs its agents in on its herdr backend, which the clients label a terminal (`sessionorigin.ChatBridge`, #8845); on Claude Code, Codex or TRAEX. An error, a cut-off, a stuck turn, a usage limit or a stop the host reports is pushed as ever; the Agents list still shows it finished and unread.
+  - A session hosted in a Lark chat bridge that finished normally gets no push and no Lark card: the bridge answered in the topic it was asked in (#8592, `chatBridgeFinish` in `server/internal/assistant/fleet_push.go`). Hosted means origin `feishu` (`server/internal/sessionorigin/origin.go`, the Agents rows' "Lark group"), or a pane of the herdr session the bridge runs its agents in on its herdr backend, which the clients label a terminal (`sessionorigin.ChatBridge`, #8845); on Claude Code, Codex or TRAE CLI. An error, a cut-off, a stuck turn, a usage limit or a stop the host reports is pushed as ever; the Agents list still shows it finished and unread.
 - Extension notifications (`POST /api/v1/notify`, `hub/notify_api.go`): extension picks active / `time-sensitive`, filtered by device input and hidden status. Decision / rate limits belong to extension; `docs/extensions/extensions.md` (“Sending notifications”).
 
-### Push grading (push urgency filtering, `hub/lnmode.go`)
+### Push grading (push urgency filtering, `hub/push_grading.go`)
 
-The `ln` spellings in this section's file names, routes, setting keys, template fields, and reason values are shipped compatibility identifiers. The feature's current name is **push grading**.
+The `ln` spellings in this section's routes, setting keys, template fields, and reason values are shipped compatibility identifiers. The feature's current name is **push grading**.
 
-A hub-side switch (`hub_settings` key `hub.ln_mode`, default off; `GET`/`PUT /api/v1/push/ln-mode` — the GET is also open to an extension token with the `notify` scope, the PUT stays full credentials only). With it off every push behaves exactly as above. With it on, alerts are delivered by urgency instead of all alerting:
+A hub-side switch (`hub_settings` key `hub.ln_mode`, default off; `GET`/`PUT /api/v1/push/ln-mode` and its neutral alias `/api/v1/push/grading`, both served by the same handler — the GET is also open to an extension token with the `notify` scope, the PUT stays full credentials only). With it off every push behaves exactly as above. With it on, alerts are delivered by urgency instead of all alerting:
 
-- **Where the owner turns it on (#8157).** Settings › Notifications › **Push grading** on the web, iOS and Android: the page's last group, after this device's own rows, because the switch is the hub's and holds for every device; its footer says in plain words what still notifies (questions, approvals, decisions only the owner can make, their reminders, the main conversation's notices) and what waits for the briefing and Held pushes (task results, "Please verify" requests, other conversations' notices; finished agents are silent). The apps read and write it with the routes above on their own device credential; a hub without the route (404 / 405) gets no switch: iOS and Android show no row, the web says to update the hub. The assistant reads and changes it through `persona_settings` key `notifications.low_distraction` (`hub/self_settings_lnmode.go`): `get` answers what the `GET` answers, `set` shows a card on the phone (before → after and what that means) and changes the switch only once the owner approves it. The route's PUT and the setting both go through `setPushGrading`, which writes the switch and tells the managers (`Hello.QuietPush`).
+- **Where the owner turns it on (#8157).** Settings › Notifications › **Push grading** on the web, iOS and Android: the page's last group, after this device's own rows, because the switch is the hub's and holds for every device; its footer says in plain words what still notifies (questions, approvals, decisions only the owner can make, their reminders, the main conversation's notices) and what waits for the briefing and Held pushes (task results, "Please verify" requests, other conversations' notices; finished agents are silent). The apps read and write it with the routes above on their own device credential; a hub without the route (404 / 405) gets no switch: iOS and Android show no row, the web says to update the hub. The assistant reads and changes it through `persona_settings` key `notifications.low_distraction` (`hub/self_settings_push_grading.go`): `get` answers what the `GET` answers, `set` shows a card on the phone (before → after and what that means) and changes the switch only once the owner approves it. The route's PUT and the setting both go through `setPushGrading`, which writes the switch and tells the managers (`Hello.QuietPush`).
 
 - Every alert push carries a level and a related key. A manager notification may name them (`assistantwire.Notification.Level` / `RelatedKey`, omitempty; older managers let the hub derive them): `NotifyInput` / `NotifyDecide` / `NotifyReply` and other cards derive **P0**, `NotifyPush` (incl. `notify_user`) **P1**, `NotifyDone` **P2**. `POST /api/v1/notify` accepts `push_level` (`P0` / `P1` / `P2`, default `P1`).
-- A `notify_user` push that names no level gets an extra rule while the switch is on (`hub/fleet_link.go` `lnNotifyPushLevel`, reusing the hub's existing main-conversation check `isMainOn`): from the main conversation it is **P0**, from any other conversation (a supervisor, scheduled-task or oversight conversation) it stays **P1** and is held for the briefing. An explicitly named level (`P0`/`P1`/`P2`) always stands, and with the switch off nothing is re-levelled.
-- P0 still alerts; P1 is held for the “Needs you” list / briefings; P2 stays silent. The WebSocket `notify` event is never filtered, so app lists and briefings keep updating; only the APNs alert is withheld.
+- A `notify_user` push that names no level gets an extra rule while the switch is on (`hub/fleet_link.go` `pushGradingNotifyLevel`, reusing the hub's existing main-conversation check `isMainOn`): from the main conversation it is **P0**, from any other conversation (a supervisor, scheduled-task or oversight conversation) it stays **P1** and is held for the briefing. An explicitly named level (`P0`/`P1`/`P2`) always stands, and with the switch off nothing is re-levelled.
+- P0 still alerts; P1 is held for the “Needs you” list / briefings; P2 stays silent. When push grading holds an alert, the hub withholds APNs, `ws_notify` (`notify` / `notifyring`), and closed-browser Web Push alongside it while state lists and held-push briefings keep updating, and `hello.push_grading` / `push_grading` keeps open web and desktop clients in sync.
 - P0 always alerts: the level is judged before the 12-hour check, so no earlier push with the same key swallows what the owner must do or decide themself (a reply reminder is keyed by the question it waits on, not the session). After a P0, P1 / P2 pushes with its related key are held as repeats for 12 hours (`ln_dedup_12h`); the check and the note happen under one lock.
 - What the manager names P0: a card that names no level, an `ask_escalate` whose `why_owner` is `irreversible`, `visible_to_others` or `only_owner_knows` (or that sets `p0`), the owner's own to-do reminders, `ask_user` cards and decisions (`needs_user` without `can_wait`) with their overdue reminders. P1: task failures, plans waiting for Start, `notify_user` by default, other escalations (`priority`, `acceptance`).
 - With the switch on, the assistant also holds back what was never a hub push (`server/internal/assistant/push_quiet.go`; the manager learns the switch from the hub's hello, `assistantwire.Hello.QuietPush`, and a change sends `manager.updated`; it never reads the hub's settings): a supervised task's card does not climb to the owner on its supervisor's timeout (its supervisor is reminded once, the owner gets a held P1 notice, then the card stays with the supervisor until it is answered or escalated); a P1 escalation goes to the Needs you list without a Feishu card or channel message, and is not posted by the channels' catch-up either; conclusions (`task_review accepted`), "Please verify" asks, their morning reminders and task progress reports post no Feishu card (the briefing and the board list them); a `notify_user` notice the hub held (`held`: a P1 one, or a repeat of a related key within 12 hours) is not copied to the Feishu bot or the channels with pushes on, while a P0 one and the main conversation's ordinary one are copied as before (the copy follows the hub's answer for the same push, #8268; a held notice marks no channel pushed, so a turn-end mirror goes as it would without it); `leader.report` carries `level`. With the switch off all of that is as before. Decisions are keyed by to-do and round (`todo:<id>@<asked_at>`), so a decision asked again rings again; `POST /api/v1/notify` keys by manager, extension and `id`; `notify_user` takes an optional `related_key` (a PR link, a to-do id). Held P1 entries of one manager and the same client destination (the typed source plus any client-followed `todo:` / http(s) `related_key`) merge when they arrive in the same minute or share a related key within 12 hours, so several conclusion notices, or three about one PR, are one entry; a different or missing destination stays in its own row because one merged row has only one link.

@@ -399,7 +399,7 @@ func doctorChecks(ctx context.Context, opts DoctorOptions) DoctorReport {
 	add(checkCommandPathsIn(opts.Dir, opts.Lang))
 	add(checkClaudeVersionIn(ctx, opts.claudeProbe(), opts.Lang))
 	add(checkHerdrIn(ctx, opts.HerdrSock, opts.Lang))
-	add(checkGlobalPermissionHooksIn(opts.ClaudeConfigDir, opts.Lang))
+	add(checkGlobalPermissionHooksIn(opts.ClaudeConfigDir, opts.Dir, opts.Lang))
 	add(checkAgentSandboxIn(opts.Dir, opts.Lang))
 	if opts.LaunchAgent != "" {
 		add(checkLaunchAgent(inspectLaunchAgent(ctx, opts), opts))
@@ -571,15 +571,16 @@ func configCommands(b []byte) []string {
 
 // shellFirstWord is the program a command line written with shellQuote runs: its first word past the VAR=value ones
 // in front (rootAssign). A word is bare, or single-quoted with each embedded quote or backslash closed,
-// backslash-escaped and reopened.
+// backslash-escaped and reopened. Other tools' hooks in the user's settings.json (hookProgram) may double-quote a
+// word instead: read the same way, nothing expanded inside. shellQuote never writes a bare ", so its lines read as before.
 func shellFirstWord(cmd string) string {
 	for rest := strings.TrimSpace(cmd); rest != ""; {
 		var w strings.Builder
 		i := 0
 		for i < len(rest) && rest[i] != ' ' && rest[i] != '\t' {
-			switch {
-			case rest[i] == '\'':
-				j := strings.IndexByte(rest[i+1:], '\'')
+			switch q := rest[i]; {
+			case q == '\'' || q == '"':
+				j := strings.IndexByte(rest[i+1:], q)
 				if j < 0 {
 					return "" // not a command line shellQuote writes
 				}
@@ -847,12 +848,14 @@ func agentSandboxWord(lang i18n.Lang, state string) string {
 }
 
 // checkGlobalPermissionHooks looks at the user's own settings.json for synchronous PermissionRequest hooks (other
-// tools put them there) and says how many; it never changes the file.
-func checkGlobalPermissionHooks(configDir string) DoctorCheck {
-	return checkGlobalPermissionHooksIn(configDir, i18n.Default)
+// tools put them there) and says how many; it never changes the file. One whose program is in a package of an
+// extension installed on this computer (dataDir's node-plugins, extensionHookOwner) is that extension's, named and
+// not warned about (#11973).
+func checkGlobalPermissionHooks(configDir, dataDir string) DoctorCheck {
+	return checkGlobalPermissionHooksIn(configDir, dataDir, i18n.Default)
 }
 
-func checkGlobalPermissionHooksIn(configDir string, lang i18n.Lang) DoctorCheck {
+func checkGlobalPermissionHooksIn(configDir, dataDir string, lang i18n.Lang) DoctorCheck {
 	c := DoctorCheck{Name: "global-permission-hooks", Items: []string{}}
 	b, err := os.ReadFile(filepath.Join(configDir, "settings.json"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -867,9 +870,10 @@ func checkGlobalPermissionHooksIn(configDir string, lang i18n.Lang) DoctorCheck 
 	var f struct {
 		Hooks map[string][]struct {
 			Hooks []struct {
-				Type    string `json:"type"`
-				Command string `json:"command"`
-				Async   bool   `json:"async"`
+				Type    string   `json:"type"`
+				Command string   `json:"command"`
+				Args    []string `json:"args"`
+				Async   bool     `json:"async"`
 			} `json:"hooks"`
 		} `json:"hooks"`
 	}
@@ -878,20 +882,41 @@ func checkGlobalPermissionHooksIn(configDir string, lang i18n.Lang) DoctorCheck 
 		c.Hint = i18n.T(lang, "node-doctor.global_hooks_invalid_hint")
 		return c
 	}
+	var foreign, extensions []string
+	fromExtensions := 0
 	for _, m := range f.Hooks["PermissionRequest"] {
 		for _, h := range m.Hooks {
-			if !h.Async && (h.Type == "command" || h.Type == "") {
-				c.Items = append(c.Items, shorten(h.Command, 80))
+			if h.Async || h.Type != "command" && h.Type != "" {
+				continue
 			}
+			c.Items = append(c.Items, shorten(h.Command, 80))
+			if name := extensionHookOwner(dataDir, hookProgram(h.Command, h.Args)); name != "" {
+				fromExtensions++
+				if !slices.Contains(extensions, name) {
+					extensions = append(extensions, name)
+				}
+				continue
+			}
+			foreign = append(foreign, shorten(h.Command, 80))
 		}
 	}
-	if len(c.Items) == 0 {
+	names := strings.Join(extensions, i18n.T(lang, "node-doctor.list_separator"))
+	switch {
+	case len(c.Items) == 0:
 		c.Status, c.Detail = DoctorOK, i18n.T(lang, "node-doctor.global_hooks_none")
-		return c
+	case len(foreign) == 0: // all the user's own choice: installed extensions'
+		c.Status = DoctorOK
+		c.Detail = i18n.T(lang, "node-doctor.global_hooks_extensions", i18n.Args{"count": fromExtensions, "extensions": names})
+	default:
+		c.Status = DoctorWarn
+		c.Detail = i18n.T(lang, "node-doctor.global_hooks_found", i18n.Args{"count": len(foreign), "hook": foreign[0]})
+		if fromExtensions > 0 {
+			c.Detail = i18n.T(lang, "node-doctor.global_hooks_found_with_extensions", i18n.Args{
+				"count": len(foreign), "hook": foreign[0], "extension_count": fromExtensions, "extensions": names,
+			})
+		}
+		c.Hint = i18n.T(lang, "node-doctor.global_hooks_found_hint")
 	}
-	c.Status = DoctorWarn
-	c.Detail = i18n.T(lang, "node-doctor.global_hooks_found", i18n.Args{"count": len(c.Items), "hook": c.Items[0]})
-	c.Hint = i18n.T(lang, "node-doctor.global_hooks_found_hint")
 	return c
 }
 

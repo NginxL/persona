@@ -89,9 +89,14 @@ files into a private runtime directory and replace every placeholder; restrict t
   prompt echoes, other sessions, additional prose and duplicate marked results are rejected. The response must still
   match the watcher's JSON schema and changed-line validation; transcript text is transport, never approval by itself.
   Each review gets a fresh session ID and is never resumed into another PR. If Herdr's five-second startup observation
-  stalls, the helper checks the same pane before failing: a working, blocked or completed agent keeps its accepted
-  prompt and the helper waits for that session's marked result instead of resubmitting it. Only a prompt that has not
-  started is failed; startup waiting does not weaken the total review deadline or the slot bound. The visible launch ends in
+  stalls, the helper polls the same pane and current-session transcript for a bounded startup grace period (30 seconds
+  by default, configurable from 1 to 120 seconds). Working or blocked states retain the accepted prompt and wait for
+  that session's marked result instead of resubmitting it. An idle or done state is accepted only after the current
+  invocation's transcript proves a valid marked result. Persistent idle state without that result or an exited scope
+  fails the attempt after the grace period; it never passes as review evidence. Only the first status observation after
+  a stall may tolerate a blocked state; the allowance is consumed after that poll regardless of status, and any later
+  blocked state fails as an unexpected interaction. Startup waiting does not weaken the total review deadline or the
+  slot bound. The visible launch ends in
   `zsh -lic cc_k3`; the trusted launcher and `launcher_environment` keep
   safe-mode, Read-only tools, the maintainer's interactive permission policy, per-session identity and any
   cgroup-v1 affinity/rlimit fallback out of the displayed command. Each `pr-review-rNN-PID-TOKEN.scope` has a unique
@@ -153,12 +158,27 @@ unit and environment files. Starting, restarting or changing the live service is
 confirm its configuration and current status first. Do not enable stale-PR closure as an incidental part of this skill.
 Inspect logs with `journalctl --user-unit persona-pr-watch.service`.
 
+## Human reviews (opt-in per repository)
+
+A repository configuration may set `"respect_human_reviews": true` (default `false`). When enabled, a **real human
+user's** review on the current exact head (`user.type == "User"`, `commit_id == head`, excluding the watcher's own
+login) replaces the watcher's independent AI semantic review for that head: no reviewer call and no watcher
+review/comment publication. A human approval records human-sourced semantic evidence but still runs every other gate
+(verification and privacy scan, linked issue, mergeability, exact-head/base re-read, the change-request merge block);
+it never merges by itself. A human `CHANGES_REQUESTED` or comment-only head parks without AI review and without
+merging until a new head or a new human state resolves it. Bot/GitHub App reviews never count, and reviews on older
+heads never carry over. See `docs/operations/pr-review-automation.md`, "Respect human reviews on the exact head".
+Do not enable the switch in a live configuration without the documented offline `--migrate-config` step; that
+migration preserves existing evidence because the switch is outside the repository-policy fingerprint.
+
 ## Repair and merge rules
 
 1. Preserve successive-head repair rounds, evidence and publication history; do not reset them to obtain more attempts.
    Let the watcher discover and re-review every new head instead of treating an old approval as reusable.
 2. Let the watcher perform every gate. Do not bypass it with `gh pr merge`, force-push, weaken tests, raise a baseline,
-   disable privacy scanning or treat another Agent's approval as the watcher's evidence.
+   disable privacy scanning or treat another Agent's approval as the watcher's evidence. A real human review is an
+   exception only inside an explicitly enabled `respect_human_reviews` repository, per the section above, and only for
+   the semantic-evidence step; it never bypasses verification or a merge gate.
 3. Keep fixes within the PR's purpose and the demonstrated defect. Small supporting refactors are allowed when they
    make the fix correct and testable; do not expand into unrelated rewrites, deployments, releases or direct main
    pushes.

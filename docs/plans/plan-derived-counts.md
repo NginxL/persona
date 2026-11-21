@@ -270,6 +270,11 @@ the guard, the report switch in the existing replays, the lane differ, and entri
 `check_fast_map.py` 0. *Gate:* none. *Rollback:* delete. *Done:* the guard passes and fails on each seeded violation
 (unit tests); the baseline count of `differs` rows is in the README.
 
+*Landed (#11900):* 32 rows, 26 of them `differs` (the baseline, in the README); the guard
+(`scripts/test/test_counts_surfaces.py`), `PERSONA_COUNTS_REPORT` in both needs-you replays, the differ
+(`scripts/test/counts_agreement.py`: iOS agrees on every case, Android on all but its D1 mark) and check-fast's rule.
+`scripts/ci/paths.py` needed no entry: CI's lanes already select every file (`spec/**`, and `**` for scripts).
+
 **5. The pure manager package.** *Change:* move needsYou, liveCounts and cardStands out of `assistant/fleet_live.go` and
 linkAttention's predicate out of `assistant/fleet_attention.go`; add `agents_needs_you`, replaying the needs-you
 fixture. fleetInputsInto and foldSidesIn stay. *Conflict:* the four repair PRs' `fleet_live.go` hunks are in

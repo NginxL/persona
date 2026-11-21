@@ -55,7 +55,7 @@
   "beta_channel": "Beta (prereleases)",
   "beta_scope": "Receives prereleases from the beta channel. Choose Release to return to stable updates; an update in progress must finish before switching.",
   "web_dev": "Web development",
-  "dev_setup": "To enable development updates, configure backup writer pause/resume commands on the hub machine.",
+  "dev_setup": "Web development updates need a Linux or macOS hub that starts the built-in assistant.",
   "dev_scope": "Builds the web app, hub and computer services from one commit. Development updates require successful compilation.",
   "branch": "Source branch",
   "current_commit": "Installed commit",
@@ -71,5 +71,15 @@
   "apply_backup": "Apply backup",
   "apply_backup_confirm": "Apply this program version? The current database and history will be kept. A new backup is made before installation; development auto-update will be turned off. The update waits for running sessions to become idle.",
   "backup_error": "Could not load backup versions: {error}",
-  "latest_commit": "Latest commit"
+  "latest_commit": "Latest commit",
+  "dev_backup": "Development backup",
+  "dev_backup_footer": "Snapshots include database dumps, configuration and keys. The folder is private (0700), must not be inside data a snapshot collects, and may not be a symbolic link.",
+  "backup_folder": "Backup folder",
+  "backup_folder_hint": "Leave empty for the recommended folder: {path}. An absolute path, or one starting with ~, is accepted.",
+  "backup_retain": "Snapshots to keep",
+  "backup_builtin": "The hub pauses its own writers while a snapshot is taken, then resumes them.",
+  "backup_external": "hub.json's quiesce and resume commands pause the writers for each snapshot.",
+  "use_recommended": "Use recommended",
+  "save_backup": "Save",
+  "backup_saved": "Backup settings saved."
 }

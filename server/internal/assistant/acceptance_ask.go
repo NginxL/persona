@@ -110,9 +110,8 @@ func (s *Service) assistantAccepts(ctx context.Context, t Todo, a acceptAsk) {
 // NoCard), for retryAcceptance.
 func (s *Service) postAsk(ctx context.Context, t Todo, a acceptAsk) bool {
 	b := &s.accept
-	if a.Conclusion && !a.ForBriefing {
-		// The accepted task is already closed. Keep its complete conclusion and round key before any provider call:
-		// a manager exit inside that call must leave retryAcceptance something to deliver (#10393).
+	if !a.ForBriefing && (a.Conclusion || t.Supervision.state(t) == reviewUserCheck) {
+		// Keep the complete ask and its key before a provider call so a restart can retry the same card (#10393).
 		b.mu.Lock()
 		if c := b.asks[t.ID]; c != nil && c.AskedAt.IsZero() {
 			a.Earlier = c.Earlier
@@ -125,7 +124,7 @@ func (s *Service) postAsk(ctx context.Context, t Todo, a acceptAsk) bool {
 		}
 		b.mu.Unlock()
 		if err != nil {
-			s.logf("task %s: conclusion: save before send: %v (tried again on the next tick)", t.ID, err)
+			s.logf("task %s: acceptance: save before send: %v (tried again on the next tick)", t.ID, err)
 			return false
 		}
 	}
@@ -245,8 +244,12 @@ func (s *Service) acceptCard(ctx context.Context, t Todo, a acceptAsk, again boo
 		link = "[" + feishubot.EscapeMarkdown(clip(a.Link, 80)) + "](" + a.Link + ")"
 	}
 	c.Markdown("**" + feishubot.EscapeMarkdown(verdictText(l, &a)) + "**")
+	how := a.How
+	if how == "" {
+		how = i18n.T(l, "assistant-reports.accept_how_default")
+	}
 	c.Markdown(i18n.T(l, "assistant-reports.accept_lines", i18n.Args{"changed": feishubot.EscapeMarkdown(a.Changed), "link": link,
-		"how": feishubot.EscapeMarkdown(a.How)}))
+		"how": feishubot.EscapeMarkdown(how)}))
 	if !a.AcceptedAt.IsZero() {
 		return c.Note(acceptedNote(l, &a))
 	}

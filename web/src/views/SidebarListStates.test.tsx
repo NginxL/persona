@@ -52,12 +52,18 @@ const todo: Todo = { id: "td1", title: "天气 App 发 1.3 版", created_at: "20
 
 const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
 const failed = () => json({ error: "boom" }, 500);
-/** The hub's answers: `/todos` and every `/sessions` read (the store's and the complete list's) as given. */
-const hub = (o: { todos?: () => Promise<Response>; sessions?: () => Promise<Response>; pinned?: boolean }) =>
+const counts = { total: 1, revision: "r1", state: { working: 1 }, machine: { mac: 1 }, project: {}, group: {}, todo: { td1: 1 } };
+const agentsResponse = (query: URLSearchParams) => query.get("counts") === "1"
+  ? json(counts)
+  : json({ sessions: [agent], total: 1, has_more: false, revision: "r1",
+      ...(query.get("with_counts") === "1" ? { counts } : {}) });
+
+/** The complete and paged lists share the route. A counts-only read uses its own response shape. */
+const hub = (o: { todos?: () => Promise<Response>; sessions?: (query: URLSearchParams) => Promise<Response>; pinned?: boolean }) =>
   vi.fn((url: string) => {
-    const path = new URL(url, "http://hub").pathname;
+    const { pathname: path, searchParams } = new URL(url, "http://hub");
     if (path === "/api/v1/todos") return (o.todos ?? (() => json({ todos: [todo] })))();
-    if (path === "/api/v1/sessions") return (o.sessions ?? (() => json({ sessions: [agent], total: 1, has_more: false, revision: "r1" })))();
+    if (path === "/api/v1/sessions") return (o.sessions ?? agentsResponse)(searchParams);
     if (path === "/api/v1/machines") return json({ machines: [mac] });
     // a pin keeps the complete list on a paging hub (lib/sidebar-api.ts pagedAgentList)
     if (path === "/api/v1/pins" && o.pinned) return json({ sessions: ["mac/s1"], spaces: [] });
@@ -169,13 +175,7 @@ describe("By to-do whose to-dos cannot be read (audit item 27)", () => {
   });
 
   it("says the same on a hub that pages its Agents list by to-do", async () => {
-    vi.stubGlobal("fetch", vi.fn((url: string) => {
-      const path = new URL(url, "http://hub").pathname;
-      if (path === "/api/v1/todos") return failed();
-      if (path === "/api/v1/sessions") return json({ sessions: [agent], total: 1, has_more: false, revision: "r1", counts: { total: 1, revision: "r1", state: { working: 1 }, machine: { mac: 1 }, project: {}, group: {}, todo: { td1: 1 } } });
-      if (path === "/api/v1/machines") return json({ machines: [mac] });
-      return json({});
-    }));
+    vi.stubGlobal("fetch", hub({ todos: failed }));
     online(["sessions_list", "sessions_agents_only", "sessions_todo"]);
     await render();
     expect(host.querySelector("[data-paged-sessions]")).not.toBeNull();
@@ -206,8 +206,13 @@ describe("a list drawn while the socket tries again after giving up (audit item 
 
 describe("the paged Agents list's read fails (audit item 4)", () => {
   it("says it could not read the Agents list, as the complete list does, with Retry", async () => {
-    let sessions = failed;
-    vi.stubGlobal("fetch", hub({ sessions: () => sessions() }));
+    let unavailable = true;
+    const fetchHub = hub({ sessions: (query) => unavailable ? failed() : agentsResponse(query) });
+    vi.stubGlobal("fetch", fetchHub);
+    const countReads = () => fetchHub.mock.calls.filter(([url]) => {
+      const { pathname, searchParams } = new URL(url, "http://hub");
+      return pathname === "/api/v1/sessions" && searchParams.get("agents_only") === "1" && searchParams.get("counts") === "1";
+    }).length;
     online(["sessions_list", "sessions_agents_only", "sessions_todo"]);
     await render();
     expect(host.querySelector("[data-paged-sessions]")).not.toBeNull();
@@ -215,9 +220,11 @@ describe("the paged Agents list's read fails (audit item 4)", () => {
     expect(said.length).toBeGreaterThan(0);
     for (const a of said) expect(a).toContain(t("sidebar.agents_read_failed", { error: "" }).replace(/[:：]\s*$/, ""));
     expect(said.some((a) => /500/.test(a ?? ""))).toBe(true);
-    sessions = () => json({ sessions: [agent], total: 1, has_more: false, revision: "r1", counts: { total: 1, revision: "r1", state: { working: 1 }, machine: { mac: 1 }, project: {}, group: {}, todo: { td1: 1 } } });
+    const readsBeforeRetry = countReads();
+    unavailable = false;
     await act(async () => retryButton()!.click());
     await flush();
+    expect(countReads()).toBeGreaterThan(readsBeforeRetry);
     expect(alerts()).toEqual([]);
   });
 });

@@ -19,6 +19,9 @@ const val LauncherScopeFeature = "launcher_scope"
 /** The hub reads pasted provider configurations and the alias import takes one alias (docs/integrations/launchers.md). */
 const val LauncherImportParseFeature = "launcher_import_parse"
 
+/** Explicit references for a provider's main key and its per-computer keys. */
+const val LauncherSecretReferencesFeature = "launcher_secret_references"
+
 /** The categories a provider added from the wizard takes over while they are still at their default (docs/assistant/onboarding.md 5.4). */
 val AssignPurposes = listOf("assistant", "agent.new")
 
@@ -50,6 +53,9 @@ interface ProviderSetup {
 
     /** Whether the selected hub reads pasted configurations and imports one alias ([LauncherImportParseFeature]). */
     val launcherImportParse: Flow<Boolean> get() = flowOf(false)
+
+    /** Hub wire support plus an enabled secret provider; the reference switch appears only while both hold. */
+    val secretReferencesAvailable: Flow<Boolean> get() = flowOf(false)
 
     /** `POST /api/v1/launchers` with the hub's answer: the name it gave and, with `assign`, what now runs on it. */
     suspend fun create(provider: NewProvider): ProviderAdded {
@@ -159,6 +165,9 @@ data class HubLauncher(
     @SerialName("legacy_scope") val legacyScope: Boolean = false,
     /** A direct API connection's "Send through": the computer whose node sends its requests; none: the hub itself. */
     @SerialName("via_machine") val viaMachine: String? = null,
+    /** Main and per-computer stored references, absent from older hubs. */
+    @SerialName("key_reference") val keyReference: SecretReference? = null,
+    @SerialName("machine_key_references") val machineKeyReferences: Map<String, SecretReference> = emptyMap(),
 ) {
     val managed: Boolean get() = ProtocolCompatibility.managedProvider(source)
     val pathScript: Boolean get() = source == "path"
@@ -171,7 +180,7 @@ data class HubLauncher(
     val hasScope: Boolean get() = managed && !share.isNullOrBlank()
 
     /** What it is called in lists. */
-    val title: String get() = displayName?.takeIf { it.isNotBlank() } ?: name
+    val title: String get() = launcherTitle(name, harness, displayName?.takeIf(String::isNotBlank), baseUrl, source)
 }
 
 /** What "Test availability" answered: [machine] it ran on (none for a direct API), and the result. */
@@ -355,7 +364,7 @@ data class PresetModel(
 @Serializable
 data class NewProvider(
     @SerialName("name") val name: String,
-    @SerialName("api_key") val apiKey: String,
+    @SerialName("api_key") val apiKey: String? = null,
     @SerialName("preset") val preset: String? = null,
     /** launcher | api; null with a preset (the preset's). */
     @SerialName("kind") val kind: String? = null,
@@ -397,6 +406,9 @@ data class NewProvider(
     @SerialName("own_service") val ownService: String? = null,
     /** A key for single computers, by machine id. */
     @SerialName("machine_keys") val machineKeys: Map<String, String>? = null,
+    /** Explicit reference alternatives to [apiKey] and [machineKeys]; never inferred from their text. */
+    @SerialName("api_key_reference") val apiKeyReference: String? = null,
+    @SerialName("machine_key_references") val machineKeyReferences: Map<String, String>? = null,
 )
 
 /**
@@ -445,6 +457,9 @@ data class ProviderUpdate(
     @SerialName("machine_keys") val machineKeys: Map<String, String>? = null,
     /** "Send through" (kind api): a computer's id, "" the hub itself; left out keeps what is stored. */
     @SerialName("via_machine") val viaMachine: String? = null,
+    /** Explicit reference alternatives to [apiKey] and [machineKeys]; null preserves stored state on update. */
+    @SerialName("api_key_reference") val apiKeyReference: String? = null,
+    @SerialName("machine_key_references") val machineKeyReferences: Map<String, String>? = null,
 )
 
 /** `POST /api/v1/launchers`' answer: [assigned] / [kept] only when `assign` was sent (an older hub leaves them out). */

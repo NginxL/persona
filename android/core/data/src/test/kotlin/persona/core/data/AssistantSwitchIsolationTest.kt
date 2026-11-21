@@ -77,6 +77,29 @@ class AssistantSwitchIsolationTest {
         assertEquals("new-main", repository.assistant.value.mainSession?.sessionId)
     }
 
+    @Test fun conversationTagFiltersReadAbsentNullEmptyAndExactOrder() = runTest {
+        val transport = Transport()
+        val repository = RealAssistantRepository(Connection(transport), Sessions(), backgroundScope)
+        runCurrent()
+        assertEquals(ConversationTagFilters.Unsupported, repository.assistant.value.conversationTagFilters)
+
+        fun response(value: JsonElement) = JsonObject(config(null).toMutableMap().apply {
+            put("conversation_tag_filters", value)
+        })
+        transport.read = { response(JsonNull) }
+        repository.refresh()
+        assertTrue(repository.assistant.value.conversationTagFilters.supported)
+        assertNull(repository.assistant.value.conversationTagFilters.entries)
+
+        transport.read = { response(JsonArray(emptyList())) }
+        repository.refresh()
+        assertEquals(ConversationTagFilters(emptyList()), repository.assistant.value.conversationTagFilters)
+
+        transport.read = { response(JsonArray(listOf(JsonPrimitive("second"), JsonPrimitive("first")))) }
+        repository.refresh()
+        assertEquals(listOf("second", "first"), repository.assistant.value.conversationTagFilters.entries)
+    }
+
     @Test fun recentTaskChatsApplyLocallyAndFollowTheNextRefresh() = runTest {
         val transport = Transport()
         val repository = RealAssistantRepository(Connection(transport), Sessions(), backgroundScope)

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
-import { transcriptStatus } from '../lib/map.js'
+import { transcriptState, transcriptStatus } from '../lib/map.js'
 import { createAgyRuntime } from '../lib/runtime.js'
 
 const ID = '11111111-2222-3333-4444-555555555555'
@@ -50,7 +50,8 @@ async function fixture(t, steps, summary, options = {}) {
   const transcript = join(logs, 'transcript.jsonl')
   const write = (values) => {
     mkdirSync(logs, { recursive: true })
-    writeFileSync(transcript, values.map((value, index) => JSON.stringify({ ...value, step_index: index })).join('\n') + '\n')
+    const records = values.map((value, index) => options.noIndex ? value : { ...value, step_index: index })
+    writeFileSync(transcript, records.map((value) => JSON.stringify(value)).join('\n') + '\n')
   }
   if (!options.noTranscript) write(steps)
   if (options.oldTranscript) {
@@ -84,7 +85,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
 })
 `, { mode: 0o700 })
   const node = await startFakeNode(t)
-  const runtime = createAgyRuntime({ home, agyDir, agyBin: binary, socketPath: node.path, listDays: 1, maxSessions: 1, log: () => {} })
+  const lines = []
+  const runtime = createAgyRuntime({ home, agyDir, agyBin: binary, socketPath: node.path, listDays: 1, maxSessions: 1, log: (line) => lines.push(line) })
   t.after(async () => {
     await runtime.stop()
     db?.close()
@@ -99,7 +101,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     await until('inventory refreshed', () => node.all('runtime.sessions').length > before)
     return node.last('runtime.sessions').sessions[0]?.status
   }
-  return { node, write, state, refresh, summaryFile, database: () => db }
+  return { node, write, state, refresh, summaryFile, database: () => db, logs: lines }
 }
 
 test('runtime inventory follows an external tool turn through its final reply', { timeout: 15_000 }, async (t) => {
@@ -212,6 +214,82 @@ test('unavailable native summary stores cannot turn narration into completion', 
   assert.equal(await refresh(), 'unknown', 'unsupported older schema')
 })
 
+const unknownReports = (logs) => logs.filter((line) => line.startsWith('agy unknown status:'))
+
+test('unknown transcript states name the missing evidence', () => {
+  const reply = step('PLANNER_RESPONSE', { content: 'Running the experiment' })
+  const cases = [
+    ['empty history', [], idle, 'no_relevant_step'],
+    ['metadata alone', [step('CHECKPOINT'), step('SYSTEM_MESSAGE')], idle, 'no_relevant_step'],
+    ['reply without native state', [reply], undefined, 'no_summary'],
+    ['unrecognized native state', [reply], { status: 'FUTURE_STATUS' }, 'summary_not_idle'],
+    ['empty native state', [reply], { status: '' }, 'summary_not_idle'],
+    ['reply without a step index', [step('PLANNER_RESPONSE', { step_index: undefined, content: 'Finished' })], idle, 'no_step_index'],
+    ['idle summary predates narration', [step('PLANNER_RESPONSE', { step_index: 1, content: 'Finished' })], idle, 'summary_behind'],
+    ['idle summary without a step count', [reply], { status: 'CASCADE_RUN_STATUS_IDLE' }, 'summary_behind'],
+  ]
+  for (const [name, steps, summary, reason] of cases) {
+    assert.deepEqual(transcriptState(steps, summary), { status: 'unknown', reason }, name)
+    assert.equal(transcriptStatus(steps, summary), 'unknown', name)
+  }
+  assert.deepEqual(transcriptState([step('PLANNER_RESPONSE', { content: 'Finished' })], idle), { status: 'done' })
+  assert.deepEqual(transcriptState([step('ERROR_MESSAGE')]), { status: 'idle' }, 'an error needs no summary')
+})
+
+const unknownCases = [
+  ['no_summary', [step('PLANNER_RESPONSE', { content: 'Private narration' })], undefined],
+  ['summary_not_idle', [step('PLANNER_RESPONSE', { content: 'Private narration' })], { status: '' }],
+  ['summary_behind', [step('USER_INPUT', { content: 'Private question' }), step('PLANNER_RESPONSE', { content: 'Private narration' })], { ...idle, step_count: 1 }],
+  ['no_step_index', [step('PLANNER_RESPONSE', { step_index: undefined, content: 'Private narration' })], idle, { noIndex: true }],
+  ['no_relevant_step', [step('CHECKPOINT', { content: 'Private summary' })], idle],
+]
+for (const [reason, steps, summary, options] of unknownCases) {
+  test(`runtime reports ${reason} as the reason a session is unknown`, { timeout: 15_000 }, async (t) => {
+    const created_at = new Date().toISOString()
+    const { node, logs } = await fixture(t, steps.map((value) => ({ ...value, created_at })), summary, options)
+    assert.equal(node.last('runtime.sessions').sessions[0].status, 'unknown')
+    assert.deepEqual(unknownReports(logs), [`agy unknown status: ${reason} 1`])
+    assert.ok(!logs.some((line) => /Private|[0-9a-f]{8}-[0-9a-f]{4}/.test(line)), 'reasons and counts only')
+  })
+}
+
+test('a failed summary read is reported apart from missing summaries', { timeout: 15_000 }, async (t) => {
+  const created_at = new Date().toISOString()
+  const { node, state, refresh, summaryFile, database, logs } = await fixture(t, [step('PLANNER_RESPONSE', { created_at, content: 'Private reply' })])
+  assert.equal(node.last('runtime.sessions').sessions[0].status, 'unknown')
+  assert.deepEqual(unknownReports(logs), ['agy unknown status: no_summary 1'], 'no database is missing evidence')
+  assert.ok(!logs.some((line) => line.includes('unreadable')), 'a missing database is not a failed read')
+
+  writeFileSync(summaryFile, 'invalid database')
+  assert.equal(await refresh(), 'unknown', 'the status itself stays unknown')
+  assert.ok(logs.includes('agy native summaries unreadable: file is not a database'))
+  assert.deepEqual(unknownReports(logs).at(-1), 'agy unknown status: read_failed 1')
+
+  rmSync(summaryFile)
+  state(idle)
+  assert.equal(await refresh(), 'done')
+  assert.ok(logs.some((line) => /^agy native summary reads recovered after \d+ failure\(s\)$/.test(line)))
+  assert.deepEqual(unknownReports(logs).at(-1), 'agy unknown status: none')
+
+  const db = database()
+  db.exec('BEGIN EXCLUSIVE')
+  try {
+    assert.equal(await refresh(), 'unknown', 'locked database')
+  } finally {
+    db.exec('ROLLBACK')
+  }
+  assert.ok(logs.includes('agy native summaries unreadable: database is locked'))
+  assert.deepEqual(unknownReports(logs).at(-1), 'agy unknown status: read_failed 1')
+  const reports = unknownReports(logs).length
+  assert.equal(await refresh(), 'done')
+  await refresh()
+  assert.deepEqual(unknownReports(logs).slice(reports), ['agy unknown status: none'], 'an unchanged tally is not logged again')
+
+  db.exec('DROP TABLE conversation_summaries; CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, status TEXT)')
+  assert.equal(await refresh(), 'unknown', 'unsupported older schema')
+  assert.ok(logs.includes('agy native summaries unreadable: SQL logic error'), 'the result code, not the statement detail')
+  assert.ok(!logs.some((line) => /Private|[0-9a-f]{8}-[0-9a-f]{4}/.test(line)), 'reasons and counts only')
+})
 
 test('completed availability workspaces stay hidden after a companion restart', async (t) => {
   const missing = join(tmpdir(), 'persona-check-availability-missing')

@@ -14,14 +14,14 @@ import (
 	"time"
 )
 
-// Names lists every template, parsing all of them.
+// Names lists ordinary prompt templates; MCP definitions have their own inventory tests.
 func Names() []string {
 	if err := templates.parseAll(); err != nil {
 		panic(fmt.Sprintf("prompts: %v", err))
 	}
 	var out []string
 	for _, t := range templates.root.Templates() {
-		if t.Name() != "" {
+		if t.Name() != "" && !strings.HasPrefix(t.Name(), "mcp/") {
 			out = append(out, t.Name())
 		}
 	}
@@ -34,7 +34,7 @@ func (s *templateSet) parseAll() error {
 	defer s.mu.Unlock()
 	return fs.WalkDir(files, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") || strings.HasPrefix(path, "mcp/") {
-			return err // mcp/ holds tool definitions, not templates (mcp.go)
+			return err // MCP definitions are rendered and validated through mcpForLanguage (mcp.go)
 		}
 		return s.parse(strings.TrimSuffix(path, ".md"))
 	})

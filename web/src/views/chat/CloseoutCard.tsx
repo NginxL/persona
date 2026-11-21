@@ -15,7 +15,7 @@ import type { Item, Session } from "../../lib/types";
 import { Collapse, cx } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
 import { prLink } from "../TodoStageBar";
-import { CloseoutEvidence, closeoutEvidenceChunk, loadCloseoutEvidence, onCloseoutEvidenceChunk } from "./closeout-chunks";
+import { CloseoutEvidence, closeoutEvidenceChunk, loadCloseoutEvidence, onCloseoutEvidenceChunk } from "./closeout-evidence-chunk";
 export { stripCloseout } from "../../lib/closeout-text";
 
 const KIND_ICON: Record<string, IconName> = { pr: "pullRequest", commit: "commit", branch: "branch", doc: "file", build: "tool", url: "link" };

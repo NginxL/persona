@@ -33,7 +33,7 @@ import PersonaWire
         #expect(!EngineSelectionModel.canSelect(future, on: m))
         m.engines = []
         #expect(!EngineSelectionModel.canSelect(future, on: m))
-        #expect(EngineSelectionModel.options(m).map(\.id) == ["herdr", "herdr-core", "herdr-both", "orca", "tern", "paseo", "cindy"])
+        #expect(EngineSelectionModel.options(m).map(\.id) == ["herdr", "herdr-core", "herdr-both", "orca", "tern", "rex", "paseo", "cindy", "t3code"])
     }
 
     @Test func combinedEngineIsAKnownChoice() throws {
@@ -70,6 +70,20 @@ import PersonaWire
         #expect(try JSON.decoder.decode(Machine.self, from: JSON.encoder.encode(m)) == m)
     }
 
+    /// Rex (#12334): a terminal engine after Tern and before Paseo, chosen like the others, also offline.
+    @Test func rexIsAKnownChoice() throws {
+        let rex = MachineEngine.rex
+        #expect(rex.rawValue == "rex" && rex.name == "Rex")
+        #expect(rex.detail == "Rex 里的终端")
+        #expect(EngineSelectionModel.canSelect(rex, on: try machine()), "selectable offline, as the other engines")
+        #expect(MachineEngine.allCases.firstIndex(of: .rex) == MachineEngine.allCases.firstIndex(of: .tern).map { $0 + 1 })
+        let m = try machine(",\"engine\":\"rex\",\"engines\":[{\"id\":\"herdr\",\"name\":\"herdr\",\"available\":false},{\"id\":\"rex\",\"name\":\"Rex\",\"available\":true,\"version\":\"0.1.0-preview.21\"}]")
+        #expect(m.engine == .rex && m.engineName == "Rex")
+        #expect(EngineSelectionModel.initialChoice(m, pairing: true) == .rex)
+        #expect(EngineSelectionModel.options(m).map(\.id) == ["herdr", "rex"], "the node's list as it reports it")
+        #expect(try JSON.decoder.decode(Machine.self, from: JSON.encoder.encode(m)) == m)
+    }
+
     @Test func cindyIsAKnownChoice() throws {
         let cindy = MachineEngine.cindy
         #expect(cindy.rawValue == "cindy" && cindy.name == "Cindy")
@@ -77,6 +91,15 @@ import PersonaWire
         #expect(EngineSelectionModel.canSelect(cindy, on: try machine()), "selectable offline, as the other engines")
         let m = try machine(",\"engine\":\"cindy\",\"engines\":[{\"id\":\"cindy\",\"name\":\"Cindy\",\"available\":true,\"version\":\"0.1.128\"}]")
         #expect(m.engine == .cindy && m.engines.first?.version == "0.1.128")
+    }
+
+    @Test func t3codeIsAKnownChoice() throws {
+        let t3 = MachineEngine.t3code
+        #expect(t3.rawValue == "t3code" && t3.name == "T3 Code")
+        #expect(t3.detail == "T3 Code 里的 Agent")
+        #expect(EngineSelectionModel.canSelect(t3, on: try machine()), "selectable offline, as the other engines")
+        let m = try machine(",\"engine\":\"t3code\",\"engines\":[{\"id\":\"t3code\",\"name\":\"T3 Code\",\"available\":true,\"version\":\"0.1.11\"}]")
+        #expect(m.engine == .t3code && m.engines.first?.version == "0.1.11")
     }
 
     @Test func noTerminalEngineIsTheEmptyHostSet() throws {

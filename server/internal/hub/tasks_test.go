@@ -153,7 +153,7 @@ func taskLine(h *Hub, todo Todo) string {
 func planArgs(readonly bool) json.RawMessage {
 	task := map[string]any{
 		"title": "修登录崩溃", "prompt": "iPad 横屏时登录页崩溃，修好并补测试", "machine": "box", "cwd": "/code/app",
-		"readonly": readonly, "why": "这个仓库最近在 box 上", "permission": "bypassPermissions",
+		"role": "worker", "readonly": readonly, "why": "这个仓库最近在 box 上", "permission": "bypassPermissions",
 		// What task_plan requires of a brief (#3822): a read-only task's goal and how long it should take.
 		"goal": "登录页横屏不再崩溃", "expect_minutes": 10,
 	}

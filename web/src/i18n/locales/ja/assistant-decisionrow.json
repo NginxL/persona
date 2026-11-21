@@ -25,5 +25,6 @@
   "confirm": "確認：{option}",
   "dialog_open": "Agent のターミナルのダイアログ「{dialog}」を先に処理してから回答してください。",
   "dialog_open_unnamed": "Agent のターミナルのダイアログを先に処理してから回答してください。",
-  "open_terminal": "ターミナルを開く"
+  "open_terminal": "ターミナルを開く",
+  "answer_recorded": "回答を記録しました。"
 }

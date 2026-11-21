@@ -3,6 +3,7 @@ package transcript
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -29,11 +30,12 @@ type File struct {
 	ino       uint64
 	firstHash uint32
 	gen       int
+	readMtime time.Time // modification time corresponding to the bytes read
 	// tree: the transcript's branches (branch.go): lines on an abandoned one are not kept as items.
 	tree *branchTree
-	// cut: where the lines whose stored items were cut down (light) sit in the file, by seq; Full reads them again.
-	// Images used to stay in memory for every session ever opened.
-	cut map[int]lineRef
+	// Raw offsets for cut items and positional sources. Full reads the original bytes even if a same-size rewrite
+	// left the cached page looking current.
+	refs map[int]lineRef
 	// A big file opened cold is parsed from a window at its end (window.go): lines 1..base are not parsed yet, win
 	// says where they are, and meta covers only the parsed lines (partialMeta) until Meta works it out for the file.
 	base        int
@@ -96,9 +98,19 @@ func (f *File) Refresh() ([]proto.Item, error) {
 
 // RefreshSpan is Refresh that also says which lines it read (From == To: none).
 func (f *File) RefreshSpan() ([]proto.Item, Span, error) {
+	return f.refreshSpan(false)
+}
+
+// RefreshExportSpan opens a readable local file even for a cached view. A
+// same-size edit with a different modification time invalidates the cache.
+func (f *File) RefreshExportSpan() ([]proto.Item, Span, error) {
+	return f.refreshSpan(true)
+}
+
+func (f *File) refreshSpan(strict bool) ([]proto.Item, Span, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	fresh, span, err := f.refresh()
+	fresh, span, err := f.refresh(strict)
 	if err != nil || f.tree == nil || len(f.tree.revoked) == 0 {
 		return fresh, span, err
 	}
@@ -112,11 +124,11 @@ func (f *File) RefreshSpan() ([]proto.Item, Span, error) {
 	for _, u := range f.tree.revoked {
 		delete(manual, u)
 	}
-	f.offset, f.lines, f.partial, f.items, f.cut, f.meta = 0, 0, nil, nil, nil, Meta{Sidechain: f.meta.Sidechain}
+	f.offset, f.lines, f.partial, f.items, f.refs, f.meta = 0, 0, nil, nil, nil, Meta{Sidechain: f.meta.Sidechain}
 	f.base, f.win, f.partialMeta, f.firstHash = 0, nil, false, 0
 	f.tree = &branchTree{manual: manual, marked: f.tree.marked}
 	f.gen++
-	return f.refresh()
+	return f.refresh(strict)
 }
 
 // freshTree is a new tree for the file read again from somewhere: the roots the node set stay (none after a file
@@ -151,10 +163,17 @@ func unchanged(st os.FileInfo, offset int64, ino uint64) bool {
 	return st.Size() == offset && inode(st) == ino
 }
 
-func (f *File) refresh() ([]proto.Item, Span, error) {
+func (f *File) refresh(strict bool) ([]proto.Item, Span, error) {
 	// A file with nothing new is the common case of a watched session at rest (a refresh four times a second): a stat
 	// says so, without the open, fstat and close below. A stat that fails goes on to the open, which reports it.
-	if st, err := os.Stat(f.Path); err == nil && unchanged(st, f.offset, f.ino) {
+	if st, err := os.Stat(f.Path); strict {
+		if err != nil {
+			return nil, Span{}, err
+		}
+		if !st.Mode().IsRegular() {
+			return nil, Span{}, errors.New("transcript source is not a regular file")
+		}
+	} else if err == nil && unchanged(st, f.offset, f.ino) {
 		return nil, Span{f.history(), f.lines, f.lines}, nil
 	}
 	fh, err := os.Open(f.Path)
@@ -166,16 +185,22 @@ func (f *File) refresh() ([]proto.Item, Span, error) {
 	if err != nil {
 		return nil, Span{}, err
 	}
+	if strict && !st.Mode().IsRegular() {
+		return nil, Span{}, errors.New("transcript source is not a regular file")
+	}
 	ino := inode(st)
-	if st.Size() < f.offset || (f.ino != 0 && ino != 0 && ino != f.ino) { // truncated or replaced: start over
-		f.offset, f.lines, f.partial, f.items, f.cut, f.meta, f.tree = 0, 0, nil, nil, nil, Meta{Sidechain: f.meta.Sidechain}, nil
+	edited := strict && st.Size() == f.offset && !f.readMtime.IsZero() && !st.ModTime().Equal(f.readMtime)
+	if edited || st.Size() < f.offset || (f.ino != 0 && ino != 0 && ino != f.ino) { // rewritten or replaced: start over
+		f.offset, f.lines, f.partial, f.items, f.refs, f.meta, f.tree = 0, 0, nil, nil, nil, Meta{Sidechain: f.meta.Sidechain}, nil
 		f.base, f.win, f.partialMeta = 0, nil, false
 		f.firstHash = 0
+		f.readMtime = time.Time{}
 		f.gen++
 	}
 	f.ino = ino
 	from := f.lines
 	if st.Size() == f.offset {
+		f.readMtime = st.ModTime()
 		return nil, Span{f.history(), from, from}, nil
 	}
 	if f.offset == 0 && st.Size() > 2*windowBytes {
@@ -185,6 +210,7 @@ func (f *File) refresh() ([]proto.Item, Span, error) {
 			return nil, Span{}, err
 		}
 		if ok {
+			f.readMtime = st.ModTime()
 			return fresh, Span{f.history(), f.base, f.lines}, nil
 		}
 	}
@@ -232,15 +258,20 @@ func (f *File) refresh() ([]proto.Item, Span, error) {
 			kept, cut := light(it, false)
 			fresh = append(fresh, sent)
 			f.items = append(f.items, kept)
-			if cut {
-				if f.cut == nil {
-					f.cut = map[int]lineRef{}
-				}
-				f.cut[f.lines] = lineRef{at, i}
+			if cut || it.SourceFingerprint != "" {
+				f.rememberLine(f.lines, lineRef{at, i})
 			}
 		}
 	}
 	f.partial = append([]byte(nil), data...)
+	if st.Size() != f.offset { // a writer appended while the read was in progress
+		if latest, err := fh.Stat(); err == nil && latest.Size() == f.offset {
+			st = latest
+		}
+	}
+	if st.Size() == f.offset {
+		f.readMtime = st.ModTime()
+	}
 	return fresh, Span{f.history(), from, f.lines}, nil
 }
 
@@ -304,26 +335,54 @@ func (f *File) PageTurns(beforeSeq, turns, maxItems int) ([]proto.Item, bool, Sp
 	return out, start > 0 || f.base > 0, f.pageSpan(start, beforeSeq)
 }
 
+// rememberLine keeps a raw source location while the caller holds f.mu.
+func (f *File) rememberLine(seq int, ref lineRef) {
+	if f.refs == nil {
+		f.refs = map[int]lineRef{}
+	}
+	f.refs[seq] = ref
+}
+
+// ErrSourceChanged means a positional item is absent or its record no longer matches the cached item.
+var ErrSourceChanged = errors.New("original transcript item no longer present")
+
 // Full returns an item whole: all of its text and its image data (pages and pushes carry a light copy). The line it
 // came from is read and parsed again; if that no longer gives the item (the file changed under it), it says so
 // rather than pass the cut copy off as whole.
 func (f *File) Full(id string) (proto.Item, error) {
 	f.mu.Lock()
 	it, found := f.item(id)
+	var err error
 	if !found { // an item in lines not parsed yet: parse back to it (window.go)
-		it, found = f.findOlder(id)
+		it, found, err = f.findOlder(id)
 	}
-	ref, cut := f.cut[it.Seq]
+	ref, reread := f.refs[it.Seq]
 	scratch := Meta{Sidechain: f.meta.Sidechain, Codex: f.meta.Codex,
 		agentCalls: maps.Clone(f.meta.agentCalls), taskCalls: maps.Clone(f.meta.taskCalls)}
 	f.mu.Unlock()
 	if !found {
+		if proto.PositionalItemID(id) {
+			if err != nil {
+				return it, err
+			}
+			return it, ErrSourceChanged
+		}
 		return it, fmt.Errorf("no item %s", id)
 	}
-	if !cut {
+	if !reread {
+		if it.SourceFingerprint != "" {
+			return it, ErrSourceChanged
+		}
 		return it, nil
 	}
-	full, ok := f.reparse(it.Seq, ref, &scratch)[id]
+	parsed, err := f.reparse(it.Seq, ref, &scratch)
+	if it.SourceFingerprint != "" && err != nil && !errors.Is(err, io.EOF) {
+		return it, err
+	}
+	full, ok := parsed[id]
+	if it.SourceFingerprint != "" && (!ok || full.SourceFingerprint != it.SourceFingerprint) {
+		return it, ErrSourceChanged
+	}
 	if !ok {
 		return it, fmt.Errorf("item %s: line %d of the transcript changed, reload the chat", id, it.Seq)
 	}
@@ -350,14 +409,14 @@ func (f *File) WithImages(items []proto.Item) []proto.Item {
 			continue
 		}
 		f.mu.Lock()
-		ref, cut := f.cut[it.Seq]
+		ref, cut := f.refs[it.Seq]
 		scratch := Meta{Sidechain: f.meta.Sidechain, Codex: f.meta.Codex}
 		f.mu.Unlock()
 		if !cut {
 			continue
 		}
 		if parsed[it.Seq] == nil {
-			parsed[it.Seq] = f.reparse(it.Seq, ref, &scratch)
+			parsed[it.Seq], _ = f.reparse(it.Seq, ref, &scratch)
 		}
 		if full, ok := parsed[it.Seq][it.ID]; ok && full.Image != nil {
 			if out == nil {
@@ -372,22 +431,22 @@ func (f *File) WithImages(items []proto.Item) []proto.Item {
 	return out
 }
 
-// reparse reads line seq again and returns its items by id (none if the file changed under it).
-func (f *File) reparse(seq int, ref lineRef, scratch *Meta) map[string]proto.Item {
+// reparse reads line seq again and returns its items by id.
+func (f *File) reparse(seq int, ref lineRef, scratch *Meta) (map[string]proto.Item, error) {
 	fh, err := os.Open(f.Path)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer fh.Close()
 	line := make([]byte, ref.n)
 	if _, err := fh.ReadAt(line, ref.off); err != nil {
-		return nil
+		return nil, err
 	}
 	out := map[string]proto.Item{}
 	for _, it := range ParseLine(seq, line, scratch) {
 		out[it.ID] = it
 	}
-	return out
+	return out, nil
 }
 
 // After returns items with seq > afterSeq, oldest first: at least limit of them unless fewer exist, and never part of

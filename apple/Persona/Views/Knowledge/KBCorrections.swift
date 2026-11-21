@@ -12,12 +12,20 @@ nonisolated struct KBCorrection: Encodable, Hashable, Sendable {
     var removePeople: [String]?
     var removeChats: [String]?
     var removeProjects: [String]?
+    var lockLists: Bool?
+    var allowPeople: [String]?
+    var allowChats: [String]?
+    var allowProjects: [String]?
 
     enum CodingKeys: String, CodingKey {
         case pinned
         case removePeople = "remove_people"
         case removeChats = "remove_chats"
         case removeProjects = "remove_projects"
+        case lockLists = "lock_lists"
+        case allowPeople = "allow_people"
+        case allowChats = "allow_chats"
+        case allowProjects = "allow_projects"
     }
 }
 
@@ -44,10 +52,8 @@ nonisolated enum KBFacts {
     }
 }
 
-/// Taking a link between two entries away. Only a link one of them holds in its own list (a project's people, chats
-/// and items, an entry's projects, a person's chats, a chat's people) can go; a detail also links what it was found
-/// with, which has nothing to remove. Removing it protects both lists from Persona's automatic linking.
-nonisolated struct KBUnlink: Identifiable, Hashable, Sendable {
+/// A link held in each entry's own list. Detail.links also includes related entries from provenance, which can't be removed.
+nonisolated struct KBRelationship: Identifiable, Hashable, Sendable {
     enum List: String, Sendable {
         case people, chats, projects, items
 
@@ -75,13 +81,10 @@ nonisolated struct KBUnlink: Identifiable, Hashable, Sendable {
 
     var first: End
     var second: End
-    /// The entry the update is written to.
-    var targetKind: String
-    var targetID: String
-    var update: KBCorrection
-
-    var id: String { "\(first.kind)/\(first.id)>\(second.kind)/\(second.id)" }
-    var ends: [End] { [first, second] }
+    /// Project items are written from the item's side, whose list is `projects`.
+    private var reverse: Bool
+    var target: End { reverse ? second : first }
+    var id: String { "\(second.kind)/\(second.id)" }
 
     private static let items: Set<String> = ["docs", "meetings", "events", "recordings"]
     private static let unsafe = try! NSRegularExpression(pattern: #"[^\p{L}\p{N}._@+-]+"#)
@@ -101,8 +104,19 @@ nonisolated struct KBUnlink: Identifiable, Hashable, Sendable {
         return String(out)
     }
 
-    /// How to take `linked` off the entry `detail` shows (named `name`), or nil when that link is not one to remove.
-    static func removal(_ detail: KBDetail, name: String, linked: KBEntry) -> KBUnlink? {
+    static func removal(_ detail: KBDetail, name: String, linked: KBEntry) -> Self? {
+        guard let pair = Self.pair(detail, name: name, linked: linked),
+              strings(detail.meta?[pair.first.field.rawValue])?.contains(pair.first.member) == true else { return nil }
+        return pair
+    }
+
+    static func allowance(_ detail: KBDetail, name: String, removed: KBEntry) -> Self? {
+        guard let pair = Self.pair(detail, name: name, linked: removed),
+              strings(detail.meta?["excluded"]?[pair.first.field.rawValue])?.contains(pair.first.member) == true else { return nil }
+        return pair
+    }
+
+    private static func pair(_ detail: KBDetail, name: String, linked: KBEntry) -> Self? {
         let a = detail, b = linked
         let aid = string(a.meta?["id"]) ?? a.id
         let af: List, bf: List
@@ -124,54 +138,76 @@ nonisolated struct KBUnlink: Identifiable, Hashable, Sendable {
         let bid = canonicalID(kind: b.kind, id: b.id)
         let am = af == .items ? "\(b.kind)/\(bid)" : b.id
         let bm = bf == .items ? "\(a.kind)/\(a.id)" : aid
-        guard let members = strings(a.meta?[af.rawValue]), members.contains(am) else { return nil }
-        var update = KBCorrection()
-        let removed = [reverse ? aid : b.id]
-        switch reverse ? .projects : af {
-        case .people: update.removePeople = removed
-        case .chats: update.removeChats = removed
-        case .projects, .items: update.removeProjects = removed
+        return Self(first: End(kind: a.kind, id: aid, canonicalID: a.id, name: name, field: af, member: am),
+                    second: End(kind: b.kind, id: b.id, canonicalID: bid, name: b.name, field: bf, member: bm),
+                    reverse: reverse)
+    }
+
+    func removalUpdate(lockLists: Bool) -> KBCorrection {
+        var update = KBCorrection(lockLists: lockLists)
+        switch target.field {
+        case .people: update.removePeople = [target.member]
+        case .chats: update.removeChats = [target.member]
+        case .projects, .items: update.removeProjects = [target.member]
         }
-        return KBUnlink(first: End(kind: a.kind, id: aid, canonicalID: a.id, name: name, field: af, member: am),
-                        second: End(kind: b.kind, id: b.id, canonicalID: bid, name: b.name, field: bf, member: bm),
-                        targetKind: reverse ? b.kind : a.kind, targetID: reverse ? b.id : aid, update: update)
+        return update
     }
 
-    /// The detail read back is this end's entry.
-    func matches(_ detail: KBDetail?, _ end: End) -> Bool {
-        detail?.kind == end.kind && detail?.id == end.canonicalID
-    }
-
-    /// Both entries read back without the other in their list, and the list protected by the user: an older hub that
-    /// takes the removal without the protection, or an extension still holding the list, is not done.
-    func confirmed(_ details: [KBDetail?]) -> Bool {
-        guard details.count == 2 else { return false }
-        return zip(ends, details).allSatisfy { end, d in
-            guard let d, matches(d, end) else { return false }
-            let members = d.meta?[end.field.rawValue]
-            let gone: Bool
-            switch members {
-            case nil, .null?: gone = true
-            default: gone = Self.strings(members).map { !$0.contains(end.member) } ?? false
-            }
-            let locked = Self.strings(d.meta?["locked_fields"])?.contains(end.field.rawValue) ?? false
-            let userHeld: Bool
-            switch d.meta?["provenance"] {
-            case nil, .null?: userHeld = true
-            case .object(let o)?: userHeld = o[end.field.rawValue] == nil
-            default: userHeld = false
-            }
-            return gone && locked && userHeld
+    var allowanceUpdate: KBCorrection {
+        switch target.field {
+        case .people: KBCorrection(allowPeople: [target.member])
+        case .chats: KBCorrection(allowChats: [target.member])
+        case .projects, .items: KBCorrection(allowProjects: [target.member])
         }
     }
 
-    /// The question before removing: what goes, that both entries stay, and which lists Persona stops changing.
+    static func matches(_ detail: KBDetail, _ end: End) -> Bool {
+        detail.kind == end.kind && detail.id == end.canonicalID
+    }
+
+    /// Both ends must keep the link out. Older hubs that only lock the lists cannot confirm the removal.
+    func removalConfirmed(_ firstDetail: KBDetail?, _ secondDetail: KBDetail?, lockLists: Bool) -> Bool {
+        Self.removalConfirmed(firstDetail, end: first, lockLists: lockLists)
+            && Self.removalConfirmed(secondDetail, end: second, lockLists: lockLists)
+    }
+
+    private static func removalConfirmed(_ detail: KBDetail?, end: End, lockLists: Bool) -> Bool {
+        let field = end.field.rawValue
+        guard let detail, matches(detail, end),
+              omits(end.member, from: detail.meta?[field]),
+              strings(detail.meta?["excluded"]?[field])?.contains(end.member) == true else { return false }
+        if lockLists, strings(detail.meta?["locked_fields"])?.contains(field) != true { return false }
+        // Failed attribution cleanup can leave an extension in control of the list.
+        switch detail.meta?["provenance"] {
+        case nil, .null?: return true
+        case .object(let provenance)?: return provenance[field] == nil
+        default: return false
+        }
+    }
+
+    func allowanceConfirmed(_ detail: KBDetail) -> Bool {
+        guard Self.matches(detail, first), let meta = detail.meta?.object,
+              detail.removed?.contains(where: { $0.kind == second.kind && $0.id == second.id }) != true else { return false }
+        switch meta["excluded"] {
+        case nil, .null?: return true
+        case .object(let excluded)?: return Self.omits(first.member, from: excluded[first.field.rawValue])
+        default: return false
+        }
+    }
+
     var question: String {
         String(localized: "Remove the link between “\(first.name)” and “\(second.name)”?")
     }
 
-    var explanation: String {
-        String(localized: "Both entries and what they hold are kept. Persona will stop changing the \(first.field.title) linked to “\(first.name)” and the \(second.field.title) linked to “\(second.name)” on its own.")
+    var lockExplanation: String {
+        String(localized: "Persona will stop changing the \(first.field.title) linked to “\(first.name)” and the \(second.field.title) linked to “\(second.name)” on its own.")
+    }
+
+    private static func omits(_ member: String, from value: JSONValue?) -> Bool {
+        switch value {
+        case nil, .null?: return true
+        default: return strings(value).map { !$0.contains(member) } ?? false
+        }
     }
 
     private static func string(_ v: JSONValue?) -> String? {
@@ -188,6 +224,159 @@ nonisolated struct KBUnlink: Identifiable, Hashable, Sendable {
             out.append(s)
         }
         return out
+    }
+}
+
+extension APIClient {
+    func kbReadback(_ end: KBRelationship.End, query: String? = nil) async -> (response: KBDetailResponse?, error: (any Error)?) {
+        do { return (try await kbDetail(end.kind, id: end.id, query: query), nil) }
+        catch { return (nil, error) }
+    }
+}
+
+/// The choice belongs to this presentation. Submitting captures it before the sheet closes.
+struct KBRemoveLinkSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let relationship: KBRelationship
+    let remove: (Bool) -> Void
+    @State private var lockLists = false
+    @State private var submitted = false
+    @State private var promptHeight: CGFloat = 0
+    @State private var actionsHeight: CGFloat = 0
+
+    var body: some View {
+        VStack(spacing: Theme.Space.s) {
+            ScrollView {
+                prompt
+                    .padding(.horizontal, Theme.Space.xl)
+                    .padding(.top, Theme.Space.xl)
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) { promptHeight = $0 }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            actions
+                .padding(.horizontal, Theme.Space.xl)
+                .padding(.bottom, Theme.Space.m)
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.height.rounded(.up) }) { actionsHeight = $0 }
+        }
+        .disabled(submitted)
+        .presentationDetents(promptHeight > 0 && actionsHeight > 0
+                             ? [.height(promptHeight + Theme.Space.s + actionsHeight)] : [.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private var prompt: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Text(relationship.question)
+                .font(Theme.Font.title)
+                .accessibilityAddTraits(.isHeader)
+            Group {
+                if lockLists {
+                    Text("Both entries are kept.")
+                } else {
+                    Text("Both entries are kept. Persona won’t make this link again on its own. This leaves other links free to update.")
+                }
+            }
+            .font(Theme.Font.secondary)
+            .foregroundStyle(.secondary)
+            .readingContent()
+            Toggle("Also stop automatic changes to both lists", isOn: $lockLists)
+                .toggleStyle(.switch)
+                .font(Theme.Font.body)
+                .scaledFrame(minHeight: Theme.Size.tapTarget)
+                .accessibilityIdentifier("kb.unlink.lockLists")
+            if lockLists {
+                Text(relationship.lockExplanation)
+                    .font(Theme.Font.secondary)
+                    .foregroundStyle(.secondary)
+                    .readingContent()
+                    .accessibilityIdentifier("kb.unlink.lockExplanation")
+            }
+        }
+    }
+
+    private var actions: some View {
+        VStack(spacing: Theme.Space.s) {
+            Button(role: .destructive) {
+                guard !submitted else { return }
+                submitted = true
+                let choice = lockLists
+                dismiss()
+                remove(choice)
+            } label: {
+                sheetButton("Remove Link")
+            }
+            .themedButton(prominent: true)
+            .tint(Theme.danger)
+            .accessibilityIdentifier("kb.unlink.confirm")
+            Button { dismiss() } label: { sheetButton("Cancel") }
+                .themedButton()
+                .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier("kb.unlink.cancel")
+        }
+        .controlSize(.large)
+    }
+
+    private func sheetButton(_ title: LocalizedStringKey) -> some View {
+        Text(title)
+            .font(Theme.Font.heading)
+            .buttonLabelLine()
+            .scaledFrame(maxWidth: .infinity, minHeight: Theme.Size.tapTarget)
+    }
+}
+
+nonisolated struct KBRemovedLink: Identifiable, Sendable {
+    let entry: KBEntry
+    let relationship: KBRelationship
+    var id: String { relationship.id }
+
+    static func rows(in detail: KBDetail, name: String) -> [Self] {
+        var seen = Set<String>()
+        return (detail.removed ?? []).compactMap { entry in
+            guard let relationship = KBRelationship.allowance(detail, name: name, removed: entry),
+                  seen.insert(relationship.id).inserted else { return nil }
+            return Self(entry: entry, relationship: relationship)
+        }
+    }
+}
+
+struct KBRemovedLinksSection: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    let rows: [KBRemovedLink]
+    let changingLink: String?
+    let allow: (KBRelationship) -> Void
+
+    var body: some View {
+        if !rows.isEmpty {
+            Section {
+                ForEach(rows) { row in
+                    let busy = changingLink == row.id
+                    let layout = typeSize >= Theme.interfaceLargestTypeSize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.s))
+                        : AnyLayout(HStackLayout(spacing: Theme.Space.s))
+                    layout {
+                        KBLinkRow(entry: row.entry).frame(maxWidth: .infinity, alignment: .leading)
+                        Button { allow(row.relationship) } label: {
+                            Text("Allow again")
+                                .font(Theme.Font.secondaryMedium)
+                                .buttonLabelLine()
+                                .scaledFrame(minWidth: Theme.Size.tapTarget, minHeight: Theme.Size.tapTarget)
+                                .opacity(busy ? 0 : 1)
+                                .overlay { if busy { ProgressView() } }
+                        }
+                        .themedButton()
+                        .layoutPriority(1)
+                        .disabled(changingLink != nil)
+                        .accessibilityLabel("Allow Persona to link \(row.entry.name) again")
+                        .accessibilityValue(busy ? Text("Updating…") : Text(verbatim: ""))
+                        .accessibilityIdentifier("kb.link.allow.\(row.id)")
+                    }
+                }
+            } header: {
+                Text("Removed by you")
+            } footer: {
+                Text("Allowing a link again lets Persona make it in a future update.")
+            }
+        }
     }
 }
 

@@ -22,6 +22,9 @@ const (
 	spawnNoticeTool = "spawn_notice"
 	// taskEndTool is the relay kind of a task's end told to the conversation that planned it (taskEndedNotice).
 	taskEndTool = "task_end"
+	// prFollowupTool is the relay kind of a post-closure delivery-PR event told to the closed to-do's original
+	// supervisor conversation (pr_followup.go). Like task_end it is a record, not a push of its own and no hop.
+	prFollowupTool = "pr_followup"
 	// spawnedKeep is how long a spawned conversation is followed: one that has not ended a turn by then is the
 	// user's own conversation by now.
 	spawnedKeep = 7 * 24 * time.Hour

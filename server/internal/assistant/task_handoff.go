@@ -13,6 +13,12 @@ import (
 // taskHandoff is rendered after placement and launcher fitting. An optional node.info read must never turn a
 // usable assignment into a failed or indefinitely waiting start merely because its handoff hint is unavailable.
 func (s *Service) taskHandoff(ctx context.Context, machine string, fit startAgent) string {
+	return prompts.RenderTaskHandoff(s.taskEntry(ctx, machine, fit))
+}
+
+// taskEntry is the verified way the fitted Agent reaches its own Persona tools: the MCP tools, the terminal entry
+// (the node's executable), or none. The handoff note names it, and a task leader's note follows it (#12136).
+func (s *Service) taskEntry(ctx context.Context, machine string, fit startAgent) prompts.TaskHandoff {
 	source := compat.Source(fit.source)
 	// Empty is a legacy shell launcher (proto.Launcher). A runtime or app's same-family agent does not establish
 	// terminal caller identity. Paseo injects the existing Persona MCP server into its Claude and Codex providers.
@@ -32,5 +38,5 @@ func (s *Service) taskHandoff(ctx context.Context, machine string, fit startAgen
 			h.Executable = string(encoded)
 		}
 	}
-	return prompts.RenderTaskHandoff(h)
+	return h
 }

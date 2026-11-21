@@ -9,6 +9,7 @@
     <string name="designsystem_modelpanel_favorites_empty">お気に入りはまだありません。モデルの ☆ をタップするとここに保存されます。</string>
     <string name="designsystem_modelpanel_no_match">一致するモデルはありません</string>
     <string name="designsystem_modelpanel_loading">モデルを読み込み中…</string>
+    <string name="designsystem_modelpanel_empty">利用できるモデルがありません</string>
     <string name="designsystem_modelpanel_retry">再試行</string>
     <string name="designsystem_modelpanel_save_favorite">お気に入りに保存</string>
     <string name="designsystem_modelpanel_remove_favorite">お気に入りから削除</string>

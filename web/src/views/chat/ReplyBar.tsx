@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
 import { exactTime, relativeTime } from "../../lib/relative-time";
-import { Button, copyText, cx, Dialog, Menu, toast } from "../../ui/atoms";
+import { Button, copyText, cx, Dialog, Menu, Spinner, toast } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { REPLY_BAR_FADE_MS, REPLY_BAR_LINGER_MS } from "../../ui/motion";
 import { isNoHover } from "../../ui/media-query";
@@ -24,6 +24,9 @@ import { TurnUsage } from "./TurnUsage";
 import type { ReplyTranslation } from "../../lib/reply-translation";
 import { ReplyTranslationButton } from "./ReplyTranslationButton";
 import { useChatActions, type ChatActions } from "./chat-actions";
+import { starrable, useCanStar, useStarAccess, useStarMark, type StarOrigin, type StarSource } from "../../lib/starred-rows";
+import { addStar, removeStar } from "../../lib/starred";
+import { starUserText } from "./star-user-text";
 import type { RewindRestore } from "../../lib/rewind";
 
 export { TurnUsage };
@@ -124,8 +127,53 @@ function useWhileOpen(live: Rewind["block"] | undefined, open: boolean, closed: 
   return useSyncExternalStore(on ? on.subscribe : NO_STORE, get, get);
 }
 
+function starSource(origin: StarOrigin | undefined, chat: ChatActions | null): StarSource | undefined {
+  if (!chat || !starrable(origin)) return undefined;
+  return {
+    machine_id: origin.mid, session_id: origin.sid, item_id: origin.item,
+    conversation: chat.assistant ? "assistant" : "agent",
+    source_fingerprint: origin.fingerprint,
+  };
+}
+
+export function StarAvailability({ origin, chat, report }: { origin: StarOrigin; chat: ChatActions | null; report: (available: "read" | "write" | null) => void }) {
+  const available = useStarAccess();
+  useEffect(() => { report(available && chat && starrable(origin) ? available : null); }, [available, chat, origin, report]);
+  return null;
+}
+
+export function StarBadge({ origin }: { origin: StarOrigin }) {
+  const mark = useStarMark(starSource(origin, useChatActions()));
+  if (!mark.id && !mark.pending) return null;
+  return (
+    <span className="pointer-events-none absolute -top-2 right-0 z-10 inline-flex items-center rounded-full bg-surface p-0.5 text-accent-ink" role="status"
+      aria-label={t(mark.pending ? "starred.saving" : "starred.marked")} data-star-mark={mark.pending ?? "saved"}>
+      {mark.pending ? <Spinner size={12} /> : <Icon name="star" className="fill-current" size={12} />}
+    </span>
+  );
+}
+
+function useStarAction(origin: StarOrigin | undefined, text: string, ts: string | undefined, isUser: boolean, load: (() => Promise<string>) | undefined): Action[] {
+  const chat = useChatActions();
+  const source = starSource(origin, chat);
+  const mark = useStarMark(source);
+  const allowed = useCanStar();
+  if (!chat || !source || !allowed || !text.trim()) return [];
+  return [{
+    key: "star", label: t(mark.id ? "starred.unstar" : "starred.star"), icon: "star", disabled: Boolean(mark.pending),
+    onSelect: () => {
+      if (mark.id) void removeStar({ ...source, id: mark.id });
+      else void addStar({
+        ...source, role: isUser ? "user" : "assistant", source_manager: chat.sourceManager,
+        title: chat.title, speaker: isUser ? "" : chat.speaker,
+        written_at: ts && Number.isFinite(Date.parse(ts)) ? new Date(ts).toISOString() : undefined, text,
+      }, load ?? starUserText(origin));
+    },
+  }];
+}
+
 /** Menu-only actions and their live disabled reasons load with the existing reply controls, not the transcript. */
-export function MessageMenu({ anchor, onClose, primary: actions, itemId, text, rewindText, messageId, isUser, onDelete, more, onSelectText, pick }: {
+export function MessageMenu({ anchor, onClose, primary: actions, itemId, text, rewindText, messageId, isUser, onDelete, more, onSelectText, pick, star, loadStar, ts }: {
   anchor: HTMLElement | { x: number; y: number };
   onClose: () => void;
   primary: Action[];
@@ -138,6 +186,9 @@ export function MessageMenu({ anchor, onClose, primary: actions, itemId, text, r
   more?: boolean;
   onSelectText: () => void;
   pick?: ForwardPick;
+  star?: StarOrigin;
+  loadStar?: () => Promise<string>;
+  ts?: string;
 }) {
   const chat = useChatActions();
   const rewind = isUser ? chat?.rewind : undefined;
@@ -147,6 +198,7 @@ export function MessageMenu({ anchor, onClose, primary: actions, itemId, text, r
     key: "select", label: t("chat-messageactions.select_text"), icon: "read", onSelect: onSelectText,
   });
   const extras = [
+    ...useStarAction(star, text, ts, Boolean(isUser), loadStar),
     ...moreActions(itemId, chat?.fork, chat?.assistant),
     ...rewindActions(messageId, rewindText, rewind && { block, code: rewind.code, run: rewind.run }),
     ...(isUser && chat?.canCompose ? savePromptActions(text) : []),
@@ -185,10 +237,11 @@ async function copyQuietly(text: string): Promise<boolean> {
  *  Select have their own controls); no ⋯ without any others. `pinned`: the
  *  chat's last message, whose time stays shown without the pointer. `usage`: what the exchange used (lib/turn-usage.ts
  *  usageKey), `usageMs` its work time, `persona` a Persona conversation's plain cost. */
-export function ReplyBar({ text, ts, itemId, more: actions, pinned, usage, usageMs, persona, translation }: { text: string; ts?: string; itemId?: string; more: Action[]; pinned?: boolean; usage?: string; usageMs?: number; persona?: boolean; translation?: ReplyTranslation }) {
+export function ReplyBar({ text, ts, itemId, more: actions, pinned, usage, usageMs, persona, translation, star, loadStar }: { star?: StarOrigin; loadStar?: () => Promise<string>; text: string; ts?: string; itemId?: string; more: Action[]; pinned?: boolean; usage?: string; usageMs?: number; persona?: boolean; translation?: ReplyTranslation }) {
   const chat = useChatActions();
   const branch = moreActions(itemId, chat?.fork, chat?.assistant)[0];
-  const more = actions.filter((a) => a.key !== "copy" && a.key !== "select");
+  const starActions = useStarAction(star, text, ts, false, loadStar);
+  const more = [...actions.filter((a) => a.key !== "copy" && a.key !== "select"), ...starActions];
   const ref = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState(false);
   const [visible, setVisible] = useState(false);

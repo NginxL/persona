@@ -137,6 +137,32 @@
   ],
   "source": "calendar"
  },
+ "phone_call_start": {
+  "description": "Start a phone call, a FaceTime video call or a FaceTime audio call on the iPhone. Pass one number (or, for FaceTime, an email address) that the user chose: when a contact has several numbers, ask which first and never pick one yourself. The user approves on the phone, then iOS asks again before dialling. The result only says the call was handed to iOS; it cannot tell whether it connected. Persona must be open on the iPhone. There is no access to call history.",
+  "properties": {
+   "kind": {
+    "description": "phone (default), facetime or facetime_audio.",
+    "enum": [
+     "phone",
+     "facetime",
+     "facetime_audio"
+    ],
+    "type": "string"
+   },
+   "name": {
+    "description": "Who is being called, shown on the approval card.",
+    "type": "string"
+   },
+   "number": {
+    "description": "Phone number to call (digits, +, spaces and dashes allowed); for FaceTime also an email address.",
+    "type": "string"
+   }
+  },
+  "required": [
+   "number"
+  ],
+  "source": "calls"
+ },
  "phone_clipboard_get": {
   "description": "Read the phone's clipboard as text. iOS may show an \"Allow Paste?\" prompt the first time, which the user has to confirm. Returns \"text\" and its character count, or text: null when the clipboard is empty or holds something that is not text.",
   "properties": {},

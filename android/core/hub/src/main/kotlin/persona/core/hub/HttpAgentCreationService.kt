@@ -111,12 +111,17 @@ class HttpAgentCreationService(
         // Hubs without unified model configuration: the launcher is picked here as before.
         if (failure.status == 404) null else throw failure
     }
-    override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean): LauncherModels? = try {
+    override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean): LauncherModels? =
+        launcherModels(machineId, launcher, refresh, null)
+    override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean, host: String?): LauncherModels? = try {
         val url = url("api", "v1", "machines", machineId, "launchers", launcher, "models").newBuilder()
-            .apply { if (refresh) addQueryParameter("refresh", "1") }.build()
+            .apply {
+                if (refresh) addQueryParameter("refresh", "1")
+                if (!host.isNullOrEmpty()) addQueryParameter("host", host)
+            }.build()
         JsonCodec.decodeFromJsonElement<LauncherModels>(read(request().url(url).build(), modelsHttp))
     } catch (failure: HubFailure) {
-        // Hubs without the list: no model picker, the launcher's own model as before.
+        // Hubs without the list cannot supply suggestions or a lock reason.
         if (failure.status == 404) null else throw failure
     }
     override suspend fun worktreeStatus(machineId: String, cwd: String, kind: String?): WorktreeStatus? = try {

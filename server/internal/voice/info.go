@@ -9,7 +9,7 @@ const (
 	codeModelUnavailable    = "model_unavailable"    // not fatal: the app's model is gone, the default one is used instead
 	codeUpstreamForbidden   = "upstream_forbidden"   // fatal: the service refused the key (401, 403)
 	codeUpstreamUnavailable = "upstream_unavailable" // fatal: the service is down for the moment (503, or says so)
-	codeUpstreamFailed      = "upstream_failed"      // fatal: the session dropped and reconnecting did not work
+	codeUpstreamFailed      = "upstream_failed"      // fatal: the session failed, or a call's reconnects did not work
 	codeTargetGone          = "target_gone"          // fatal: the conversation to bind is not listed
 	codeTargetReadOnly      = "target_read_only"     // fatal: it can only be read
 	codeTargetForbidden     = "target_forbidden"     // fatal: this caller may not bind one (another extension)

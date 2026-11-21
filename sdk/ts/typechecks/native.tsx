@@ -1,4 +1,4 @@
-import { Button, Text, View, Section, Row, Field, Grid, Graph, Fragment, callback, useState, useLoadEffect, useFetch, type Node } from "@persona/extension/ui";
+import { Button, Text, View, Section, Row, Field, Grid, Graph, Scene, Fragment, callback, useState, useLoadEffect, useFetch, type Node } from "@persona/extension/ui";
 
 const initializeCapability: import("@persona/extension/wire").InitializeResult = { protocol: 1, id: "example", version: "1", ui_page_cancellation: 1 };
 void initializeCapability;
@@ -10,7 +10,7 @@ function Counter({ label }: { label: string }): Node {
   return <Section key="counter-section"><Text key="count" text={String(count)} /><Button key="increment" title={label} action={callback(() => setCount((value) => value + 1))} /></Section>;
 }
 export const fragments = <View key="fragments"><><Fragment key="fragment"><Section key="section" /></Fragment></></View>;
-export const valid = <View key="page" title="fixture"><Counter key="counter" label="fixture" /><Section key="controls"><Row key="row" title="fixture" control={{ kind: "switch", name: "enabled", action: callback(() => {}) }} /><Field key="field" name="name" label="fixture" kind="text" /><Grid key="tiles" tiles={[{ key: "tile", title: "fixture", action: callback(() => {}) }]} /><Graph key="graph" nodes={[{ id: "a", title: "fixture" }, { id: "b", title: "fixture", action: callback(() => {}) }]} edges={[{ from: "a", to: "b" }]} layout="tree" /></Section></View>;
+export const valid = <View key="page" title="fixture"><Counter key="counter" label="fixture" /><Section key="controls"><Row key="row" title="fixture" control={{ kind: "switch", name: "enabled", action: callback(() => {}) }} /><Field key="field" name="name" label="fixture" kind="text" /><Grid key="tiles" tiles={[{ key: "tile", title: "fixture", action: callback(() => {}) }]} /><Graph key="graph" nodes={[{ id: "a", title: "fixture" }, { id: "b", title: "fixture", action: callback(() => {}) }]} edges={[{ from: "a", to: "b" }]} layout="tree" /><Scene key="scene" alt="fixture" shapes={[{ kind: "box", center: [0, 0], size: [1, 1], bottom: 0, top: 1 }]} pins={[{ id: "lamp", at: [0, 0], label: "fixture", state: "On", light: { on: true }, action: callback(() => {}) }]} /></Section></View>;
 
 // @ts-expect-error Unknown native prop.
 const unknownProp = <Text key="text" text="fixture" css="arbitrary" />;

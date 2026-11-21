@@ -840,7 +840,8 @@ struct TaskQuestions: View {
             .flatMap { todo in store.interactions(todo).map { (todo: todo, ix: $0) } }
             .sorted { ($0.ix.createdAt ?? .distantPast) < ($1.ix.createdAt ?? .distantPast) }
         if let first = asks.first {
-            let cap = cap
+            let resize = resize(first.ix.id)
+            let cap = cap(resize)
             let keyboard = keyboardRoom
             let area = cap > 0 ? max(cap - labelHeight - Theme.Space.xs, Theme.Size.tapTarget) : 0
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -859,8 +860,9 @@ struct TaskQuestions: View {
                     .environment(\.cardRoom, containerLength)
                     .environment(\.cardArea, area)
                     .environment(\.cardFits, keyboard ? area - Theme.Space.l : 0)
-                    // Alone, the cap is its only one (a lone question past half the page, #6277).
-                    .environment(\.cardTakesArea, !sharesRoom)
+                    // Alone, the cap is its only one (a lone question past half the page, #6277); sized by hand, too.
+                    .environment(\.cardTakesArea, !sharesRoom || resize != nil)
+                    .environment(\.cardResize, resize)
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("task-question")
@@ -886,13 +888,27 @@ struct TaskQuestions: View {
     /// The conversation's own cards are on screen under the entries: half the room each (#9392).
     private var sharesRoom: Bool { room.stackShown > 0 }
 
-    /// How tall the question with its task's name may be; 0 before the page is measured (no cap yet).
-    private var cap: CGFloat {
+    private var rest: CGFloat { footerRest > 0 ? footerRest : room.footer - shown - room.stackShown }
+
+    /// How tall the question with its task's name may be; 0 before the page is measured (no cap yet). Beside the
+    /// conversation's own cards each has half the room, and a card that takes less (folded, #12306) leaves the rest to
+    /// the other: a folded card kept its half empty while the question showed one option. The user's height
+    /// (`CardHeight`) wins with the keyboard down.
+    private func cap(_ resize: CardResize?) -> CGFloat {
         guard room.height > 0, room.footer > 0 else { return 0 }
-        let rest = footerRest > 0 ? footerRest : room.footer - shown - room.stackShown
         let whole = room.cardsRoom(rest: rest, keyboard: keyboardRoom)
-        if sharesRoom { return max(Theme.Size.tapTarget, whole / 2) }
-        return keyboardRoom ? max(Theme.Size.tapTarget, whole) : max(room.height / 2, whole)
+        if keyboardRoom { return max(Theme.Size.tapTarget, sharesRoom ? whole / 2 : whole) }
+        let fallback = sharesRoom ? max(Theme.Size.tapTarget, whole / 2, whole - room.stackShown) : max(room.height / 2, whole)
+        guard let resize else { return fallback }
+        return CardHeight.shared.cap(default: fallback, range: resize.range, id: resize.id)
+    }
+
+    /// The grabber's terms (#12306), the keyboard down: from the shortest card to all the room above the composer the
+    /// conversation's own cards leave, the conversation keeping a sliver. Beside them the question is the one sized.
+    private func resize(_ id: String) -> CardResize? {
+        guard room.height > 0, room.footer > 0, !keyboardRoom else { return nil }
+        let tallest = room.tallestRoom(rest: rest) - (sharesRoom ? room.stackShown : 0)
+        return CardResize(id: id, height: { shown }, range: FooterRoom.resizeRange(tallest: tallest))
     }
 }
 

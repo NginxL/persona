@@ -54,7 +54,7 @@ fun TerminalPanesScreen(model: TerminalPanesViewModel, navigator: Navigator) {
     val untitled = stringResource(R.string.terminal_panes_untitled)
     JListPage(
         title = stringResource(R.string.terminal_panes_title), summary = stringResource(R.string.terminal_panes_summary),
-        onBack = navigator::back, refreshing = state.busy, onRefresh = model::refresh,
+        onBack = if (persona.core.designsystem.LocalIsSidebarRoot.current) null else navigator::back, refreshing = state.busy, onRefresh = model::refresh,
         actions = { JIconButton(PhIcons.ArrowClockwise, stringResource(R.string.terminal_panes_refresh), model::refresh, enabled = !state.busy) },
     ) {
         if (state.machines.isEmpty()) item("empty") {

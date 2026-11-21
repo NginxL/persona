@@ -622,7 +622,7 @@ func TestInteractiveClaudeCodeDescendsFromTheBridge(t *testing.T) {
 			return err == nil && json.Unmarshal(bytes.TrimSpace(raw), &pid) == nil
 		})
 		line := lineage(pid, parentPID)
-		id, ok := n.mcpAssistantOf(pid, nil, parentPID, "main-chat")
+		id, _, ok := n.mcpAssistantOf(pid, nil, parentPID, "main-chat")
 		b.shutdown()
 		if !slices.Contains(line, os.Getpid()) {
 			t.Fatalf("tmux %s: the pane's child (pid %d) does not descend from the bridge (pid %d): %v", b.tm.Bin, pid, os.Getpid(), line)

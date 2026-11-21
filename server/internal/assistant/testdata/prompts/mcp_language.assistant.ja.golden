@@ -1,0 +1,3823 @@
+[
+  {
+    "name": "ask_user",
+    "description": "Ask the user one or more multiple-choice questions on their iPhone (a card in this conversation plus a push notification) and wait for the answers. Use it to confirm anything risky (sending messages / email for them, deleting, changing live systems) or to let them pick between options. AskUserQuestion does not work here; use this. They can also type a free-form answer. Waits up to 2 hours; if the user writes in this conversation instead of picking an option, the question is withdrawn and the tool returns at once, with their message following. If nobody answers in time, the question becomes a to-do that waits for the user's call (in their to-do list and the next briefing), and their answer comes to this conversation later as a new message. With a deadline (each question then recommends one of its options): if nobody answers by it and you marked it reversible, the recommended options are taken by default and recorded on the question's to-do; one that cannot be undone is only reminded again and keeps waiting. With wait false the card goes up the same way but the call returns at once: end the turn without guessing the answer; it comes later as a new message quoting the question and the answer (or saying the card was closed unanswered, or expired and became a to-do). Use wait false only where your instructions say to; a confirmation this same turn needs (approving a message before it is sent) keeps the default. A waiting call holds this turn, so anything else sent to this conversation waits behind it: once such a message waits and the question has been up for a couple of minutes, the call returns without the answer and the card stays up as with wait false; end the turn then.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "questions"
+      ],
+      "properties": {
+        "wait": {
+          "type": "boolean",
+          "description": "default true: hold this turn until the user answers. false: put the card up and return at once; the answer arrives later as a new message in this conversation"
+        },
+        "deadline": {
+          "type": "string",
+          "description": "optional: until when the questions wait, a duration (\"30m\", \"4h\") or an RFC 3339 time, 1 minute to 30 days ahead; needs reversible and a recommend on every question"
+        },
+        "reversible": {
+          "type": "boolean",
+          "description": "with deadline: whether going ahead with the recommended options can be undone later. false for deleting, sending anything to other people, spending money or changing production: those are never taken by default"
+        },
+        "questions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": [
+              "question",
+              "options"
+            ],
+            "properties": {
+              "question": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string",
+                "description": "short label, ≤12 chars"
+              },
+              "multiSelect": {
+                "type": "boolean"
+              },
+              "recommend": {
+                "type": "string",
+                "description": "the label of the option you recommend; required with deadline"
+              },
+              "options": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "label"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "notify_user",
+    "description": "Send the user a push notification right now (works when the app is closed). Tapping it opens this conversation. Use for results of scheduled runs and anything time-sensitive; ordinary replies already notify. In the hub's push grading, a notice from a conversation other than the main one is held for the briefing instead of alerting unless it is P0; the tool answer then says it was moved to the briefing, so treat the user as not alerted.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "title",
+        "body"
+      ],
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "push_level": {
+          "type": "string",
+          "enum": [
+            "P0",
+            "P1"
+          ],
+          "description": "How urgent this is. P1 (default): worth knowing; in the hub's push grading it is held for the briefing instead of alerting, and from a non-main conversation it is held even without an explicit level. P0: something the user must do or decide themselves (an action only they can take, a decision only they can make), so it alerts even in push grading and from any conversation. Use P1 for results, progress and conclusions."
+        },
+        "related_key": {
+          "type": "string",
+          "description": "Optional: what this is about, such as a PR link or a to-do id. In push grading the same key interrupts at most once in 12 hours, and held notices about it are listed together."
+        }
+      }
+    }
+  },
+  {
+    "name": "supervision_finish",
+    "description": "Finish handling a supervision wake-up without cluttering the user's main conversation. Use visibility=\"silent\" when no user decision or useful result needs to be shown, with a short summary of what you checked or changed; then end the turn. The complete turn stays available in the expandable supervision record. Use visibility=\"user\" to explicitly show the turn without sending a notification. notify_user, ask_user, and task_review user conclusion cards also promote the turn. A promoted turn cannot be made silent again. This tool is only for supervision-triggered turns, not normal user messages.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "visibility",
+        "summary"
+      ],
+      "properties": {
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "silent",
+            "user"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "schedule_followup",
+    "description": "Wake yourself later with `prompt`; `new_conversation: true` uses its own chat. Wakes reset the message hop chain at most once per 10 minutes. `at` accepts RFC3339 or relative 30m/2h/1d. For repeats set `every` (5m-7d) once; never chain runs. Or use `cron` instead of at/every: 5 fields in the user's zone, at least 5m apart; @hourly/@daily/@weekly/@monthly/@yearly work. Day 0/7 is Sunday; restricted day fields match either. Inspect the reply's next runs. `until` cannot be a bare clock time.\n\nRuns inherit Main chat's launcher/model/effort; overrides require an own conversation, and permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat each run with its state note. See field descriptions for push and end-time edit rules.\n\nFor approved recurring work advancing a supervised to-do, pass its explicit `todo_id`; do not guess from a title. Omission keeps an association; \"\" clears it; one-shots refuse it. From the second run, progress is new Agent answers or tool calls (not waits or repeats), criterion changes or progress reports; a long stall asks Change approach / Keep waiting, even with `push: asked`. Get owner consent before creating or changing recurring work.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "explicit supervised to-do this recurring follow-up advances"
+        },
+        "fresh_each_run": {
+          "type": "boolean"
+        },
+        "at": {
+          "type": "string",
+          "description": "when (the first run, with every); default with every: one interval from now"
+        },
+        "every": {
+          "type": "string",
+          "description": "repeat this often, e.g. 30m"
+        },
+        "cron": {
+          "type": "string",
+          "description": "repeat on a cron expression instead of at / every: minute hour day-of-month month day-of-week in the user's time zone, e.g. */30 9-18 * * 1-5"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "what to do then, self-contained"
+        },
+        "title": {
+          "type": "string",
+          "description": "short label shown in the app"
+        },
+        "new_conversation": {
+          "type": "boolean",
+          "description": "start a fresh conversation instead of continuing this one"
+        },
+        "push": {
+          "type": "string",
+          "enum": [
+            "every",
+            "asked"
+          ],
+          "description": "every (default for a new task): each run's answer is pushed to the user; asked: only what a run sends with notify_user, for a task that watches something or a standing loop (a patrol, a daily round). Continuing this conversation, a run's answer is then not pushed or sent to channels; from Main chat it runs in its own conversation instead. Omit to keep an existing task's"
+        },
+        "inbox": {
+          "type": "string",
+          "enum": [
+            "off",
+            "worthy",
+            "every"
+          ],
+          "description": "what of a run goes into the user's Inbox, independent of push: off (default for a new task), worthy (a run puts a row there with inbox_post only when it finds something worth a look), every (every run ends with a row made by Persona). Set it only when the user asked for it. Omit to keep an existing task's"
+        },
+        "until": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "optional end time (RFC 3339 or 30m / 2h / 1d). After it, Persona turns the task off and records a skipped run instead of running. Omit to keep an existing task's end time; null clears it. Ignored for a one-off."
+        },
+        "launcher": {
+          "type": "string",
+          "description": "this task's own launcher, instead of Main chat's (a name on the computer where its runs start). Needs new_conversation: true: a follow-up that continues this conversation runs on that conversation's launcher. Empty clears the override and follows Main chat again. Omit to keep an existing task's"
+        },
+        "model": {
+          "type": "string",
+          "description": "model id for the launcher above; without a launcher it pins the launcher the task runs on now. Empty uses the launcher's default. Omit to keep an existing task's"
+        },
+        "effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "description": "thinking effort for Claude launchers; without a launcher it pins the launcher the task runs on now. Omit to keep an existing task's; empty clears it"
+        }
+      }
+    }
+  },
+  {
+    "name": "schedule_routine",
+    "description": "Create a recurring routine, or pass `id` from list_followups to edit only the fields supplied. `enabled: false` pauses it. Use `time` with optional `weekdays`, or `cron` instead. Times use the user's zone; cron has 5 fields, runs at least 5m apart, supports the listed aliases, treats 0/7 as Sunday and restricted day fields as either. Seconds, @every and TZ= are refused; inspect the reply's next runs. `until` cannot be a bare clock time.\n\nRuns inherit Main chat's launcher/model/effort. Omit overrides to keep them; an empty launcher returns to Main chat. Permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat per run with its state note. See field descriptions for push and end-time edit rules.\n\nFor approved work advancing a supervised to-do, pass its explicit `todo_id`; this conversation must supervise it. Omission keeps its association; \"\" clears it. From the second run Persona checks Agent answers, tool calls (not waits or repeats), criterion changes and progress reports; a long stall asks Change approach / Keep waiting, even with `push: asked`. Get owner consent before creating or changing recurring work.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "explicit supervised to-do this routine advances"
+        },
+        "fresh_each_run": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string",
+          "description": "to change an existing routine"
+        },
+        "title": {
+          "type": "string",
+          "description": "short name shown in the app, e.g. 早报"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "what to do each time, self-contained"
+        },
+        "time": {
+          "type": "string",
+          "description": "HH:MM, 24-hour"
+        },
+        "weekdays": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          },
+          "description": "1 = Monday … 7 = Sunday; omit or empty = every day"
+        },
+        "cron": {
+          "type": "string",
+          "description": "instead of time / weekdays: minute hour day-of-month month day-of-week in the user's time zone, e.g. */30 9-18 * * 1-5 or 0 10 1 * *; or @hourly / @daily / @weekly / @monthly / @yearly"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "report": {
+          "type": "boolean",
+          "description": "a daily report (such as a leader conversation's): each run opens with Persona's north-star lines (today's interruptions and availability, the change against yesterday until the same time, the source), which the report starts with. Omit to keep an existing routine's"
+        },
+        "push": {
+          "type": "string",
+          "enum": [
+            "every",
+            "asked"
+          ],
+          "description": "every (default for a new task): each run's answer is pushed to the user; asked: only what a run sends with notify_user, for a task that watches something (it then runs in its own conversation). Omit to keep an existing task's"
+        },
+        "inbox": {
+          "type": "string",
+          "enum": [
+            "off",
+            "worthy",
+            "every"
+          ],
+          "description": "what of a run goes into the user's Inbox, independent of push: off (default for a new task), worthy (a run puts a row there with inbox_post only when it finds something worth a look; for a task that watches something), every (every run ends with a row made by Persona; for a briefing the user follows daily). Set it only when the user asked for it. Omit to keep an existing task's"
+        },
+        "run_if": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Optional owner-approved shell check on the routine computer before scheduled runs. Exit 0 runs; exit 1 skips. Other errors follow on_error. Omit to keep it or use null to remove it.",
+          "properties": {
+            "command": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "timeout_s": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60,
+              "default": 30
+            },
+            "on_error": {
+              "type": "string",
+              "enum": [
+                "run",
+                "skip"
+              ],
+              "default": "run"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": false
+        },
+        "until": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "optional end time (RFC 3339 or 30m / 2h / 1d). After it, Persona turns the task off and records a skipped run instead of running. Omit to keep an existing task's end time; null clears it. Ignored for a one-off."
+        },
+        "launcher": {
+          "type": "string",
+          "description": "this routine's own launcher, instead of Main chat's (a name on the computer where its runs start). Empty clears the override and follows Main chat again. Omit to keep an existing routine's"
+        },
+        "model": {
+          "type": "string",
+          "description": "model id for the launcher above; without a launcher it pins the launcher the routine runs on now. Empty uses the launcher's default. Omit to keep an existing routine's"
+        },
+        "effort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "description": "thinking effort for Claude launchers; without a launcher it pins the launcher the routine runs on now. Omit to keep an existing routine's; empty clears it"
+        }
+      }
+    }
+  },
+  {
+    "name": "schedule_state_set",
+    "description": "Stage the recurring task's state note for this scheduled run. Call near the end of the run with the run key in the scheduled prompt and the full replacement state (up to 4096 UTF-8 bytes). Keep cursors, references, and what was already reported. The hub attempts to save the draft after confirming that the run succeeded. If it cannot track the run or write the note, later runs use the last saved note. An empty string clears the note when saved.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "run_key",
+        "text"
+      ],
+      "properties": {
+        "run_key": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "delete_routine",
+    "description": "Delete a scheduled task (routine or follow-up) by id (from list_followups). Confirm with the user first unless they asked for it.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "list_followups",
+    "description": "List every scheduled task (with ids): follow-ups that have not run yet, repeating ones, daily routines. A repeating task with an end time shows that time.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "cancel_followup",
+    "description": "Cancel a scheduled follow-up or a repeating task by id (from list_followups).\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "list_places",
+    "description": "The user's saved places (home, the office, …) with their coordinates and reminder radius, as the user set them in Settings › Assistant › Saved Places or as you saved them with save_place. Read them before a reminder by place, and before a route or directions to or from a place the user names (home, the office); never take a place's coordinates from memory.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "save_place",
+    "description": "Save a place to the user's saved places, or change the saved place of the same name. Only for a place the user just confirmed in this conversation (their current location while they are there, or a phone_location_search result they picked); the user sees and edits it in Settings › Assistant › Saved Places.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "name",
+        "latitude",
+        "longitude"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "What the user calls it, e.g. 家 or 公司 (at most 40 characters)"
+        },
+        "address": {
+          "type": "string",
+          "description": "The address, as phone_location_search gave it"
+        },
+        "latitude": {
+          "type": "number"
+        },
+        "longitude": {
+          "type": "number"
+        },
+        "radius_meters": {
+          "type": "integer",
+          "description": "The reminder circle, 100–2000; leave it out for 150"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "machines_list",
+    "description": "List computers' connection, system, resources, agents, launcher failures and node builds. Samples over 30 seconds old are stale. Nulls have reasons; do not infer or rank.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "machine_redeploy",
+    "description": "Redeploy by ID or exact name; return the confirmed outcome.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "agents_list",
+    "description": "The Claude Code / Codex agents running on the user's computers (herdr), with their state: needs_you (waiting for an answer / approval), working, unread (finished, result not looked at), idle. done lists work finished in the last 24 hours, and muted lists the muted agents that would otherwise appear in the live snapshot; both include the work conclusion when known. Each line has machine, session id, project, title, last update and the last thing the agent said. launcher= names the launcher an agent runs on when it is known, and usage_limit (with resets_at when the reset is known) marks one its subscription's usage limit stopped (agent_switch moves such an agent to another launcher when the user asks). Known Claude Code switch states appear as ultracode=on/off; an omitted state is unknown. ultracode=on means every substantive task runs a multi-agent dynamic workflow, independently of thinking effort. Let it finish and wait for workflow results without nudging it. Much faster and more accurate than ssh + herdr. At the end: the launchers that failed their last health check, by machine (agent_start and task_plan move off them).\n\nA line under an agent is something waiting for the user: a question lists its options and the interaction id to answer it with (interaction_answer), an approval is the user's to give in the app.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "needs_you",
+            "working",
+            "unread",
+            "idle",
+            "done",
+            "muted",
+            "archived",
+            "all"
+          ],
+          "description": "default active = needs_you + working + unread; done = finished work in the last 24 hours; muted = muted agents in the live snapshot categories; archived: only the archived sessions (agent_unarchive restores them); the others leave archived ones out, all lists them marked archived"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string",
+          "description": "filter by title / project / directory"
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_read",
+    "description": "Read the recent conversation of one agent (from agents_list): the user's messages, what the agent said, tool calls in short form. `turns` = how many recent exchanges (default 2, max 10). Use it to answer the user's follow-ups about work an agent or task already did (its conclusion, a PR link, why it stopped) instead of asking the agent with agent_send, which makes it take another turn while the user waits (and a stopped agent takes no messages: it is read-only).\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "full id or its first 8 characters"
+        },
+        "turns": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_send",
+    "description": "Send what the user asked for to an Agent. A busy Agent may queue it. A stopped Agent needs resume and resume_why when its context is needed. Recorded non-user stops (including quota/capacity errors) allow resume. User, exit or unknown stops need the user's Resume. It must be supervised (give task unless on an open task of yours). A nearly full Agent is compacted first. For unrelated work use agent_start. Unsure: ask_user. An unstarted branch starts on its first message. Only /exit or /quit stops a running Agent and keeps the tab. The owner's controls close another conversation's Agent.\n\nFor dialog_open, retry with dismiss_notice only when Enter alone closes the notice. For permissions and pickers, tell the user or use interaction_answer.\n\nFrom the main conversation, give task to supervise new work, including done_when in text. More on your existing task keeps its title and updates its criteria. A different title, the user's own to-do or another conversation's task is refused. A failed send creates no task. Omit task for a reply, nudge or decision.\n\nUse `handoff` for an already-stopped to-do you supervise. A node acknowledgement starts its wait for the receiving Agent's result.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id",
+        "text"
+      ],
+      "properties": {
+        "wait_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0/omitted: normal receipt"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "resume": {
+          "type": "boolean",
+          "description": "resume this stopped agent with its context, text as its first message"
+        },
+        "resume_why": {
+          "type": "string",
+          "description": "shown to the user"
+        },
+        "dismiss_notice": {
+          "type": "boolean",
+          "description": "Press Enter first to close a notice that only says \"Enter to continue\" (no options). Any other dialog still refuses the send."
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          },
+          "description": "absolute paths of pictures/files the user gave in this conversation (Claude Code path or app attachment); copied to the agent, appended to its message with mentions updated; others refused"
+        },
+        "handoff": {
+          "type": "object",
+          "required": [
+            "todo_id",
+            "receiving_todo_id",
+            "head",
+            "check",
+            "until"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "todo_id": {
+              "type": "string"
+            },
+            "receiving_todo_id": {
+              "type": "string"
+            },
+            "head": {
+              "type": "string",
+              "description": "Full candidate commit ID"
+            },
+            "check": {
+              "type": "string"
+            },
+            "until": {
+              "type": "string",
+              "description": "Duration or RFC 3339 deadline"
+            }
+          }
+        },
+        "task": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "new work: make it your supervised task first (main conversation only); null for a reply",
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "短いタスク名（日本語、20文字未満）"
+            },
+            "done_when": {
+              "type": "array",
+              "maxItems": 6,
+              "items": {
+                "type": "string"
+              },
+              "description": "results you can check when it says it is done (a PR merged, a sheet's link, what the live system answers)"
+            },
+            "expect_minutes": {
+              "type": "integer",
+              "description": "how long it should take from now; longer without progress counts as stuck"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_switch",
+    "description": "Move a running Claude Code agent (from agents_list) to another launcher on its computer and go on with it, in one step: the agent is quit and resumed on that launcher in the same terminal, with the same conversation, and `text` is sent to it there. It is the switch the user makes from the agent's chat. Use it only when the user asked for it, for example when a subscription's usage limit stopped agents and the user wants them to go on with another provider now rather than wait for the reset; never on your own. The launcher must be one of that computer's (machines_list and agents_list show the names). The switch happens now or not at all: an agent that is working, waits for the user (a question, a permission, a plan), is starting, has background work its quit would end, or has a draft or a dialog in its input box is refused with nothing typed and nothing left waiting; tell the user why, and try again once it has stopped if they still want it. Other refusals say why too (a launcher that does not run there or is not signed in, a model the launcher's default cannot be read for: give model). Not for stopped agents (agent_send with resume), assistant conversations, read-only agents, or Codex and other agents. An agent its usage limit stopped goes on with what it was doing when `text` is left out; any other agent needs `text`. Its usage-limit continuation, if one was due, is not sent afterwards.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id",
+        "launcher"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's id or name, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's session id, or its first 8 characters"
+        },
+        "launcher": {
+          "type": "string",
+          "description": "the launcher to move it to, by its name on that computer"
+        },
+        "model": {
+          "type": "string",
+          "description": "a model of that launcher; empty: the launcher's default"
+        },
+        "effort": {
+          "type": "string",
+          "description": "the reasoning effort on the new launcher; empty: as it is"
+        },
+        "text": {
+          "type": "string",
+          "description": "what the agent does on the new launcher, sent as the user would type it; empty only for an agent its usage limit stopped (it goes on with what it was doing)"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "agents_switch",
+    "description": "Move many Claude Code agents to another launcher on their computers in one call. Use it when the user asks to move agents to another launcher (\"move everything on the default launcher to X\", \"switch these to X\"), for example because they watch their subscription quota; never on your own. Name the agents in `agents`, or leave it out to take every Claude Code agent (running ones, and stopped ones Persona started), narrowed by `machine` and `from_launcher` (`claude` is the default launcher). First call it with `preview` true and tell the user what it will do with each agent, then call it again without `preview` once they agree; when the user already named exactly which agents and where, one call is enough. Each agent goes as its state allows: one its usage limit stopped is switched now and goes on with what it was doing; an idle one is switched now and nothing is sent (it waits on the new launcher for the next message); one that is working, waits for the user (a question, a permission, a plan), is starting or has background work is queued and switched when its turn ends (with the usage-limit continuation if that turn ended on a limit); a stopped one Persona started has the launcher it resumes on changed, so its next Resume, or the message that resumes it, comes up on the new launcher; one the checks refuse (another CLI, a runtime's session, an assistant conversation, a launcher that does not run there, a model the launcher's default cannot be read for: give model) is reported and left as it is, and so is one whose switch failed on its computer (it is back on its launcher; not tried again: tell the user why). The answer has one line per agent: switched and continued, switched, switched (takes effect when resumed), queued, or refused with why. A queued switch is dropped if the agent moves to another launcher meanwhile or after a day; if it stops meanwhile, its Resume is pointed at the new launcher instead; agents_list shows queued ones as switch_queued=. The switch is the same as the user's from the agent's chat: same conversation, same terminal.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "launcher"
+      ],
+      "properties": {
+        "launcher": {
+          "type": "string",
+          "description": "the launcher to move them to, by its name on their computers"
+        },
+        "model": {
+          "type": "string",
+          "description": "a model of that launcher; empty: the launcher's default"
+        },
+        "effort": {
+          "type": "string",
+          "description": "the reasoning effort on the new launcher; empty: as each has it"
+        },
+        "agents": {
+          "type": "array",
+          "description": "the agents to move; empty: every Claude Code agent (running, or stopped and started by Persona) that machine and from_launcher keep",
+          "items": {
+            "type": "object",
+            "required": [
+              "session_id"
+            ],
+            "properties": {
+              "machine": {
+                "type": "string",
+                "description": "the machine's id or name, as agents_list shows it"
+              },
+              "session_id": {
+                "type": "string",
+                "description": "the agent's session id, or its first 8 characters"
+              }
+            }
+          }
+        },
+        "machine": {
+          "type": "string",
+          "description": "without agents: only this computer's agents"
+        },
+        "from_launcher": {
+          "type": "string",
+          "description": "without agents: only the agents running on this launcher (claude: the default)"
+        },
+        "preview": {
+          "type": "boolean",
+          "description": "true: only say what it would do with each agent; nothing is switched or queued"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "agent_interrupt",
+    "description": "Stop what an agent (from agents_list) is doing right now, and optionally redirect it: its current turn is cut off (Esc in its terminal, or its runtime's cancel), the agent and its session stay, and `then` is sent to it at once as the user would type it. Use it when waiting is worse than stopping: it works in the wrong direction, waits in a loop (sleep, polling), repeats a failing step, collides with another agent, or the user said stop. To add a word to an agent that works fine, use agent_send instead (queued behind its turn). What it did already is not undone (files it changed, commands it ran): tell it in `then` what to put back. Not for assistant conversations, and not for agents that can only be read. A `then` of only /exit or /quit to an agent on a task another conversation supervises is refused, as agent_send refuses it: nothing is stopped or sent.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's id or name, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's session id, or its first 8 characters"
+        },
+        "then": {
+          "type": "string",
+          "description": "the new instruction, sent right after it stopped; empty: just stop it"
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_start",
+    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions. TRAE CLI and omp take no effort setting.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nWhen the work needs a branch and checkout of its own (work in parallel with what is already open in that repository), give `worktree.branch`: Persona makes the worktree through the machine's engine first (herdr's or Orca's own, so it is listed there and in the app, under the workspace `cwd` is in) and starts the agent in it. Do not tell the agent to run `git worktree add` itself: a worktree made that way is invisible to Orca and to the app. An existing local branch is checked out; a new one starts at the HEAD of the workspace `cwd` is in. A branch already checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables exist; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier: off for small work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Once Claude Code confirms it, agents_list shows `ultracode=on`. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry; follow the refusal.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "cwd",
+        "prompt"
+      ],
+      "properties": {
+        "wait_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0/omitted: normal receipt"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "absolute path or ~/…; with worktree, a directory of the repository to branch from"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          },
+          "description": "absolute paths of pictures/files the user gave in this conversation (Claude Code path or app attachment); copied to the agent, appended to its message with mentions updated; others refused"
+        },
+        "launcher": {
+          "type": "string",
+          "description": "listed launcher (Claude Code, pi, cursor or agy); unknown names refused with choices; empty: default/fallback, claude first, answer says which"
+        },
+        "secret_env": {
+          "type": "object",
+          "maxProperties": 8,
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "NAME → secret-provider reference (op://vault/item/field), never a value; card approval first"
+        },
+        "ultracode": {
+          "type": "boolean",
+          "description": "Claude Code multi-agent workflows for substantial steps; default false"
+        },
+        "worktree": {
+          "type": "object",
+          "description": "engine-made worktree of cwd's repository",
+          "required": [
+            "branch"
+          ],
+          "properties": {
+            "branch": {
+              "type": "string",
+              "description": "the branch to check out (made from the workspace's HEAD when it does not exist)"
+            }
+          }
+        },
+        "tier": {
+          "type": "string",
+          "description": "Agent preset from the snapshot's 模型档位 line; choose by purpose; resolved before approval and shown on the card; explicit launcher/model/effort/speed overrides"
+        },
+        "speed": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "fast",
+            "ultrafast"
+          ],
+          "description": "new-start speed; explicit choice overrides the tier. standard/omitted: launcher default. Codex: fast, ultrafast; Claude Code: fast only"
+        },
+        "effort": {
+          "type": "string",
+          "description": "Explicit effort; omit for tier/purpose default."
+        },
+        "model": {
+          "type": "string",
+          "description": "Explicit model id or alias the agent takes; omit for the tier or purpose default."
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_supervise",
+    "description": "Main only: adopt an Agent opened manually or by agent_start without a task. Creates a to-do/card, supervision signals and task_review closeout, as task_plan does. The background supervisor reviews it unless assistant.main_supervises_own_tasks is on; the answer names the supervisor, and main can still review. Already your task: done_when/expect_minutes change its brief scope (prefer task_scope). Another conversation's task stays theirs; use agent_transfer to move it.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "agents_list machine id or name"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Agent session id or first 8 characters"
+        },
+        "title": {
+          "type": "string",
+          "description": "短いタスク名（日本語、20文字未満）。空の場合は Agent のタイトルを使います"
+        },
+        "done_when": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "string"
+          },
+          "description": "checkable completion criteria"
+        },
+        "expect_minutes": {
+          "type": "integer",
+          "description": "estimated minutes from now"
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_transfer",
+    "description": "Main only: move an open Agent task to a current direction or main (App Move to). Keep task, brief, criteria, estimate, origin and Agent; no message, interruption or restart. Transfer back to undo. Refuses user-owned to-dos, assistant sessions and untracked work (adopt with agent_supervise).\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id",
+        "supervisor"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "agents_list machine id or name"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "Agent session id or first 8 characters"
+        },
+        "supervisor": {
+          "type": "string",
+          "description": "exact direction or main id from conversations_list"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "agent_archive",
+    "description": "Archive a coding agent's session (from agents_list) when the user asks to archive or tidy up agents: it leaves the Agents list for Archived in the app, nothing is deleted, and agent_unarchive brings it back (never remove a session any other way). Persona also asks the agent's own tool to archive it where that tool has an archive (Codex); the result says whether it did (native: done / pending / unsupported). Without close the agent itself is not closed: one open on its computer stays open. With close, its agent and its terminal tab are also closed on its computer (its transcript stays; then it is stopped until resumed): only when the user asks to close it too, and the user confirms on the phone first (declined: nothing changes). A busy agent is refused and nothing changes: working, waiting for an answer or background work, and for close also a /loop, queued messages or a server it runs. When the close does not happen the session stays archived and still open on the computer, and the result says why: tell the user exactly that, not that it was closed. With `force: true`, explicitly cancel and close an Agent stuck waiting for a terminal confirmation, then archive it, as `paseo archive --force` does. Use force only when the user asks to stop or archive that blocked Agent. Pending permissions and plans are rejected or cancelled, never allowed. Working Agents, background work, running subagents/workflows, queued messages, loops and serving ports are still refused. A failed close leaves it visible. Force implies close and does not ask for a second permission card. Not for Persona conversations (conversation_archive).\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's id or name, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's session id, or its first 8 characters"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "cancel and close a confirmation-blocked Agent before archiving; only when the user asks; never approve its pending request"
+        },
+        "close": {
+          "type": "boolean",
+          "description": "also close its agent on the computer (asks the user on the phone first); default false: archive only"
+        }
+      }
+    }
+  },
+  {
+    "name": "agent_unarchive",
+    "description": "Bring an archived coding agent's session back into the Agents list (find it with agents_list and state archived). Nothing is reopened on the computer: a stopped agent stays stopped until resumed (agent_send with resume). Persona also asks the agent's own tool to restore it where that tool archived it too; the result says whether it did.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's id or name, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's session id, or its first 8 characters"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "agent_autoname",
+    "description": "Rename one coding agent's session with the model when the user explicitly asks for Auto Rename. This replaces the current title, including a hand-written one, with a short title generated from its conversation; it does not change the terminal tab's title. The user must confirm this write on the phone every time; a declined or unanswered confirmation does nothing and makes no model call. The background automatic-naming switch and its once-only/placeholder restrictions do not block this explicit request. Do not use it on Persona conversations (including the main chat), on an agent the user has not asked to rename, or with a session-id prefix. Use the exact machine and session_id from agents_list. On success the JSON answer has title, title_source: auto and changed; on refusal it has the stable code and retryable fields. The HTTP endpoint used by client menus is separate and does not depend on this tool.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "machine",
+        "session_id"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's exact id or name, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's exact full session id, never a prefix"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "agent_autoname_receipt",
+    "description": "Read-only: inspect the current assistant's existing agent_autoname confirmation cards and one coding agent's current naming snapshot. This does not prove that a particular earlier model call started, completed or succeeded: the model's tool-call id is not a manager-side correlation. The naming snapshot may predate the call or come from another caller, and background naming failures are not attributed to it. Do not retry a request from this result; unknown or ambiguous means the evidence cannot settle the outcome. Use only the exact machine and full session id from agents_list. The caller is verified from the actual assistant conversation; no other assistant's cards can be read. Optional since/before are an RFC3339 window of at most 24 hours, and must be supplied together. Confirmation history is read with bounded pages; incomplete pages are reported. This tool never calls the naming model, writes settings, approves or resolves a card, renames an agent, or publishes a session list. Not for Persona conversations, ordinary coding Agents, or extensions.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "machine",
+        "session_id"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's exact id, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's exact full session id, never a prefix"
+        },
+        "since": {
+          "type": "string",
+          "format": "date-time",
+          "description": "inclusive RFC3339 start of the original confirmation window; requires before"
+        },
+        "before": {
+          "type": "string",
+          "format": "date-time",
+          "description": "exclusive RFC3339 end of the original confirmation window [since,before); at most 24 hours after since"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "interaction_answer",
+    "description": "Answer another agent's question for the user, in their place, when they said what to answer or told you to decide. Only a question can be answered this way: a tool permission, a plan and a terminal dialog are theirs to decide in the app, and the assistant's own question is never answered by itself. Every question must be answered by its own wording, with the option labels it offers; free text is not accepted (the user answers that in the app, or you use agent_send). A multi-select takes an array of labels. A card a 督办 message handed you before the user (a task you supervise) is yours to answer when it is the agent's own call: give reason, and the answer is kept as the task's decision; what the user must decide goes to them with ask_escalate.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "session_id",
+        "interaction_id",
+        "answers"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the machine's id or name, as agents_list shows it"
+        },
+        "session_id": {
+          "type": "string",
+          "description": "the agent's session id, or its first 8 characters"
+        },
+        "interaction_id": {
+          "type": "string",
+          "description": "the waiting interaction's id, from agents_list"
+        },
+        "answers": {
+          "type": "object",
+          "description": "each question's own wording → the option label to pick; a multi-select gives an array of labels",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          }
+        },
+        "reason": {
+          "type": "string",
+          "description": "optional: in a sentence, why this answer (kept with the task's decision when a 督办 message handed you the card)"
+        }
+      }
+    }
+  },
+  {
+    "name": "ask_escalate",
+    "description": "Hand the cards a task's agents wait on to the user, when a 督办 message gave them to you first and the user must decide: a tool permission or a plan (no conversation approves those), or a question that is irreversible, seen by other people, changes the goal or goes against a decision already made on the task. Every card of the task the user has not been told of goes to them at once, as one reminder (in the user's push grading it pushes only when why_owner or p0 says it is theirs alone), with your reason and recommendation on it; their answers go straight to the agents and are kept as the task's decisions. Only the task's supervisor and the main conversation can. A leader's escalation is told to the main conversation too, so don't ask the user the same thing again yourself.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "todo_id",
+        "reason"
+      ],
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "the task's todo id (todo_…), from the 督办 message"
+        },
+        "reason": {
+          "type": "string",
+          "description": "in a sentence, in the user's language: what they are to decide and why it is theirs"
+        },
+        "recommend": {
+          "type": "string",
+          "description": "the option you recommend, in a line (an option's label when there is one)"
+        },
+        "why_owner": {
+          "type": "string",
+          "enum": [
+            "irreversible",
+            "visible_to_others",
+            "priority",
+            "acceptance",
+            "only_owner_knows"
+          ],
+          "description": "why only the user can decide it. In the user's push grading only irreversible, visible_to_others and only_owner_knows push to their phone; the rest wait in their Needs you list and briefing"
+        },
+        "p0": {
+          "type": "boolean",
+          "description": "true: the user must do or decide this themselves now, so it pushes even in push grading whatever why_owner says"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "inbox_suggest",
+    "description": "Submit the event’s recap and one suggestion, replacing any earlier suggestion. It waits in the user's inbox; nothing goes out until they confirm, and then the program does exactly what it says (you never send it yourself). `kind`: `reply` — one message to send, `text` in the user's voice, ready to go out as it is (no blanks to fill in like 【…】: leave out what you could not find and say so in `note`; for a Feishu sheet / Base item `changes` proposes moving rows' status: ref, field and one of the values the item lists); `agent` — an Agent to start, `text` its instruction (`machine` and `cwd` optional); `todo` — a to-do for the user to add: `text` its title (clear, starting with the action, no chat or people names), `due` only when the message states a deadline: a day `2006-01-02` for all day, or a moment as RFC 3339 with its offset; leave it out when unsure and say so in `note`; the user can edit both and adds it with one tap (a row that came to a to-do counts as handled); `conclusion` — you dealt with it, `text` the conclusion, `outcome` `fyi` (worth knowing) or `done` (nothing to do). `handback: true` for one the user has to judge: their confirmation comes back here as an instruction instead of being carried out. `note`: one or two sentences on what you found and where. `recap`: the event's background, progress and where it is stuck (up to 600 characters), every time. `title`: what the matter is, without chat or person names; `summary`: one sentence on where things stand and who is waited on for what. Write both every time; items whose title comes from the source (mail, documents, PRs / issues, and the like) ignore `title`, and the tool says so. `related`: ids of inbox items in other chats or sources this one is about. `recap` without `kind` creates no suggestion, and may include `title`, `summary`, and `follow`. `follow` records waiting on the other side: `who` (empty means waiting for a reply), `next`, and `check_at` (RFC 3339 with a time zone) or `check_in` (such as `30m`, `4h`, or `2d`). `check_at` takes precedence; with neither, look again in `24h`; the resulting time is clamped to 30 minutes–14 days from now. `follow` is valid only without `kind`. `reported`: `{text, by}` records one externally visible action you or an Agent actually completed but the program did not observe, without verifying it; never use it for plans or actions not taken. `by` is `agent` or `assistant` (default `assistant`), and `text` is one sentence, kept on one line and clipped to 120 characters. It may be given alone or accompany `kind`, `recap`, `title`, `summary`, or `follow`; a filed item refuses it, and text identical to the item's latest `reported` entry is not recorded twice. Call it at the end of each turn. In a conversation the user handed an inbox item to (its context block names the item's id), pass that id as `item` and call it when you have something to write back to the item, and again whenever it changes (it also shows in that conversation as a card); it refuses an item not handed to this conversation or one the user already filed: answer in the chat then.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "processing_turn": {
+          "type": "string"
+        },
+        "item": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "reply",
+            "agent",
+            "conclusion",
+            "todo"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "handback": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "fyi",
+            "done"
+          ]
+        },
+        "recap": {
+          "type": "string"
+        },
+        "reported": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "assistant"
+              ],
+              "default": "assistant"
+            }
+          }
+        },
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "follow": {
+          "type": "object",
+          "properties": {
+            "who": {
+              "type": "string"
+            },
+            "next": {
+              "type": "string"
+            },
+            "check_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "check_in": {
+              "type": "string"
+            }
+          }
+        },
+        "machine": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "due": {
+          "type": "string"
+        },
+        "related": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "ref",
+              "field",
+              "value"
+            ],
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "field": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "inbox_draft",
+    "description": "Legacy inbox_suggest `reply`. Prefer inbox_suggest. Draft a reply for this conversation’s inbox item. It waits in the user's inbox; they read it and send it with one tap (you never send it yourself). `text` is the reply in the user's voice, ready to go out as it is: no blanks to fill in (【…】) — leave out what you could not find and say so in `note`; `note` is one or two sentences on what you found and where, for the user to check the draft against. For a Feishu sheet / Base item, `changes` proposes moving rows' status (ref, field and one of the values the item lists); they are made when the user sends. Call it once, at the end.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "processing_turn": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "ref",
+              "field",
+              "value"
+            ],
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "field": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "inbox_folders",
+    "description": "List the folders the user's inbox items are filed under: each `/`-separated path (`work/alerts/engine`, every segment a level) with its item count and open count, and whether automatic filing by the triage model is on. Give `folder` to also list the items filed in that folder and below, or `unfiled: true` for the items in no folder; each line has the item's id (what inbox_move takes), source, title, sender and whether it is done. Call it before inbox_move, to reuse a folder in use rather than open a near-duplicate.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "folder": {
+          "type": "string",
+          "description": "a folder path: also list the items filed there and below"
+        },
+        "unfiled": {
+          "type": "boolean",
+          "description": "also list the items in no folder"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "inbox_move",
+    "description": "Move inbox items into a folder, as the user would from the inbox: `items` are their ids (from inbox_folders, or the id of an item handed to this conversation), `folder` a `/`-separated path (`work/alerts/engine`; a new path makes the folder), or `\"\"` to take them out of every folder. Moved items stay where they are put: the triage model no longer files them. An unknown id or a path with no name in it moves nothing. Move only what the user asked for.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "items",
+        "folder"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "inbox item ids"
+        },
+        "folder": {
+          "type": "string",
+          "description": "the folder path, or \"\" for no folder"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "inbox_post",
+    "description": "Put this conversation into the user's Inbox as a row that opens it, so a result is not missed behind a quiet unread dot. Call it only when the user explicitly asked for it (for example \"tell me if there is anything worth a look\", \"send me the briefing every time\") or when the scheduled task you are running is set to put findings in the Inbox. Never decide on your own to interrupt the user: an ordinary reply, a run with nothing new, or something merely interesting does not go there. `title` is a short name for the row (the task's name or what was found), `summary` one or two sentences saying what to look at, `tier` is `action` when the user has to do something and `fyi` (the default) when it is worth knowing, and `reason` names the request or task setting that makes this post (the user can read it on the row). Calling it again for this conversation soon after updates the same row instead of adding another. It does not push to the phone: use notify_user for that when the user asked for a push.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "title",
+        "summary",
+        "reason"
+      ],
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "action",
+            "fyi"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "kb_search",
+    "description": "Search the knowledge base: summaries and metadata of chats, people, projects, docs, meetings, events, recordings (with their minutes and any transcript still retained), topics (curated knowledge points: how something works, what was decided and why, the steps and pitfalls), project timelines, the notes directories the user added (hits with an absolute path) and, with messages=true, the full message archive (newest days first). All words must match. Hits come in the order the files are read, not by relevance, so a broad search can fill the limit with chats: give kind to search one kind only, the entries whose name matches first, then as kb_list ranks them. A past meeting (its decisions, what is still open, who does what) is kind=recordings: found by its title, the calendar event's title, its minutes or any transcript still retained; then kb_get it. Transcripts expire before minutes: never promise a trimmed recording's full transcript.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "projects",
+            "chats",
+            "people",
+            "docs",
+            "meetings",
+            "events",
+            "recordings",
+            "topics"
+          ],
+          "description": "only this kind's entries (no notes directories; the message archive only with chats)"
+        },
+        "messages": {
+          "type": "boolean",
+          "description": "also search the message archive (default true)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "default 40"
+        }
+      }
+    }
+  },
+  {
+    "name": "kb_list",
+    "description": "List knowledge-base entities of one kind ranked by importance (P0 first), relevance to the user, recency: projects (short = a feature / launch, long = a team mission), chats, people, docs, meetings, events, recordings (the user's phone / watch recordings; newest first, saying which have meeting minutes, which are all-day recordings with a day recap and its state, and which transcripts have expired), topics (knowledge points curated by subject out of the timelines and chats: concepts, decisions with their reasons, practices, pitfalls, facts, open questions; the biggest first). Transcripts stay for recording_days (14 days by default), minutes and recaps for minutes_days (forever by default). Meetings, events and recordings show when they started, in the user's time zone. Optional tag filter.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "projects",
+            "chats",
+            "people",
+            "docs",
+            "meetings",
+            "events",
+            "recordings",
+            "topics"
+          ]
+        },
+        "tag": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "default 30"
+        }
+      }
+    }
+  },
+  {
+    "name": "kb_get",
+    "description": "Read one entity: its metadata (links to people / chats / projects, tags), compressed context (summary.md), a project's timeline, a chat's messages of the last 7 days, a recording's meeting minutes, or an all-day recording's day recap (the day's timeline, meetings, suggested to-dos), with each action item's state (suggested, or its to-do's) and its timestamped transcript while still retained (phone/watch recordings, text only), a meeting's / event's recordings, a topic's knowledge points by subtopic (each with its kind, reason and the entries it came from). Transcripts expire after recording_days (14 days by default); minutes and recaps stay for minutes_days (forever by default). id from kb_list / kb_search (a project also by name). A project lists its 20 most relevant people and a count (all: meta.json).\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "projects",
+            "chats",
+            "people",
+            "docs",
+            "meetings",
+            "events",
+            "recordings",
+            "topics"
+          ]
+        },
+        "id": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "kb_update",
+    "description": "Write settled facts to the KB. Projects: edit name, project_kind (short|long), status, goal, my_role, aliases, chats/people, code dirs (`\u003cmachine\u003e:\u003cpath\u003e`, linking Agents), timeline log or summary; merge_into folds duplicates, unmerge reverses it, with no other changes in that call. Annotate chats, people, docs, meetings, events, recordings (phone-owned content; tags, pinned and projects only) and topics (name, note, aliases, tags only). Explicit tags override automatic ones. remove_* (ids) permanently unlinks only that link; other updates proceed. Change project_mode/source_urls only at the user's direction: reference-only keeps pointers and aliases but leaves details at the source; full in a separate call restores detail writes.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "kind",
+        "id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "projects",
+            "chats",
+            "people",
+            "docs",
+            "meetings",
+            "events",
+            "recordings",
+            "topics"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "description": "id, or a project's name (created when new)"
+        },
+        "merge_into": {
+          "type": "string",
+          "description": "projects only: fold this project into the target (slug or name)"
+        },
+        "unmerge": {
+          "type": "boolean",
+          "description": "projects only: undo the merge that folded this project into another"
+        },
+        "name": {
+          "type": "string"
+        },
+        "project_kind": {
+          "type": "string",
+          "enum": [
+            "short",
+            "long"
+          ]
+        },
+        "project_mode": {
+          "type": "string",
+          "enum": [
+            "full",
+            "reference-only"
+          ],
+          "description": "user-directed"
+        },
+        "source_urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "user-directed; replace; empty list clears"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "paused",
+            "done"
+          ]
+        },
+        "goal": {
+          "type": "string"
+        },
+        "my_role": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "importance": {
+          "type": "string",
+          "enum": [
+            "P0",
+            "P1",
+            "P2",
+            "P3"
+          ]
+        },
+        "relevance": {
+          "type": "integer"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "summary": {
+          "type": "string",
+          "description": "Markdown, replaces summary.md"
+        },
+        "log": {
+          "type": "string",
+          "description": "one line appended to a project's timeline"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remove_aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "projects: aliases that are not this project's (another's name, too generic)"
+        },
+        "chats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remove_chats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "people": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "remove_people": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "kb_history_plan",
+    "description": "Show or change what a source's history import reads. What is read of each chat comes from the knowledge base's selection (the same rules as daily ingestion; per-chat settings are changed here with `set`): the whole chat, only the user's own messages (with the messages around them) and mentions of the user, or nothing. Without `set` or `back_days` it refreshes the source's chat list and lists the chats grouped that way, largest first, with each chat's id and any per-chat setting of the user's. `set` changes per-chat settings, which apply to daily ingestion too: a chat by its id or exact name (a name two chats share is refused with their ids, a name no chat has gets close names; then nothing is changed); `read: false` never reads it, `read: true, store: true` keeps the whole chat (for `days`, or as the rules say), `read: true, store: false` only the user's messages and mentions, `reset: true` back to the rules. `back_days` limits how far back the import goes (null: as far as the rules keep messages). A change, or a refreshed list, that reads more than the user approved takes the approval back, so the import needs kb_history_resume again; reading less does not. Listing or changing never starts the import: show the user the list, apply the exceptions they name, show the result again, and only when they say to start call kb_history_resume. Needs `kb.history.enabled` in manager.json.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "connector id from kb.history.sources; omitted: every configured source (required with set or back_days)"
+        },
+        "set": {
+          "type": "array",
+          "description": "per-chat settings to change, all or none",
+          "items": {
+            "type": "object",
+            "required": [
+              "chat"
+            ],
+            "properties": {
+              "chat": {
+                "type": "string",
+                "description": "the chat's id, or its exact name"
+              },
+              "read": {
+                "type": "boolean",
+                "description": "false: never read it (required unless reset)"
+              },
+              "store": {
+                "type": "boolean",
+                "description": "true: keep the whole chat; false: only the user's messages and mentions"
+              },
+              "days": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "with store: how many days its lines are kept (null: as the rules say)"
+              },
+              "reset": {
+                "type": "boolean",
+                "description": "remove the chat's setting: the rules decide again"
+              }
+            }
+          }
+        },
+        "back_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "how many days back the import goes for this source; null: as far as the rules keep messages"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "kb_history_status",
+    "description": "How the history import is doing, per source: its state (running, resting, paused, stopped, done, waiting for approval or for the search index), whether its plan is approved, chats done / to go / paused / in error / unreadable with messages read and written, calls and messages in the last hour, the last slowdown, pause and stop with their reasons, and the last call. Read-only.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "one connector id; omitted: all configured sources"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "kb_history_stop",
+    "description": "Stop the history import now: it makes no further call until the user resumes it (the call in flight, if any, finishes; nothing is cancelled). Use it whenever the user says to stop or pause importing history.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "why, in a few words, as the user said it; shown in the status, never written to the log"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "kb_history_resume",
+    "description": "Approve a source's history import plan, as the selection reads it now, and start or resume the import (it also clears a stop). Only when the user has seen the plan (kb_history_plan) and explicitly says to start or resume; never on your own. After a stop, check kb_history_status first and tell the user why it stopped; `slow` keeps the slowest pace for the first two hours after the import starts again, the safe choice after a stop.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "connector id from kb.history.sources"
+        },
+        "slow": {
+          "type": "boolean",
+          "description": "the slowest pace for the first two hours of calls"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "persona_settings",
+    "description": "Read and change Persona's settings: inbox sorting and task links, 关于我, default launcher, mail accounts, machine Claude Code exclusions and extensions. List keys and inputs; get reads one. set/add/remove show before → after on the phone and wait for approval; secrets are entered there, never requested in chat. Change only what was asked.\n\nModel groups `model_config.kb`, `model_config.inbox.triage`, `model_config.agent.delegate` and `model_config.translate`: `get` returns their effective binding, revision and compatible `purpose.provider_ids`. `set` and `test` take one listed provider ID as value. A changed provider clears the old model, effort and permission mode. `test` only checks the connection, without approval or saving; an unverified or offline provider may still be saved.\n\n`assistant.standing_authorizations`: only the main conversation may replace the list at its current revision with the user’s phone approval. Each grant names `machine_id`, absolute `directory`, `actions` (merge, push, deploy-test, deploy-production, send, delete, spend), `conditions`, exact user `quote`, `source` and `reversible`. Keep unchanged grants by ID; replace one by removing it and adding it without an ID. Never invent a quote or expand scope. Only independently verifiable conditions may permit automatic answers. Revoke in Settings. Tool permissions are never automatically approved.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "list",
+            "get",
+            "set",
+            "test",
+            "add",
+            "remove"
+          ],
+          "description": "default list"
+        },
+        "key": {
+          "type": "string",
+          "description": "the setting, from list (inbox.rules, mail.accounts, extension.\u003cid\u003e…)"
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "object",
+            "array",
+            "null"
+          ],
+          "description": "set: the new value; test: the provider ID to check; add: the item (each setting's list entry says what)"
+        },
+        "id": {
+          "type": "string",
+          "description": "remove: which item (from get)"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "secret_run",
+    "description": "Run commands on one of the user's computers that need a password only the user knows, typically its sudo password. Never ask for a password in the conversation or in ask_user: call this instead. The user gets a card in the Persona app showing the computer, your purpose and every command verbatim, types the password there and taps Run; that computer's node then runs exactly those commands in order, each as the user with /bin/sh -c in the home directory and PATH=/usr/bin:/bin:/usr/sbin:/sbin (give other tools by their absolute path). Only a command that runs sudo with -S gets the password, as a line on its stdin; every other command gets an empty stdin. Write sudo as `sudo -S -k -p '' …`, one sudo per command and never after a pipe (sudo would read the pipe; run a pipeline as root with `sudo -S -k -p '' sh -c '…'`); a sudo without -S is refused. Where a sudoers rule says NOPASSWD, sudo does not read stdin and the command it runs gets the password instead, so do not give such a command anything that reads stdin. Commands are printable ASCII only, so the card shows exactly what runs. The first command that fails stops the run. Never write a command that prints, stores or sends the password; you never see it. The result is JSON with status (ran, failed, declined, expired or refused), the computer, a message and, for ran and failed, each command's exit_code, timed_out and output (stdout and stderr, clipped to its end); when a command's output held the password, none of it comes back (output_withheld: true). A command stopped at the timeout may still run as root: check before asking again. declined, expired and refused mean nothing ran: tell the user; ask again only if they want. Not on Windows.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "machine",
+        "purpose",
+        "commands"
+      ],
+      "properties": {
+        "machine": {
+          "type": "string",
+          "description": "the computer to run on: its id or name, as agent_start takes it"
+        },
+        "purpose": {
+          "type": "string",
+          "description": "one sentence the card shows: why the password is needed"
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "1 to 5 one-line shell commands of printable ASCII, at most 1000 characters each, run in order"
+        },
+        "delivery": {
+          "type": "string",
+          "enum": [
+            "stdin"
+          ],
+          "description": "how the password reaches the commands: stdin, the default and only way"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1800,
+          "description": "for the whole run, default 300"
+        }
+      },
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "skill_import",
+    "description": "Import a user-requested skill ZIP through Persona's existing Settings importer. First preview the base64-encoded archive (up to 4 MiB compressed); returns validated metadata, a short-lived reference and environment. Then install with the same archive, reference and environment. Installation and undo wait for the user's own permission card showing the validated skill and target computer; never approve for the user. The target is the current assistant's configured personal computer, never a model-chosen path or machine. Skills are shared by assistants using that computer account and load in new conversations; an existing conversation is not guaranteed to refresh. Same-name skills are never overwritten. ZIP inspection does not run scripts or treat skill instructions as authorization. Use status with the original reference and environment after a lost/uncertain response, before any retry: it records previewed, installed or undone and recovers the undo receipt. Status is an operation receipt, not a live inventory; receipts expire after ten minutes or a computer restart. If unavailable, inspect Settings \u003e Skills instead of assuming failure. Cancel discards an unused preview. Undo takes an installed receipt, refuses edited/replaced files and retains recovery data. No URL download, repository clone, arbitrary path write or arbitrary skill removal is provided. An older computer may require a Persona update.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op"
+      ],
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "preview",
+            "install",
+            "status",
+            "cancel",
+            "undo"
+          ]
+        },
+        "archive": {
+          "type": "string",
+          "maxLength": 5592408,
+          "description": "Base64 ZIP bytes, required only for preview and install. Supply identical bytes for both; do not put secrets in the archive."
+        },
+        "reference": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Opaque receipt from preview/install, required except for preview. Never invent one."
+        },
+        "environment": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Environment returned by preview, required except for preview. A changed assistant computer requires a fresh preview."
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "model_profiles_list",
+    "description": "List editable model profiles, current profile, changed fields, rollback and recent audit events. Profiles contain model settings only, never credentials.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "model_profile_get",
+    "description": "Inspect one model profile by id. See its purpose bindings, launcher model fields and named execution tiers (the Agent presets). Add, change or remove a tier with persona_settings key model_profiles.tiers; other fields are edited through the model-profiles HTTP API. Saving does not apply purpose or launcher settings.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Profile id from model_profiles_list"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ]
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "model_profile_switch",
+    "description": "Switch atomically to a model profile by id when the user asks (for example economy or performance). Saves a before-image for model_profile_rollback and records actor/time. Applies on next model call or Agent start; does not interrupt running work. Inspect profiles first; do not assume economy needs any particular model.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Profile id from model_profiles_list"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ]
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "model_profile_rollback",
+    "description": "Undo the last model-profile switch using its saved before-image. Restores only touched model settings, not launcher credentials. Inspect the rollback preview with model_profiles_list first; a second rollback redoes the switch.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "repositories_list",
+    "description": "Search this assistant's saved names, aliases, full paths and purposes to resolve repository identity; use repository_get for useful details. The user's explicit repository URL or path takes precedence. References are not authorization or an allowlist; never infer a machine or local checkout path. Returns saved metadata and verified_at only: no remote, source, clone or permission checks. Non-repository tasks need no lookup; this is not a mandatory dispatch preflight.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Optional case-insensitive substring of a saved name, alias, full path or purpose; omit to browse. Preserve explicit user repository choices."
+        },
+        "cursor": {
+          "type": "string",
+          "maxLength": 1024,
+          "description": "Opaque next_cursor from this assistant's previous page with the same query. Restart without it if the saved references changed."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Results per page, default 20; at most 50."
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "repository_get",
+    "description": "Read this assistant's saved reference by id from repositories_list: provider, instance, full path, canonical URL, optional name/aliases/purpose, verified_at. Retrieve details only when useful; the user's explicit repository URL or path takes precedence. A reference is not authorization or an allowlist; never infer a machine or local checkout path. Saved metadata only: no remote check, source read, clone, credentials or permission grant.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Stable saved binding id returned by this assistant's repositories_list, not a URL, machine, path or another assistant's id."
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "repository_add",
+    "description": "On the user's request, add a reference for this assistant using Settings \u003e Repositories URLs/metadata and existence checks through its provider. Refuse duplicates, concurrent changes and URL credentials. A permission card shows normalized details; only the user's own approval saves. Returns the saved binding with id and verified_at. Reference only, not authorization or an allowlist: no clone, source fetch, permission grant, machine or local checkout. If saving is uncertain or its response lost, inspect repositories_list/repository_get before retrying. Undo in Settings \u003e Repositories.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "description": "Repository URL, repository page, or git SSH remote without credentials."
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "github",
+            "gitlab"
+          ],
+          "description": "Required for a self-hosted GitHub/GitLab; other providers are detected from the host."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "aliases": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          }
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "view_show",
+    "description": "Create a persistent live card in the calling assistant conversation. Use the same View schema as persona-view and extension UI: sections of components, a required plain-text fallback, and optional named pages. The card stays at its feed position; use view_update to change it. The hub validates the View and returns field-level errors for correction. At most 64 KB per card and 200 cards per conversation. This does not send a push notification. Keep the conclusion in your normal reply too. Returns {id, version}; save the id for updates. Do not collect passwords or secrets in a card. An html component can call persona.reply / persona.open only when it has a key, and each call is confirmed by the user; the card's one reply is shared with its reply actions.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "view"
+      ],
+      "properties": {
+        "view": {
+          "type": "object",
+          "description": "A View from schema/extension/view.schema.json with a required plain-text fallback and sections. Only assistant reply/open/push.page/pop actions, not extension ui.action ids."
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "view_update",
+    "description": "Replace a live card created by this assistant conversation with a complete validated View. Other conversations and ordinary agents cannot modify it. Supply the version read from view_get to reject stale updates; without it the hub uses the version it reads at the start of this call. Validation or a version conflict leaves the previous card intact. Contents are stored before update notifications are coalesced (at most one per second). Returns {version}. Keep stable component keys to preserve editing and scroll state across devices.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "view"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The exact id returned by view_show, including its view_ prefix."
+        },
+        "view": {
+          "type": "object",
+          "description": "The entire replacement View, including required plain-text fallback."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Expected version from view_get; a stale version returns a conflict instead of overwriting."
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "view_get",
+    "description": "Read a persistent live card created by the calling assistant conversation. Returns its id, conversation, version, full View, timestamps and actions (the user's selected reply and submitted values, with pending/sent/failed delivery status; kind html is a reply from an html component's persona.reply, its text the reply the user confirmed; version is the card version the user saw when choosing). Use it before updating a card after resuming work; an id from another conversation is forbidden. Updating the card never clears a committed answer.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The exact live card id returned by view_show."
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "conversations_list",
+    "description": "List your Persona conversations, newest activity first: id, title, tags, last activity, main/running state and last-message gist. Archived ones need `include_archived`; this conversation is marked. Use it to identify the user's conversation before reading, renaming, archiving, tagging or messaging it.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "case-insensitive match on title or last message"
+        },
+        "tag": {
+          "type": "string",
+          "description": "exact tag to match"
+        },
+        "include_archived": {
+          "type": "boolean",
+          "description": "include archived conversations (marked as such)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "default 30, max 100"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation_read",
+    "description": "Read the recent part of another Persona conversation (an id from conversations_list): the user's messages, what was answered, tool calls in short form, cut like agent_read. `turns` = how many recent exchanges (default 2, max 10).\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "full id or its first 8 characters"
+        },
+        "turns": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation_rename",
+    "description": "Rename: direction name via main-only direction_name (no date/kind); ordinary kind/topic becomes MMDD | kind | topic using its start date. User-chosen names/titles require user_asked. Main has no title.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "conversation id or first 8 characters"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "direction: plain project-supervisor name"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "功能",
+            "设计",
+            "修复",
+            "优化",
+            "发布",
+            "探索",
+            "文档",
+            "研究",
+            "评审",
+            "定时"
+          ],
+          "description": "ordinary conversation kind"
+        },
+        "topic": {
+          "type": "string",
+          "description": "ordinary topic, at most 14 characters"
+        },
+        "user_asked": {
+          "type": "boolean",
+          "description": "explicit user request to replace their title/name"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "conversation_archive",
+    "description": "Archive a Persona conversation: it leaves the sidebar's list (it is kept, and listed under 已归档), nothing is deleted. Only when the user asks to tidy up or archive. The main conversation can't be archived. Archiving this conversation itself is allowed: the current turn finishes, and a new message from the user brings it back.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "full id or its first 8 characters"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "conversation_unarchive",
+    "description": "Bring an archived Persona conversation back into the sidebar's list (find it with conversations_list and include_archived).\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "full id or its first 8 characters"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "conversation_tags_set",
+    "description": "Replace a conversation's tags; [] clears them. These user-defined labels group conversations in apps and lists. They are trimmed and de-duplicated, at most 10 of 32 characters each. Tag only conversations in your own space when the user asks for tags or grouping; never invent them. This conversation is a valid id.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "tags"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "full id or first 8 characters"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "complete replacement list; [] clears all"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "conversation_new",
+    "description": "Open a Persona conversation with a first message; returns its id. For threads the user asks for. Marked as from this one; named after its first turn and told to report with conversation_send. Failure or no report leaves one notice. A read-only policy may refuse: follow it, do not retry. Add `tags` only if asked.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "everything the new conversation needs; it does not see this one"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "initial tags; trimmed and de-duplicated, at most 10 of 32 characters each"
+        },
+        "quote": {
+          "type": "string",
+          "description": "\"latest\" (this turn), a message id or the user's exact words"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "conversation_send",
+    "description": "Message another conversation; it waits for a running turn or 2 min of user quiet. Replies use conversation_send. Few hops per user message (main: no cap; a wake-up resets; a first reply adds none). Past the rate it queues: the result says when. Ack or FYI only: wake false. Follow policy refusals; don't retry. Owner-verbatim words to main: start with them. Handing on a user request: set quote (free once).\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "full id or its first 8 characters"
+        },
+        "text": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string",
+          "description": "\"latest\" (this turn), a message id or the user's exact words"
+        },
+        "wake": {
+          "type": "boolean",
+          "description": "false: no turn; read with the next one"
+        }
+      }
+    }
+  },
+  {
+    "name": "task_plan",
+    "description": "Use task_plan for code, repository research and work beyond a few tool calls. Make one task per independent piece. Check machines_list, then use the knowledge base, agents_list and user preferences to fill the editable choices and their one-line reasons. Read-only, user_requested and preapproved kinds start at once; other tasks wait for the owner's 开始. A queued receipt is dispatch, so check the to-do outcome and reach its Agent via agent_send. Tool-owned reminders and events are separate.\n\nDefault machine_policy=fixed keeps the machine on retries and refuses an unavailable launcher there. Use flexible only for portable work: a failed health check can move it and the reply explains why. A side conversation supervises its work, receives 督办 and closes with task_review. Main delegates a whole plan with supervisor (one of assistant.leaders) or leaves it out. With no leader, the background supervisor handles 督办 and task_review unless assistant.main_supervises_own_tasks puts main in charge. If the caller cannot receive 督办, the same follow-up handles it and sends the caller a short notice and link at the end. Check the returned supervisor and similar running work. Pass todo_id for the caller's existing unassigned to-do, including a Lark topic, task split or failed start.\n\nStarted tasks keep a brief (owner request or started_why). Give goal, done_when, out_of_bounds. Writable work needs done_when (PR/Issue defaults to PR merged + issue closed unless owner asks for PR-only/draft-only); read-only needs goal. Omit expect_minutes for automatic estimation; positive overrides. Manual Agents have no estimate_due. Continue via continues+continues_why; use task_retry for failed starts and task_scope+scope_revision for scope changes.\n\nFile changes need readonly=false and explicitly authorized write permission. Replace a read-only Codex process with a writable one for fixes. Use agent_send for live follow-up when permissions stay the same. readonly=true adds the read-only constraint to the assignment. Claude-family uses bypassPermissions for both. Codex uses plan unless assistant.readonly_mode=prompt (normal runtime permissions). pi, cursor and agy refuse readonly in either setting. Set role=worker, or leader to start and review direct workers through restricted task_plan/task_review. Workers cannot delegate.\n\nWhen repository identity needs resolving, consult repositories_list, and repository_get only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight. Closing the terminal on acceptance is the owner's Start choice; this tool cannot set it.\n\nFor an existing todo with a saved workspace naming plan, explicitly select {\"backend\":{\"operation_id\":\"\u003csaved operation ID\u003e\"}}. Its selected repositories must all be ready before the session starts at the saved root on its owning computer. An optional backend.host selects a supported engine on that computer.\n\nWorkspace policy: \"new\" makes an isolated checkout; {\"new\":{\"branch\":\"task/my-change\"}} names its branch; {\"existing\":\"\u003ccwd or workspace_id\u003e\"} selects one; \"none\" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation), and an occupied cwd uses new. Explicit existing never switches silently; refusal names its task owner. For an explicit new branch already checked out, reuse requires a clean checkout, no live Agent and no unfinished-task owner; otherwise refuse with its path and known owner. The machine's engine owns creation, location and registration; never run git worktree add. The card previews the path and is editable before Start. Default branch: task/\u003ctodo id\u003e. Creation failure starts no Agent. Workspaces remain after acceptance. Organization read-only policy refusals include their reason: follow it, never retry unchanged.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "tasks"
+      ],
+      "properties": {
+        "wait_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0/omitted: normal receipt"
+        },
+        "supervisor": {
+          "type": "string",
+          "description": "main only: leader conversation id (assistant.leaders); it supervises; omit for no direction or your own work"
+        },
+        "tasks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "prompt",
+              "role",
+              "machine",
+              "readonly",
+              "user_requested",
+              "why"
+            ],
+            "anyOf": [
+              {
+                "required": [
+                  "cwd"
+                ]
+              },
+              {
+                "type": "object",
+                "required": [
+                  "workspace",
+                  "todo_id"
+                ],
+                "properties": {
+                  "workspace": {
+                    "type": "object",
+                    "required": [
+                      "backend"
+                    ]
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "description": "カードに表示する日本語のタイトル（20文字未満）。"
+              },
+              "context": {
+                "type": "string",
+                "description": "facts the manager cannot resolve; omit project background"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "goal, authorization bounds and new facts; the manager adds project context, criteria and framework rules once"
+              },
+              "machine": {
+                "type": "string",
+                "description": "Machine id; fixed by default."
+              },
+              "machine_policy": {
+                "type": "string",
+                "enum": [
+                  "fixed",
+                  "flexible"
+                ],
+                "description": "fixed (default): keep this machine; flexible: permit health-based moves only for portable work"
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Absolute or ~/ project directory, unless workspace.backend supplies it."
+              },
+              "workspace": {
+                "type": [
+                  "string",
+                  "object"
+                ],
+                "description": "workspace policy; omit for default; existing: absolute/~/path or workspace id on that machine; no custom root",
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "new",
+                      "none"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "backend"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "backend": {
+                        "type": "object",
+                        "required": [
+                          "operation_id"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "operation_id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "host": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "existing"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "existing": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "new"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "new": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "branch": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "launcher": {
+                "type": "string",
+                "description": "listed launcher (Claude Code, pi, cursor or agy in herdr); unknown names refused with choices; empty: default/fallback, claude first, why says which"
+              },
+              "model": {
+                "type": "string",
+                "description": "model id or alias the agent takes; empty: the launcher's default"
+              },
+              "permission": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "plan",
+                  "auto",
+                  "bypassPermissions"
+                ],
+                "description": "mode; empty: writable default; readonly/replacement/Codex rules: see description; TRAE CLI and omp take none"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "worker",
+                  "leader"
+                ],
+                "description": "worker: ordinary; leader (any conversation): starts/reviews direct workers"
+              },
+              "ultracode": {
+                "type": "boolean",
+                "description": "large tasks (many files, multi-angle checks): Claude Code multi-agent workflows for substantial steps, slower/costlier; small tasks: false; Claude Code 2.1.284+ only, otherwise starts without it; never put it in prompt/title"
+              },
+              "readonly": {
+                "type": "boolean",
+                "description": "true only for a task that must remain read-only; false for explicitly authorized file changes (a Codex read-only sandbox: see the description). The first message adds「本任务只读：不改项目文件、不提交、不对外写入」 only when true"
+              },
+              "user_requested": {
+                "type": "boolean",
+                "description": "True only for this task/start requested in the user's latest message; false for inferred work/your own idea."
+              },
+              "why": {
+                "type": "string",
+                "description": "コンピュータ、ディレクトリ、モデルを選ぶ理由を日本語で一行に記述します。"
+              },
+              "done_when": {
+                "type": "array",
+                "maxItems": 6,
+                "items": {
+                  "type": "string"
+                },
+                "description": "Agent に伝える確認可能な完了条件を日本語で一項目ずつ記述します。書き込み可能なタスクは一つ以上必須です。continues 指定時は無視されます。"
+              },
+              "goal": {
+                "type": "string",
+                "description": "ユーザーが得る結果を日本語で一行に記述します。読み取り専用タスクでは必須です。書き込み可能なタスクで省略した場合はタイトルを使います。"
+              },
+              "out_of_bounds": {
+                "type": "array",
+                "maxItems": 6,
+                "items": {
+                  "type": "string"
+                },
+                "description": "任意の禁止事項や対象外の範囲を日本語で一項目ずつ記述します。"
+              },
+              "continues": {
+                "type": "string",
+                "description": "Original todo id. Reuse todo, original brief and effective criteria even on failed Start; never split. Start stops/releases active prior Agents and reopens if closed. Refuse unauthorized takeover, unreachable Agents that cannot be stopped, or open legacy successors."
+              },
+              "scope_revision": {
+                "type": "string",
+                "description": "With continues after a scope change: exact task_scope scope_revision; refuse stale plans."
+              },
+              "continues_why": {
+                "type": "string",
+                "description": "With continues: one-line stop/replacement reason saved on this plan."
+              },
+              "started_why": {
+                "type": "string",
+                "description": "If not just owner-requested (own idea, 督办 or routine): one-line start reason saved in brief."
+              },
+              "attachments": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                  "type": "string"
+                },
+                "description": "absolute paths of pictures/files the user gave in this conversation (Claude Code path or app attachment); copied to the agent, appended to its message with mentions updated; others refused"
+              },
+              "expect_minutes": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Optional minutes override. Omit/0: comparable history, or the 60-minute system_default; positive: override. Review at 1×; stuck at 1.5× (min 20m); overdue at 3× (min 24h)."
+              },
+              "project": {
+                "type": "string",
+                "description": "Existing kb_list projects slug/name for a clear long-term area; no near-duplicates."
+              },
+              "part_of": {
+                "type": "string",
+                "description": "Optional request todo this is a piece of."
+              },
+              "after": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "With part_of: prerequisite pieces."
+              },
+              "todo_id": {
+                "type": "string",
+                "description": "Open or failed-start todo this chat opened/supervises; no live Agent. Release stopped Agents at Start. Equals continues if both are given."
+              },
+              "inbox_item": {
+                "type": "string",
+                "description": "Handed-off Inbox ID, or 'none' for unrelated work. Checks the conversation and manager; links without filing or replying."
+              },
+              "tier": {
+                "type": "string",
+                "description": "Agent preset from the snapshot's 模型档位 line; choose by purpose; resolved at task start with its profile; explicit launcher/model/effort/speed overrides"
+              },
+              "speed": {
+                "type": "string",
+                "enum": [
+                  "standard",
+                  "fast",
+                  "ultrafast"
+                ],
+                "description": "new-start speed; standard/omitted: launcher default. Codex: fast, ultrafast; Claude Code: fast only"
+              },
+              "effort": {
+                "type": "string",
+                "description": "Explicit effort; omit for tier/purpose default."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "task_plan_withdraw",
+    "description": "Take down a plan card this conversation put up (task_plan) while nothing of it has started: its work was done elsewhere, or the user decided not to do it. The card stops waiting for the user's 开始, as when they dismiss it themselves, and leaves the to-handle lists (the snapshot's plans waiting to start, the briefings). Only for a plan of this conversation that still waits for 开始; a started or dismissed plan, or another conversation's, is refused and nothing changes. Your reason is kept on record; tell the user in a line which card you took down and why.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "plan_id",
+        "reason"
+      ],
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "description": "the plan's id (plan_…), as task_plan's answer or the snapshot's plans waiting to start give it"
+        },
+        "reason": {
+          "type": "string",
+          "description": "why it is no longer needed, in the user's language, one sentence"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "task_review",
+    "description": "accepted closes work after the delivery gate (default delivery_gate=merged: park verified open PRs; linked issues must close). user_check keeps the task and Agent open until owner Pass and routes feedback to that Agent. If opted in at Start, accepted done cleans up the idle tab unless user_check. Report closed/skipped/pending; never close the tab yourself. rework caps stalled/low-ROI churn at 2 rounds (external_input/substantive_new cap at 10 total); accept with a brief note instead of bouncing for low-ROI edge cases or style nitpicks. Replace stopped Agents via agent_start. Use parked with evidence for external waits and needs_user for owner decisions.\n\naccepted (outcome=done) with done_when needs every criterion once in checks (met=true + nonblank evidence); user_check cannot bypass. outcome=cannot, cancelled and no-criteria tasks are unchanged. Other verdicts may omit checks without losing progress. Report each criterion met/not_met/dropped, then also_done. Judge the scoped brief, not a handover or Agent claims.\n\nGive accepted's outcome/reason/link. The hub handles conclusion cards and passes “Please verify” on acceptance unless user_check. needs_user can default to recommend at 24h/deadline; irreversible or visible_to_others only reminds. Recheck at 24h. can_wait needs low cost, nobody blocked today and no deadline within 12h. “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision. Clarify without repeating or taking irreversible/external action.\n\nA non-main conversation reviewing another supervisor's task may only accept/cancel; send gaps with agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and waiting cards end.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "todo_id",
+        "verdict"
+      ],
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "the task's todo id (todo_…), from the 督办 message or the context snapshot"
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "rework",
+            "needs_user",
+            "parked",
+            "cancelled"
+          ]
+        },
+        "rework_kind": {
+          "type": "string",
+          "enum": [
+            "external_input",
+            "substantive_new",
+            "repeated_error",
+            "low_roi_edge"
+          ],
+          "description": "rework, optional: external_input (external review/conflict/owner input; skips 2-round stalled cap), substantive_new (prior gap fixed, new defect found; resets stalled cap), repeated_error/low_roi_edge (default when omitted; cap 2 stalled, 10 total)"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "criterion",
+              "met"
+            ],
+            "properties": {
+              "criterion": {
+                "type": "string",
+                "description": "one done_when criterion (or what the task was for, when it had none)"
+              },
+              "met": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string",
+                "description": "what shows it is met (a link, a command's output), or what is missing"
+              }
+            }
+          },
+          "description": "each criterion, met or not, with its evidence or gap; updates that done_when entry's persisted state, evidence, time and supervisor identity. Omitted entries keep their progress"
+        },
+        "note": {
+          "type": "string",
+          "description": "rework は Agent が行う具体的な作業を日本語で記述します。needs_user はユーザーが決めること、parked は reason 以外に記録する補足、cancelled は理由、accepted は結果を一行で記述します"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "done",
+            "cannot"
+          ],
+          "description": "accepted: done (the work is done or the answer is yes), or cannot (the task found it cannot be done); default done"
+        },
+        "reason": {
+          "type": "string",
+          "description": "accepted: the conclusion card's one sentence of why, in the user's language; default the note's first line. needs_user (required): one sentence saying what is to be decided, in the user's language. parked (required): one sentence saying what the task waits for, in the user's language; waiting on a PR: include its link"
+        },
+        "waiting_on": {
+          "type": "string",
+          "enum": [
+            "someone_else",
+            "external_event",
+            "date"
+          ],
+          "description": "parked (required): someone_else (person acts/answers), external_event (outside event), or date. Owner decisions use needs_user; legacy owner_priority parks stay readable"
+        },
+        "until": {
+          "type": "string",
+          "description": "parked, optional: duration (\"3d\", \"36h\", \"90m\") or RFC 3339 time, 1m–30d ahead; default 24h. waiting_on=date requires explicit RFC 3339"
+        },
+        "link": {
+          "type": "string",
+          "description": "accepted/needs_user: one evidence link (PR/page/doc); defaults to task PR, note/checks link, or agent chat"
+        },
+        "recommend": {
+          "type": "string",
+          "description": "needs_user (required): recommended option label (first in options); owner OK sends it to the agent"
+        },
+        "why_owner": {
+          "type": "string",
+          "enum": [
+            "irreversible",
+            "visible_to_others",
+            "priority",
+            "acceptance",
+            "only_owner_knows"
+          ],
+          "description": "needs_user (required): irreversible (delete/prod write/spend), visible_to_others (external message/comment/review), priority (whether/order), acceptance (visual check), only_owner_knows (private fact); decide anything else yourself"
+        },
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "leads_to"
+            ],
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "the option in a few words, as a button says it"
+              },
+              "leads_to": {
+                "type": "string",
+                "description": "one sentence: what choosing it leads to"
+              }
+            }
+          },
+          "description": "needs_user (required): 2 to 4 options the user chooses from, the recommended one first"
+        },
+        "cost_of_waiting": {
+          "type": "string",
+          "description": "needs_user (required): one sentence saying what it costs if the user does not answer soon"
+        },
+        "question_quote": {
+          "type": "string",
+          "description": "needs_user: quote the Agent's original question verbatim if reason paraphrases it, so the hub can check for an existing reply"
+        },
+        "can_wait": {
+          "type": "boolean",
+          "description": "needs_user, optional: defer to next daily briefing (no deadline \u003c12h, low cost_of_waiting); no push/card, listed in Needs you. Ignored for irreversible/visible_to_others, deadline \u003c12h, reversible=false, or no briefing with facts due within 24h and \u003e=12h before deadline; default false"
+        },
+        "deadline": {
+          "type": "string",
+          "description": "needs_user, optional: until when the decision waits, a duration (\"4h\", \"90m\") or an RFC 3339 time, 1 minute to 30 days ahead; needs reversible. Default: 24h and reversible, except for why_owner irreversible and visible_to_others, which have none"
+        },
+        "also_done": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "string"
+          },
+          "description": "accepted, optional: what was done beyond the task's brief (one line each); the task's page lists it after the criteria"
+        },
+        "user_check": {
+          "type": "boolean",
+          "description": "accepted only: the user is still to look at the result themselves (a UI change someone has to see): a \"Please verify\" card waits for their \"Pass\" instead of your acceptance passing it; default false"
+        },
+        "reversible": {
+          "type": "boolean",
+          "description": "with deadline: whether taking recommend can be undone later. false for deleting, sending anything to other people, spending money or changing production: those are never taken by default (why_owner irreversible and visible_to_others must say false)"
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "kind",
+            "target",
+            "wake"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "person_reply",
+                "merge_review",
+                "external_event",
+                "date"
+              ],
+              "description": "External wait kind"
+            },
+            "target": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "The person or external object"
+            },
+            "wake": {
+              "type": "string",
+              "maxLength": 600,
+              "description": "Observable change that ends the wait"
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 2000,
+              "description": "Required for merge_review (ready PR/MR) and external_event"
+            },
+            "interaction_id": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "external_event only. This worker's exact pending owner request ID from agents_list. Shows the existing request"
+            },
+            "pr_event": {
+              "type": "string",
+              "enum": [
+                "terminal",
+                "terminal_or_review"
+              ],
+              "description": "GitHub PR waits only. terminal for merge or close. terminal_or_review adds new submitted reviews"
+            },
+            "contact": {
+              "type": "object",
+              "required": [
+                "channel",
+                "url",
+                "sender",
+                "sent_at",
+                "request",
+                "status"
+              ],
+              "properties": {
+                "channel": {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "url": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "description": "sent-message/receipt link, not a channel homepage"
+                },
+                "sender": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "sent_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "actual sent time; not in the future"
+                },
+                "request": {
+                  "type": "string",
+                  "maxLength": 600
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "sent"
+                  ]
+                }
+              },
+              "description": "Sent request, required for person_reply and merge_review"
+            },
+            "ready": {
+              "type": "boolean",
+              "enum": [
+                true
+              ],
+              "description": "merge_review only. The PR/MR is ready for the reviewer"
+            },
+            "reply": {
+              "type": "object",
+              "required": [
+                "source",
+                "brand",
+                "app_id",
+                "account_open_id",
+                "person_open_id",
+                "chat_id",
+                "thread_id",
+                "request_message_id"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "larkcli"
+                  ]
+                },
+                "brand": {
+                  "type": "string",
+                  "enum": [
+                    "feishu",
+                    "lark"
+                  ]
+                },
+                "app_id": {
+                  "type": "string"
+                },
+                "account_open_id": {
+                  "type": "string"
+                },
+                "person_open_id": {
+                  "type": "string",
+                  "description": "expected human OpenID in this app, not self"
+                },
+                "chat_id": {
+                  "type": "string"
+                },
+                "thread_id": {
+                  "type": "string",
+                  "description": "provider topic ID, not root-message ID"
+                },
+                "request_message_id": {
+                  "type": "string"
+                }
+              },
+              "description": "person_reply: exact IDs from a configured lark-cli reader, never names. contact.url must be the sent request's matching topic AppLink. A verified reply asks the current supervisor to review, not direct Agent delivery"
+            }
+          },
+          "description": "Required for parked. Inspect the source. recorded_by is output only. Missing legacy evidence is unverified"
+        }
+      }
+    }
+  },
+  {
+    "name": "task_scope",
+    "description": "Change what a task you supervise is to do, or what done means for it, after it started (its todo id). The task's brief (the owner's request and the criteria it started with) is never rewritten: this adds an entry to the brief's log with what changed and why, applies the new done_when and expect_minutes, restarts overdue, estimate_due only on a new estimate, and the owner reads the change in their next digest. It is the only way done_when changes after a task started (agent_supervise and agent_send with a task on your own task go through the same log). Give done_when as the whole list after the change: a criterion you leave out is recorded as dropped by this change, and the completion report says so. A change that adds a step only the owner may allow (deploying, merging, releasing, sending or commenting where other people see it, deleting, spending, changing production) and was not part of the task is refused unless the owner's own message started this turn: ask them first (ask_user, or task_review needs_user), then call it again when they answered. Only the task's supervisor may call it. The agent is not told: send it what changed with agent_send. Use it also for estimate_due/overdue: explain and set expect_minutes.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "todo_id",
+        "change",
+        "why"
+      ],
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "the task's todo id (todo_…)"
+        },
+        "change": {
+          "type": "string",
+          "description": "変更内容をユーザーが読める日本語の一文で記述します。例：段階的な本番検証を求めず、テスト環境でのみ検証する"
+        },
+        "why": {
+          "type": "string",
+          "description": "理由を日本語の一文で記述します"
+        },
+        "done_when": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": {
+            "type": "string"
+          },
+          "description": "the criteria after the change, the whole list; leave it out to keep them as they are"
+        },
+        "expect_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "how long the task should take from now; leave it out (or 0) to keep it"
+        }
+      }
+    }
+  },
+  {
+    "name": "task_decided",
+    "description": "Record the owner's needs_user choice; main chat or supervisor only. Quote their words and exact option; never guess. told_agent=true means already delivered (also direct Agent chat): record only. Otherwise send and record. Both settle the ask.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "todo_id",
+        "option",
+        "said"
+      ],
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "task id"
+        },
+        "option": {
+          "type": "string",
+          "description": "exact option label"
+        },
+        "said": {
+          "type": "string",
+          "description": "owner's words"
+        },
+        "told_agent": {
+          "type": "boolean",
+          "description": "true: already delivered to the Agent, record only; false: relay and record"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "task_start_screen",
+    "description": "Read the last 30 lines of the terminal tab a task's agent did not start in, while its computer keeps that tab (a 督办 message says until when): the question the tab's shell waits on, or where the agent's own screen stopped. Only for a task of this conversation whose start is being remedied; what it shows stays here, it is not kept with the task.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "todo_id"
+      ],
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "the task's id, as the 督办 message gives it"
+        },
+        "reason": {
+          "type": "string",
+          "description": "why you look, in the user's language (optional; kept with the task's history)"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "task_start_keys",
+    "description": "Type into the terminal tab a task's agent did not start in, while its computer keeps that tab and no agent runs there: text as is (no enter, at most 32 characters), then keys by name (\"enter\", \"esc\", \"ctrl+c\", \"y\", \"n\", \"up\", \"down\"…, at most 8). Use it to answer the question the tab's shell waits on, or to get past where the agent's screen stopped; read the tab first with task_start_screen and again after. The keys, the text and your reason are kept with the task's history. It starts nothing: start the agent again with task_retry.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "todo_id",
+        "reason"
+      ],
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "the task's id, as the 督办 message gives it"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "text to type as is, before the keys"
+        },
+        "keys": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string"
+          },
+          "description": "keys to press after the text, by name"
+        },
+        "reason": {
+          "type": "string",
+          "description": "why these keys, in the user's language, one sentence"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "task_retry",
+    "description": "Start a failed task's agent again: in its kept tab (once task_start_keys answered what stopped it), else in a new tab, reopening it; with launcher, on that launcher of the same computer and workspace. At most 3 retries; the hub never retries itself. Returns at once; the outcome comes as a 督办 message. Only this conversation's tasks; reason goes in their history.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "todo_id",
+        "reason"
+      ],
+      "properties": {
+        "todo_id": {
+          "type": "string",
+          "description": "the task's id, from the 督办 message"
+        },
+        "reason": {
+          "type": "string",
+          "description": "why it should start now, in the user's language, one sentence"
+        },
+        "launcher": {
+          "type": "string",
+          "description": "optional: another launcher of that computer, as the 督办 message lists"
+        },
+        "model": {
+          "type": "string",
+          "description": "with launcher: a model id (default: its own)"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "todo_workspace",
+    "description": "Manage an explicitly requested backend workspace for one to-do. Legacy Engine creation and folder reuse stay available. inspect reads saved and live state. First prepare needs operation_id, machine_id, layout and selected_repo_ids from todo_repositories_get; all selected repos must be ready. Inspect unknown outcomes before retrying the same operation. To correct a branch/path, cancel, edit associations or naming, then prepare the same to-do with a new operation_id. Unchanged successful repos and local work survive; conflicting resources need explicit cleanup. Cleanup removes worktrees and retains branches by default. Use force (discards unsaved work) or delete_branch only for that explicitly requested effect. Prepare after cleanup with a new operation_id. No action starts an Agent or changes the to-do stage.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "action"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "inspect",
+            "prepare",
+            "cancel",
+            "cleanup"
+          ]
+        },
+        "operation_id": {
+          "type": "string"
+        },
+        "machine_id": {
+          "type": "string"
+        },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "root",
+            "container"
+          ]
+        },
+        "selected_repo_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "delete_branch": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "todo_repositories_get",
+    "description": "Read a to-do's saved repository/issue/PR associations and catalog status. No Git/network calls.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "todo_repositories_set",
+    "description": "Replace atomically using revisions from todo_repositories_get/repositories_list. [] removes metadata. Frozen source snapshots: remove/reselect to adopt catalog identity changes. Editable after execution. Omit links to keep; [] clears. Omitted/empty titles keep. Reread/reconcile conflicts. No files, progress or completion changes.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "expected_revision",
+        "expected_catalog_revision",
+        "repositories"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_catalog_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "repositories": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": [
+              "repo_id"
+            ],
+            "properties": {
+              "repo_id": {
+                "type": "string"
+              },
+              "directory_alias": {
+                "type": "string"
+              },
+              "requested_ref": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "default",
+                      "branch",
+                      "tag",
+                      "commit",
+                      "ref"
+                    ]
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "default"
+                      }
+                    }
+                  },
+                  {
+                    "required": [
+                      "value"
+                    ]
+                  }
+                ]
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "issue",
+                        "pull_request"
+                      ]
+                    },
+                    "number": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,19}$"
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
+                      "maxLength": 1024
+                    }
+                  },
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "required": [
+                        "url"
+                      ],
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "number"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "required": [
+                        "kind",
+                        "number"
+                      ],
+                      "not": {
+                        "required": [
+                          "url"
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "maxItems": 50
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "todo_repository_links_set",
+    "description": "Set saved-source links. [] clears; absent/empty titles keep. Reread conflicts. Metadata only.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "repo_id",
+        "expected_revision",
+        "links"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "repo_id": {
+          "type": "string"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issue",
+                  "pull_request"
+                ]
+              },
+              "number": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]{0,19}$"
+              },
+              "title": {
+                "type": "string",
+                "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
+                "maxLength": 1024
+              },
+              "role": {
+                "type": "string",
+                "description": "delivery (default): this task's own deliverable, verified by the delivery gate; reference: related work, shown but never verified at acceptance.",
+                "enum": [
+                  "delivery",
+                  "reference"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": [
+                  "url"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "kind"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "number"
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "kind",
+                  "number"
+                ],
+                "not": {
+                  "required": [
+                    "url"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "todo_repository_links_add",
+    "description": "Atomically add 1–50 exact issue/PR URLs across links:[{url,title}] and legacy urls, at least one in total. Auto-group even unlisted repositories; no manual entry. Actual titles only: nonempty refreshes, omitted/empty keeps. Deduplicate; explicit adds can restore removed links. Preserve aliases, refs and source snapshots. Replace/remove via todo_repositories_get and revision-checked set tools. Associations never prove completion.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "urls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "string"
+          }
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string",
+                "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
+                "maxLength": 1024
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "todo_list",
+    "description": "List Persona to-dos (not Feishu tasks): open/failed starts by default, due first and undated last. Returns id, title/state, priority/project, due/reminder, agents and first note line; times use the user's time zone. Filter by the schema fields. Find an id here before edits; use todo_get for details.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "done",
+            "all"
+          ],
+          "description": "Default: open."
+        },
+        "due_before": {
+          "type": "string",
+          "description": "Due no later than this date (inclusive through day's end) or datetime (user's time zone/RFC3339); excludes undated to-dos."
+        },
+        "due_after": {
+          "type": "string",
+          "description": "Due from this date/datetime onward; excludes undated to-dos."
+        },
+        "overdue": {
+          "type": "boolean",
+          "description": "Open and past due."
+        },
+        "with_agents": {
+          "type": "boolean",
+          "description": "true: with agents (tasks); false: user's own."
+        },
+        "query": {
+          "type": "string",
+          "description": "words to find in the title or notes"
+        },
+        "project": {
+          "type": "string",
+          "description": "Existing knowledge-base project slug/name."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "todo",
+            "concern"
+          ],
+          "description": "todo or user-raised concerns awaiting concern_report; omitted includes both."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Default 50; maximum 200."
+        }
+      }
+    }
+  },
+  {
+    "name": "todo_get",
+    "description": "Read a to-do's title/state, priority, due/reminder and push status, timestamps, origin/plan, notes, agents, decisions and canonical repository/issue/PR associations. Maintain links with todo_repository_links_add or the revision-checked set tools; associations do not prove completion.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "the to-do's id (todo_…), as todo_list gives it"
+        }
+      }
+    }
+  },
+  {
+    "name": "todo_create",
+    "description": "Record requested/agreed work or reminders immediately, without confirmation; execute via task_plan. Open title/due duplicates return existing to-dos but refuse bindings: use todo_repositories_get/set. Short title in the user's language; details in notes. In leader chats: record that direction's work; task_plan dispatches, todo_complete finishes unassigned work. Bindings save atomically; IDs/catalog_revision from repositories_list. No files or task progress changes.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "title"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "what is to be done, in a line, in the user's language"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Details."
+        },
+        "due": {
+          "type": "string",
+          "description": "Day only: YYYY-MM-DD; otherwise YYYY-MM-DD HH:MM (user time zone) or RFC3339. Relative 2h/3d accepted."
+        },
+        "remind": {
+          "type": "string",
+          "description": "Future reminder (user time zone/RFC3339 or relative 30m/2h/1d). Only if requested or deadline close and important."
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "high",
+            "normal",
+            "low"
+          ],
+          "description": "normal when left out"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "todo",
+            "concern"
+          ],
+          "description": "todo (default); concern (main chat only) tracks a user-raised matter until concern_report reports its outcome; other completion tools cannot close it."
+        },
+        "project": {
+          "type": "string",
+          "description": "Existing kb_list project slug/name; prefer long-term work. Only when clear; no near-duplicates."
+        },
+        "part_of": {
+          "type": "string",
+          "description": "Request to-do id this is a piece of; hand out via task_plan todo_id."
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "With part_of: sibling piece ids it waits for."
+        },
+        "repository_bindings": {
+          "type": "object",
+          "required": [
+            "catalog_revision",
+            "repositories"
+          ],
+          "properties": {
+            "catalog_revision": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "repositories": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "required": [
+                  "repo_id"
+                ],
+                "properties": {
+                  "repo_id": {
+                    "type": "string"
+                  },
+                  "directory_alias": {
+                    "type": "string"
+                  },
+                  "requested_ref": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "default",
+                          "branch",
+                          "tag",
+                          "commit",
+                          "ref"
+                        ]
+                      },
+                      "value": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                      "kind"
+                    ],
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "default"
+                          }
+                        }
+                      },
+                      {
+                        "required": [
+                          "value"
+                        ]
+                      }
+                    ]
+                  },
+                  "links": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "issue",
+                            "pull_request"
+                          ]
+                        },
+                        "number": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]{0,19}$"
+                        },
+                        "title": {
+                          "type": "string",
+                          "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
+                          "maxLength": 1024
+                        }
+                      },
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "required": [
+                            "url"
+                          ],
+                          "not": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "kind"
+                                ]
+                              },
+                              {
+                                "required": [
+                                  "number"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "required": [
+                            "kind",
+                            "number"
+                          ],
+                          "not": {
+                            "required": [
+                              "url"
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "maxItems": 50
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "todo_update",
+    "description": "Update supplied title, notes, due/reminder, priority, project, part_of or after immediately, including task to-dos; no confirmation. Omitted fields stay; \"\" clears notes/due/remind/project/part_of, [] clears after. New reminder times notify again. Completion/reopening uses todo_complete/todo_reopen.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "To-do id from todo_list."
+        },
+        "title": {
+          "type": "string",
+          "description": "the new title"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Replacement notes; retain anything still needed. \"\" clears."
+        },
+        "due": {
+          "type": "string",
+          "description": "New due date YYYY-MM-DD or datetime (user's time zone/RFC3339); \"\" clears."
+        },
+        "remind": {
+          "type": "string",
+          "description": "New reminder datetime (user's time zone/RFC3339) or relative 30m/2h/1d; never past. \"\" clears."
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "high",
+            "normal",
+            "low"
+          ]
+        },
+        "project": {
+          "type": "string",
+          "description": "Existing knowledge-base project slug/name (kb_list projects), preferably a long-term work area. Set only when clear; do not invent near-duplicates. \"\" clears."
+        },
+        "part_of": {
+          "type": "string",
+          "description": "Request to-do this is a piece of; changing clears after."
+        },
+        "after": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Sibling piece ids it waits for; replaces old."
+        }
+      }
+    }
+  },
+  {
+    "name": "todo_complete",
+    "description": "Mark one of the user's Persona to-dos done, when the user says it is done (or asks you to close it). The user's own to-do is closed at once. A task's, or one agents work on, is confirmed on the phone first, because closing it also closes its agents once they are idle; if the user declines, nothing changes. A concern is not closed with this: report its outcome with concern_report.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "the to-do's id (todo_…), as todo_list gives it"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "todo_reopen",
+    "description": "Open a done Persona to-do again, when the user says it is not done after all. The user's own to-do is reopened at once; a task's, or one agents worked on, is confirmed on the phone first.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "the to-do's id (todo_…), as todo_list gives it"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "todo_delete",
+    "description": "Delete one of the user's Persona to-dos for good (its notes, links to agents and decisions go with it), only when the user asks for it to be deleted; one that is finished is completed instead (todo_complete). Every delete is confirmed on the phone first; if the user declines, writes instead, or does not answer, nothing is deleted. The agents that worked on it are left as they are.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "the to-do's id (todo_…), as todo_list gives it"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "concern_report",
+    "description": "Report the outcome of one of the user's concerns (a to-do of kind concern, see todo_list kind concern) and close it: main conversation only. Call it in the same reply in which you tell the user the outcome, with report the words you told them, faithfully; it is kept on the concern as a decision of source reported (shown in the app, sent to extensions). It is the only way a concern closes: nothing closes one on its own, and todo_complete refuses it. Report only an outcome the user has actually been told; if the concern is not settled yet, leave it open. A concern the user reopens needs another report.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "report"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "the concern's id (todo_…), as todo_list gives it"
+        },
+        "report": {
+          "type": "string",
+          "description": "what you told the user of its outcome, as you said it in this reply (at most 4000 characters)"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "direction_name",
+    "description": "Name a direction (a leader conversation, one of assistant.leaders, current or ended): main conversation only. The name is what the app and the work-log extension show for the direction, so make it short and plain, the way the user calls that line of work (「Persona 产品」「基建」), never a conversation title with a date or kind in it. An empty name takes yours away: the direction then shows its knowledge-base project's name, else its conversation title without the date and kind. Whoever names it last, the user in the app or you, that name shows.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "the leader conversation's id (persona_settings get assistant.leaders, conversations_list)"
+        },
+        "name": {
+          "type": "string",
+          "description": "the direction's name, at most 40 characters; empty to clear it"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "leader_progress",
+    "description": "Report your direction's progress to the user's work log: leader conversations only (assistant.leaders). Write at the goal level, not the process: what was reached, what is being done now and where it is stuck, what the user has to do, with links to the evidence (merged PR, deployed and checked page, document). Send one when a task of yours was reached and at each report cycle (your scheduled check-in, or the end of a day's work on the direction); not after every step, and never only to say you are still working. It does not message the user: it becomes a progress line of your direction in the work-log extension's card, and the latest one is kept on the direction. What needs the user's decision now still goes by task_review needs_user.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "reached": {
+          "type": "string",
+          "description": "前回の報告から達成したことを一文で記述します。ユーザーが別の言語を使わない限り日本語で書き、進展がない場合は空にします"
+        },
+        "doing": {
+          "type": "string",
+          "description": "what is being done now and, if stuck, where and on what; one sentence"
+        },
+        "needs_you": {
+          "type": "string",
+          "description": "what the user has to do (decide, verify, give access), with where; empty when nothing"
+        },
+        "links": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "string"
+          },
+          "description": "evidence links: PRs, deployed pages, documents; the first is shown first"
+        }
+      }
+    },
+    "defer_loading": true
+  }
+]

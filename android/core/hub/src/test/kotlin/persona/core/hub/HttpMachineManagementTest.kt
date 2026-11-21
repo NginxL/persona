@@ -146,6 +146,47 @@ class HttpMachineManagementTest {
         assertEquals(HubError.Protocol, (runCatching { machines.claudeLiveReplies("desk") }.exceptionOrNull() as HubFailure).kind)
     }
 
+    @Test fun linkSwitchPostsOnceAndDecodesTheAcceptedState() = withHub { server, machines ->
+        server.enqueue(MockResponse().setResponseCode(202).setBody(
+            """{"link_switch":{"available":false,"reason":"in_progress","phase":"checking",
+              "rollback_unconfirmed":false,"at":"2026-11-19T16:00:05+08:00","future":true}}""",
+        ))
+        val state = machines.startLinkSwitch("desk/name")
+        assertFalse(state.available)
+        assertEquals("in_progress", state.reason)
+        assertEquals("checking", state.phase)
+        assertEquals("2026-11-19T08:00:05Z", state.at)
+        server.takeRequest().let {
+            assertEquals("POST", it.method)
+            assertEquals("/api/v1/machines/desk%2Fname/link-switch", it.path)
+            assertEquals("{}", it.body.readUtf8())
+        }
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"already running","code":"in_progress"}"""))
+        val refused = runCatching { machines.startLinkSwitch("desk/name") }.exceptionOrNull() as HubFailure
+        assertEquals(409, refused.status)
+        assertEquals("in_progress", refused.code)
+        server.takeRequest()
+        server.enqueue(MockResponse().setResponseCode(403).setBody("""{"error":"full access required","code":"forbidden"}"""))
+        assertEquals(403, (runCatching { machines.startLinkSwitch("desk/name") }.exceptionOrNull() as HubFailure).status)
+        server.takeRequest()
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test fun linkSwitchRejectsAnAnswerItCannotTrust() = withHub { server, machines ->
+        repeat(4) { index ->
+            server.enqueue(MockResponse().setResponseCode(202).setBody(when (index) {
+                0 -> """{}"""
+                1 -> """{"link_switch":{"phase":"checking"}}"""
+                2 -> """{"link_switch":{"available":true,"phase":"failed","rollback_unconfirmed":"true"}}"""
+                else -> """{"link_switch":{"available":"yes"}}"""
+            }))
+            val failure = runCatching { machines.startLinkSwitch("desk") }.exceptionOrNull() as HubFailure
+            assertEquals(HubError.Protocol, failure.kind)
+            server.takeRequest()
+        }
+        assertEquals(4, server.requestCount)
+    }
+
     @Test fun launchersReconnectAndDeployGoToTheMachine() = withHub { server, machines ->
         server.enqueue(MockResponse().setBody("""{"launchers":[{"name":"claude","model":"opus"},{"name":"codex","agent_type":"codex"}]}"""))
         val launchers = machines.launchers("mac/one")
@@ -472,5 +513,93 @@ class HttpModelConfigurationTest {
         assertEquals("模型用途不存在", (missing?.message).zhAny())
         server.enqueue(MockResponse().setResponseCode(500).setBody("""{"error":"boom"}"""))
         assertEquals(500, (runCatching { models.catalog() }.exceptionOrNull() as HubFailure).status)
+    }
+
+    @Test fun modelProfilesLoadApplyRollbackSaveAndDegradeOnOldHubs() = withHub { server, models ->
+        val profilesJson = """{
+            "revision": 4,
+            "active": "performance",
+            "rollback": {"to": "economy", "at": "2026-11-21T06:00:00Z", "changes": ["assistant"]},
+            "profiles": [
+                {
+                    "id": "performance",
+                    "name": "Performance",
+                    "description": "Strong models",
+                    "active": true,
+                    "changes": [],
+                    "purposes": {"assistant": {"provider": "launcher.claude", "model": "opus", "effort": "high", "permission_mode": "auto"}},
+                    "launchers": {"gateway": {"model": "glm-5", "small_model": ""}},
+                    "tiers": {"strong": {"launcher": "claude", "model": "opus", "effort": "high", "speed": "fast", "permission_mode": "acceptEdits", "description": "Complex tasks"}}
+                },
+                {
+                    "id": "economy",
+                    "name": "Economy",
+                    "active": false,
+                    "changes": ["assistant"]
+                }
+            ],
+            "events": [{"at": "2026-11-21T06:00:00Z", "action": "switch", "from": "economy", "to": "performance", "by": {"kind": "device", "name": "Phone"}, "changed": ["assistant"]}]
+        }"""
+        server.enqueue(MockResponse().setBody(profilesJson))
+        val view = requireNotNull(models.profiles())
+        assertEquals("/api/v1/model-profiles", server.takeRequest().path)
+        assertEquals(4L, view.revision)
+        assertEquals("performance", view.active)
+        assertEquals("economy", view.rollback?.to)
+        assertEquals(2, view.profiles.size)
+        assertEquals("auto", view.profiles[0].purposes["assistant"]?.permissionMode)
+        assertEquals("", view.profiles[0].launchers["gateway"]?.smallModel)
+        assertEquals("fast", view.profiles[0].tiers["strong"]?.speed)
+
+        // Older hub without /api/v1/model-profiles returns null cleanly.
+        server.enqueue(MockResponse().setResponseCode(404).setBody("404 page not found"))
+        assertNull(models.profiles())
+        assertEquals("/api/v1/model-profiles", server.takeRequest().path)
+
+        // Apply profile
+        server.enqueue(MockResponse().setBody(profilesJson.replace("\"active\": \"performance\"", "\"active\": \"economy\"")))
+        val applied = models.applyProfile("economy")
+        val applyReq = server.takeRequest()
+        assertEquals("POST", applyReq.method)
+        assertEquals("/api/v1/model-profiles/economy/apply", applyReq.path)
+        assertEquals("economy", applied.active)
+
+        // Rollback profile
+        server.enqueue(MockResponse().setBody(profilesJson))
+        val rolledBack = models.rollbackProfile()
+        val rollbackReq = server.takeRequest()
+        assertEquals("POST", rollbackReq.method)
+        assertEquals("/api/v1/model-profiles/rollback", rollbackReq.path)
+        assertEquals("performance", rolledBack.active)
+
+        // Save profile (200 Saved)
+        server.enqueue(MockResponse().setBody(profilesJson.replace("\"revision\": 4", "\"revision\": 5")))
+        val input = ModelProfileSaveInput(
+            revision = 4,
+            name = "Performance",
+            description = "Updated",
+            purposes = mapOf("assistant" to ModelBinding(provider = "launcher.claude", model = "opus", effort = "high")),
+            tiers = mapOf("strong" to ModelProfileTier(launcher = "claude", model = "opus", effort = "high", description = "Main")),
+        )
+        val saved = models.saveProfile("performance", input)
+        assertTrue(saved is ModelProfileSave.Saved)
+        assertEquals(5L, (saved as ModelProfileSave.Saved).view.revision)
+        val saveReq = server.takeRequest()
+        assertEquals("PUT", saveReq.method)
+        assertEquals("/api/v1/model-profiles/performance", saveReq.path)
+        val saveBody = JsonCodec.parseToJsonElement(saveReq.body.readUtf8()).jsonObject
+        assertEquals("4", saveBody["revision"]?.jsonPrimitive?.content)
+        assertEquals("Updated", saveBody["description"]?.jsonPrimitive?.content)
+
+        // Save profile (409 Conflict)
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"conflict"}"""))
+        assertEquals(ModelProfileSave.Conflict, models.saveProfile("performance", input))
+        server.takeRequest()
+
+        // Save profile (400 Bad Request propagates HubFailure)
+        server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":"invalid tier"}"""))
+        assertEquals(400, (runCatching { models.saveProfile("performance", input) }.exceptionOrNull() as HubFailure).status)
+        server.takeRequest()
+        Unit
     }
 }

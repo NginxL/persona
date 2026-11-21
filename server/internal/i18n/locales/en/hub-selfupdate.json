@@ -35,10 +35,18 @@
   "reason_no_takeover": "The new version could not take over: {error}",
   "reason_not_confirmed": "The new version was not confirmed within 3 minutes",
   "err_program_unreplaced": "Version {version} has no {program} for {platform}, and {service} runs it: installing it would leave {program} on the old version. Wait for a release that includes it",
-  "err_development_config": "Configure backup writer quiesce/resume commands on the hub machine first.",
+  "err_development_config": "The backup writer quiesce and resume commands in hub.json must be configured as a pair, or both left empty to use the hub's built-in pause.",
   "err_development_topology": "Development updates require the built-in child assistant. Computers owned by independent assistants need their original update channel.",
+  "err_development_platform": "Development updates need a hub on Linux or macOS.",
+  "err_development_quiesce": "The hub could not pause its writers for the backup: {error}",
   "err_computer_packages": "The hub updated, but computer packages could not be prepared. Their staged files are retained on the hub machine; inspect the update logs before redeploying computers.",
   "err_development_recovery": "An interrupted development update needs recovery. Inspect update/development/adopting.json and the retained snapshot on the hub machine before updating or changing sources.",
   "err_development_phase": "Could not prepare the development update. Inspect update/development/{phase}.log on the hub machine. The previous build and verified snapshots are retained.",
-  "err_development_backup": "This program backup is no longer available. Refresh the backup versions."
+  "err_development_backup": "This program backup is no longer available. Refresh the backup versions.",
+  "err_development_backup_path": "That backup folder can't be used: {error}",
+  "err_development_backup_retain": "Keep between 1 and {max} snapshots.",
+  "err_development_backup_recovery": "The current snapshot folder needs recovery before it can be changed: {error}",
+  "err_quiesced": "The hub is pausing its writers for a backup. Try again in a moment.",
+  "err_quiesce_timeout": "The built-in manager did not stop in time for the backup.",
+  "err_development_docker": "Web development updates aren't available for a Docker hub; update it with a new image."
 }

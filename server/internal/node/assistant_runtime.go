@@ -145,12 +145,15 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		if pickedEffort != "" {
 			startParams["effort"] = pickedEffort
 		}
+		if mode != "" {
+			startParams["permission_mode"] = mode
+		}
 		if supportsPolicy && policy != "" {
 			startParams["supervision_instructions"] = policy
 		}
 		s, err := n.runtimeStartWith(ctx, h, startParams)
 		if err != nil {
-			return "", err
+			return "", n.localizeSupervisionRefusal(ctx, err)
 		}
 		id = s.SessionID
 		st.AwaitingFirstMessage = true
@@ -219,7 +222,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 	var said json.RawMessage
 	if err := h.peer.Call(cctx, "session.send", params, &said); err != nil {
 		if isRPCError(err) {
-			return "", err
+			return "", n.localizeSupervisionRefusal(ctx, err)
 		}
 		return "", fmt.Errorf("%s: %w", h.label(), err)
 	}

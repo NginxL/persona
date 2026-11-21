@@ -246,24 +246,29 @@ var larkNoteFile = lazyre.New(`^[\w./~+-]+\.(?:md|markdown|txt|log|csv|tsv)$`)
 
 // larkExecutableAssignment: an assignment that can change which program a command runs or what it loads. A PATH of
 // directories already trusted here (trustedPATH) does not; on another machine PATH names that machine's directories
-// and changes nothing here.
-func larkExecutableAssignment(w string, remote bool) bool {
+// and changes nothing here. extraPATH are the login shell's directories (larkExtraPATH).
+func larkExecutableAssignment(w string, remote bool, extraPATH larkExtraPATH) bool {
 	k, val, _ := strings.Cut(w, "=")
 	if !larkExecutableEnv[k] {
 		return false
 	}
-	return k != "PATH" || !remote && !trustedPATH(val)
+	return k != "PATH" || !remote && !trustedPATH(val, extraPATH)
 }
 
 // larkSystemPath: where lark-cli and the programs it starts are installed in the usual setups.
 var larkSystemPath = []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin", "/opt/homebrew/bin"}
 
-// trustedPATH: every directory of a PATH value is one this process's PATH or the system already has, so a command
-// resolves among programs the gate already runs by name (an absolute lark-cli path is taken as lark-cli too).
-// $HOME, ~ and $PATH are read as here; any other expansion is not trusted.
-func trustedPATH(val string) bool {
+// trustedPATH: every directory of a PATH value is one this process's PATH, the login shell's (extraPATH) or the system
+// already has, so a command resolves among programs the gate already runs by name (an absolute lark-cli path is taken
+// as lark-cli too). The login shell's directories are where the assistant's own Bash finds an npm global install that
+// this process does not have (larkLoginPATH). $HOME, ~ and $PATH are read as here; any other expansion is not trusted.
+func trustedPATH(val string, extraPATH larkExtraPATH) bool {
 	known := map[string]bool{}
-	for _, d := range append(filepath.SplitList(os.Getenv("PATH")), larkSystemPath...) {
+	extra := append([]string(nil), larkSystemPath...)
+	if extraPATH != nil {
+		extra = append(extra, extraPATH()...)
+	}
+	for _, d := range append(filepath.SplitList(os.Getenv("PATH")), extra...) {
 		if filepath.IsAbs(d) {
 			known[filepath.Clean(d)] = true
 		}

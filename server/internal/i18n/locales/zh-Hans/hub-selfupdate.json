@@ -34,10 +34,18 @@
   "reason_no_takeover": "新版本没能接手：{error}",
   "reason_not_confirmed": "新版本 3 分钟内没有确认",
   "err_program_unreplaced": "版本 {version} 没有 {platform} 的 {program}，而 {service} 运行的就是它：装了会让 {program} 留在旧版本。等包含它的版本发布",
-  "err_development_config": "请先在 hub 机器上配置备份时暂停、恢复写入的命令。",
+  "err_development_config": "hub.json 里的备份暂停、恢复命令必须成对配置；都不配置则使用 hub 内置的暂停。",
   "err_development_topology": "开发版更新需要 hub 内置子进程助手。由独立助手管理的电脑须使用其原有更新渠道。",
+  "err_development_platform": "开发版更新需要 Linux 或 macOS 上的 hub。",
+  "err_development_quiesce": "hub 无法为备份暂停写入：{error}",
   "err_computer_packages": "hub 已更新，但电脑程序包准备失败。暂存文件仍保留在 hub 机器上，请检查更新日志后再部署电脑。",
   "err_development_recovery": "上次开发版更新中断，需要先恢复。请在 hub 机器上检查 update/development/adopting.json 和保留的快照，再更新或切换来源。",
   "err_development_phase": "开发版更新准备失败。请在 hub 机器上检查 update/development/{phase}.log，原版本及有效快照仍保留。",
-  "err_development_backup": "此程序备份已不可用，请刷新历史备份版本。"
+  "err_development_backup": "此程序备份已不可用，请刷新历史备份版本。",
+  "err_development_backup_path": "不能使用这个备份文件夹：{error}",
+  "err_development_backup_retain": "保留的快照数量应在 1 到 {max} 之间。",
+  "err_development_backup_recovery": "当前快照文件夹需要先恢复才能更换：{error}",
+  "err_quiesced": "hub 正在为备份暂停写入，请稍后再试。",
+  "err_quiesce_timeout": "内置助手没有为备份及时停止。",
+  "err_development_docker": "Docker 里的 hub 不能使用开发版更新，请用新镜像更新。"
 }

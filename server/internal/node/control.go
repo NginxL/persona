@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/screen"
 	"github.com/nwverse/persona/server/internal/shellcmd"
@@ -125,14 +127,19 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 			}
 		}()
 	}
-	if kind == ompAgent { // start_agent.go: omp's own command, and none of a Claude start's options
+	if kind == ompAgent {
 		if launcher != ompAgent {
 			// Only the launcher named omp is known to run omp: another one (a Codex launcher, a provider of no omp
 			// command) would type something else into the pane and get the first message.
 			return nil, fmt.Errorf("omp starts only with the launcher named omp, not %q", launcher)
 		}
-		if execution.Model != "" || mode != "" || effort != "" || wantsUltracode(execution.Ultracode) {
-			return nil, refusal("omp_options", ompOptionsRefusal, nil)
+		if (resume != "" && execution.Model != "") || mode != "" || effort != "" || wantsUltracode(execution.Ultracode) {
+			return nil, ompOptionsRefusal(ctx)
+		}
+		if execution.Model != "" {
+			if err := n.checkOmpStartModel(ctx, launcher, execution.Model); err != nil {
+				return nil, err
+			}
 		}
 		if resume != "" {
 			if a, ok := n.agent(resume); ok {
@@ -165,6 +172,17 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if !proto.FasterSpeed(execution.Speed) {
 		argv, codex = n.codexLauncher(ctx, launcher)
 	}
+	var launch host.Launcher
+	if codex && kind == "codex" && resume == "" && mode == "" && stockOrcaCodexArgv(launcher, argv) && n.startKind(ctx) == proto.EngineOrca {
+		launch, err = n.launcherFor(n.startKind(ctx))
+		if err != nil {
+			return nil, err
+		}
+		argv, err = codexOrcaLaunchDefaults(ctx, launch, argv)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if backend := backendLaunchFrom(ctx); backend != nil && codex && mode != "plan" {
 		for _, repo := range backend.executor.journal.Repositories {
 			argv = append(argv, "--add-dir", repo.CommonDir)
@@ -186,7 +204,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	if err := n.checkUltracodeStart(ctx, execution.Ultracode, kind); err != nil {
 		return nil, err
 	}
-	if execution.Model != "" && workAgentKind(launcher, kind) == "" {
+	if execution.Model != "" && kind != ompAgent && workAgentKind(launcher, kind) == "" {
 		agent, err := n.launcherModelCheck(ctx, launcher, execution.Model)
 		if err != nil {
 			return nil, err
@@ -215,6 +233,13 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		if n.startKind(ctx) == proto.EngineOrca && kind != "claude" { // the start's host
 			return nil, refusal("orca_resume", "Orca 上只能从手机继续 Claude 会话：其它 Agent 请在电脑上恢复，这次没有启动。", nil)
 		}
+		// An id this computer has no transcript, record or start of is not one to resume, as `claude --resume` would
+		// say: started under it, a new conversation would be listed under the id of another, which the manager tells
+		// conversations by (a health chat's: #10941). A first start that failed keeps its start or its record (#861)
+		// and starts under its id below.
+		if kind == "claude" && !codex && !n.resumeKnown(ctx, resume) {
+			return nil, resumeUnknown()
+		}
 	}
 
 	var instructionFile, instructionChannel string
@@ -240,9 +265,11 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	prompt = taskFallback(prompt, execution.TaskAttachments)
 
 	// New sessions start in the host the start named, else the default host.
-	launch, err := n.launcherFor(n.startKind(ctx))
-	if err != nil {
-		return nil, err
+	if launch == nil {
+		launch, err = n.launcherFor(n.startKind(ctx))
+		if err != nil {
+			return nil, err
+		}
 	}
 	ws, err := n.tabSpace(ctx, launch, cwd, workspaceID)
 	if err != nil {
@@ -264,13 +291,13 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		if resume != "" {
 			return nil, refusal("work_agent_resume", "这个会话不能用启动器接着：pi 在它原来的标签里继续，cursor 和 agy 请在电脑上恢复。这次没有启动。", nil)
 		}
-		return n.startWorkAgent(ctx, launch, cwd, launcher, work, execution.Model, effort, prompt, ws, tabName)
+		return n.startWorkAgent(ctx, launch, cwd, launcher, work, execution.Model, effort, mode, prompt, ws, tabName)
 	}
 	if kind != "claude" { // start_agent.go
 		if mode != "" || effort != "" {
 			return nil, fmt.Errorf("permission mode and effort are only supported for Claude starts")
 		}
-		return n.startOtherAgent(ctx, launch, cwd, launcher, kind, prompt, resume, ws, tabName)
+		return n.startOtherAgent(ctx, launch, cwd, launcher, kind, prompt, resume, ws, tabName, execution)
 	}
 	if err := n.codexFunctionLauncher(ctx, launcher, true); err != nil {
 		return nil, err
@@ -423,6 +450,88 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		}
 	}
 	return n.sessionFor(id, *a), nil
+}
+
+// resumeUnknown refuses a resume of an id the computer never had (resumeKnown), or one an extension may not resume
+// here (resumeOutsideHealth): the same words for both, so the refusal does not say which. The hub words it in the
+// request's language by its code (apierr).
+func resumeUnknown() error {
+	return refusal(proto.CodeResumeUnknown, i18n.T(i18n.Default, "rpc-errors.resume_unknown"), nil)
+}
+
+// resumeKnown: this computer has something of conversation id to resume: its transcript, a start of it (one that
+// failed included), a Claude process of it that it saw (a hook's SessionStart before a first message wrote the
+// transcript, ultracode.go), or its record (once the hub's copy of the records has come, or the start's time is up).
+func (n *Node) resumeKnown(ctx context.Context, id string) bool {
+	if n.transcriptPath(id) != "" || n.starts.get(id) != nil {
+		return true
+	}
+	n.mu.Lock()
+	m, seen := n.modes[id]
+	n.mu.Unlock()
+	if seen && m.Ultracode != nil {
+		return true
+	}
+	_ = n.state.loaded(ctx)
+	_, ok := n.state.get(id)
+	return ok
+}
+
+// resumeOutsideHealth: this computer knows where conversation id started, and every directory it knows it by is
+// outside the health space and the Agent folders kept out of Persona. The hub asks it (session.start's
+// resume_outside_health) for a resume an extension's token names that its computer does not list (#10941): a quiet chat
+// leaves the list after a week, or sooner on a busy computer, and a stopped Agent takes no message, so a resume is the
+// only way back to one the extension started.
+//
+// Where it started is read only from what no resume rewrites: its transcript's or rollout's head (where it started and
+// last was, the assistant's own health project too), its omp session file (where `omp --resume` opens it, one Persona
+// did not start too), or the record of an engine runtime's start (EngineRuntime: the node has no transcript under the
+// id Persona named such an Agent by). Its terminal record, a start of it and its running agent only add directories to
+// refuse on: a resume writes a terminal record anew with the folder the resume names, and the apps name a run's latest
+// folder, so once a health run's transcript is gone its record alone could say outside (#12097). One it has nothing of,
+// nothing else of, or a transcript whose head names no directory, is refused like one of the space: either would let
+// the extension start a conversation the manager takes for another, or run one of the space outside it.
+func (n *Node) resumeOutsideHealth(ctx context.Context, id string) bool {
+	id = n.resolveAlias(id)
+	var dirs []string
+	started := false
+	if p := n.transcriptPath(id); p != "" {
+		st, err := os.Stat(p)
+		if err != nil {
+			return false
+		}
+		m := n.meta(p, st)
+		if m.start == "" {
+			return false
+		}
+		dirs = append(dirs, m.start, m.cwd, n.assistantDirOfProject(filepath.Base(filepath.Dir(p))))
+		started = true
+	}
+	if r := n.starts.get(id); r != nil {
+		dirs = append(dirs, r.session.Cwd)
+	}
+	if a, ok := n.agent(id); ok {
+		dirs = append(dirs, a.Cwd, a.ForegroundCwd)
+	}
+	if s, ok := n.ompResumeSession(id); ok && s.Cwd != "" {
+		dirs = append(dirs, s.Cwd)
+		started = true
+	}
+	if n.state != nil {
+		if n.state.loaded(ctx) != nil {
+			return false // its record, which may say the space, is not in yet
+		}
+		if st, ok := n.state.get(id); ok {
+			dirs = append(dirs, st.Cwd)
+			started = started || st.EngineRuntime != "" && st.Cwd != ""
+		}
+	}
+	for _, d := range dirs {
+		if d != "" && (identity.InHealthSpace(d) || n.cwdBlocked(d)) {
+			return false
+		}
+	}
+	return started
 }
 
 // retypeStart types a start's line again into pane once its shell is at rest (settleShell), after leaving the

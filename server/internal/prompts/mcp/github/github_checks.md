@@ -1,4 +1,4 @@
-The checks (CI) of a GitHub pull request's head commit, or of a commit / branch: each check's name, status and conclusion. For failed GitHub Actions jobs it adds the last part of the job's log, where the error usually is.
+The checks (CI) of a GitHub pull request's head commit, or of a commit / branch: each check's name, status and conclusion. For failed GitHub Actions jobs it adds the last part of the job's log, where the error usually is.{{template "shared/mcp_language" .}}
 
 ```json
 {

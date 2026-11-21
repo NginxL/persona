@@ -2,12 +2,17 @@ package node
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // asBash runs script the way the node does where the login shell is bash (`bash -ic`), with defs as the ~/.bashrc,
@@ -15,6 +20,203 @@ import (
 func asBash(t *testing.T, defs, script string) string {
 	t.Helper()
 	return asBashIn(t, t.TempDir(), defs, script)
+}
+
+func TestLauncherScanTimeoutDiscardsIncompleteFramesAndBoundsChildOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses Unix shell process groups")
+	}
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("no zsh")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ZDOTDIR", home)
+	t.Setenv("SHELL", "/bin/zsh")
+	const hang = "exec /bin/sh -c '/bin/sleep 8 & wait'"
+	for name, rc := range map[string]string{
+		"startup":       "echo 'Welcome back'\n" + hang,
+		"no rows":       "_claude_launchers() { " + hang + "; }",
+		"helper banner": "_claude_launchers() { echo 'Starting discovery'; " + hang + "; }",
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeFile(t, filepath.Join(home, ".zshrc"), rc+"\n")
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			start := time.Now()
+			out, err := scanLaunchers(ctx)
+			if err == nil || len(out) != 0 || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				t.Fatalf("scan should fail without reporting launchers: output=%q error=%v context=%v", out, err, ctx.Err())
+			}
+			if took := time.Since(start); took > 6*time.Second {
+				t.Fatalf("scan waited %s for a child that held stdout open", took)
+			}
+		})
+	}
+}
+
+func TestConcurrentLaunchersShareFailedShellScan(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a Unix shell fixture")
+	}
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("no zsh")
+	}
+	refreshFinished := func() bool {
+		launcherCache.Lock()
+		defer launcherCache.Unlock()
+		return !launcherCache.fetching
+	}
+	waitFor(t, "previous background launcher refresh", refreshFinished)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ZDOTDIR", home)
+	t.Setenv("SHELL", "/bin/zsh")
+	stale := []proto.Launcher{{Name: "stale"}}
+	launcherCache.Lock()
+	oldAt, oldList, oldCodex, oldSettings, oldScripts := launcherCache.at, launcherCache.list, launcherCache.codex, launcherCache.settings, launcherCache.scripts
+	launcherCache.at, launcherCache.list = time.Now().Add(-2*time.Minute), stale
+	launcherCache.Unlock()
+	t.Cleanup(func() {
+		launcherCache.Lock()
+		launcherCache.at, launcherCache.list, launcherCache.codex, launcherCache.settings, launcherCache.scripts = oldAt, oldList, oldCodex, oldSettings, oldScripts
+		launcherCache.Unlock()
+	})
+	rc, started, release := filepath.Join(home, ".zshrc"), filepath.Join(home, "started"), filepath.Join(home, "release")
+	const recordStart = `printf 'start\n' >> "$HOME/started"` + "\n"
+	writeFile(t, rc, recordStart+`while [ ! -f "$HOME/release" ]; do /bin/sleep 0.02; done
+exit 1
+`)
+	t.Cleanup(func() {
+		_ = os.WriteFile(release, nil, 0o600)
+		waitFor(t, "background launcher refresh cleanup", refreshFinished)
+	})
+	n := &Node{}
+	readCached := func() []proto.Launcher {
+		t.Helper()
+		done := make(chan []proto.Launcher, 1)
+		go func() { done <- n.cachedLaunchers() }()
+		select {
+		case list := <-done:
+			return list
+		case <-time.After(2 * time.Second):
+			t.Fatal("cached launcher list waited for the shell")
+			return nil
+		}
+	}
+	if got := readCached(); !slices.Equal(got, stale) {
+		t.Fatalf("cached launcher list at refresh start = %v, want %v", got, stale)
+	}
+	waitFor(t, "launcher scan startup", func() bool { _, err := os.Stat(started); return err == nil })
+	type answer struct {
+		list   []proto.Launcher
+		err    error
+		forced bool
+	}
+	const requests = 5
+	ready, done := make(chan struct{}, requests), make(chan answer, requests)
+	for request := range requests {
+		go func() {
+			ctx := context.WithValue(t.Context(), launcherFetchObserverKey{}, func() { ready <- struct{}{} })
+			forced := request%2 == 0
+			list, err := n.launchers(ctx, forced)
+			done <- answer{list: list, err: err, forced: forced}
+		}()
+	}
+	queued := time.After(5 * time.Second)
+	for range requests {
+		select {
+		case <-ready:
+		case <-queued:
+			t.Fatal("launcher requests did not join the running scan")
+		}
+	}
+	for range requests {
+		if got := readCached(); !slices.Equal(got, stale) {
+			t.Fatalf("cached launcher list during refresh = %v, want %v", got, stale)
+		}
+	}
+	writeFile(t, release, "")
+	deadline := time.After(10 * time.Second)
+	for range requests {
+		select {
+		case got := <-done:
+			if got.forced {
+				if got.err == nil || got.list != nil {
+					t.Errorf("forced read after shared scan failure = %v, %v; want the discovery error", got.list, got.err)
+				}
+				continue
+			}
+			if got.err != nil || !slices.Equal(got.list, stale) {
+				t.Errorf("launcher list after scan failure = %v, error = %v, want %v", got.list, got.err, stale)
+			}
+		case <-deadline:
+			t.Fatal("launcher requests did not return after the shell exited")
+		}
+	}
+	waitFor(t, "failed background launcher refresh", refreshFinished)
+	if list, err := n.launchers(t.Context()); err != nil || !slices.Equal(list, stale) {
+		t.Fatalf("launcher list before the fallback expires = %v, error = %v, want %v", list, err, stale)
+	}
+	if got := readCached(); !slices.Equal(got, stale) {
+		t.Fatalf("cached launcher list before the fallback expires = %v, want %v", got, stale)
+	}
+	if starts, err := os.ReadFile(started); err != nil || string(starts) != "start\n" {
+		t.Fatalf("concurrent calls and fallback reads started %q, %v", starts, err)
+	}
+	writeFile(t, rc, recordStart+"alias retry_test='claude --model model-a'\n")
+	launcherCache.Lock()
+	launcherCache.at = time.Now().Add(-2 * time.Minute)
+	launcherCache.Unlock()
+	for range 2 {
+		list, err := n.launchers(t.Context())
+		if err != nil || byName(list)["retry_test"].Model != "model-a" {
+			t.Fatalf("a new call should retry and cache the recovered launchers: %+v, %v", list, err)
+		}
+	}
+	if list := readCached(); byName(list)["retry_test"].Model != "model-a" {
+		t.Fatalf("cached launcher list after recovery = %+v", list)
+	}
+	if starts, err := os.ReadFile(started); err != nil || string(starts) != "start\nstart\n" {
+		t.Fatalf("retry and cache should run the shell once more: %q, %v", starts, err)
+	}
+}
+
+func TestFreshLauncherCacheDoesNotJoinShellScan(t *testing.T) {
+	shellLaunchers(t, "cached")
+	started, release := make(chan struct{}), make(chan struct{})
+	refresh := launcherCache.fetch.DoChan("shell", func() (any, error) {
+		close(started)
+		<-release
+		return nil, errors.New("shell scan failed")
+	})
+	defer func() {
+		close(release)
+		<-refresh
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shell refresh did not start")
+	}
+
+	type answer struct {
+		list []proto.Launcher
+		err  error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		list, err := (&Node{}).launchers(t.Context())
+		done <- answer{list, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil || !slices.Equal(got.list, []proto.Launcher{{Name: "cached"}}) {
+			t.Fatalf("fresh launcher list = %v, error = %v", got.list, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fresh cache read waited for the in-flight scan")
+	}
 }
 
 // asBashIn is asBash with dir as the HOME, for a test that puts something in it first.

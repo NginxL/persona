@@ -209,6 +209,20 @@ class CompleteSessionsRepositoryTest {
         assertEquals(9L, repository.sessions.value.first().rev)
     }
 
+    @Test fun firstPaintSnapshotRetainsFoldedSideParentsWithinWindowLimit() {
+        val side = Session("demo", "side-top", foldedUnder = "deep-parent", foldedAs = FoldedAs.SIDE, status = "working")
+        val fillers = (0 until 60).map { Session("demo", "filler-$it", status = "idle") }
+        val deepParent = Session("demo", "deep-parent", status = "idle")
+        val saved = firstPaintSnapshot(listOf(side) + fillers + deepParent, limit = 50)
+        assertEquals(50, saved.size)
+        assertTrue(saved.any { it.sessionId == "side-top" })
+        assertTrue(saved.any { it.sessionId == "deep-parent" })
+        // Folded on cold first paint, side-top folds into deep-parent instead of flashing as Row #1
+        val folded = persona.core.domain.sort.foldedSessions(saved, hierarchy = true)
+        assertTrue(folded.none { it.sessionId == "side-top" })
+        assertTrue(folded.any { it.sessionId == "deep-parent" })
+    }
+
     private class Connection : HubConnection {
         override val state = MutableStateFlow(ConnectionState.WaitingForNetwork)
         override val events = MutableSharedFlow<ServerEvent>()

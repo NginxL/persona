@@ -52,7 +52,7 @@ afterEach(() => {
 describe("the setup a Persona chat's next message runs on", () => {
   it("its kept pick, on every device; the main chat follows the default without one, another chat keeps what it started with", () => {
     expect(assistantSetup(chat({ session: session({ model_pick: { launcher: "team-api", effort: "low" } }) }), info)).toEqual({ provider: "team-api", model: undefined, effort: "low", source: "pick" });
-    expect(assistantSetup(chat({ isMain: true }), info)).toEqual({ provider: "claude", model: "opus", effort: "medium", source: "default" });
+    expect(assistantSetup(chat({ isMain: true }), info)).toEqual({ provider: "claude", model: "opus", effort: "high", source: "default" });
     expect(assistantSetup(chat(), info)).toEqual({ provider: "relay", model: "claude-sonnet-5-5", effort: "medium", source: "own" });
     // a launcher the list no longer offers is not what it runs on: the assistant's
     expect(assistantSetup(chat({ session: session({ launcher: "gone", model: "kimi" }) }), info)).toEqual({ provider: "claude", model: undefined, effort: "medium", source: "own" });
@@ -86,7 +86,7 @@ describe("the setup a Persona chat's next message runs on", () => {
 
   it("the pill: the provider's name for people, its list's name for the model (none set: the default entry, else the model it is set up with)", () => {
     const view = (c: AssistantChat) => assistantPillView(c, assistantSetup(c, info), info, listOf(assistantSetup(c, info).provider));
-    expect(view(chat({ isMain: true }))).toMatchObject({ engine: "claude", provider: "claude", model: "Opus 5.5", effort: "medium" });
+    expect(view(chat({ isMain: true }))).toMatchObject({ engine: "claude", provider: "claude", model: "Opus 5.5", effort: "high" });
     expect(view(chat({ session: session({ model_pick: { launcher: "team-api" } }) }))).toMatchObject({ provider: "Team API", model: "sonnet 5.5" });
     expect(view(chat({ session: session({ model_pick: { launcher: "claude" } }) })).model).toBe("Default (recommended)");
     expect(view(chat({ session: session({ model_pick: { launcher: "codex", model: "gpt-5.5" } }) }))).toMatchObject({ engine: "codex", model: "5.5" });
@@ -137,7 +137,7 @@ describe("the panel's providers", () => {
     ]);
     expect(providers.find((p) => p.id === "gpt-direct")!.models).toBeNull();
     // the provider it runs on is the one whose models switch "at once" (Recommended); its row is the default's model
-    expect(state).toEqual({ current: { provider: "claude", model: "opus", effort: "medium" }, recommended: ["claude"] });
+    expect(state).toEqual({ current: { provider: "claude", model: "opus", effort: "high" }, recommended: ["claude"] });
     expect(providers.find((p) => p.id === "codex")).toMatchObject({ loading: true, models: null });
   });
 
@@ -239,4 +239,19 @@ describe("what a pick keeps", () => {
     expect(assistantPickOf({ provider: "claude", model: "opus", effort: "medium" }, claudeList, now)).toBeNull();
     expect(assistantPickOf({ provider: "claude", model: "opus", effort: "max" }, claudeList, now)).toEqual({ launcher: "claude", model: "opus", effort: "max" });
   });
+});
+
+it("keeps unsupported supervision connections visible with a reason", () => {
+  const catalog: AssistantLaunchers = { ...info, launchers: [
+    { name: "claude", source: "builtin" },
+    { name: "opencode", source: "opencode", agent: "opencode", assistant: true, supervision_policy: true },
+    { name: "plugin", source: "opencode", agent: "opencode", assistant: true },
+    { name: "grok", source: "grok", agent: "grok", assistant: true },
+  ] };
+  const setup = assistantSetup(chat({ isMain: true }), catalog);
+  const supervised = assistantPanel(setup, catalog, listOf, { running: true, switching: true, supervision: true }).providers;
+  expect(supervised.find((p) => p.id === "opencode")?.unavailable).toBeUndefined();
+  for (const name of ["plugin", "grok"]) expect(supervised.find((p) => p.id === name)?.unavailable).toBe(t("chat-modelpanel.supervision_unavailable"));
+  const ordinary = assistantPanel(setup, catalog, listOf, { running: true, switching: true }).providers;
+  expect(ordinary.find((p) => p.id === "plugin")?.unavailable).toBeUndefined();
 });

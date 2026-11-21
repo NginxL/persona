@@ -1,5 +1,6 @@
 {
   "handoff_from": "Came from {title} · click to return",
+  "handoff_previous": "Back to the previous page",
   "handoff_dismiss": "Hide the way back",
   "inbox_back_title": "Back to “{title}”",
   "inbox_back_generic": "Back to this Inbox item"

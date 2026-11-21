@@ -58,6 +58,8 @@ const publish = (patch: Partial<typeof fixture.state>) => {
   fixture.listeners.forEach((listener) => listener());
 };
 const push = (event: string, msg?: Record<string, unknown>) => fixture.events.get(event)?.forEach((listener) => listener(msg));
+const pagingFeatures = ["sessions_list", "sessions_lookup"];
+const resetList = () => publish({ features: [], loaded: false });
 const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 let host: HTMLDivElement;
 let root: Root | undefined;
@@ -68,7 +70,7 @@ const resolve = async (request: ReturnType<typeof deferred>, sessions: Session[]
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-  fixture.state = { sessions: {}, features: ["sessions_list", "sessions_lookup"], loaded: true };
+  fixture.state = { sessions: {}, features: pagingFeatures, loaded: true };
   fixture.owner = "first-login";
   fixture.api.mockReset();
   host = document.createElement("div");
@@ -208,7 +210,7 @@ describe("complete session snapshots for the sidebar fallback", () => {
     fixture.api.mockReturnValueOnce(stale.promise).mockResolvedValue({ sessions: [row("new-epoch")] });
     await mount();
     const signal = fixture.api.mock.calls[0][1].signal as AbortSignal;
-    await act(async () => { publish({ loaded: false }); publish({ loaded: true }); });
+    await act(async () => { resetList(); publish({ features: pagingFeatures, loaded: true }); });
     expect(signal.aborted).toBe(true);
     expect(fixture.api).toHaveBeenCalledTimes(2);
     await resolve(stale, [row("old-epoch")]);
@@ -221,7 +223,7 @@ describe("complete session snapshots for the sidebar fallback", () => {
     await mount();
     await act(async () => {
       root!.unmount(); root = undefined;
-      if (change === "reset") { publish({ loaded: false }); publish({ loaded: true }); }
+      if (change === "reset") { resetList(); publish({ features: pagingFeatures, loaded: true }); }
       else { fixture.owner = "second-login"; if (change === "credential") publish({ sessions: {} }); }
     });
     await mount();
@@ -312,14 +314,29 @@ describe("complete session snapshots for the sidebar fallback", () => {
     expect(host.querySelector("output")!.dataset.titles).toBe("Current title,Renamed");
   });
 
-  it("waits for initial hub loading before requesting the fallback snapshot", async () => {
+  it("starts paging on hello and publishes both pages together after the first refresh", async () => {
+    fixture.state.features = [];
     fixture.state.loaded = false;
-    fixture.api.mockResolvedValue({ sessions: [row("ready")] });
+    const { hub } = pagingHub(201);
+    const read = fixture.api.getMockImplementation()!;
+    let finishPage!: () => void;
+    const heldPage = new Promise<void>((resolve) => { finishPage = resolve; });
+    fixture.api.mockImplementation(async (path: string) => {
+      if (path.includes("cursor=")) await heldPage;
+      return read(path);
+    });
     await mount();
     expect(fixture.api).not.toHaveBeenCalled();
+    await act(async () => { publish({ features: pagingFeatures }); });
+    expect(fixture.api).toHaveBeenCalledTimes(2);
+    expect(hub.baselines).toBe(1);
+    expect(host.textContent).toBe("");
     await act(async () => { publish({ loaded: true }); });
-    expect(host.textContent).toBe("ready");
-    expect(fixture.api).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toBe("");
+    await act(async () => { finishPage(); });
+    expect(host.textContent!.split(",")).toHaveLength(201);
+    expect(host.textContent).toContain("agent-200");
+    expect(hub.baselines).toBe(2);
   });
 
   it.each(["sessions_list", "session", "sessions", "sessions_delta", "hello"])("refreshes on %s without clearing visible rows", async (event) => {
@@ -423,7 +440,7 @@ describe("complete session snapshots for the sidebar fallback", () => {
     await act(async () => { push("sessions_list"); });
     expect(fixture.api).toHaveBeenCalledTimes(1);
     await act(async () => {
-      if (end === "reset") publish({ loaded: false });
+      if (end === "reset") resetList();
       else { root!.unmount(); root = undefined; }
     });
     await advance(10_000);
@@ -500,12 +517,12 @@ describe("complete session snapshots for the sidebar fallback", () => {
     await act(async () => { push("sessions_list"); });
     await advance(3_000);
     const signal = fixture.api.mock.calls[1][1].signal as AbortSignal;
-    await act(async () => { publish({ loaded: false }); });
+    await act(async () => { resetList(); });
     expect(signal.aborted).toBe(true);
     expect(host.textContent).toBe("");
     await resolve(stale, [row("stale")]);
     expect(host.textContent).toBe("");
-    await act(async () => { publish({ loaded: true }); });
+    await act(async () => { publish({ features: pagingFeatures, loaded: true }); });
     await resolve(next, [row("new-login")]);
     expect(host.textContent).toBe("new-login");
   });

@@ -1,5 +1,5 @@
 {
-  "name_assistant": "主对话",
+  "name_assistant": "对话默认值",
   "name_agent_new": "Agents",
   "name_kb": "信息处理",
   "name_inbox_triage": "信息筛选",
@@ -28,7 +28,7 @@
   "name_assistant_supervise": "后台督办",
   "name_meeting_room": "会中对话",
   "name_meeting_minutes": "会议纪要",
-  "desc_assistant": "和你对话，把事情拆成任务派出去。只有这个对话是你在等它回复的。",
+  "desc_assistant": "新对话和其他助手用途的默认设置；各自设置后使用自己的配置。",
   "desc_agent_new": "在你的各台电脑上干活的 Agent。任务开始时仍可以单独指定模型。",
   "desc_kb": "没有人在等的文字处理：翻译、草拟回复、起标题、整理知识库。",
   "desc_inbox_triage": "分拣、摘要收件箱里的新内容并判断重要性。同一个模型还判断 Agent 为什么停下、哪些事交给 AI 分身。调用多而小。",
@@ -89,7 +89,7 @@
   "source_default": "默认",
   "source_extension_default": "扩展默认",
   "source_auto": "自动选择（hub 上能直接调用的接入）",
-  "status_no_api": "这项 API 用途还没有可调用的模型。在 设置 › 模型供应商 添加带 Key 的接入，或选择 Claude Code 启动器",
+  "status_no_api": "这项 API 用途还没有可调用的模型。在 设置 › 模型供应商 添加带 Key 的接入，或选择 Claude Code、Codex、Antigravity 启动器",
   "status_codex_no_api": "这项 API 用途还没有可调用的模型。Codex 无法关闭全部工具，不能用来处理这些请求。在 设置 › 模型供应商 添加带 Key 的接入，或选择 Claude Code 启动器",
   "status_provider_incompatible": "供应商不存在或不兼容",
   "status_no_model": "未配置模型",
@@ -148,5 +148,9 @@
   "err_candidates_not_callable": "{provider} 不能直接调用，不能作为候选。请选择直连 API 的供应商，或有地址和密钥的供应商",
   "candidate_not_offered": "设置中的模型供应商均未提供此模型",
   "candidate_not_direct": "无法直接调用供应商 {provider}",
-  "candidate_provider_gone": "供应商 {provider} 已移除或无法直接调用"
+  "candidate_provider_gone": "供应商 {provider} 已移除或无法直接调用",
+  "err_permission_mode_launcher_only": "只有启动器类型的模型用途才能设置权限模式",
+  "err_permission_mode_unsupported": "该启动器不支持所选的权限模式",
+  "name_assistant_main": "主对话",
+  "desc_assistant_main": "和你对话并派发任务。这些设置只用于主对话，不改变新对话的默认值。"
 }

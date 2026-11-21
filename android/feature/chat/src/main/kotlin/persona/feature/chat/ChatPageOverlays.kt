@@ -5,6 +5,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import persona.core.contracts.api.ChatActions
+import persona.core.contracts.api.HubConnection
+import persona.core.contracts.api.SessionFiles
+import persona.core.designsystem.LocalHubFeatures
 import androidx.compose.ui.Modifier
 import persona.core.contracts.Item
 import persona.core.contracts.Session
@@ -31,7 +35,7 @@ internal fun ChatPageOverlays(
     key: SessionKey,
     history: String?,
     terminalHelp: MutableState<Boolean>,
-    activitySheet: MutableState<Boolean>,
+    activitySheet: MutableState<BackgroundPanelRequest?>,
     session: Session?,
     readOnly: Boolean,
     canSend: Boolean,
@@ -65,6 +69,9 @@ internal fun ChatPageOverlays(
     onDelete: (MessageTarget) -> Unit,
     viewer: MutableState<ViewerRequest?>,
     chatListState: ChatListState,
+    backgroundActions: ChatActions?,
+    backgroundConnection: HubConnection?,
+    backgroundFiles: SessionFiles?,
 ) {
     pushedDetail?.let { open ->
         val host = taskHost ?: return@let
@@ -73,14 +80,16 @@ internal fun ChatPageOverlays(
     if (search.visible) ChatSearchScreen(search, searchableItems, turnCount, hasOlder,
         repository, key, history, onClose = { search.close(chatListState) })
     if (terminalHelp.value) TerminalHelpDialog { terminalHelp.value = false }
-    if (activitySheet.value) session?.takeIf(ChatActivity::shown)?.let { s ->
-        ChatActivitySheet(s, onStop = if (readOnly || !canSend) null else ({ send(ChatActivity.STOP_LOOP) }),
-            onOpenOutput = onOpenPath?.let { open -> { path -> activitySheet.value = false; open(path, null) } },
-            onDismiss = { activitySheet.value = false })
-    }
-    // The loop stopped and the background work ended: nothing left for the sheet.
-    val activityShown = ChatActivity.shown(session)
-    LaunchedEffect(activityShown) { if (!activityShown) activitySheet.value = false }
+    val request = activitySheet.value
+    val owned = request != null && session != null && session.key == request.session && session.manager == request.manager && !session.assistant
+    LaunchedEffect(request, owned) { if (request != null && !owned) activitySheet.value = null }
+    if (owned && request != null && session != null) BackgroundTasksPanel(
+        request, session, backgroundActions, backgroundConnection, "sessions_lookup" in LocalHubFeatures.current,
+        backgroundFiles, onStopLoop = if (readOnly || !canSend) null else ({ send(ChatActivity.STOP_LOOP) }),
+        onOpenFile = onOpenPath?.let { open -> { path -> activitySheet.value = null; open(path, null) } },
+        onOpenAgent = onOpenSession?.takeUnless { readOnly }?.let { open -> { target -> activitySheet.value = null; open(target) } },
+        onDismiss = { activitySheet.value = null },
+    )
     if (statusSheet.value) ChatStatusSheet(status, session, messages, deliveryActions.busyIds,
         onAction = onDeliveryAction, onDismiss = { statusSheet.value = false },
         replacement = replacement,

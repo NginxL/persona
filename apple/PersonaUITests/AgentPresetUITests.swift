@@ -77,7 +77,7 @@ final class AgentPresetUITests: XCTestCase {
         return see(element, what)
     }
 
-    @MainActor private func launchNewAgent(_ look: String = "light", largest: Bool = false) {
+    @MainActor private func launchNewAgent(_ look: String = "light", largest: Bool = false, arguments: [String] = []) {
         app?.terminate()
         app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
@@ -85,6 +85,7 @@ final class AgentPresetUITests: XCTestCase {
                                "-newChat.machine", "macbook", "-cwd.macbook", "/Users/me/code/blog",
                                "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-ui.scheme", look]
             + (largest ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
+            + arguments
         app.launchPinned()
         if !app.buttons["newChat.directory"].waitForExistence(timeout: 20) {
             app.terminate()
@@ -189,6 +190,64 @@ final class AgentPresetUITests: XCTestCase {
         XCTAssertNil(body["model"])
         XCTAssertNil(body["effort"])
         XCTAssertNil(body["tier"])
+    }
+
+    @MainActor func testOmpStartsWithTypedModelOrLauncherDefault() throws {
+        let id = "openai/gpt-5.2"
+        for (look, largest) in [("light", false), ("dark", false), ("light", true), ("dark", true)] {
+            let size = largest ? "accessibility-xxxl" : "default"
+            try use("omp")
+            launchNewAgent(look, largest: largest, arguments: ["-mode.macbook", "plan"])
+            app.buttons["newChat.launcher"].tap()
+            reveal(button(beginning: "omp"), "the native omp launcher").tap()
+            let row = reveal(app.buttons["newChat.model"], "the omp model row")
+            row.tap()
+            let enter = reveal(app.buttons["newChat.model.other"], "Enter Model ID for the empty catalog")
+            XCTAssertTrue(enter.label.contains("Enter Model ID"), enter.label)
+            shot("omp-model-\(size)", look: look)
+            enter.tap()
+            let field = see(app.textFields["typedModel.field"], "the omp model ID field")
+            field.tap()
+            field.typeText(id)
+            see(app.buttons["typedModel.use"], "use the model ID").tap()
+            wait("the typed omp model") { says(row).contains(id) }
+            reveal(row, "the chosen model on the form")
+            shot("omp-selected-\(size)", look: look)
+            if look == "dark" {
+                row.tap()
+                see(app.buttons["newChat.model.default"], "use omp's configured model").tap()
+            }
+            let body = start()
+            XCTAssertEqual(body["launcher"] as? String, "omp")
+            XCTAssertEqual(body["model"] as? String, look == "light" ? id : nil)
+            XCTAssertNil(body["permission_mode"])
+            XCTAssertNil(body["effort"])
+            XCTAssertNil(body["ultracode"])
+            XCTAssertNil(body["work_session"])
+        }
+    }
+
+    @MainActor func testOmpInHerdrSpaceUsesThatHostsCatalog() throws {
+        try use("omp-workspace")
+        app = XCUIApplication()
+        let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+        app.launchArguments = ["-pairURL", pair, "-tab", "dev", "-dev.openChat", "",
+                               "-openSession", "macbook/a1f3c2d4-0000-4000-8000-000000000001", "-openSpaceFromChat", "YES",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-ui.scheme", "light"]
+        app.launchPinned()
+        see(app.buttons["Open a new tab in this space"], "the existing herdr space", timeout: 30).tap()
+        reveal(app.buttons["newChat.launcher"], "the workspace launcher").tap()
+        see(button(beginning: "omp"), "the native omp launcher").tap()
+        reveal(app.buttons["newChat.model"], "model override in the explicit herdr workspace").tap()
+        see(app.buttons["newChat.model.other"], "enter a model for this host").tap()
+        let field = see(app.textFields["typedModel.field"], "the model field")
+        field.tap()
+        field.typeText("vendor/workspace-model")
+        see(app.buttons["typedModel.use"], "use the workspace model").tap()
+        let body = start()
+        XCTAssertEqual(body["host"] as? String, "herdr")
+        XCTAssertEqual(body["workspace_id"] as? String, "w1")
+        XCTAssertEqual(body["model"] as? String, "vendor/workspace-model")
     }
 
     @MainActor func testLockedLauncherModelIsExplainedAndNotSent() throws {

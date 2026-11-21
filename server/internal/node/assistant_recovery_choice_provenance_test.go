@@ -66,7 +66,8 @@ func recoveryChoiceFail(t *testing.T, n *Node, sent chan modelExecution, p *assi
 	return waitRecoverySend(t, sent)
 }
 
-// recoveryChoiceSwitch runs a real next-model step with a per-turn request whose full identity differs only as asked.
+// recoveryChoiceSwitch seeds a pre-upgrade switch for legacy provenance/serialization coverage.
+// New protected conversations cannot enter this switch; worker retry behavior is exercised separately below.
 func recoveryChoiceSwitch(t *testing.T, n *Node, sent chan modelExecution, from modelExecution) modelExecution {
 	t.Helper()
 	p := &assistantProc{id: recoveryChoiceProvenanceID, agent: "claude", launcher: "claude", model: from, busy: true}
@@ -85,8 +86,11 @@ func recoveryChoiceSwitch(t *testing.T, n *Node, sent chan modelExecution, from 
 	n.procs[recoveryChoiceProvenanceID] = p
 	n.recoveries[recoveryChoiceProvenanceID] = r
 	n.mu.Unlock()
-	n.runAssistantRecovery(p, r, "claude", "", from, from.Model, false)
-	return waitRecoverySend(t, sent)
+	next := from
+	next.Model = "fallback-model"
+	n.recordRecoverySwitch(recoveryChoiceProvenanceID, "claude", from.Model, "", next.Model,
+		proto.ModelRecoveryReasonServer, nil, []string{from.Model, next.Model}, from)
+	return next
 }
 
 func recoveryChoiceJSON(t *testing.T, n *Node) string {
@@ -236,11 +240,10 @@ func TestRecoveryChoiceProvenanceMatrix(t *testing.T) {
 		})
 	}
 
-	t.Run("rejected delivery preserves the old chain", func(t *testing.T) {
+	t.Run("rejected protected delivery cannot preserve a legacy fallback", func(t *testing.T) {
 		n, _ := recoveryTestNode(t, recoveryChoiceProvenanceID, true, false)
 		n.putModelRecovery(recoveryChoiceProvenanceID, recoveryChoiceRecord(n, false))
 		recoveryChoiceHold(n, from, to, now, now.Add(assistantFallbackHold))
-		before := *n.fallbacks[recoveryChoiceProvenanceID]
 		sentinel := errors.New("reject the explicit pick before delivery")
 		probeKey := n.home + "\x00claude\x00last-model"
 		modelProbeCache.Lock()
@@ -257,12 +260,8 @@ func TestRecoveryChoiceProvenanceMatrix(t *testing.T) {
 		if !errors.Is(err, sentinel) {
 			t.Fatalf("assistantSend did not reach the deterministic delivery rejection: %v", err)
 		}
-		if n.modelRecovery(recoveryChoiceProvenanceID) == nil {
-			t.Fatal("a rejected new pick erased the old recovery before delivery")
-		}
-		after := n.fallbacks[recoveryChoiceProvenanceID]
-		if after == nil || !after.at.Equal(before.at) || !after.until.Equal(before.until) || !sameModelChoice(after.from, before.from) || !sameModelChoice(after.to, before.to) {
-			t.Fatalf("a rejected new pick changed the old fallback chain: before %+v, after %+v", before, after)
+		if n.modelRecovery(recoveryChoiceProvenanceID) != nil || n.fallbacks[recoveryChoiceProvenanceID] != nil {
+			t.Fatal("a protected request retained a legacy fallback after rejecting delivery")
 		}
 	})
 
@@ -309,15 +308,22 @@ func TestRecoveryChoiceProvenanceMatrix(t *testing.T) {
 	})
 }
 
-func TestRecoveryChoiceProvenanceRetries(t *testing.T) {
-	from := recoveryChoiceExecution("primary-model", "high", "fp-high")
-	to := recoveryChoiceExecution("fallback-model", "high", "fp-high")
+// Worker recovery retains its previous per-choice retry budgets and busy-turn provenance.
+func workerRecoveryChoiceExecution(model, effort, fingerprint string) modelExecution {
+	m := recoveryChoiceExecution(model, effort, fingerprint)
+	m.IsMain = false
+	return m
+}
+
+func TestWorkerRecoveryChoiceProvenanceRetries(t *testing.T) {
+	from := workerRecoveryChoiceExecution("primary-model", "high", "fp-high")
+	to := workerRecoveryChoiceExecution("fallback-model", "high", "fp-high")
 	now := time.Now()
 
 	t.Run("explicit new pick gets its own first retry", func(t *testing.T) {
-		n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, true, false)
+		n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, false, false)
 		recoveryChoiceHold(n, from, to, now, now.Add(assistantFallbackHold))
-		picked := recoveryChoiceExecution("last-model", "low", "fp-new-pick")
+		picked := workerRecoveryChoiceExecution("last-model", "low", "fp-new-pick")
 		p := &assistantProc{id: recoveryChoiceProvenanceID, agent: "claude", launcher: "claude", model: picked}
 		n.procs[recoveryChoiceProvenanceID] = p
 		if got := recoveryChoiceFail(t, n, sent, p); !sameModelChoice(got, picked) {
@@ -332,10 +338,10 @@ func TestRecoveryChoiceProvenanceRetries(t *testing.T) {
 	})
 
 	t.Run("explicit pick of old fallback gets its own first retry", func(t *testing.T) {
-		n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, true, false)
+		n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, false, false)
 		n.putModelRecovery(recoveryChoiceProvenanceID, recoveryChoiceRecord(n, false))
 		recoveryChoiceHold(n, from, to, now, now.Add(assistantFallbackHold))
-		picked := recoveryChoiceExecution("fallback-model", "low", "fp-explicit-fallback")
+		picked := workerRecoveryChoiceExecution("fallback-model", "low", "fp-explicit-fallback")
 		if got := recoveryChoiceClassify(n, "claude", picked); !sameModelChoice(got, picked) {
 			t.Fatalf("old-fallback pick was rewritten before its turn: %+v", got)
 		}
@@ -357,8 +363,8 @@ func TestRecoveryChoiceProvenanceRetries(t *testing.T) {
 		},
 		{
 			name:       "legacy unfingerprinted exact held to identity",
-			from:       modelExecution{Model: "primary-model", IsMain: true},
-			to:         modelExecution{Model: "fallback-model", IsMain: true},
+			from:       modelExecution{Model: "primary-model", IsMain: false},
+			to:         modelExecution{Model: "fallback-model", IsMain: false},
 			legacyJSON: true,
 		},
 	} {
@@ -400,7 +406,7 @@ done
 			cwd := t.TempDir()
 			f.n.state.put(recoveryChoiceProvenanceID, sessionState{
 				Launcher: "claude", Cwd: cwd, Model: tc.from.Model, ModelEffort: tc.from.Effort,
-				ModelFingerprint: tc.from.Fingerprint, IsMain: true,
+				ModelFingerprint: tc.from.Fingerprint, IsMain: false,
 			})
 			marker := recoveryChoiceRecord(f.n, false)
 			if tc.legacyJSON {
@@ -438,7 +444,7 @@ done
 	}
 
 	t.Run("unchanged old request keeps bounded sticky fallback", func(t *testing.T) {
-		n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, true, false)
+		n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, false, false)
 		recoveryChoiceHold(n, from, to, now, now.Add(-time.Minute))
 		p := &assistantProc{id: recoveryChoiceProvenanceID, agent: "claude", launcher: "claude", model: from}
 		n.procs[recoveryChoiceProvenanceID] = p
@@ -448,7 +454,7 @@ done
 	})
 
 	t.Run("aged exact request earns a fresh same-model retry", func(t *testing.T) {
-		n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, true, false)
+		n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, false, false)
 		recoveryChoiceHold(n, from, to, now.Add(-assistantRefusalSticky-time.Minute), now.Add(-assistantRefusalSticky))
 		p := &assistantProc{id: recoveryChoiceProvenanceID, agent: "claude", launcher: "claude", model: from}
 		n.procs[recoveryChoiceProvenanceID] = p
@@ -493,7 +499,7 @@ done
 		cwd := t.TempDir()
 		f.n.state.put(recoveryChoiceProvenanceID, sessionState{
 			Launcher: "claude", Cwd: cwd, Model: from.Model, ModelEffort: from.Effort,
-			ModelFingerprint: from.Fingerprint, IsMain: true,
+			ModelFingerprint: from.Fingerprint, IsMain: false,
 		})
 		f.n.putModelRecovery(recoveryChoiceProvenanceID, recoveryChoiceRecord(f.n, false))
 		recoveryChoiceHold(f.n, from, to, now, now.Add(assistantFallbackHold))
@@ -513,7 +519,7 @@ done
 			t.Fatalf("the older held fallback turn was not delivered: %+v", p)
 		}
 
-		newer := recoveryChoiceExecution("primary-model", "low", "fp-low")
+		newer := workerRecoveryChoiceExecution("primary-model", "low", "fp-low")
 		if _, err := f.n.assistantSend(context.Background(), id, cwd, "claude", "newer explicit primary low", nil, "", "", newer); err != nil {
 			t.Fatal(err)
 		}
@@ -538,14 +544,13 @@ done
 			f.n.mu.Lock()
 			active := f.n.recoveries[id]
 			f.n.mu.Unlock()
-			marker := f.n.modelRecovery(id)
-			return active == nil && marker != nil && marker.ChainExhausted
+			return active == nil
 		})
 		if unexpected != nil {
 			t.Fatalf("older used-up chain sent another attempt on %q instead of exhausting: %+v", unexpected.Model, *unexpected)
 		}
-		if marker := f.n.modelRecovery(id); marker == nil || !marker.ChainExhausted {
-			t.Fatalf("the original two-model chain did not publish exhaustion: %+v", marker)
+		if marker := f.n.modelRecovery(id); marker != nil && marker.ChainExhausted {
+			t.Fatal("worker recovery published a protected-conversation marker")
 		}
 		select {
 		case got := <-sent:
@@ -583,7 +588,7 @@ done
 		},
 	} {
 		t.Run(tc.name+" survives newer pick", func(t *testing.T) {
-			n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, true, false)
+			n, sent := recoveryTestNode(t, recoveryChoiceProvenanceID, false, false)
 			marker := recoveryChoiceRecord(n, true)
 			n.putModelRecovery(recoveryChoiceProvenanceID, marker)
 			recoveryChoiceHold(n, from, to, now, now.Add(assistantFallbackHold))
@@ -596,7 +601,7 @@ done
 			n.recoveries = map[string]*assistantTurnRecovery{recoveryChoiceProvenanceID: old}
 
 			n.cancelAssistantRecovery(recoveryChoiceProvenanceID) // the ordinary newer send's takeover
-			newer := recoveryChoiceExecution("primary-model", "low", "fp-newer")
+			newer := workerRecoveryChoiceExecution("primary-model", "low", "fp-newer")
 			newer = recoveryChoiceClassify(n, "claude", newer)
 			st, _ := n.state.get(recoveryChoiceProvenanceID)
 			st.Model, st.ModelEffort, st.ModelFingerprint = newer.Model, newer.Effort, newer.Fingerprint

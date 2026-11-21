@@ -445,7 +445,7 @@ func (s *Service) externalPickContext(ctx context.Context, machine, sid string, 
 func (s *Service) applyExternalScope(ctx context.Context, id string, params map[string]any, b ModelBinding) error {
 	scope, ok := ctx.Value(externalPickKey{}).(externalPickScope)
 	starting := ok && s.externalMainStartScope(ctx, scope.pick.MachineID, scope.execution.SessionID, scope.pick)
-	if !ok || id != "assistant" || launcherProvider(scope.pick.Launcher) != b.Provider || scope.pick.Model != b.Model ||
+	if !ok || (id != "assistant" && id != purposeMain) || launcherProvider(scope.pick.Launcher) != b.Provider || scope.pick.Model != b.Model ||
 		!s.externalMainScope(ctx, scope.pick.MachineID, scope.execution.SessionID) && !starting {
 		return i18n.Err("external-adapter.scope_required")
 	}

@@ -67,6 +67,8 @@ data class ModelPillContent(
     val loading: String? = null,
     /** The model's list could not be read and no model is known: the warning in the danger color. */
     val failed: Boolean = false,
+    /** On an engine handoff the target's mark stays visible in the compact Agent composer. */
+    val pendingEngine: Boolean = false,
 )
 
 /** A provider's letter tile (the web's `ProviderMark`): its first letter in a small framed square, in the secondary ink. */
@@ -147,7 +149,7 @@ fun JModelPill(
                         style = if (agentComposer) text.copy(fontWeight = FontWeight.SemiBold) else text,
                         color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                if (!agentComposer) content.engine?.let { JAgentMark(it, size = Tokens.Size.markXS) }
+                if (!agentComposer || content.pendingEngine) content.engine?.let { JAgentMark(it, size = Tokens.Size.markXS) }
                 content.effort?.let { Text(it, style = text, color = if (agentComposer) palette.ink2 else palette.ink, maxLines = 1, softWrap = false) }
                 if (content.ultracode) JIcon(PhIcons.Stack, null, size = Tokens.Size.markXS, tint = palette.ink2)
             }

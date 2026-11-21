@@ -6,6 +6,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import persona.core.contracts.api.AgentLauncher
+import persona.core.contracts.api.HubLauncher
+import persona.core.contracts.api.UnavailableLauncher
 
 class ModelsTest {
     @Test fun agentTaskResultsDecodeRunningAndKeepOriginalReportIdentity() {
@@ -128,12 +131,40 @@ class ModelsTest {
         assertEquals("Claude", label(""""agent":"claude""""))
         assertEquals("Codex", label(""""agent":"codex""""))
         assertEquals("Codex", label(""""source_kind":"codex_app_server""""))
-        assertEquals("TRAEX", label(""""agent":"traex""""))
+        assertEquals("TRAE CLI", label(""""agent":"traex""""))
+        assertEquals("TRAE CLI", label(""""agent":"traecli""""))
+        assertEquals("TRAE CLI", label(""""agent":"trae-cli""""))
         assertEquals("DSH", label(""""agent":"dsh","agent_label":"DSH""""))
         assertEquals("pi", label(""""agent":"pi""""))
         val dsh = JsonCodec.decodeFromString<Session>("""{"session_id":"s","agent":"dsh"}""")
         assertTrue(!dsh.isClaude && !dsh.isCodex)
         assertTrue(JsonCodec.decodeFromString<Session>("""{"session_id":"s","agent":""}""").isClaude)
+    }
+
+    @Test fun namedTraeCliLaunchersKeepTheirConfigurationIdentifiersAndCustomTitles() {
+        val builtIn = AgentLauncher(name = "traex", agentType = "traex")
+        for (label in listOf(null, "TRAEX", "TraeCLI")) {
+            assertEquals("TRAE CLI", builtIn.copy(displayName = label).title)
+            assertEquals("TRAE CLI", UnavailableLauncher(name = "traex", displayName = label, agent = "traex").title)
+            assertEquals("TRAE CLI", HubLauncher(name = "traex", displayName = label, agent = "traex").title)
+        }
+        assertEquals("traex", builtIn.name)
+        assertEquals("My CLI", builtIn.copy(displayName = "My CLI").title)
+        assertEquals("claude", builtIn.copy(name = "claude", agentType = "claude").title)
+        assertEquals("Custom Claude", HubLauncher(name = "traex", displayName = "Custom Claude").title)
+    }
+
+    @Test fun anOlderHubsBuiltinCliHasItsDisplayNameWithoutChangingAgentType() {
+        val raw = """{"name":"traex","base_url":"(traex)"}"""
+        val launcher = JsonCodec.decodeFromString<AgentLauncher>(raw)
+        val settings = JsonCodec.decodeFromString<HubLauncher>(raw)
+        assertEquals("traex", launcher.name)
+        assertEquals("claude", launcher.agentType)
+        assertEquals("TRAE CLI", launcher.title)
+        assertEquals("TRAE CLI", settings.title)
+        assertEquals("My CLI", launcher.copy(displayName = "My CLI").title)
+        assertEquals("traex", launcher.copy(source = "persona").title)
+        assertEquals("traex", launcher.copy(baseUrl = null).title)
     }
 
     @Test fun aPaseoProviderIsNamedByItsOwnNameNeverTheEngines() {
@@ -144,6 +175,13 @@ class ModelsTest {
         assertEquals("grok", label(""""agent_label":"Paseo","launcher":"grok""""))
         assertEquals("grok", label(""""agent_label":" ","launcher":"grok""""))
         assertEquals("grok", label(""""launcher":"grok""""))
+        for (id in listOf("traex", "traecli", "trae-cli")) {
+            assertEquals("TRAE CLI", label(""""agent_label":"TRAEX","launcher":"$id""""))
+            assertEquals("TRAE CLI", label(""""launcher":"$id""""))
+            assertEquals("My agent", label(""""agent_label":"My agent","launcher":"$id""""))
+            assertEquals("TRAE CLI", AgentLauncher(name = id, agentType = "paseo").title)
+            assertEquals("My agent", HubLauncher(name = id, agent = "paseo", displayName = "My agent").title)
+        }
         // Nothing else to go by: as before.
         assertEquals("Paseo", label(""""agent_label":"Paseo""""))
         assertEquals("paseo", label(""""status":"idle""""))
@@ -159,6 +197,7 @@ class ModelsTest {
         // A node that labels the card with the row's label (#8142): the provider's name.
         val named = JsonCodec.decodeFromString<Interaction>("""{"id":"p","kind":"question","agent":"paseo","agent_label":"Grok"}""")
         assertEquals("Grok", named.agentDisplayName)
+        assertEquals("TRAE CLI", named.copy(agentLabelHint = "TRAEX").agentDisplayName)
         assertTrue(named.fromOtherAgent)
         assertEquals("Grok 在问你", (named.headline).zhAny())
         // An older node's card names only the engine: no name, never "Paseo" (nor "Claude"), and still another agent's card.

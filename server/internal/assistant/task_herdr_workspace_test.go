@@ -68,7 +68,7 @@ func TestTaskLeaderHerdrWorkspaceSurvivesRestartAndGroupsWorkers(t *testing.T) {
 	if starts[0]["task_id"] != leader.ID || starts[0]["workspace_label"] != leader.Title {
 		t.Errorf("leader did not ask for its own named task workspace: %v", starts[0])
 	}
-	if starts[1]["workspace_id"] != taskHerdrWorkspaceID || starts[1]["workspace_label"] != nil {
+	if starts[1]["workspace_id"] != taskHerdrWorkspaceID || starts[1]["workspace_label"] != leader.Title {
 		t.Errorf("worker did not reopen the recorded task workspace after restart: %v", starts[1])
 	}
 	create := taskWorktreeCreate(f)

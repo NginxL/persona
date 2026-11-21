@@ -98,6 +98,14 @@ func (n *Node) spawnCodex(id, cwd, launcher string, resume, spare bool, options 
 
 // codexAssistantCommand is the command that runs the Codex assistant's app-server with launcher in shell.
 func (n *Node) codexAssistantCommand(shell, launcher string, args []string) *exec.Cmd {
+	if provider, ok := n.managedLauncher(launcher); ok && provider.AgentType() == "codex" {
+		catalog, _ := n.codexCatalogFor(provider)
+		prefix := launchArgv("codex", nil, provider.Args, launcherDefaultEffort(provider), provider.Model, managedEnv(provider), catalog)
+		// Keep the assistant's MCP and provider flags before app-server. Running
+		// personad launch here bypasses the shell's codex wrapper and starts a TUI.
+		argv := append(append(prefix[1:], args...), "app-server")
+		return exec.Command(shell, append([]string{"-ic", `builtin command codex "$@"`, "persona"}, argv...)...)
+	}
 	return exec.Command(shell, append([]string{"-ic", codexShell(n.launcherForScript(launcher)), "persona"}, args...)...)
 }
 
@@ -120,6 +128,11 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 	cmd := n.codexAssistantCommand(shell, launcher, args)
 	cmd.Dir = root
 	cmd.Env = identity.Environment(os.Environ(), "PERSONA_ASSISTANT=1")
+	if provider, ok := n.managedLauncher(launcher); ok && provider.AgentType() == "codex" {
+		// Use the same managed environment and header bindings as personad launch,
+		// without passing secrets as shell code or command-line arguments.
+		cmd.Env = identity.Environment(withoutEnv(cmd.Env, envClearFor(provider)), managedEnv(provider)...)
+	}
 	gateEnv, releaseGates, nameGates := n.assistantLarkEnvNamed(cwd, id) // its addresses at the gate proxy go with the process
 	started := false
 	defer func() {

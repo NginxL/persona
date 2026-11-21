@@ -13,7 +13,7 @@
 //   cursor    SI `cursor.svg`; source cursor.com/brand
 //   gemini    SI `googlegemini.svg`; source gemini.google.com (no brand kit found)
 //   pi        SI `pi.svg`; source pi.dev/favicon.svg (no licence text found)
-//   trae      SI `trae.svg`; source trae.ai (TRAE, ByteDance's coding agent; not TRAEX, which keeps its letter)
+//   trae      SI `trae.svg`; source trae.ai (TRAE artwork; the built-in TRAE CLI kind keeps its letter)
 //   grok, agy  Lobe Icons 1.104.0 Grok and Antigravity monochrome marks
 //   dsh, kimi, copilot  SI 16.36.0 DeepSeek, Kimi and GitHub Copilot marks
 // viewBoxes of opencode, cursor and trae are cropped to the glyph (CLAUDE.md: assets carry no padding); nothing else is changed.

@@ -63,6 +63,7 @@ func TestRestoreLeavesWhatTheBundleLacksInPlace(t *testing.T) {
 		"tailcat-hub.json":                         []byte("hub tailcat identity made after the backup"),
 		pendingKeyName(t, pending):                 pending,
 		filepath.Join("skills", "s", "SKILL.md"):   []byte("a skill installed after the backup"),
+		filepath.Join("tls", "hub.key"):            []byte("TLS identity made after the backup"),
 		filepath.Join("data", "facts", "later.md"): []byte("knowledge written after the backup"),
 	}
 	for name, content := range kept {

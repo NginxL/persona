@@ -166,6 +166,34 @@ func (s slowReader) Read(b []byte) (int, error) {
 // A resident node keeps its connection when the transport under it ends: the manager comes back on a new one with its
 // token and takes it back, the same Node serving it (#10663). A token the node does not have is refused on the spot,
 // and the connection served is left as it was.
+func TestAttachKeepsConnectionAfterLargeRequest(t *testing.T) {
+	r := startResidentAttach(t)
+	defer r.end()
+	ctx, cancel := context.WithTimeout(r.ctx, 20*time.Second)
+	defer cancel()
+	const head, tail = `{"padding":"`, `"}`
+	const size = 70 << 20
+	params := rpc.Appended{
+		Size: len(head) + size + len(tail),
+		Append: func(dst []byte) []byte {
+			dst = append(dst, head...)
+			for range size {
+				dst = append(dst, 'x')
+			}
+			return append(dst, tail...)
+		},
+	}
+	if err := r.hub.Call(ctx, "ping", params, nil); err != nil {
+		t.Fatalf("70 MiB request: %v", err)
+	}
+	if err := r.hub.Call(ctx, "ping", nil, nil); err != nil {
+		t.Fatalf("ping after large request: %v", err)
+	}
+	if got := r.made.Load(); got != 1 {
+		t.Fatalf("created %d nodes on the transport, want 1", got)
+	}
+}
+
 func TestAttachResumesAConnection(t *testing.T) {
 	r := startResidentAttach(t)
 	hub := r.hub

@@ -353,9 +353,11 @@ func (s *Service) ciClosedTodo(ctx context.Context, machine, sid, existingProof 
 	started := s.work.started[key]
 	s.work.mu.Unlock()
 	s.todos.mu.RLock()
-	if _, open := s.todos.activeBySession[key]; open {
+	if id, open := s.todos.activeBySession[key]; open {
+		t := s.todos.todos[id]
+		held := t != nil && (t.Supervision.state(*t) == reviewTimedOut || t.Supervision.state(*t) == reviewClosing)
 		s.todos.mu.RUnlock()
-		return false, "", nil
+		return held, "", nil
 	}
 	var identities []string
 	var latest time.Time

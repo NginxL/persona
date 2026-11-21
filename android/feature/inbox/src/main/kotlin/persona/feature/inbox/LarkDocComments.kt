@@ -73,15 +73,11 @@ fun sortLarkDocComments(threads: List<LarkDocCommentThread>): List<LarkDocCommen
 
 /** The people a comment's text still @s (each picked one's `@name` is in it), once each. */
 fun larkDocMentions(text: String, picked: List<LarkDocPerson>): List<LarkDocPerson> =
-    picked.filter { "@${it.name}" in text }.distinctBy { it.userId }
+    larkMentions(text, picked.map { persona.core.contracts.api.LarkMention(it.userId, it.name) })
+        .map { LarkDocPerson(it.userId, it.name) }
 
 /** The name being looked up after an @ at the end of [text] (after a space or at the start, no space in it), or null. */
-fun larkDocMentionQuery(text: String): String? {
-    val at = text.lastIndexOf('@').takeIf { it >= 0 } ?: return null
-    if (at > 0 && !text[at - 1].isWhitespace()) return null
-    val query = text.substring(at + 1)
-    return query.takeIf { it.length <= 20 && it.none(Char::isWhitespace) }
-}
+fun larkDocMentionQuery(text: String): String? = larkMentionQuery(text)
 
 /** The routes the comments use; [LarkDocCommentsTransport] is the real one, tests give their own. */
 interface LarkDocCommentsApi {

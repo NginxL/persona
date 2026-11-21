@@ -49,10 +49,31 @@ func closeoutHookNode(t *testing.T, answer func(string, json.RawMessage) (any, e
 func TestDispatchedReportFormSkipsSecondSessionStart(t *testing.T) {
 	n, asked := closeoutStartNode(t, func() (string, error) { return "duplicate", nil })
 	for _, form := range []string{closeout.Example, closeout.MarkdownExample("English")} {
-		n.state.put("s1", sessionState{TaskInstructions: "Review the samples.\n" + form})
+		n.state.put("s1", sessionState{TaskInstructions: "Review the samples.\n" + form, TaskInstructionChannel: "claude"})
 		if got := n.closeoutStart(t.Context(), sockRequest{Pane: "w1:p1"}, startHook("s1")); got != nil || asked.Load() != 0 {
 			t.Fatalf("supplied form shown twice: %v (%d calls)", got, asked.Load())
 		}
+	}
+}
+
+func TestFallbackReportFormSkipsStartupAndReturnsAfterContextReset(t *testing.T) {
+	n, asked := closeoutStartNode(t, func() (string, error) { return "the form", nil })
+	pane := sockRequest{Kind: "hook", Pane: "w1:p1"}
+	n.state.put("s1", sessionState{TaskInstructions: closeout.MarkdownExample("English")})
+	if out := n.closeoutStart(t.Context(), pane, startHook("s1")); out != nil || asked.Load() != 0 {
+		t.Fatalf("first message already supplies the form: %v (%d calls)", out, asked.Load())
+	}
+	for _, source := range []string{"resume", "compact", "clear"} {
+		in := startHook("s1")
+		in.Source = source
+		out, _ := n.closeoutStart(t.Context(), pane, in).(map[string]any)
+		spec, _ := out["hookSpecificOutput"].(map[string]any)
+		if spec["additionalContext"] != "the form" {
+			t.Fatalf("%s: closeout form not restored: %v", source, out)
+		}
+	}
+	if asked.Load() != 1 {
+		t.Fatalf("asked %d times, want 1", asked.Load())
 	}
 }
 

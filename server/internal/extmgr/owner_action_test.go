@@ -78,6 +78,85 @@ func TestOwnerActionIsBoundToItsCardAndChannel(t *testing.T) {
 	})
 }
 
+// The strict proof exchange returns the authenticated event once, while the
+// legacy question capability still cannot resolve a permission card.
+func TestOwnerApprovalProofIsExactAndOneUse(t *testing.T) {
+	original := assistantwire.OwnerApprovalProof{MessageID: "om_reply", ParentID: "om_card", ChatID: "oc_owner", Text: "发"}
+	for _, tc := range []struct {
+		name        string
+		channel     string
+		interaction string
+		kind        string
+		mutate      func(*assistantwire.OwnerApprovalProof)
+	}{
+		{name: "valid", channel: channel.Feishu, interaction: "ix_perm", kind: proto.IxPermission},
+		{name: "wrong channel", channel: "ext-chat", interaction: "ix_perm", kind: proto.IxPermission},
+		{name: "legacy question kind", channel: channel.Feishu, interaction: "ix_perm", kind: proto.IxQuestion},
+		{name: "message", channel: channel.Feishu, interaction: "ix_perm", kind: proto.IxPermission, mutate: func(p *assistantwire.OwnerApprovalProof) { p.MessageID = "om_other" }},
+		{name: "parent", channel: channel.Feishu, interaction: "ix_perm", kind: proto.IxPermission, mutate: func(p *assistantwire.OwnerApprovalProof) { p.ParentID = "om_other" }},
+		{name: "chat", channel: channel.Feishu, interaction: "ix_perm", kind: proto.IxPermission, mutate: func(p *assistantwire.OwnerApprovalProof) { p.ChatID = "oc_other" }},
+		{name: "text", channel: channel.Feishu, interaction: "ix_perm", kind: proto.IxPermission, mutate: func(p *assistantwire.OwnerApprovalProof) { p.Text = "同意" }},
+		{name: "missing parent", channel: channel.Feishu, interaction: "ix_perm", kind: proto.IxPermission, mutate: func(p *assistantwire.OwnerApprovalProof) { p.ParentID = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestManager(t)
+			action := h.issueOwnerReplyAction(channel.Feishu, original)
+			expected := original
+			if tc.mutate != nil {
+				tc.mutate(&expected)
+			}
+			proof, err := h.takeOwnerApproval(action, tc.channel, tc.interaction, tc.kind, expected)
+			wantOK := tc.name == "valid"
+			if wantOK {
+				if err != nil || proof != original {
+					t.Fatalf("valid proof = %+v, %v", proof, err)
+				}
+				if _, err := h.takeOwnerApproval(action, tc.channel, tc.interaction, tc.kind, expected); !errors.Is(err, errNoOwnerAction) {
+					t.Fatalf("proof used twice: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, errNoOwnerAction) {
+				t.Fatalf("mismatched proof: %v", err)
+			}
+			// A failed comparison does not consume the owner's action.
+			if proof, err := h.takeOwnerApproval(action, channel.Feishu, "ix_perm", proto.IxPermission, original); err != nil || proof != original {
+				t.Fatalf("original proof after rejection = %+v, %v", proof, err)
+			}
+		})
+	}
+}
+
+func TestOwnerApprovalProofWireIsSeparateFromLegacyAnswers(t *testing.T) {
+	h := newTestManager(t)
+	original := assistantwire.OwnerApprovalProof{MessageID: "om_reply", ParentID: "om_card", ChatID: "oc_owner", Text: "同意"}
+	action := h.issueOwnerReplyAction(channel.Feishu, original)
+	if err := h.takeOwnerAction(action, channel.Feishu, "ix_perm", proto.IxPermission); !errors.Is(err, errNoOwnerAction) {
+		t.Fatalf("legacy typed-answer path gained permission approval: %v", err)
+	}
+	params, _ := json.Marshal(map[string]any{
+		"interaction_id": "ix_perm", "action": action, "channel": channel.Feishu, "kind": proto.IxPermission,
+		"approval_reply": true, "message_id": original.MessageID, "parent_id": original.ParentID,
+		"chat_id": original.ChatID, "text": original.Text,
+	})
+	raw, handled, err := h.AppCall(context.Background(), assistantwire.AppCall{AppID: assistantwire.AppInteractions,
+		Method: assistantwire.InteractionsOwnerAction, Params: params})
+	if err != nil || !handled {
+		t.Fatalf("strict owner proof call: handled=%v err=%v", handled, err)
+	}
+	var out struct {
+		Proof assistantwire.OwnerApprovalProof `json:"owner_approval_proof"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Proof != original {
+		t.Fatalf("wire proof = %+v, %v", out.Proof, err)
+	}
+	_, _, err = h.AppCall(context.Background(), assistantwire.AppCall{AppID: assistantwire.AppInteractions,
+		Method: assistantwire.InteractionsOwnerAction, Params: params})
+	if !errors.Is(err, errNoOwnerAction) {
+		t.Fatalf("wire proof replay: %v", err)
+	}
+}
+
 // The assistant's interactions.owner_action carries the channel and the card's kind; a call without them (an
 // assistant of before #5011) is refused.
 func TestOwnerActionCallNeedsChannelAndKind(t *testing.T) {

@@ -30,6 +30,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.core.contracts.HubScope
+import persona.core.contracts.Session
 import persona.core.contracts.api.*
 import persona.core.designsystem.*
 import persona.core.navigation.AppTab
@@ -156,6 +157,7 @@ class KnowledgeShotsTest {
                 style = s; dark = d
                 rule.waitForIdle()
                 rule.onNodeWithText(if (name == "list") list else detail).assertExists()
+                if (name == "entry") rule.onNodeWithText("TRAE CLI", useUnmergedTree = true).assertExists()
                 val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
                 val file = "knowledge-$name-$language-${s.name.lowercase()}-${if (d) "dark" else "light"}.png"
                 File(out(), file).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -197,6 +199,9 @@ private object DemoKnowledge : KnowledgeRepository {
         else -> emptyList()
     }, listOf("ios", "web"))
     override suspend fun detail(kind: KnowledgeKind, id: String) = if (kind == KnowledgeKind.Recordings) recording(id) else project(kind, id)
+    override suspend fun entry(kind: KnowledgeKind, id: String) = KnowledgeDetailResponse(detail(kind, id),
+        agents = listOf(Session("laptop", "forecast", title = "Check the forecast widget", agent = "trae-cli", status = "idle"))
+            .takeIf { kind == KnowledgeKind.Projects })
 
     private fun recording(id: String) = KnowledgeDetail("recordings", id, "~/.persona/data/recordings/$id",
         meta = buildJsonObject {

@@ -143,7 +143,6 @@
   "todos_badge_title_one": "{count} to-do needs you",
   "todos_badge_title_other": "{count} to-dos need you",
   "list_menu": "Agent list options",
-  "list_menu_sorted": "Agent list options: {sort}",
   "not_connected_yet": "Not connected yet",
   "more_pages": "More",
   "more_pages_count_one": "More (1 page)",

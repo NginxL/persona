@@ -1,0 +1,85 @@
+package assistant
+
+import (
+	"context"
+	"errors"
+
+	"github.com/nwverse/persona/server/internal/db"
+)
+
+type openTaskPlanStore interface {
+	OpenTaskPlans(context.Context) ([]db.TaskPlanRow, error)
+}
+
+// openTaskPlans uses only this manager's store; managers have independent databases.
+func (s *Service) openTaskPlans(ctx context.Context) ([]*TaskPlan, error) {
+	if st := s.store(); st != nil {
+		reader, ok := st.(openTaskPlanStore)
+		if !ok {
+			return nil, errors.New("pending plans: store does not support open-plan reads")
+		}
+		rows, err := reader.OpenTaskPlans(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*TaskPlan, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, planFromRow(row))
+		}
+		return out, nil
+	}
+	s.tasks.mu.Lock()
+	defer s.tasks.mu.Unlock()
+	var out []*TaskPlan
+	for _, p := range s.tasks.plans {
+		if p.State != planOpen {
+			continue
+		}
+		cp := *p
+		cp.Tasks = append([]PlanTask(nil), p.Tasks...)
+		out = append(out, &cp)
+	}
+	return out, nil
+}
+
+// Main belongs to the ordinary Assistant space; Health keeps its own decisions.
+func (s *Service) mainPendingPlans(ctx context.Context) ([]*TaskPlan, error) {
+	plans, err := s.openTaskPlans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(plans))
+	for _, p := range plans {
+		ids = append(ids, p.Conversation)
+	}
+	spaces := s.conversationSpaces(ctx, ids)
+	archived, ready := s.archivedSet()
+	if !ready {
+		return nil, errors.New("pending plans: archive state unavailable")
+	}
+	out := make([]*TaskPlan, 0, len(plans))
+	for _, p := range plans {
+		if space := spaces[p.Conversation]; space.known && space.space != "" {
+			continue
+		}
+		if _, hidden := archived[p.Conversation]; hidden {
+			continue
+		}
+		if err := s.conversationIDAvailable(ctx, p.Conversation); err != nil {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func (s *Service) planWithSpace(ctx context.Context, p *TaskPlan) *TaskPlan {
+	if p == nil {
+		return nil
+	}
+	cp := *p
+	if space, known := s.conversationSpace(ctx, p.Conversation); known {
+		cp.Space = space
+	}
+	return &cp
+}

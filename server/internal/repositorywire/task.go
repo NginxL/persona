@@ -53,11 +53,33 @@ type SourceSnapshot struct {
 	// ProviderName keeps an extension provider's name, so the row still reads when it is gone (absent for the built-ins).
 	ProviderName string `json:"provider_name,omitempty"`
 }
+
+// Link roles distinguish a task's own deliverable from work it merely references. The delivery gate verifies only
+// delivery links; reference links stay visible as context.
+const (
+	LinkRoleDelivery  = "delivery"
+	LinkRoleReference = "reference"
+)
+
+// NormalizeLinkRole returns the stored role, applying the delivery default to rows saved before roles existed.
+func NormalizeLinkRole(role string) (string, Problem) {
+	switch role {
+	case "", LinkRoleDelivery:
+		return LinkRoleDelivery, ""
+	case LinkRoleReference:
+		return LinkRoleReference, ""
+	default:
+		return "", Problem("invalid")
+	}
+}
+
 type LinkInput struct {
 	URL    string `json:"url,omitempty"`
 	Kind   string `json:"kind,omitempty"`
 	Number string `json:"number,omitempty"`
 	Title  string `json:"title,omitempty"`
+	// Role says whether the link is the task's own delivery (default) or a reference to related work.
+	Role string `json:"role,omitempty"`
 	// Resolved is an extension identity's link as the service resolved it before the transaction (never JSON).
 	Resolved *ResolvedLink `json:"-"`
 }
@@ -73,6 +95,8 @@ type TaskLink struct {
 	Number       string `json:"number"`
 	CanonicalURL string `json:"canonical_url"`
 	Title        string `json:"title,omitempty"`
+	// Role is delivery (default, including rows saved before roles existed) or reference.
+	Role string `json:"role,omitempty"`
 }
 type TaskInput struct {
 	RepoID         string       `json:"repo_id"`
@@ -242,8 +266,12 @@ func NormalizeLink(identity Identity, in LinkInput) (TaskLink, error) {
 	if !utf8.ValidString(in.Title) || len(in.Title) > 1024 || strings.ContainsFunc(in.Title, unicode.IsControl) {
 		return TaskLink{}, Problem("invalid")
 	}
+	role, roleErr := NormalizeLinkRole(in.Role)
+	if roleErr != "" {
+		return TaskLink{}, roleErr
+	}
 	if IsExtensionProvider(identity.Provider) {
-		return extensionLink(identity, in)
+		return extensionLink(identity, in, role)
 	}
 	if in.URL != "" {
 		if in.Kind != "" || in.Number != "" || len(in.URL) > 2048 {
@@ -295,12 +323,18 @@ func NormalizeLink(identity Identity, in LinkInput) (TaskLink, error) {
 			segment = "-/merge_requests"
 		}
 	}
-	return TaskLink{Kind: in.Kind, Number: in.Number, CanonicalURL: identity.CanonicalURL + "/" + segment + "/" + in.Number, Title: in.Title}, nil
+	// Storage keeps the delivery default as the empty value so rows saved before roles existed read identically;
+	// only an explicit reference is written.
+	storedRole := ""
+	if role == LinkRoleReference {
+		storedRole = LinkRoleReference
+	}
+	return TaskLink{Kind: in.Kind, Number: in.Number, CanonicalURL: identity.CanonicalURL + "/" + segment + "/" + in.Number, Title: in.Title, Role: storedRole}, nil
 }
 
 // extensionLink is an extension identity's link as the service resolved it before the transaction: a stored link or the
 // provider's answer, re-checked. Nothing is synthesized from a kind and number: without an answer the link is refused.
-func extensionLink(identity Identity, in LinkInput) (TaskLink, error) {
+func extensionLink(identity Identity, in LinkInput, role string) (TaskLink, error) {
 	if in.URL != "" && (in.Kind != "" || in.Number != "" || len(in.URL) > 2048) || in.URL == "" && in.Kind == "" {
 		return TaskLink{}, Problem("invalid")
 	}
@@ -317,6 +351,11 @@ func extensionLink(identity Identity, in LinkInput) (TaskLink, error) {
 	} else if len(link.Title) > 1024 || !utf8.ValidString(link.Title) || strings.ContainsFunc(link.Title, unicode.IsControl) {
 		link.Title = ""
 	}
+	link.Role = role
+	// Storage keeps the delivery default as the empty value.
+	if link.Role == LinkRoleDelivery {
+		link.Role = ""
+	}
 	return link, nil
 }
 
@@ -330,6 +369,10 @@ func PreserveLinkTitles(current, next []TaskLink) {
 		for _, old := range current {
 			if old.Kind == next[i].Kind && old.Number == next[i].Number {
 				next[i].Title = old.Title
+				// A role-less edit (older clients, report imports) must not reset a role an explicit edit set.
+				if next[i].Role == "" {
+					next[i].Role = old.Role
+				}
 				break
 			}
 		}
@@ -556,7 +599,7 @@ func ParseTaskLinkInput(in LinkInput) (Identity, TaskLink, error) {
 	if err != nil {
 		return identity, link, err
 	}
-	link, err = NormalizeLink(identity, LinkInput{Kind: link.Kind, Number: link.Number, Title: in.Title})
+	link, err = NormalizeLink(identity, LinkInput{Kind: link.Kind, Number: link.Number, Title: in.Title, Role: in.Role})
 	return identity, link, err
 }
 
@@ -614,6 +657,10 @@ func MergeTaskLinkDetails(current []TaskRepository, input []LinkInput, catalog C
 		if existing >= 0 {
 			if link.Title != "" {
 				out[index].Links[existing].Title = link.Title
+			}
+			// Additive imports never flip a role an explicit edit or an earlier import set.
+			if link.Role != "" {
+				out[index].Links[existing].Role = link.Role
 			}
 			continue
 		}

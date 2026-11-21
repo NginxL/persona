@@ -13,7 +13,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import { api, ApiError, enc, errorText } from "./api";
 import type { AgentMutes } from "./agent-groups";
 import { agentName } from "./agent-kind";
-import { connectorOpenTitle } from "./connectors";
+import { connectorOpenTitle } from "./connector-profiles";
 import { contextBody } from "./context-body";
 import type { Route } from "./router";
 import { isResumed } from "./reconnect";

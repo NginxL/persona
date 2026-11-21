@@ -11,7 +11,7 @@
   picking a group there makes it the current hub, and making another hub current anywhere moves a list narrowed to one group along with it, so Agents and the
   hub-level pages (Persona and its sidebar, the Inbox) never show two different hubs. "All Hubs" leaves the current hub as it is.
 - The Persona assistant, Inbox, the avatar (#2406, [persona.md](../apple/persona.md) "On the phone": each hub keeps its own choice), and hub-related settings (models, connectors, devices, notifications…) belong to each hub and are **not merged**. They display the "current hub":
-  switch it in the Persona top-bar menu, at the top left of the Inbox, at the top of the Settings home page, or by showing one group in the Agents menu.
+  switch it in the sidebar's assistant switcher (on Apple its first group lists the hubs, then the current hub's assistants under its name, #12594; a hub without a roster keeps a hub menu under the sidebar's title), at the top left of the Inbox, at the top of the Settings home page, or by showing one group in the Agents menu. The conversation's own menu (the Persona face or name in its top bar) has no hub section: it holds only that conversation's actions.
 - With only one group, none of these additions appear, and the UI is exactly as before (screenshots compared pixel by pixel; see "Tests").
 
 ## Terminology

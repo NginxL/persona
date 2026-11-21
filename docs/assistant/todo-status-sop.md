@@ -45,7 +45,7 @@ The first rule that holds wins.
 | 1 | `failed_start` | The task's agent never started (`start_error`) | Waiting on you; Done once 48 hours passed |
 | 1a | `superseded` | Rule 1, and its row (see "Related to-dos") has a to-do that really finished: closed without a start error (#3713) | Just finished for 24 hours or until seen, then Done; behind that to-do in the row, never leading it |
 | 2 | `agent_asks` | An agent waits on the owner (question, approval, plan) or was cut off by a model error | Waiting on you |
-| 3 | `owner_decides` | Open, and the review says `needs_user`, or its ask is a decision or "cannot be done" | Waiting on you |
+| 3 | `owner_decides` | Open, and the review says `user_check` (personal verification) or `needs_user`, or its ask is a decision or "cannot be done" | Waiting on you |
 | 4 | `agent_running` | An agent is working or starting | Working |
 | 5 | `closed` | `done_at` is set | Just finished for 24 hours or until seen, then Done |
 | 5a | `parked` (web) | Open and the current review is parked | Parked until the hub changes its state, including past its fallback `until`; never Done just because its agent stopped |

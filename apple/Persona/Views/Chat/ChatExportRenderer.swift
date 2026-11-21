@@ -23,6 +23,7 @@ struct ExportRequest: Identifiable {
     var pieces: (_ questions: Bool) -> [ForwardDraft.Piece]
     var loadImage: (String) async -> UIImage?
     var width: CGFloat
+    var prefersLetterMark = false
 }
 
 /// The choices the preview offers, and the appearance the picture is drawn in.
@@ -58,13 +59,14 @@ enum ChatExportRenderer {
     }
 
     /// The messages as they go: the whole of each (read when the chat holds it cut), as a forward carries it.
-    static func messages(_ pieces: [ForwardDraft.Piece]) async throws -> [ExportMessage] {
+    static func messages(_ pieces: [ForwardDraft.Piece], prefersLetterMark: Bool = false) async throws -> [ExportMessage] {
         var out: [ExportMessage] = []
         for p in pieces {
             let raw = try await p.full?() ?? p.raw
             out.append(ExportMessage(id: p.source.item, role: p.source.role,
                                      author: p.source.role == .user ? String(localized: "Me") : p.source.author,
-                                     text: ForwardMessage.body(raw, limit: ExportMessage.limit), time: p.source.time, images: p.images))
+                                     text: ForwardMessage.body(raw, limit: ExportMessage.limit), time: p.source.time, images: p.images,
+                                     prefersLetterMark: p.source.role == .agent && prefersLetterMark))
         }
         return out
     }
@@ -84,7 +86,7 @@ enum ChatExportRenderer {
 
     /// Draws the picture's pages for `request` with `options` at `scale`; checks for cancellation between blocks.
     static func render(_ request: ExportRequest, options: ExportOptions, scale: CGFloat) async throws -> [ExportPage] {
-        let messages = try await messages(request.pieces(options.questions))
+        let messages = try await messages(request.pieces(options.questions), prefersLetterMark: request.prefersLetterMark)
         try Task.checkCancellation()
         let width = width(request.width)
         let column = width - 2 * Layout.margin
@@ -255,7 +257,13 @@ struct ExportAssets {
                     // As the chat loads them (through the hub when it fetches pictures, #9473), at the picture's size.
                     let size = ReplyImageLayout.size(points: max(column, Theme.Size.replyPicture), scale: scale)
                     for p in pictures where out.images[p.url] == nil {
-                        let img = await LarkMedia.shared.image(ReplyPictureSource.path(p.url, size: size), maxPixel: CGFloat(size))
+                        let img: UIImage?
+                        if p.isLocal {
+                            // The same session-scoped file loader used for message photos; relative paths use the session cwd.
+                            img = await loadImage(p.localPath ?? p.url)
+                        } else {
+                            img = await LarkMedia.shared.image(ReplyPictureSource.path(p.url, size: size), maxPixel: CGFloat(size))
+                        }
                         if let img { out.images[p.url] = img }
                     }
                 case .mathText(let md):
@@ -386,7 +394,7 @@ struct ExportAuthor: View {
     @ViewBuilder private var mark: some View {
         if message.role == .persona {
             PersonaAvatar(size: Theme.Size.markM)
-        } else if let brand = AgentKind.brand(named: message.author) {
+        } else if !message.prefersLetterMark, let brand = AgentKind.brand(named: message.author) {
             Image(brand).resizable().scaledToFit().foregroundStyle(.primary)
                 .padding(Theme.Space.xxs)
                 .frame(width: Theme.Size.markM, height: Theme.Size.markM)

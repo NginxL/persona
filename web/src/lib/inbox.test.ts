@@ -176,7 +176,7 @@ describe("等你的 Agent", () => {
     expect(interactionTitle(ix("a", { agent: "paseo", agent_label: "Grok", kind: "permission" }))).toBe("Grok 在等你批准");
     expect(interactionTitle(ix("a", { agent: "paseo", agent_label: "Grok" }))).toBe("Grok 在问你");
     expect(interactionTitle(ix("a", { agent: "dsh", agent_label: "DSH" }))).toBe("DSH 在问你");
-    expect(interactionTitle(ix("a", { agent: "traex", kind: "permission" }))).toBe("TRAEX 在等你批准");
+    expect(interactionTitle(ix("a", { agent: "traex", kind: "permission" }))).toBe("TRAE CLI 在等你批准");
   });
 
   it("助手的会话跳到 Persona，其余跳到会话页", () => {

@@ -1,4 +1,4 @@
-Cancel a scheduled follow-up or a repeating task by id (from list_followups).
+Cancel a scheduled follow-up or a repeating task by id (from list_followups).{{template "shared/mcp_language" .}}
 
 ```json
 {

@@ -7,7 +7,7 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { nativeErrorStep } from '../lib/errors.js'
-import { stepsToItems } from '../lib/map.js'
+import { stepsToItems, transcriptState } from '../lib/map.js'
 import { createAgyRuntime } from '../lib/runtime.js'
 
 const RAW = '11111111-2222-4333-8444-555555555555'
@@ -82,6 +82,92 @@ test('a request the service refuses as it is names its cause and is the user\'s 
   // A specific message of the user's own stays as it is.
   assert.deepEqual(nativeErrorStep({ ...invalidMedia, errorMessage: { error: { userErrorMessage: 'Model not available', errorCode: 404 } } }, 0)
     .turn_error, { turn_error: 'Model not available', turn_error_kind: 'user' })
+})
+
+const INTERRUPTED_NOTE = 'The stream was interrupted. Please continue the task you were working on.'
+
+test('stopping a turn drops agy\'s stream-interrupted note in both export and native error paths', () => {
+  for (const errorBody of [
+    { userErrorMessage: INTERRUPTED_NOTE },
+    { modelErrorMessage: INTERRUPTED_NOTE },
+    { shortError: INTERRUPTED_NOTE },
+    { userErrorMessage: 'Agent execution terminated due to error.', shortError: INTERRUPTED_NOTE },
+    { userErrorMessage: 'The stream was interrupted.' },
+  ]) {
+    assert.equal(nativeErrorStep({
+      type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+      status: 'CORTEX_STEP_STATUS_DONE',
+      metadata: { createdAt: AT },
+      errorMessage: { error: errorBody },
+    }, 1), null)
+  }
+
+  // Real upstream errors that mention stream interruption keep their error card and turn_error.
+  const realUpstream = nativeErrorStep({
+    type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+    status: 'CORTEX_STEP_STATUS_DONE',
+    metadata: { createdAt: AT },
+    errorMessage: { error: { userErrorMessage: 'The stream was interrupted: 503 unavailable', errorCode: 503 } },
+  }, 1)
+  assert.deepEqual(realUpstream?.turn_error, { turn_error: 'The stream was interrupted: 503 unavailable' })
+
+  const interrupted = { step_index: 2, type: 'ERROR_MESSAGE', source: 'SYSTEM', status: 'DONE', created_at: AT, error: INTERRUPTED_NOTE }
+  const reply = { step_index: 1, type: 'PLANNER_RESPONSE', source: 'MODEL', status: 'DONE', created_at: AT, content: 'Partial reply.' }
+  const stopped = stepsToItems([input, reply, interrupted])
+  assert.equal(stopped.toSeq, 3)
+  assert.equal(stopped.turnError, undefined)
+  assert.equal(stopped.lastText, 'Partial reply.')
+  assert.deepEqual(stopped.items.map((item) => [item.role, item.kind, item.text]), [
+    ['user', 'text', input.content],
+    ['assistant', 'text', 'Partial reply.'],
+  ])
+  assert.deepEqual(transcriptState([input, reply, interrupted]), { status: 'idle' })
+
+  // An interrupted note still resets pending tool calls and does not trigger a stray wake notice.
+  const afterWake = stepsToItems([
+    input,
+    reply,
+    { step_index: 2, type: 'SYSTEM_MESSAGE', created_at: AT, content: 'background update' },
+    { ...interrupted, step_index: 3 },
+  ])
+  assert.equal(afterWake.items.some((item) => item.wake), false)
+  assert.equal(afterWake.turnError, undefined)
+
+  const interruptedTool = stepsToItems([
+    input,
+    { step_index: 1, type: 'PLANNER_RESPONSE', created_at: AT, tool_calls: [{ name: 'run_command', args: {} }] },
+    interrupted,
+    { step_index: 3, type: 'USER_INPUT', source: 'USER_EXPLICIT', status: 'DONE', created_at: AT, content: 'Continue' },
+    { step_index: 4, type: 'PLANNER_RESPONSE', created_at: AT, tool_calls: [{ name: 'view_file', args: {} }] },
+    { step_index: 5, type: 'GENERIC', status: 'DONE', created_at: AT, content: 'file body' },
+  ])
+  const uses = interruptedTool.items.filter((item) => item.kind === 'tool_use')
+  const result = interruptedTool.items.find((item) => item.kind === 'tool_result')
+  assert.equal(result.tool_use_id, uses[1].tool_use_id)
+  assert.equal(interruptedTool.items.some((item) => item.text?.startsWith('API Error:')), false)
+  assert.equal(interruptedTool.turnError, undefined)
+
+  // Real exported errors stay visible.
+  const realExported = stepsToItems([
+    input,
+    { step_index: 1, type: 'ERROR_MESSAGE', source: 'SYSTEM', status: 'DONE', created_at: AT, error: 'The stream was interrupted: 503 unavailable' },
+  ])
+  assert.equal(realExported.turnError?.turn_error, 'The stream was interrupted: 503 unavailable')
+  assert.equal(realExported.items.at(-1).text, 'API Error: The stream was interrupted: 503 unavailable')
+})
+
+test('runtime ignores an omitted native stream-interrupted note without emitting turn_error', async (t) => {
+  const { row, items } = await fixture(t, {
+    nativeError: {
+      type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+      status: 'CORTEX_STEP_STATUS_DONE',
+      metadata: { createdAt: AT },
+      errorMessage: { error: { userErrorMessage: INTERRUPTED_NOTE } },
+    },
+  })
+  const page = await items()
+  assert.equal(page.items.some((item) => item.text?.startsWith('API Error:')), false)
+  assert.equal(row().turn_error, undefined)
 })
 
 async function fixture(t, options = {}) {

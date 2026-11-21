@@ -273,21 +273,20 @@ func TestAssistantFirstFailureInTheHandoverGapIsCarried(t *testing.T) {
 	if !a.recoverAssistantResult(p, true, "API Error: safeguards flagged") {
 		t.Fatal("the first failure in the handover gap was published as final")
 	}
-	send := assistantRecoverySend
+	stubHandoverRecovery(t, a, b)
 	selected := make(chan string, 1)
 	assistantRecoverySend = func(_ context.Context, _ *Node, _ *assistantProc, _, _ string, execution modelExecution) error {
 		selected <- execution.Model
 		return nil
 	}
-	t.Cleanup(func() { assistantRecoverySend = send })
 	if adopted := k.adopt(b); len(adopted) != 1 || adopted[0] != p {
 		t.Fatalf("the live conversation was not adopted: %+v", adopted)
 	}
 	b.resumeAdoptedFailures(true)
 	select {
 	case got := <-selected:
-		if got == "primary-model" || got == "" {
-			t.Fatalf("the carried safeguards failure did not select a fallback: %q", got)
+		if got != "fallback-model" {
+			t.Fatalf("the carried safeguards failure did not select the fixture's fallback: %q", got)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the carried first failure did not resume on the new Node")

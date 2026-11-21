@@ -9,6 +9,10 @@ import (
 // FeatureMessageSendState is informational: extension features can appear in
 // older hubs' feature arrays. Trust only the authenticated hello's top-level
 // message_send_state version, written by the hub, not an extension report.
+// FeatureAgentTerminalSend means the hub has an Agent-only message route for
+// a paired terminal client. Older hubs have no such entry point.
+const FeatureAgentTerminalSend = "agent_terminal_send"
+
 const (
 	FeatureMessageSendState = "message_send_state"
 	MessageSendStateVersion = 1

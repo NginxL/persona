@@ -45,9 +45,17 @@
       "sf": "chevron.left",
       "phosphor": "caret-left"
     },
+    "backgroundMonitor": {
+      "sf": "display",
+      "phosphor": "monitor"
+    },
     "backgroundTask": {
       "sf": "gearshape.2",
       "phosphor": "gear-six"
+    },
+    "backgroundTasks": {
+      "sf": "list.clipboard",
+      "phosphor": "list-checks"
     },
     "backgroundWaiting": {
       "sf": "clock.fill",
@@ -421,6 +429,10 @@
       "sf": "music.note",
       "phosphor": "music-note"
     },
+    "muted": {
+      "sf": "bell.slash.fill",
+      "phosphor": "prohibit"
+    },
     "newConversation": {
       "sf": "plus.bubble",
       "phosphor": "chat-circle-dots"
@@ -624,6 +636,10 @@
     "skills": {
       "sf": "puzzlepiece.extension",
       "phosphor": "puzzle-piece"
+    },
+    "someday": {
+      "sf": "moon.stars.fill",
+      "phosphor": "couch"
     },
     "space": {
       "sf": "square.stack.3d.up",

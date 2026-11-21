@@ -60,7 +60,7 @@ func (h *orcaHost) onTerminal(ctx context.Context, t orcart.Terminal, write bool
 var errNotInFront = errors.New("no agent is in front in the pane")
 
 // front makes sure an agent is in front in the pane before text goes in, and returns its terminal: our own process
-// scan finds a claude or codex in front with this pane key (not suspended, not in the background, not inside a nested
+// scan finds a supported agent in front with this pane key (not suspended, not in the background, not inside a nested
 // host). Anything else — including not being able to tell — refuses with nothing typed. Orca's terminal.agentStatus
 // is asked too, for a permission dialog (prompt: the text is a prompt, which the dialog would take as its answer); its
 // isRunningAgent is not required on macOS and Linux: Orca says false while Claude Code has background tasks, though

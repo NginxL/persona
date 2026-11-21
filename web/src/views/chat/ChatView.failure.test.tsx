@@ -609,6 +609,23 @@ describe("a send whose answer came back in doubt (the hub stopped waiting, the m
     expect(line()?.textContent).toContain(t("lib-outbox.peer_unconfirmed"));
   });
 
+  // The screenshot case (#9025 follow-up): a busy Claude whose Persona plugin is from before busy delivery got the
+  // message through its inbox, which did not take it. The bubble says why and what fixes it, across a reload too.
+  it("an unconfirmed relay to a session with an older Persona plugin says to reopen it on the computer", async () => {
+    act(() => root.render(<ChatView mid="hub" sid="c1" />));
+    await flush();
+    let sending!: Promise<boolean>;
+    act(() => { sending = captured.onSend!({ text: "可以派 subagent 分头处理", images: [] }); });
+    await flush();
+    answer(json({ code: "peer_unconfirmed", error: "not taken", delivered: "unknown", delivered_as: "relayed", relay_reason: "plugin_outdated" }, 409));
+    await act(async () => void (await sending));
+    await flush();
+    const line = () => host.querySelector("[data-outbox] [data-in-doubt]");
+    expect(line()?.getAttribute("data-in-doubt")).toBe("unknown");
+    expect(line()?.textContent).toContain(t("lib-outbox.peer_unconfirmed_old_plugin"));
+    expect(getState().outbox["hub/c1"]![0].relay).toBe("plugin_outdated");
+  });
+
   it("a refusal stays failed even with the same words in the chat", async () => {
     act(() => root.render(<ChatView mid="hub" sid="c1" />));
     await flush();

@@ -37,5 +37,10 @@
   "chat_at": "{when} {time} 的对话",
   "chat_n": "对话 {n}",
   "chats_label": "「{title}」跑出来的对话",
-  "until": "截止 {when}"
+  "until": "截止 {when}",
+  "menu_actions": "「{title}」的操作",
+  "menu_skip_next": "跳过下次运行",
+  "menu_cancel_skip": "取消跳过",
+  "skip_conflict": "计划已变更。请查看下次运行时间后再试。",
+  "skip_failed": "无法更新跳过设置。{error}"
 }

@@ -4,14 +4,18 @@
 import type JSZip from "jszip";
 import type { WorkBook } from "xlsx";
 import { t } from "../i18n";
+import { diffLines, type Op } from "./diff-lines";
+
+// The line diff lives in diff-lines.ts so a work group's edit rows (ActionRow, on the first screen) get it without
+// this file's document readers and their lib-compare strings.
+export { diffLines };
+export type { Op };
 
 /** One page / slide / sheet: what it is called and its lines of text. */
 export interface Unit {
   label: string;
   lines: string[];
 }
-
-export type Op = { kind: "same" | "add" | "del"; text: string };
 
 /** A table row whose cells changed: each cell before and after (equal when that cell did not change). */
 export type RowChange = { kind: "row"; cells: { old: string; new: string }[] };
@@ -62,55 +66,6 @@ export const ROW_SEP = " | "; // marks a unit's start inside the flattened text;
 /** Units into one list of lines, each unit led by a header line, so a diff can say where a change is. */
 export function flatten(units: Unit[]): string[] {
   return units.flatMap((u) => [HEADER + u.label, ...u.lines]);
-}
-
-/**
- * Myers' line diff (the one git uses). Inputs past `limit` lines in all, or with more than `maxEdits` changes, come
- * back as null: too much to show as a diff.
- */
-export function diffLines(a: string[], b: string[], limit = 60_000, maxEdits = 6_000): Op[] | null {
-  const n = a.length;
-  const m = b.length;
-  if (n + m > limit) return null;
-  const max = Math.min(n + m, maxEdits);
-  const off = max + 1;
-  const v = new Int32Array(2 * max + 3);
-  const trace: Int32Array[] = [];
-  let found = -1;
-  for (let d = 0; d <= max; d++) {
-    trace.push(v.slice());
-    for (let k = -d; k <= d; k += 2) {
-      let x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1;
-      let y = x - k;
-      while (x < n && y < m && a[x] === b[y]) {
-        x++;
-        y++;
-      }
-      v[off + k] = x;
-      if (x >= n && y >= m) {
-        found = d;
-        break;
-      }
-    }
-    if (found >= 0) break;
-  }
-  if (found < 0) return null;
-  // walk back through the saved frontiers
-  const ops: Op[] = [];
-  let x = n;
-  let y = m;
-  for (let d = found; d > 0; d--) {
-    const pv = trace[d];
-    const k = x - y;
-    const prevK = k === -d || (k !== d && pv[off + k - 1] < pv[off + k + 1]) ? k + 1 : k - 1;
-    const prevX = pv[off + prevK];
-    const prevY = prevX - prevK;
-    while (x > prevX && y > prevY) ops.push({ kind: "same", text: a[--x] }), y--;
-    if (x === prevX) ops.push({ kind: "add", text: b[--y] });
-    else ops.push({ kind: "del", text: a[--x] });
-  }
-  while (x > 0 && y > 0) ops.push({ kind: "same", text: a[--x] }), y--;
-  return ops.reverse();
 }
 
 /** The changed stretches with `context` unchanged lines around each, labeled by the unit they start in. */

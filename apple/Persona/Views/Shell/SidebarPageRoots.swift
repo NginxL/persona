@@ -27,6 +27,9 @@ enum SidebarPageRoot: Hashable {
             case .profile: .profile
             case .routines: .routines
             case .knowledge: .knowledge
+            #if os(iOS)
+            case .starred: .starred
+            #endif
             case .recordings: .recordings
             case .extensionPage(let r): .extensionPage(r)
             }
@@ -130,6 +133,9 @@ extension SidebarPageRoot {
         case .profile: .page(ShellRoute.profile)
         case .routines: .page(ShellRoute.routines)
         case .knowledge: .page(ShellRoute.knowledge)
+        #if os(iOS)
+        case .starred: .page(ShellRoute.starred)
+        #endif
         case .recordings: .page(ShellRoute.recordings)
         case .extensionPage(let r): .page(ShellRoute.extensionPage(r))
         case .messages: .page(SidebarRoute.messages)

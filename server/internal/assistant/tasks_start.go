@@ -241,7 +241,7 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 			return nil, err
 		}
 	}
-	s.event(ctx, map[string]any{"type": "task_plan", "plan": p})
+	s.event(ctx, map[string]any{"type": "task_plan", "plan": s.planWithSpace(ctx, p)})
 	for i := range p.Tasks {
 		if task := p.Tasks[i]; task.TodoID != "" && task.Error == "" {
 			s.startPlanTaskAsync(p.ID, p.Conversation, i, task, false, func() {
@@ -259,16 +259,16 @@ func (s *Service) startPlan(ctx context.Context, id string, edits []PlanTask, re
 // supervisePlanTask keeps a continuation's ledger in step with its brief even
 // if the scope changed between accepting the card and preparing dispatch.
 func (s *Service) supervisePlanTask(ctx context.Context, id, supervisor string, t *PlanTask) {
-	if t.Continues == "" {
-		s.superviseTodo(ctx, id, supervisor, t.DoneWhen, t.ExpectMinutes)
-		return
-	}
 	_, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
+		if t.Continues == "" {
+			v.Supervisor, v.DoneWhen, v.ExpectMinutes = supervisor, cleanDoneWhen(t.DoneWhen), t.ExpectMinutes
+			return true
+		}
 		brief, ok := s.briefOfTodo(t.Continues)
 		if !ok {
 			return false
 		}
-		v.Supervisor, v.DoneWhen, v.ExpectMinutes = supervisor, cleanDoneWhen(brief.Criteria), brief.ExpectNow
+		v.Supervisor, v.DoneWhen, v.ExpectMinutes = supervisor, cleanDoneWhen(brief.Criteria), brief.ExpectMinutes
 		return true
 	})
 	if err != nil {
@@ -1126,6 +1126,9 @@ var continueHold = 30 * time.Second
 // one is on its way, or before the agent took it up, answer the todo as it is, as does a task with no agent cut off.
 // The agent's machine offline is refused.
 func (s *Service) continueTask(ctx context.Context, cur Todo) (json.RawMessage, error) {
+	if cur.Supervision != nil && cur.Supervision.state(cur) == reviewTimedOut {
+		return s.continueTimedOut(ctx, cur)
+	}
 	cut := cutAgent(s.taskAgents(ctx, cur))
 	if cut.SessionID == "" {
 		return s.todoView(ctx, cur.ID)
@@ -1345,6 +1348,6 @@ func (s *Service) dismissPlan(ctx context.Context, id string) (*TaskPlan, error)
 	if !ok {
 		return nil, errPlanNotOpen
 	}
-	s.event(ctx, map[string]any{"type": "task_plan", "plan": p})
+	s.event(ctx, map[string]any{"type": "task_plan", "plan": s.planWithSpace(ctx, p)})
 	return p, nil
 }

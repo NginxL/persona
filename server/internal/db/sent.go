@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // ClaimSend records a message about to be sent. A client_msg_id seen before returns that send's state instead
@@ -36,9 +38,24 @@ func (d *DB) SettleSend(ctx context.Context, id, state string) error {
 }
 
 // RecordEcho keeps the node's record of where a sent message landed (node/echo.go). A record of a found line is not
-// replaced by one that still expects it (two notices can arrive out of order). A send not recorded here (no
-// client_msg_id row: another machine's, or forgotten because nothing was sent) is ignored.
+// replaced by one that still expects it (two notices can arrive out of order). A2A receipts can create their own
+// records because the Manager sends them outside the app ledger.
 func (d *DB) RecordEcho(ctx context.Context, id, machine string, echo json.RawMessage) error {
+	if strings.HasPrefix(id, proto.A2ADeliveryPrefix) {
+		var receipt struct {
+			Session string               `json:"session_id"`
+			Source  *proto.MessageSource `json:"source"`
+		}
+		if json.Unmarshal(echo, &receipt) == nil && receipt.Session != "" && receipt.Source != nil && receipt.Source.Kind == proto.SourceConversation {
+			// Manager A2A deliveries skip the app send ledger. A trusted node's
+			// receipt still has to be available when that node reconnects.
+			_, err := d.pool.Exec(ctx, `INSERT INTO sent_messages (client_msg_id, machine_id, session_id, state, echo)
+				VALUES ($1, $2, $3, 'unknown', $4) ON CONFLICT (client_msg_id) DO UPDATE SET echo = EXCLUDED.echo
+				WHERE sent_messages.machine_id = EXCLUDED.machine_id AND sent_messages.session_id = EXCLUDED.session_id
+				AND (coalesce(sent_messages.echo->>'line', '') = '' OR coalesce(EXCLUDED.echo->>'line', '') <> '')`, id, machine, receipt.Session, echo)
+			return err
+		}
+	}
 	_, err := d.pool.Exec(ctx, `UPDATE sent_messages SET echo = $3
 		WHERE client_msg_id = $1 AND machine_id = $2
 		AND (echo IS NULL OR echo->>'line' IS NULL OR echo->>'line' = '' OR coalesce($3::jsonb->>'line', '') <> '')`, id, machine, echo)

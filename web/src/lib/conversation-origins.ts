@@ -5,6 +5,7 @@
 import { t } from "../i18n";
 import type { IconName } from "../ui/icons";
 import type { BrandId } from "./connectors";
+import { byConversationOrder } from "./conversation-order";
 import { byTime } from "./times";
 import type { AssistantInfo, Item, Session } from "./types";
 
@@ -124,12 +125,13 @@ export function autoConversations(conversations: readonly Session[], main: strin
  *  entry on Scheduled Tasks and stay in "All chats", so they no longer crowd Recent), by last activity (equal times by
  *  id, as iOS). The sidebar shows the first ones (lib/sidebar-recent.ts, #5146). `withTasks`: the user's "Show scheduled
  *  task chats" (#8324, `assistant.recent_task_chats`) brings the background supervisor and the tasks' chats back, by time. */
-export function recentConversations(conversations: readonly Session[], main: string | undefined, leaders: readonly string[], background?: string, withTasks = false): Session[] {
+export function recentConversations(conversations: readonly Session[], main: string | undefined, leaders: readonly string[], background?: string, withTasks = false, order?: readonly string[]): Session[] {
   const lead = new Set(leaders);
-  return conversations
+  const recent = conversations
     .filter((c) => c.session_id !== main && !lead.has(c.session_id) && !c.archived
       && (withTasks || (!(background && c.session_id === background) && autoOrigin(c, background) !== "task")))
     .sort((a, b) => byTime(b.updated_at, a.updated_at) || (a.session_id < b.session_id ? -1 : a.session_id > b.session_id ? 1 : 0));
+  return byConversationOrder(recent, order);
 }
 
 /** The assistant's conversations in `rows` (its machine's, as the session list or a push brings them) that the held

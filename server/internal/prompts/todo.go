@@ -112,6 +112,87 @@ type TodoOutcomeReply struct {
 
 func RenderTodoOutcomeInput(in TodoOutcomeInput) string { return render("todo/outcome_input", in) }
 
+// TodoLessons is the system prompt asking what a task the supervisor accepted taught: lessons of four kinds for the
+// next tasks of its project (todo/lessons, #12295, docs/assistant/todos.md "Lessons from accepted tasks").
+type TodoLessons struct {
+	Language string
+	Owner    string
+}
+
+func RenderTodoLessons(d TodoLessons) string { return render("todo/lessons", d) }
+
+// TodoLessonsInput is the story of an accepted task (todo/lessons_input): the owner's request, goal and criteria, the
+// scope changes, every review (rework rounds with the criteria not met), the owner's answers, how each criterion ended,
+// the estimate against the time it took, the Agent's last reply, and the lessons its project already has.
+type TodoLessonsInput struct {
+	Language                     string
+	Title, Request, Goal         string
+	Criteria                     []string
+	Changes                      []TodoLessonsChange
+	Reviews                      []TodoLessonsReview
+	Answers                      []TodoLessonsAnswer
+	Result                       []TodoLessonsCriterion
+	ExpectMinutes, ActualMinutes int
+	Reply                        string
+	Known                        []TodoLessonsKnown
+}
+
+// TodoLessonsChange is one scope change of the task's brief: what changed and why.
+type TodoLessonsChange struct {
+	Change, Why string
+}
+
+// TodoLessonsReview is one review: its verdict, the rework round it started, who gave it (the reviewer, the done
+// judge; "" the supervisor), its note and the criteria it found not met.
+type TodoLessonsReview struct {
+	Verdict, By, Note string
+	Round             int
+	Unmet             []TodoLessonsGap
+}
+
+// TodoLessonsGap is a criterion a review found not met, with what it found.
+type TodoLessonsGap struct {
+	Criterion, Evidence string
+}
+
+// TodoLessonsAnswer is a question of the task the owner answered: the question and their choice.
+type TodoLessonsAnswer struct {
+	Question, Choice string
+}
+
+// TodoLessonsCriterion is how one criterion ended: met, not_met, unchecked or dropped, with its evidence.
+type TodoLessonsCriterion struct {
+	Criterion, State, Evidence string
+}
+
+// TodoLessonsKnown is a lesson the project already has, for the model to say a new one repeats it.
+type TodoLessonsKnown struct {
+	ID, Kind, Text string
+}
+
+func RenderTodoLessonsInput(in TodoLessonsInput) string { return render("todo/lessons_input", in) }
+
+// TodoProjectLessons is the <persona-context> of a project's lessons a new Agent gets before its first prompt, after
+// the project's own block (todo/project_lessons, #12295): the most repeated first. The caller cleans the texts.
+type TodoProjectLessons struct {
+	Language, Name string
+	Lessons        []TodoProjectLesson
+}
+
+// TodoProjectLesson is one lesson: its kind, text, how many accepted tasks taught it, and when it was last taught.
+type TodoProjectLesson struct {
+	Kind, Text, When string
+	Seen             int
+}
+
+// RenderTodoProjectLessons is the block; empty without lessons.
+func RenderTodoProjectLessons(p TodoProjectLessons) string {
+	if len(p.Lessons) == 0 {
+		return ""
+	}
+	return render("todo/project_lessons", p)
+}
+
 // TodoProject is the <persona-context> a new agent gets before its first prompt when its directory belongs to a
 // project (todo/project, #2820): the project's one line and the outcomes of its latest finished todos, newest first.
 // The caller leaves out "</persona-context>" from the texts.

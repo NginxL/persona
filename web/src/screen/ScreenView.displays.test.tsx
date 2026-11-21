@@ -124,9 +124,9 @@ describe("ScreenView on a Mac with two displays", () => {
     await open();
     await framebuffer(960, 300);
     act(() => void rfbs.at(-1)!.dispatchEvent(new CustomEvent("connect", { detail: {} })));
+    await menuAppears(); // the menu's import callback also applies the remembered crop
     expect(screen().style.left).toBe("-480px");
     await flush();
-    await menuAppears();
     act(() => button()!.click());
     expect(rows().map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
     act(() => rows()[0].click());

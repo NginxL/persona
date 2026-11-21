@@ -308,6 +308,7 @@ func (s *Service) recordBriefCompletion(ctx context.Context, t Todo, source stri
 	if changed {
 		s.clearEstimateDue(t.ID) // a queued deadline must not arrive after the active done report
 		s.todosChanged(ctx)
+		s.learnAcceptedEstimate(ctx, t.ID)
 	}
 }
 
@@ -329,7 +330,7 @@ func (s *Service) estimateDueCurrent(t Todo, brief TaskBrief, key string) bool {
 		return false
 	}
 	switch st := t.Supervision.state(t); st {
-	case reviewPending, reviewNeedsUser, reviewParked:
+	case reviewPending, reviewNeedsUser, reviewParked, reviewTimedOut, reviewClosing:
 		return false
 	case "":
 		tb := briefFromView(brief)
@@ -418,7 +419,7 @@ func (s *Service) briefClock(ctx context.Context, t Todo, now time.Time) {
 	if v == nil || t.DoneAt != nil {
 		return
 	}
-	if st := v.state(t); st == reviewNeedsUser || st == reviewPending || st == reviewParked {
+	if st := v.state(t); st == reviewNeedsUser || st == reviewPending || st == reviewParked || st == reviewTimedOut || st == reviewClosing {
 		return
 	}
 	brief, ok := s.briefOfTodo(t.ID)

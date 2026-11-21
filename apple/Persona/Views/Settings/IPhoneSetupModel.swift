@@ -83,6 +83,9 @@ import UIKit
     private(set) var picked: String?
     /// The iPhone a pairing was started for from here: never started twice for the same one by itself.
     @ObservationIgnored private var pairStarted: Set<String> = []
+    /// Ignore reads that overlap a new Prepare, and the job each retry replaced on its computer.
+    @ObservationIgnored private var prepareRevision = 0
+    @ObservationIgnored private var replacedPrepare: [String: Date] = [:]
     @ObservationIgnored private let deps: Deps
 
     /// Reads nothing: the picks kept on this device are read on the first load (docs/apple/performance.md P3).
@@ -142,7 +145,11 @@ import UIKit
         if ask, list?.on == true {
             let targets = chosen.map { [$0] } ?? self.computers.filter { $0.unusable == nil }.map(\.id)
             for id in targets {
-                if let p = try? await deps.machineIPhone(id) { fresh[id] = p }
+                guard busy != .preparing else { continue }
+                let revision = prepareRevision
+                if let p = try? await deps.machineIPhone(id), revision == prepareRevision {
+                    recordStatus(p, on: id)
+                }
             }
         }
         if case .this(let me, _) = match, me.consented, !loaded {
@@ -208,8 +215,29 @@ import UIKit
     }
 
     func prepare() async {
-        guard let c = computer, let d = device else { return }
-        await run(.preparing) { self.fresh[c.id] = try await self.deps.job(c.id, "prepare", d.id) }
+        guard busy == nil, let c = computer, let d = device else { return }
+        let previous = c.job("prepare", for: d.id)
+        guard previous?.running != true else { return }
+        prepareRevision += 1
+        if let previous, var status = c.iphone {
+            replacedPrepare[c.id] = previous.started
+            status.job = nil
+            fresh[c.id] = status
+        }
+        await run(.preparing) {
+            let p = try await self.deps.job(c.id, "prepare", d.id)
+            self.recordStatus(p, on: c.id)
+        }
+    }
+
+    private func recordStatus(_ p: MachineIPhone, on id: String) {
+        if let job = p.job, job.kind == "prepare", let started = job.started {
+            if started == replacedPrepare[id] { return }
+            // Both dates come from the same computer. A late read must not roll back the newest attempt.
+            if let current = fresh[id]?.job, current.kind == "prepare", let currentStart = current.started,
+               started < currentStart || (started == currentStart && job.running && !current.running) { return }
+        }
+        fresh[id] = p
     }
 
     /// This iPhone's own consent: only for the iPhone it identified as itself.

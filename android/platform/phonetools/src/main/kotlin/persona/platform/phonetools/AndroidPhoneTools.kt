@@ -64,6 +64,7 @@ class AndroidPhoneTools(context: Context, private val foreground: () -> Boolean)
                     }.toString())
                 }
             }
+            "phone_call_start" -> if (foreground()) CallTool.start(context, args) else PhoneToolText.needsForeground()
             "phone_notify" -> PhoneNotifications(context).schedule(args)
             "phone_notifications_list" -> PhoneNotifications(context).list(args.int("limit", 50, 1, 100))
             else -> PhoneToolText.unknownTool(name, emptyList())

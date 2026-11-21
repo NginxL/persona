@@ -69,23 +69,24 @@ func newWithdrawals() withdrawals {
 // sendCard pushes manager's card id (sendLocalizedQuiet) under cardCollapseID and notes which devices that understand
 // withdrawals it went to. only, when not nil, is the devices that can take it at all (an MCP form or link: those that
 // registered for one).
-func (p *Pusher) sendCard(manager string, policy pushPolicy, build localized, id string, wants func(NotifyPrefs) bool, rule quietRule, only func(Device) bool) {
+func (p *Pusher) sendCard(manager string, policy pushPolicy, build localized, id string, wants func(NotifyPrefs) bool, rule quietRule, only func(Device) bool) string {
 	if p == nil {
-		return
+		return ""
 	}
 	policy.manager = manager
 	if policy.level != assistantwire.LevelP0 {
-		// Extract before applyLn's mode check too: enabling ln mode between checks must not hold a source-less card.
+		// Extract before applyPushGrading's mode check too: enabling push grading between checks must not hold a source-less card.
 		policy = pushPolicyWithSource(policy, build(i18n.Default))
 	}
-	if allow, _ := p.applyLn(policy); !allow {
-		return
+	if allow, reason := p.applyPushGrading(policy); !allow {
+		return reason
 	}
 	p.sendFromTo(manager, build, cardCollapseID(manager, id), wants, rule, only, func(d Device) {
 		if hasFeature(d, featureWithdraw) {
 			p.cardPushedTo(id, d.DeviceID)
 		}
 	})
+	return ""
 }
 
 // cardCollapseID is the apns-collapse-id of manager's card id: the card id for the assistant the hub starts (and a card

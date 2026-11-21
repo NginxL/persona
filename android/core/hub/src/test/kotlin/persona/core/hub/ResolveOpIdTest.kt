@@ -16,7 +16,7 @@ import org.junit.Test
 /** An answer cut off by a restarting hub goes again under the same op id, for a bounded time (#1574). */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ResolveOpIdTest {
-    private class Sent(val path: String, val opId: String?, val body: String)
+    private class Sent(val path: String, val opId: String?, val body: String, val feature: String?)
 
     private fun ok(path: String) = Response.Builder().request(Request.Builder().url("https://hub.example$path").build())
         .protocol(Protocol.HTTP_1_1).code(200).message("OK").body("{}".toResponseBody()).build()
@@ -32,7 +32,7 @@ class ResolveOpIdTest {
         var ids = 0
         val transport = HubChatTransport({ path, _, body, headers ->
             val buffer = okio.Buffer().also { body!!.writeTo(it) }
-            sent += Sent(path, headers[HubChatTransport.OP_ID_HEADER], buffer.readUtf8())
+            sent += Sent(path, headers[HubChatTransport.OP_ID_HEADER], buffer.readUtf8(), headers["X-Persona-Features"])
             failures.removeFirstOrNull()?.let { throw it }
             ok(path)
         }, awaitOnline = { waits++; true }, clockMillis = { testScheduler.currentTime }, newOpId = { "op-${++ids}" })
@@ -47,6 +47,34 @@ class ResolveOpIdTest {
         // The next answer is another operation.
         transport.resolve("ix2", Resolution(allow = false))
         assertEquals("op-2", (sent.last().opId).zhAny())
+    }
+
+    @Test fun theHandoffFeatureStaysOnOneFullCardApprovalAndItsRetries() = runTest {
+        val sent = mutableListOf<Sent>()
+        val failures = ArrayDeque(listOf<Exception>(HubFailure.from(IOException("cut off")), HubFailure.from(IOException("cut off again"))))
+        var ids = 0
+        val transport = HubChatTransport({ path, _, body, headers ->
+            val buffer = okio.Buffer().also { body!!.writeTo(it) }
+            sent += Sent(path, headers[HubChatTransport.OP_ID_HEADER], buffer.readUtf8(), headers["X-Persona-Features"])
+            failures.removeFirstOrNull()?.let { throw it }
+            ok(path)
+        }, awaitOnline = { true }, clockMillis = { testScheduler.currentTime }, newOpId = { "op-${++ids}" })
+
+        transport.resolveOutcome("ix", Resolution(allow = true), handoffCard = true)
+        assertEquals(3, sent.size)
+        assertEquals(setOf("op-1"), sent.map { it.opId }.toSet())
+        assertEquals(setOf("secret_handoff"), sent.map { it.feature }.toSet())
+        assertEquals(setOf("""{"allow":true}"""), sent.map { it.body }.toSet())
+
+        transport.resolveOutcome("ix", Resolution(allow = true, always = true), handoffCard = true)
+        assertEquals("secret_handoff", sent.last().feature)
+        assertEquals("""{"allow":true,"always":true}""", sent.last().body)
+        transport.resolveOutcome("ix", Resolution(allow = false), handoffCard = true)
+        assertNull(sent.last().feature)
+        transport.resolveOutcome("ix", Resolution(allow = true), handoffCard = false)
+        assertNull(sent.last().feature)
+        transport.resolve("ix", Resolution(allow = true))
+        assertNull(sent.last().feature)
     }
 
     @Test fun retriesStopAfterTheBoundAndOtherFailuresAreNotRetried() = runTest {

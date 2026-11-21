@@ -137,7 +137,6 @@
   "inbox_badge_title": "受信トレイ：未読の項目{count}件。待機中のエージェントは「概要」へ",
   "todos_badge_title": "あなたの対応が必要なToDo {count}件",
   "list_menu": "エージェント一覧のオプション",
-  "list_menu_sorted": "エージェント一覧のオプション：{sort}",
   "not_connected_yet": "未接続",
   "more_pages": "その他",
   "more_pages_count": "その他（{count} ページ）",

@@ -174,4 +174,12 @@
     <string name="assistant_settings_supervise_model">バックグラウンド監督のモデル</string>
     <string name="assistant_settings_unavailable">アシスタント設定を開けません</string>
     <string name="assistant_settings_unavailable_detail">先に hub とペアリングするか、体験モードを終了してください。</string>
+    <string name="assistant_settings_owner_approval_header">完全一致する返信での承認</string>
+    <string name="assistant_settings_owner_approval">完全一致する返信でバッチを承認</string>
+    <string name="assistant_settings_owner_approval_persistent">未回答の提案を回答まで保持</string>
+    <string name="assistant_settings_owner_approval_caption">デフォルトはオフです。完全一致する返信は、表示された元の本文・宛先・操作だけを1回承認します。変更後は再承認が必要で、「常に許可」ルールは作成されません。</string>
+    <string name="assistant_settings_owner_approval_phrases">承認フレーズ</string>
+    <string name="assistant_settings_owner_approval_phrases_placeholder">1行に1つの完全一致フレーズ</string>
+    <string name="assistant_settings_owner_approval_phrases_caption">返信全体が1つのフレーズと一致する必要があります。空にすると返信承認を無効にし、通常の許可と拒否はそのまま使えます。</string>
+    <string name="assistant_settings_owner_approval_save_phrases">フレーズを保存</string>
 </resources>

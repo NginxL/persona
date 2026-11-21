@@ -226,7 +226,7 @@ func (s *Service) replaceTaskQueue(ctx context.Context, task PlanTask, next *Tas
 		return false
 	}
 	if changed {
-		s.event(ctx, map[string]any{"type": "task_plan", "plan": plan})
+		s.event(ctx, map[string]any{"type": "task_plan", "plan": s.planWithSpace(ctx, plan)})
 	}
 	return changed
 }

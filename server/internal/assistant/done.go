@@ -100,6 +100,8 @@ func autoDoneSkip(t Todo, work time.Time, worked bool) string {
 		return "cancelled"
 	case t.DoneAt != nil:
 		return "done"
+	case t.Supervision.state(t) == reviewTimedOut || t.Supervision.state(t) == reviewClosing:
+		return "held"
 	case t.ReopenedAt != nil && !(worked && work.After(*t.ReopenedAt)):
 		return "reopened" // no new turn since the user reopened it
 	}
@@ -441,6 +443,15 @@ func judgeTaskDoneWith(ctx context.Context, m jsonModel, in taskDoneInput) (task
 // autoFinishTask: t's receipt went out (its agents all stopped). work is when one of them last started a turn. The
 // todo is marked done when the judge finds the work finished; otherwise it stays as it is.
 func (s *Service) autoFinishTask(t Todo, work time.Time, worked bool) {
+	s.autoFinishTaskMode(t, work, worked, true)
+}
+
+// autoFinishTaskRetry is the supervision sweep's deferred pass. Its backoff replaces another inline three-second wait.
+func (s *Service) autoFinishTaskRetry(t Todo, work time.Time, worked bool) {
+	s.autoFinishTaskMode(t, work, worked, false)
+}
+
+func (s *Service) autoFinishTaskMode(t Todo, work time.Time, worked bool, immediateRetry bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), taskDoneTimeout)
 	defer cancel()
 	if skip := autoDoneSkip(t, work, worked); skip != "" {
@@ -459,7 +470,7 @@ func (s *Service) autoFinishTask(t Todo, work time.Time, worked bool) {
 		return
 	}
 	c, err := s.judgeTaskDone(ctx, t)
-	if err != nil && !ai.IsPaused(err) && !ai.IsNotConfigured(err) && ctx.Err() == nil {
+	if immediateRetry && err != nil && !ai.IsPaused(err) && !ai.IsNotConfigured(err) && ctx.Err() == nil {
 		// One failed call (a model service hiccup, a reply that was no verdict) is asked once more before the task is
 		// left unjudged (#3111); no model at all is not asked again.
 		s.logf("task %s: done judge: %v (asked again)", t.ID, err)
@@ -469,7 +480,15 @@ func (s *Service) autoFinishTask(t Todo, work time.Time, worked bool) {
 		case <-ctx.Done():
 		}
 	}
-	if !s.taskCompletionCurrent(ctx, t, work) {
+	stateCtx := ctx
+	if t.Supervision != nil && err != nil && ctx.Err() != nil {
+		// A judge timeout expires its own context. Use a fresh one only to verify that this is still the same stopped
+		// stretch and to persist its retry; otherwise the timeout would bypass the service-failure budget entirely.
+		var cancelState context.CancelFunc
+		stateCtx, cancelState = context.WithTimeout(context.Background(), taskDoneTimeout)
+		defer cancelState()
+	}
+	if !s.taskCompletionCurrent(stateCtx, t, work) {
 		if cur, ok := s.todoNow(t.ID); !ok || cur.DoneAt != nil {
 			s.logf("task %s: closed while judged: judgment dropped", t.ID) // accepted, cancelled or closed by hand (#7539)
 		} else {
@@ -477,7 +496,12 @@ func (s *Service) autoFinishTask(t Todo, work time.Time, worked bool) {
 		}
 		return
 	}
-	s.applyTaskDone(ctx, t, work, worked, c, err)
+	if deferred, judgedErr := s.deferTaskDoneJudgment(stateCtx, t, work, err); deferred {
+		return
+	} else {
+		err = judgedErr
+	}
+	s.applyTaskDone(stateCtx, t, work, worked, c, err)
 }
 
 // applyTaskDone writes judgment c (err: the judge could not say) of task t, whose agents last started a turn at work

@@ -39,7 +39,7 @@ function agents() {
 async function setup(t, o = {}) {
   const a = agents()
   const fake = await startFakePaseo(t, { providers: PROVIDERS, entries: ENTRIES, agents: Object.values(a).map((agent) => ({ agent, project: PROJECT })), ...o })
-  const node = await startFakeNode(t, { features: FEATURES, strict: o.strict })
+  const node = await startFakeNode(t, { features: o.nodeFeatures ?? FEATURES, strict: o.strict })
   const home = mkdtempSync('/tmp/ppaseo-')
   t.after(() => rmSync(home, { recursive: true, force: true }))
   // Where Paseo's own CLI finds its daemon: the address in the home's paseo.pid.
@@ -66,7 +66,7 @@ test("Paseo's agents are the engine's sessions: Claude Code's by its session and
   assert.equal(node.hello.runtime, 'paseo')
   assert.equal(node.hello.name, 'Paseo')
   assert.equal(node.hello.version, '0.14.0', "Paseo's version")
-  assert.deepEqual(node.hello.caps, { start: true, send: true, interrupt: true, rename: true, close: true, assistant: false, modes: true, model: true,
+  assert.deepEqual(node.hello.caps, { start: true, send: true, interrupt: true, queue_edit: false, queue_send_now: false, rename: true, close: true, assistant: false, modes: true, model: true,
     models: true, check: true, rewind: true, seen: true, workspaces: true, resume: true, readonly: true, same_kind: true })
   assert.deepEqual(node.hello.launchers.map((l) => [l.name, l.agent, l.prompt_optional]),
     [['my-claude', 'claude', undefined], ['my-codex', 'codex', true], ['grok', 'paseo', undefined]])
@@ -431,7 +431,7 @@ test("rows say how far a rewind goes: Paseo's provider decides, conversation and
   // (Both also say the permission modes they take, #8261.)
   const both = ['default', 'bypassPermissions']
   assert.deepEqual(caps(`paseo-${a.codex.id}`), { rewind: true, rewind_code: false, permission_modes: both }, 'Codex: the conversation only')
-  assert.deepEqual(caps(`paseo-${a.grok.id}`), { rewind: false, rewind_code: false, permission_modes: both },
+  assert.deepEqual(caps(`paseo-${a.grok.id}`), { rewind: false, rewind_code: false, permission_modes: both, a2a_wake_on_send: true },
     'files and conversation only at once is no rewind of Persona\'s')
   assert.deepEqual(caps('paseo-e1'), { rewind: false, rewind_code: false }, 'a Paseo that does not say')
 })
@@ -617,6 +617,24 @@ test("a new session gets Persona's agent tools, each server naming the session t
   const [first, second] = fake.requestsOf('agent.create.request').map((r) => r.config.mcpServers.persona.env.PERSONA_SESSION_ID)
   assert.notEqual(first, second, 'each agent has its own session id')
   assert.equal(JSON.parse(readFileSync(mcpConfig, 'utf8')).mcpServers.persona.env.PERSONA_SESSION_ID, undefined, 'the shared config is not changed')
+})
+
+test('a Persona-started Paseo agent receives its own A2A MCP ticket', async (t) => {
+  const dir = mkdtempSync('/tmp/ppaseo-mcp-')
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const mcpConfig = join(dir, 'mcp.json')
+  writeFileSync(mcpConfig, JSON.stringify(MCP_JSON))
+  const { fake, node, logs } = await setup(t, { mcpConfig, nodeFeatures: [...FEATURES, 'a2a_mcp'] })
+  const ticketRequests = []
+  node.a2aMcpToken = (id) => { ticketRequests.push(id); return 'test-a2a-ticket' }
+  const sessionId = 'paseo-a2a-test'
+  await call(node, 'session.start', { cwd: '/tmp', prompt: 'x', launcher: 'my-codex', session_id: sessionId })
+  const { mcpServers } = fake.requestsOf('agent.create.request').at(-1).config
+  assert.deepEqual(ticketRequests, [sessionId])
+  assert.equal(mcpServers.persona.env.PERSONA_A2A_TOKEN, undefined)
+  assert.equal(mcpServers.persona_a2a.env.PERSONA_SESSION_ID, sessionId)
+  assert.equal(mcpServers.persona_a2a.env.PERSONA_A2A_TOKEN, 'test-a2a-ticket')
+  assert.ok(logs.every((line) => !line.includes('test-a2a-ticket')))
 })
 
 test("a new Claude Code session gets the Agent's own Persona tools preapproved; a provider that cannot is created again without that", async (t) => {

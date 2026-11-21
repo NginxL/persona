@@ -88,10 +88,12 @@ export function useScopedCounts(): ReturnType<typeof useCounts> {
   const scope = useScope();
   const whole = useCounts();
   const { sessions } = useFullAgentSessions(scope.several);
+  const allInteractions = useStore((s) => s.interactions);
+  const grading = useStore((s) => s.pushGrading);
   const interactions = useScopedInteractions().length;
   return useMemo(
-    () => (scope.several ? { ...stateCounts(scoped(sessions, scope)), interactions, quietCounted: false } : whole),
-    [scope, sessions, interactions, whole],
+    () => (scope.several ? { ...stateCounts(scoped(sessions, scope), allInteractions, grading), interactions, quietCounted: false } : whole),
+    [scope, sessions, allInteractions, grading, interactions, whole],
   );
 }
 

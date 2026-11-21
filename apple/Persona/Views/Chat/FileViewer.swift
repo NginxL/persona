@@ -40,7 +40,7 @@ nonisolated struct FileContent: Decodable, Sendable {
     }
 }
 
-extension APIClient {
+nonisolated extension APIClient {
     /// A file or a directory on a machine; a text file bigger than a page from `offset` (the page before's `next`).
     /// `stream`: a binary file without its bytes (hub feature `file_stream`, docs/protocol/protocol.md「File preview」).
     func file(machine: String, path: String, cwd: String?, offset: Int64 = 0, stream: Bool = false) async throws -> FileContent {
@@ -55,7 +55,7 @@ extension APIClient {
 }
 
 /// A file mentioned in a conversation, opened on the machine the session runs on.
-struct FileRef: Identifiable, Hashable {
+nonisolated struct FileRef: Identifiable, Hashable, Sendable {
     /// The group of hubs the machine is in (docs/protocol/multi-hub.md).
     var group: String = ""
     var machineID: String

@@ -41,6 +41,8 @@ badge. These cases pin what that number counts, so the places and the clients ag
   lists land (`SideFold.fold`, `AppModel.allSessions`) and counts the badge from every pending card but a
   directory-hidden session's (`AppModel.directoryVisibleInteractions`), as `AppModel.countBadges` does. Android reads
   them through the functions `ShellCounts.agentRows` calls. Both assert `rows`, `badge_rows` and `badge`.
+- With the counts report switch on (spec/fixtures/counts/README.md, "Lane reports"), both replays also write what they
+  counted for each case, marks included, and `scripts/test/counts_agreement.py` compares the two lanes.
 
 ## Known differences
 

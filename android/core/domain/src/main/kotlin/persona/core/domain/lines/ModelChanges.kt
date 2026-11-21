@@ -71,7 +71,8 @@ object ModelChanges {
             val identity = identity(model)
             val from = previous
             previous = model to identity
-            if (from == null || from.second.canonical == identity.canonical || from.second.name == identity.name) continue
+            if (from == null || from.second.canonical == identity.canonical || from.second.name == identity.name ||
+                exchange.user?.let { EngineChanges.of(lines[it]) } != null) continue
             val at = exchange.user?.let { it + 1 } ?: exchange.start
             inserts[at] = ChatLine.ModelChange("mc-" + lines[exchange.user ?: exchange.start].id, from.first, model)
         }

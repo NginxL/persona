@@ -101,6 +101,11 @@ var (
 // dropped, duplicates after trimming collapse to the first occurrence, and the length and count limits are enforced.
 // The returned slice is never nil when no error occurs.
 func normalizeConversationTags(in []string) ([]string, error) {
+	return normalizeTagList(in, conversationTagsMax, errTagTooMany)
+}
+
+// normalizeTagList is the shared normalization for a conversation's tags and the user's filter entries.
+func normalizeTagList(in []string, max int, tooMany error) ([]string, error) {
 	out := make([]string, 0, len(in))
 	for _, raw := range in {
 		tag := strings.TrimSpace(raw)
@@ -114,8 +119,8 @@ func normalizeConversationTags(in []string) ([]string, error) {
 			out = append(out, tag)
 		}
 	}
-	if len(out) > conversationTagsMax {
-		return nil, errTagTooMany
+	if len(out) > max {
+		return nil, tooMany
 	}
 	return out, nil
 }

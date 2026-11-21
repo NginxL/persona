@@ -43,7 +43,7 @@ func TestNodeSessionStopProvenanceJSON(t *testing.T) {
 
 func TestNodeSessionStopProvenancePersistence(t *testing.T) {
 	d, ctx := open(t), context.Background()
-	causes := []proto.StopCause{proto.StopUnknown, proto.StopUser, proto.StopIdle, proto.StopTaskCompleted, proto.StopRestart}
+	causes := []proto.StopCause{proto.StopUnknown, proto.StopUser, proto.StopIdle, proto.StopTaskCompleted, proto.StopRestart, proto.StopUsageLimit, proto.StopTransientError}
 	for i, cause := range causes {
 		want := NodeSession{
 			Launcher: "claude", Cwd: "workspace", StopCause: cause, StopCauseAt: int64(i + 1),

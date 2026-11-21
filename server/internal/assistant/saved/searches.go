@@ -47,7 +47,7 @@ type SearchResponse struct {
 
 // Both reads and writes require durable revision support. A test/older store with
 // only PutSetting must not advertise a collection that would lose concurrent edits.
-type savedAgentSearchStore interface {
+type revisionedSettings interface {
 	Setting(context.Context, string, any) (bool, error)
 	CompareSetting(context.Context, string, int64, any) (bool, error)
 }
@@ -227,14 +227,14 @@ func parseSavedSearchMutation(raw []byte) (savedAgentSearchMutation, error) {
 	return m, nil
 }
 
-func (b *searchBook) store() (savedAgentSearchStore, error) {
-	st, ok := b.h.Store().(savedAgentSearchStore)
+func (b *searchBook) store() (revisionedSettings, error) {
+	st, ok := b.h.Store().(revisionedSettings)
 	if !ok || st == nil {
 		return nil, savedSearchUnsupported
 	}
 	return st, nil
 }
-func readSavedSearches(ctx context.Context, st savedAgentSearchStore) (SearchDocument, error) {
+func readSavedSearches(ctx context.Context, st revisionedSettings) (SearchDocument, error) {
 	doc := SearchDocument{Searches: []AgentSearch{}}
 	var raw json.RawMessage
 	exists, err := st.Setting(ctx, SearchesKey, &raw)
@@ -354,7 +354,7 @@ func applySavedSearch(before SearchDocument, m savedAgentSearchMutation, now tim
 	}
 	return next, nil
 }
-func (b *searchBook) change(ctx context.Context, st savedAgentSearchStore, m savedAgentSearchMutation) (SearchDocument, error) {
+func (b *searchBook) change(ctx context.Context, st revisionedSettings, m savedAgentSearchMutation) (SearchDocument, error) {
 	before, err := readSavedSearches(ctx, st)
 	if err != nil {
 		return before, err

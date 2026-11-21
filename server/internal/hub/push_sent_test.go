@@ -21,7 +21,7 @@ import (
 
 // sentPusher is a pusher on store (nil: memory only) with its clock at now, started as newPusher starts one: it reads
 // the delivered pushes back (loadSent) on that clock.
-func sentPusher(t *testing.T, store *lnStore, now time.Time) *Pusher {
+func sentPusher(t *testing.T, store *gradingStore, now time.Time) *Pusher {
 	t.Helper()
 	p := newPusher(t.TempDir(), nil, t.Logf)
 	p.now = func() time.Time { return now }
@@ -47,7 +47,7 @@ func statsViews(p *Pusher) map[string][]pushDayStats {
 	now := p.now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	out := map[string][]pushDayStats{}
-	for _, since := range []time.Time{today, today.AddDate(0, 0, -1), now.Add(-lnInterceptAge)} {
+	for _, since := range []time.Time{today, today.AddDate(0, 0, -1), now.Add(-heldPushMaxAge)} {
 		for _, manager := range []string{"", "manager-a", "manager-b"} {
 			out[since.Format(time.RFC3339)+"/"+manager] = p.pushDailyStats(since, manager)
 		}
@@ -61,7 +61,7 @@ func statsViews(p *Pusher) map[string][]pushDayStats {
 func TestPushSentWritesOnlyTheNewRow(t *testing.T) {
 	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
 	perPush := func(seeded int) (adds, bytes int) {
-		store := newLnStore()
+		store := newGradingStore()
 		var seed []db.PushSent
 		for i := range seeded {
 			seed = append(seed, db.PushSent{At: now.Add(-time.Duration(seeded-i) * time.Minute), Level: "p1",
@@ -101,7 +101,7 @@ func TestPushSentWritesOnlyTheNewRow(t *testing.T) {
 // process that recorded the pushes, and those of a pusher that kept them in memory only (the old record's answers).
 func TestPushSentReadersUnchanged(t *testing.T) {
 	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
-	store := newLnStore()
+	store := newGradingStore()
 	p := sentPusher(t, store, now)
 	memory := sentPusher(t, nil, now)
 	pushes := []struct {
@@ -147,7 +147,7 @@ func TestPushSentAdoptsTheOldSetting(t *testing.T) {
 	now := time.Now().UTC()
 	var legacy []pushSent
 	for i := range 10 { // past the 14 days: the old build dropped them at load too
-		legacy = append(legacy, pushSent{At: now.Add(-lnInterceptAge - time.Duration(10-i)*time.Hour), Level: "p1", Manager: "manager-a"})
+		legacy = append(legacy, pushSent{At: now.Add(-heldPushMaxAge - time.Duration(10-i)*time.Hour), Level: "p1", Manager: "manager-a"})
 	}
 	for i := range pushSentMax - 10 {
 		manager := "manager-a"
@@ -157,14 +157,14 @@ func TestPushSentAdoptsTheOldSetting(t *testing.T) {
 		legacy = append(legacy, pushSent{At: now.Add(-time.Duration(pushSentMax-10-i) * 9 * time.Minute), Level: "p1",
 			RelatedKey: fmt.Sprintf("k-%d", i), Manager: manager})
 	}
-	store := newLnStore()
+	store := newGradingStore()
 	if err := store.PutSetting(t.Context(), pushSentSettingKey, legacy); err != nil {
 		t.Fatal(err)
 	}
-	// What the old build answered: loadLnState kept the setting's entries inside the 14 days.
+	// What the old build answered: loadPushGradingState kept the setting's entries inside the 14 days.
 	old := sentPusher(t, nil, now)
 	for _, e := range legacy {
-		if e.At.After(now.Add(-lnInterceptAge)) {
+		if e.At.After(now.Add(-heldPushMaxAge)) {
 			old.sent = append(old.sent, e)
 		}
 	}
@@ -194,12 +194,12 @@ func TestPushSentAdoptsTheOldSetting(t *testing.T) {
 // at most once an hour, so it never grows past what the counts read.
 func TestPushSentPrunesByAgeAndCount(t *testing.T) {
 	now := time.Now().UTC()
-	store := newLnStore()
+	store := newGradingStore()
 	for i := range pushSentMax + 50 {
 		store.sentRows = append(store.sentRows, db.PushSent{At: now.Add(-time.Duration(pushSentMax+50-i) * time.Second), Level: "p1",
 			RelatedKey: fmt.Sprintf("k-%d", i), Manager: "manager-a"})
 	}
-	store.sentRows[60].At = now.Add(-lnInterceptAge - time.Hour) // one expired row among the newest 2,000
+	store.sentRows[60].At = now.Add(-heldPushMaxAge - time.Hour) // one expired row among the newest 2,000
 	p := sentPusher(t, store, now)
 	rows := store.sentTable()
 	if len(rows) != pushSentMax-1 || rows[0].RelatedKey != "k-50" {
@@ -233,7 +233,7 @@ func TestPushSentPrunesByAgeAndCount(t *testing.T) {
 // the normal path and adds its own row.
 func TestPushSentRetryAfterLandedWriteAddsNoRow(t *testing.T) {
 	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
-	store := newLnStore()
+	store := newGradingStore()
 	store.landThenFail = 1
 	p := sentPusher(t, store, now)
 	recordAndSave(t, p, "manager-a", "p1", "session:landed", now)

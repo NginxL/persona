@@ -313,9 +313,11 @@ test('an autonomous wake preserves a previous unexported reply through interrupt
 
   update({ sessionUpdate: 'tool_call', toolCallId: 'read', name: 'read_file' })
   await until('autonomous tool over the pending reply', () => node.last('session.items')?.items.some((item) => item.kind === 'tool_use'))
-  assert.notEqual(node.last('session.items').history, prior)
+  assert.equal(node.last('session.items').history, prior, 'a wake over a pending reply appends')
+  assert.ok(node.last('session.items').from_seq > 0)
   await node.peer.call('session.interrupt', { session_id: SESSION })
-  await until('prior transcript restored and autonomous tool removed', () => node.last('session.items')?.history === prior)
+  await until('prior transcript restored and autonomous tool removed', () => node.last('session.items')?.history !== prior)
+  assert.equal(node.last('session.items').from_seq, 0)
   assert.deepEqual(node.last('session.items').items.map((item) => item.text), ['Run the workflow.', 'Workflow started.'])
 
   await chunk('Workflow finished.')
@@ -733,7 +735,7 @@ test('live thinking chunks, parallel tool updates and settling keep history stab
   assert.equal(resultsByCall.get(bashUse.tool_use_id)?.is_error, false)
   assert.equal(merged.at(-1).text, 'Fixed cleanly.')
 
-  // 5. Only once native transcript_full.jsonl actually flushes does history transition back to canonical disk history.
+  // 5. Only once native transcript_full.jsonl actually flushes does the history change, replacing the projected steps.
   const flushed = [
     ...prior,
     { ...userStep(4, 'Investigate the jump.'), created_at: '2026-01-01T00:00:04Z' },
@@ -742,7 +744,7 @@ test('live thinking chunks, parallel tool updates and settling keep history stab
   transcripts(directory, flushed, flushed)
   await until('native disk export replaces synthetic settled history once', () => {
     const latest = node.last('session.items')
-    return latest && latest.history !== liveHistory && !latest.history.includes(':settled:') && latest.to_seq === 6
+    return latest && latest.history !== liveHistory && latest.to_seq === 6
   })
   assert.equal(node.last('session.items').from_seq, 0)
   assert.equal(node.last('session.items').items.at(-1).text, 'Fixed cleanly.')
@@ -777,6 +779,45 @@ test('trailing thinking chunks arriving right before turn completion are not dro
   assert.equal(page.items.find((it) => it.id === thoughtItem.id)?.text, 'First half + second half.')
 })
 
+test('main chat sends append under the same history; each native export changes it once (#12014)', { timeout: 25_000 }, async (t) => {
+  const { node, directory, update, chunk, promptCount } = await fixture(t, {}, { assistant: true })
+  let exported = [userStep(0, 'Old prompt.'), replyStep(1, 'Old answer.')]
+  transcripts(directory, exported, exported)
+  await until('prior turn pushed', () => node.last('session.items')?.to_seq === 2)
+
+  for (const n of [1, 2]) {
+    const idle = await node.peer.call('session.items', { session_id: SESSION })
+    const pushed = node.all('session.items').length
+    await node.peer.call('session.send', { session_id: SESSION, text: `Request ${n}.`, assistant: true })
+    await promptCount(n)
+    const sentBatch = () => node.all('session.items').slice(pushed).find((batch) => batch.items.some((item) => item.role === 'user'))
+    await until('the sent message is pushed', sentBatch)
+    const sent = sentBatch()
+    assert.equal(sent.history, idle.history, 'a send is not a history rewrite')
+    assert.equal(sent.from_seq, idle.to_seq)
+    assert.equal(sent.items.some((item) => item.seq <= idle.to_seq), false, 'earlier turns are not sent again')
+    assert.equal((await node.peer.call('session.items', { session_id: SESSION })).history, idle.history)
+
+    await chunk(`Reply ${n}.`)
+    update({ end: true })
+    await until('the settled reply is pushed', () => node.last('session.items')?.items.some((item) => item.text === `Reply ${n}.`))
+    for (const batch of node.all('session.items').slice(pushed)) {
+      assert.equal(batch.history, idle.history, 'live and settled steps append')
+      assert.ok(batch.from_seq > 0)
+    }
+
+    exported = [...exported, userStep(exported.length, `Request ${n}.`), replyStep(exported.length + 1, `Reply ${n}.`)]
+    transcripts(directory, exported, exported)
+    await until('the native export replaces the projected turn', () => node.last('session.items')?.history !== idle.history)
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    const changes = node.all('session.items').slice(pushed).filter((batch) => batch.history !== idle.history)
+    assert.equal(new Set(changes.map((batch) => batch.history)).size, 1, 'one history change per turn')
+    assert.equal(changes[0].from_seq, 0)
+    assert.deepEqual(changes[0].items.filter((item) => item.kind === 'text').map((item) => item.text),
+      exported.map((step) => step.content))
+  }
+})
+
 for (const partialTools of [false, true]) {
   test(`partial export preserves the final reply (tools: ${partialTools})`, async (t) => {
     const { node, directory, update, chunk, promptCount } = await fixture(t)
@@ -799,7 +840,7 @@ for (const partialTools of [false, true]) {
     assert.ok(page.items.some((item) => item.text === 'Checking first.'))
     const full = [...partial, replyStep(partial.at(-1).step_index + 1, 'Final answer.')]
     transcripts(directory, full, full)
-    await until('final export replaces pending history', () => node.last('session.items') && !node.last('session.items').history.includes(':settled:'))
+    await until('final export replaces pending history', () => node.last('session.items') && node.last('session.items').history !== page.history)
     assert.equal((await node.peer.call('session.items', { session_id: SESSION })).items.at(-1).text, 'Final answer.')
   })
 }
@@ -868,6 +909,7 @@ for (const text of ['invalid-once', 'invalid-always']) {
 for (const secondReply of ['Second answer.', 'First answer.']) {
   test(`a previous turn exported during its successor cannot replace ${secondReply}`, async (t) => {
     const { node, directory, update, chunk, promptCount } = await fixture(t)
+    const idle = await node.peer.call('session.items', { session_id: SESSION })
     await node.peer.call('session.send', { session_id: SESSION, text: 'First.' })
     await promptCount(1)
     await chunk('First answer.')
@@ -882,9 +924,11 @@ for (const secondReply of ['Second answer.', 'First answer.']) {
     const page = await node.peer.call('session.items', { session_id: SESSION })
     assert.deepEqual(page.items.filter((item) => item.kind === 'text').map((item) => item.text),
       ['First.', 'First answer.', 'Second.', secondReply])
+    assert.equal(page.history, idle.history, 'a send behind an unexported turn appends too (#12014)')
+    for (const batch of node.all('session.items')) assert.equal(batch.history, idle.history)
     const full = [...first, userStep(2, 'Second.'), replyStep(3, secondReply)]
     transcripts(directory, full, full)
-    await until('second export replaces pending', () => node.last('session.items') && !node.last('session.items').history.includes(':settled:'))
+    await until('second export replaces pending', () => node.last('session.items') && node.last('session.items').history !== page.history)
     assert.equal(node.last('session.items').items.at(-1).text, secondReply)
   })
 }
@@ -898,11 +942,12 @@ for (const externalReply of [false, true]) {
     await chunk('First answer.')
     update({ end: true })
     await until('first reply settled', () => node.last('session.delta')?.text === '')
+    const pending = await node.peer.call('session.items', { session_id: SESSION })
     const steps = [userStep(0, 'First.'), replyStep(1, 'First answer.'), userStep(2, 'External question.')]
     if (externalReply) steps.push(replyStep(3, 'External answer.'))
     transcripts(directory, steps, steps)
     const page = await node.peer.call('session.items', { session_id: SESSION })
-    assert.equal(page.history.includes(':settled:'), false)
+    assert.notEqual(page.history, pending.history)
     assert.deepEqual(page.items.map((item) => item.text), steps.map((step) => step.content))
   })
 }
@@ -915,7 +960,8 @@ test('compact truncated replies eventually release pending history without losin
   update({ end: true })
   await until('reply settled', () => node.last('session.delta')?.text === '')
   await new Promise((resolve) => setTimeout(resolve, 200))
-  assert.equal((await node.peer.call('session.items', { session_id: SESSION })).items.at(-1).text, 'First answer with complete details.')
+  const pending = await node.peer.call('session.items', { session_id: SESSION })
+  assert.equal(pending.items.at(-1).text, 'First answer with complete details.')
   const logs = join(directory, 'config/brain', RAW, '.system_generated/logs')
   mkdirSync(logs, { recursive: true })
   writeFileSync(join(logs, 'transcript.jsonl'), JSON.stringify(userStep(0, 'First.')) + '\n')
@@ -923,7 +969,7 @@ test('compact truncated replies eventually release pending history without losin
   writeFileSync(join(logs, 'transcript.jsonl'), [userStep(0, 'First.'),
     { ...replyStep(1, 'First answer <truncated 20 bytes>'), truncated_fields: ['content'] }].map(JSON.stringify).join('\n') + '\n')
   const page = await node.peer.call('session.items', { session_id: SESSION })
-  assert.equal(page.history.includes(':settled:'), false)
+  assert.notEqual(page.history, pending.history)
   assert.equal(page.items.at(-1).text, 'First answer <truncated 20 bytes>')
 })
 

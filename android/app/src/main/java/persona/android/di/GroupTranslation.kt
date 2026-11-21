@@ -34,6 +34,8 @@ internal class GroupNames(val namespace: String?) {
     /** Interaction ids are the hub's own and two hubs can use the same one: other groups' carry the suffix too. */
     fun interactionId(raw: String) = GroupKeys.machine(raw, namespace)
     fun interaction(value: Interaction) = if (plain) value else value.copy(id = interactionId(value.id), machineId = machineId(value.machineId))
+    fun rawInteraction(value: Interaction) = if (plain) value else
+        value.copy(id = GroupKeys.raw(value.id), machineId = rawMachine(value.machineId))
     fun fleet(value: FleetState) = if (plain) value else value.copy(items = value.items.map { item ->
         // The id is "machine/session": FleetSummary.key opens and answers by its machine part.
         item.copy(id = path(item.id), interaction = item.interaction?.let(::interactionId))
@@ -55,6 +57,7 @@ internal class GroupNames(val namespace: String?) {
         is MessageSendStateEvent -> value.copy(machineId = machineId(value.machineId))
         is ItemsEvent -> value.copy(machineId = machineId(value.machineId))
         is SessionsEvent -> value.copy(machineId = machineId(value.machineId), sessions = value.sessions.map(::session))
+        is SessionRowEvent -> value.copy(session = session(value.session))
         is MachinesEvent -> value.copy(machines = value.machines.map(::machine))
         is RevsEvent -> value.copy(machineId = machineId(value.machineId))
         is InteractionEvent -> value.copy(interaction = interaction(value.interaction))
@@ -236,6 +239,7 @@ internal fun MachineManagement.inGroup(names: GroupNames): MachineManagement {
         override suspend fun launcherQuota(machineId: String, name: String, refresh: Boolean) =
             source.launcherQuota(names.rawMachine(machineId), name, refresh).let { a -> a.copy(machine = a.machine?.takeIf { it.isNotBlank() }?.let(names::machineId)) }
         override suspend fun reconnect(machineId: String) = source.reconnect(names.rawMachine(machineId))
+        override suspend fun startLinkSwitch(machineId: String) = source.startLinkSwitch(names.rawMachine(machineId))
         override suspend fun rename(machineId: String, name: String) = source.rename(names.rawMachine(machineId), name)
         override suspend fun deploy(machineId: String) = source.deploy(names.rawMachine(machineId))
         override suspend fun herdr(machineId: String) = source.herdr(names.rawMachine(machineId))
@@ -288,6 +292,10 @@ internal fun AssistantManagement.inGroup(names: GroupNames): AssistantManagement
         override suspend fun launchers(machineId: String) = source.launchers(names.rawMachine(machineId))
         override suspend fun assistantLaunchers(machineId: String) = source.assistantLaunchers(names.rawMachine(machineId))
         override suspend fun assistantLauncherList(machineId: String) = source.assistantLauncherList(names.rawMachine(machineId))
+        override suspend fun assistantLauncherList(machineId: String, refresh: Boolean) =
+            source.assistantLauncherList(names.rawMachine(machineId), refresh)
+        override suspend fun mainAssistantLauncherList(machineId: String, refresh: Boolean) =
+            source.mainAssistantLauncherList(names.rawMachine(machineId), refresh)
         override suspend fun launcherModels(machineId: String, launcher: String) = source.launcherModels(names.rawMachine(machineId), launcher)
         override suspend fun setModelPick(session: SessionKey, pick: persona.core.contracts.ModelPick) = source.setModelPick(names.raw(session), pick)
         override suspend fun clearModelPick(session: SessionKey) = source.clearModelPick(names.raw(session))
@@ -344,7 +352,9 @@ internal fun MainConversationSender.inGroup(names: GroupNames, scope: CoroutineS
         override val outbox = source.outbox.mapIn(scope) { list -> list.map(names::outbox) }
         override val sendReceipts = source.sendReceipts.mapIn(scope) { list -> list.map(names::receipt) }
         override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) =
-            source.sendToMain(text, clientMessageId, draft?.let(names::rawDraft))
+            sendToMain(text, clientMessageId, draft, null)
+        override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?, via: String?) =
+            source.sendToMain(text, clientMessageId, draft?.let(names::rawDraft), via)
         override suspend fun mainReplaced(previous: SessionKey) = source.mainReplaced(names.raw(previous))
         override suspend fun mainChanged() = source.mainChanged()
     }
@@ -409,6 +419,8 @@ internal fun AgentCreationService.inGroup(names: GroupNames): AgentCreationServi
         override suspend fun newAgentModel() = source.newAgentModel()
         override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean) =
             source.launcherModels(names.rawMachine(machineId), launcher, refresh)
+        override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean, host: String?) =
+            source.launcherModels(names.rawMachine(machineId), launcher, refresh, host)
         override suspend fun worktreeStatus(machineId: String, cwd: String, kind: String?) = source.worktreeStatus(names.rawMachine(machineId), cwd, kind)
         override suspend fun addWorktree(machineId: String, cwd: String, nameHint: String, branch: String, kind: String?) =
             source.addWorktree(names.rawMachine(machineId), cwd, nameHint, branch, kind)
@@ -467,6 +479,8 @@ internal fun SessionFiles.inGroup(names: GroupNames): SessionFiles {
         override suspend fun stat(machineId: String, cwd: String, paths: List<String>) = source.stat(names.rawMachine(machineId), cwd, paths)
         override suspend fun download(machineId: String, cwd: String, path: String, into: java.io.File) =
             source.download(names.rawMachine(machineId), cwd, path, into)
+        override suspend fun readLogTail(machineId: String, cwd: String, path: String, manager: String?) =
+            source.readLogTail(names.rawMachine(machineId), cwd, path, manager)
         override fun comparesVersions(machineId: String) = source.comparesVersions(names.rawMachine(machineId))
         override suspend fun blob(machineId: String, cwd: String, path: String, rev: String) =
             source.blob(names.rawMachine(machineId), cwd, path, rev)

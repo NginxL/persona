@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 /// Where the paths of a conversation are looked up: its machine and working directory (relative paths are in it).
-struct FileScope: Hashable, Sendable {
+nonisolated struct FileScope: Hashable, Sendable {
     /// The machine, in its group of hubs (docs/protocol/multi-hub.md).
     var machine: MachineRef
     var cwd: String

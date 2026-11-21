@@ -1,6 +1,8 @@
 {
   "picture": "Picture",
   "retry": "Picture didn't load. Click to retry",
+  "retry_button": "Retry",
+  "local_load_failed": "Failed to load local image",
   "more": "{n} more",
   "load_image": "Load image",
   "load_images": "Load {n} images"

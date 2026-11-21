@@ -305,6 +305,8 @@ private struct BriefOpenButton: View {
 private struct BriefChatRow: View {
     var row: BriefBody.Row
     var chat: SessionKey?
+    /// The conversation's stack: Open pushes the chat on it, with Back to the card (#12006).
+    @Environment(\.pushInboxChat) private var pushChat
 
     var body: some View {
         HStack(spacing: Theme.Space.m) {
@@ -313,7 +315,7 @@ private struct BriefChatRow: View {
                 Text(briefMeta(row)).font(Theme.Font.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if let chat { BriefOpenButton(title: row.title) { AppModel.shared.open(chat) } }
+            if let chat { BriefOpenButton(title: row.title) { AppModel.shared.openInPage(chat, push: conversationAgentPush(pushChat)) } }
         }
         .padding(.vertical, Theme.Space.xs)
     }
@@ -481,6 +483,7 @@ private struct BriefLaterRow: View {
     var group: String
     var conversation: String = ""
     var chat: SessionKey?
+    @Environment(\.pushInboxChat) private var pushChat
     private var actions: BriefActions { .shared }
 
     var body: some View {
@@ -489,7 +492,7 @@ private struct BriefLaterRow: View {
             Text(briefMeta(row)).font(Theme.Font.caption).foregroundStyle(.secondary)
             HStack(spacing: Theme.Space.s) {
                 Spacer(minLength: 0)
-                if let chat { BriefOpenButton(title: row.title) { AppModel.shared.open(chat) } }
+                if let chat { BriefOpenButton(title: row.title) { AppModel.shared.openInPage(chat, push: conversationAgentPush(pushChat)) } }
                 handled
             }
             .padding(.top, Theme.Space.xs)

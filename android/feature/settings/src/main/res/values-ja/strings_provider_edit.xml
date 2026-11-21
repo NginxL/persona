@@ -116,4 +116,7 @@
     <string name="settings_pedit_via">送信経由</string>
     <string name="settings_pedit_via_hub">ハブ自身</string>
     <string name="settings_pedit_via_note">この接続のリクエストをどのマシンから送るかを選びます。ハブからプロバイダーに届かず、お使いのコンピューターからは届く場合はそのコンピューターを選んでください。リクエストを送るときはオンラインである必要があります。</string>
+    <string name="settings_provider_reference_hint">必要なときにプロバイダーがキーを渡します。Persona は参照だけを保存します。</string>
+    <string name="settings_provider_reference_saved">保存時に参照から値を取れるか確認します。接続テストは保存後に行います。</string>
+    <string name="settings_provider_reference_unavailable">シークレットプロバイダーを利用できません。代わりにキーを入力してください。</string>
 </resources>

@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,10 +18,10 @@ import (
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
-// An API purpose may pick a launcher without a gateway the manager can call (plain claude, a computer's own launcher):
-// each request then runs that launcher's CLI headless once on the main chat's computer, which answers with the final
-// text (docs/assistant/model-config.md "Running API purposes on a launcher", #5823). The manager still resolves the
-// purpose and reads the answer; the node runs the CLI with no tools and leaves no session (model.run).
+// An API purpose may pick a launcher without a gateway the manager can call (plain claude, codex, agy, or a computer's
+// own launcher): each request then runs that launcher's CLI headless once on the main chat's computer, which answers
+// with the final text (docs/assistant/model-config.md "Running API purposes on a launcher", #5823, #12027). The manager
+// still resolves the purpose and reads the answer; the node runs the CLI with no tools and leaves no session (model.run).
 
 // modelRunTimeout bounds a run whose caller set no deadline.
 const modelRunTimeout = 2 * time.Minute
@@ -41,7 +42,9 @@ func (s *Service) modelRun(ctx context.Context, c ai.Config, r ai.Request) (ai.R
 		defer cancel()
 	}
 	p := proto.ModelRunParams{Launcher: c.RunLauncher, Model: c.Model, System: r.System, Prompt: runPrompt(r.Messages)}
-	if slices.Contains(proto.EffortLevels, c.ReasoningEffort) { // "off" / "none" are the APIs' words: the launcher's own then
+	effortOK := slices.Contains(proto.EffortLevels, c.ReasoningEffort) ||
+		(slices.Contains(proto.CodexEffortLevels, c.ReasoningEffort) && s.runLauncherAgent(ctx, c.ViaMachine, c.RunLauncher) == "codex")
+	if effortOK { // "off" / "none" (and Codex-only levels on non-Codex launchers) defer to the launcher's own default
 		p.Effort = c.ReasoningEffort
 	}
 	_, p.Configured = s.configuredLauncher(ctx, c.ViaMachine, c.RunLauncher)
@@ -65,6 +68,38 @@ func (s *Service) modelRun(ctx context.Context, c ai.Config, r ai.Request) (ai.R
 		return ai.Reply{}, fmt.Errorf("model.run: bad answer: %w", err)
 	}
 	return ai.Reply{Text: a.Text, Model: a.Model, Usage: a.Usage}, nil
+}
+
+// runLauncherAgent resolves the CLI agent behind launcher name on machine for model.run effort filtering.
+func (s *Service) runLauncherAgent(ctx context.Context, machine, name string) string {
+	if l, ok := s.configuredLauncher(ctx, machine, name); ok {
+		if agent := cmp.Or(l.AgentType, l.Agent); agent != "" {
+			return agent
+		}
+	}
+	for _, l := range s.storedLaunchers(ctx) {
+		if l.Name == name {
+			return l.AgentType()
+		}
+	}
+	if machine != "" {
+		for _, m := range s.zshrcLaunchers(ctx, false) {
+			if m.MachineID != machine {
+				continue
+			}
+			for _, l := range m.Launchers {
+				if l.Name == name {
+					return viewAgent(LauncherView{Name: l.Name, Agent: l.Agent})
+				}
+			}
+		}
+	}
+	for _, v := range s.launcherViews(ctx) {
+		if v.Name == name {
+			return viewAgent(v)
+		}
+	}
+	return viewAgent(LauncherView{Name: name})
 }
 
 // runPrompt is the conversation as the CLI reads it: a single user turn as it is, several as one transcript.

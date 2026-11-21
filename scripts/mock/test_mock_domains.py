@@ -24,6 +24,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request as HTTPRequest, build_opener
 
@@ -41,9 +42,11 @@ class FakeHandler:
 
     def __init__(self, path, down=False):
         self.path, self.sent, self.down, self.network_checks = path, [], down, 0
+        self.response_headers = {}
 
-    def send_json(self, obj, status=200):
+    def send_json(self, obj, status=200, headers=None):
         self.sent.append((status, obj))
+        self.response_headers = headers or {}
 
     def bad_network(self):
         self.network_checks += 1
@@ -56,6 +59,77 @@ def registry(namespace=None):
 
 
 class RegistryTests(unittest.TestCase):
+    def test_starred_backup_preview_tracks_legacy_saves_and_reimport_is_idempotent(self):
+        import starred_mock
+
+        timestamp = "2026-11-20T00:00:00Z"
+        events = []
+        r, d = registry({
+            "MANAGERS": {"default": "assistant"},
+            "other_manager": lambda h: ("m-work", None) if "manager=m-work" in h.path else None,
+            "is_read_only": lambda _h: False,
+            "broadcast": events.append,
+            "ago": lambda: timestamp,
+        })
+        with patch.dict(os.environ, {"MOCK_STARRED": "1", "MOCK_STARRED_BACKUP": "1"}):
+            starred_mock.register(d)
+
+        def send(method, suffix="", body=None, status=200):
+            h = FakeHandler(starred_mock.BASE + suffix)
+            payload = b"" if body is None else json.dumps(body).encode()
+            self.assertTrue(r.http(h, method, h.path.partition("?")[0], payload))
+            got, result = h.sent.pop()
+            self.assertEqual(got, status, result)
+            return result
+
+        message = {"key": "sm" + "a" * 32, "conversation": "agent", "role": "assistant",
+                   "title": "Old conversation", "speaker": "Agent", "text": "Saved words", "starred_at": timestamp}
+        bundle = {"format": "persona.starred", "version": 1, "messages": [message]}
+        self.assertEqual(send("GET", "/import"), {"can_import": True})
+        first = send("POST", "/import/preview", bundle)
+        self.assertEqual(first, {"revision": 0, "total": 1, "to_add": 1, "already_saved": 0, "available": 300})
+        old_message = dict(message, title="a" * 199 + " ", text=" " * 4000,
+                           omitted_chars=1, written_at="0001-01-01T00:00:00Z")
+        self.assertEqual(send("POST", "/import/preview", dict(bundle, messages=[old_message])), first)
+        self.assertEqual(send("GET")["stars"], [])
+        self.assertEqual(events, [])
+        send("POST", "/import/preview", dict(bundle, messages=[message, message]), status=400)
+        item = {"machine_id": "box", "session_id": "example", "item_id": "example-message",
+                "conversation": "agent", "role": "user", "text": "Newer saved words"}
+        send("POST", body=item)
+        send("POST", "/import", dict(bundle, revision=first["revision"]), status=409)
+
+        fresh = send("POST", "/import/preview", bundle)
+        imported = send("POST", "/import", dict(bundle, revision=fresh["revision"]))
+        self.assertEqual(imported, {"revision": 2, "added": 1, "already_saved": 0})
+        archive = next(star for star in send("GET")["stars"] if star["machine_id"] == starred_mock.BACKUP_MACHINE)
+        self.assertEqual(archive["text"], message["text"])
+        self.assertEqual(archive["starred_at"], timestamp)
+        self.assertEqual(archive["session_id"], "backup." + message["key"])
+        self.assertEqual(archive["item_id"], "line0#0")
+        self.assertNotIn("source_fingerprint", archive)
+        self.assertNotIn("source_manager", archive)
+        retry = send("POST", "/import", dict(bundle, revision=imported["revision"]))
+        self.assertEqual(retry, {"revision": 2, "added": 0, "already_saved": 1})
+        other = send("POST", "/import/preview?manager=m-work", bundle)
+        self.assertEqual(other, first)
+        self.assertEqual(events, [{"type": "assistant_starred"}] * 2)
+
+    def test_starred_backup_discovery_preserves_the_old_snapshot_routes(self):
+        import starred_mock
+
+        r, d = registry({"MANAGERS": {"default": "assistant"}, "other_manager": lambda _h: None})
+        with patch.dict(os.environ, {"MOCK_STARRED": "1", "MOCK_STARRED_BACKUP": "old"}):
+            starred_mock.register(d)
+        for method, path, want in (
+            ("GET", starred_mock.BASE, 200), ("GET", starred_mock.BACKUP, 405),
+            ("POST", starred_mock.BACKUP, 405), ("POST", starred_mock.BACKUP + "/preview", 404),
+        ):
+            h = FakeHandler(path)
+            self.assertTrue(r.http(h, method, path))
+            self.assertEqual(h.sent[0][0], want)
+            self.assertEqual(h.response_headers.get("Allow"), "DELETE" if want == 405 else None)
+
     def test_route_matches_method_and_whole_path(self):
         r, d = registry()
         seen = []
@@ -187,6 +261,8 @@ class RegistryTests(unittest.TestCase):
                     mock_domains.load({}, ["domain_bad"])
                 # A second load runs the module again, as a second run of mock_hub.py makes its globals anew (runpy).
                 Path(tmp, "domain_state.py").write_text("SEEN = []\n\ndef register(d):\n    SEEN.append(d.name)\n")
+                # Earlier imports may have cached this directory before the new module existed.
+                importlib.invalidate_caches()
                 mock_domains.load({}, ["domain_state"])
                 mock_domains.load({}, ["domain_state"])
                 self.assertEqual(sys.modules["domain_state"].SEEN, ["domain_state"])

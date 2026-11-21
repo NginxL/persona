@@ -103,14 +103,19 @@ func (p nudgeProgress) settled() bool { return !p.NudgedAt.IsZero() || !p.Skippe
 
 // botCardRef is a card kept in the chat's state: its message and the interaction it asks.
 type botCardRef struct {
-	MessageID string    `json:"message_id"`
-	Kind      string    `json:"kind,omitempty"`
-	MachineID string    `json:"machine_id,omitempty"`
-	SessionID string    `json:"session_id,omitempty"`
-	Thread    string    `json:"thread,omitempty"`  // the topic it was posted into (botCard.Thread)
-	ChatID    string    `json:"chat_id,omitempty"` // the group chat of that topic (botCard.ChatID); "" in the owner's DM
-	At        time.Time `json:"at"`
-	ExpiresAt time.Time `json:"expires_at,omitzero"` // the decision deadline when posted; a live prepared card may extend it
+	MessageID       string    `json:"message_id"`
+	Kind            string    `json:"kind,omitempty"`
+	MachineID       string    `json:"machine_id,omitempty"`
+	SessionID       string    `json:"session_id,omitempty"`
+	Thread          string    `json:"thread,omitempty"`  // the topic it was posted into (botCard.Thread)
+	ChatID          string    `json:"chat_id,omitempty"` // the group chat of that topic (botCard.ChatID); "" in the owner's DM
+	At              time.Time `json:"at"`
+	ExpiresAt       time.Time `json:"expires_at,omitzero"` // the decision deadline when posted; a live prepared card may extend it
+	ApprovalBatchID string    `json:"approval_batch_id,omitempty"`
+	ApprovalItemID  string    `json:"approval_item_id,omitempty"`
+	OwnerProposal   bool      `json:"owner_proposal,omitempty"`
+	Resumable       bool      `json:"resumable,omitempty"`
+	NoExpiry        bool      `json:"no_expiry,omitempty"`
 	// NudgedAt is when the card was nudged under (feishu_nudge.go): once set, never again, also after a restart.
 	NudgedAt time.Time `json:"nudged_at,omitzero"`
 	// SkippedAt is when the nudge for this card was given up (not due any more when nudges came on again, the chat
@@ -285,7 +290,8 @@ func (s *Service) loadBotLocked(ctx context.Context) {
 			}
 			b.cards[id] = botCard{MessageID: ref.MessageID, Thread: ref.Thread, ChatID: ref.ChatID, At: ref.At, NudgedAt: ref.NudgedAt, SkippedAt: ref.SkippedAt, Tries: ref.Tries, TriedAt: ref.TriedAt,
 				DeadlineNudge: ref.DeadlineNudge,
-				Ix:            proto.Interaction{ID: id, Kind: ref.Kind, MachineID: ref.MachineID, SessionID: ref.SessionID, ExpiresAt: ref.ExpiresAt}}
+				Ix: proto.Interaction{ID: id, Kind: ref.Kind, MachineID: ref.MachineID, SessionID: ref.SessionID, ExpiresAt: ref.ExpiresAt,
+					ApprovalBatchID: ref.ApprovalBatchID, ApprovalItemID: ref.ApprovalItemID, OwnerProposal: ref.OwnerProposal, Resumable: ref.Resumable, NoExpiry: ref.NoExpiry}}
 		}
 	}
 }
@@ -295,16 +301,22 @@ func (s *Service) loadBotLocked(ctx context.Context) {
 func (s *Service) trimBotCardsLocked() {
 	b := &s.fbot
 	for id, ref := range b.st.Cards {
-		if ref == nil || b.clock().Sub(ref.At) > botCardsDays*24*time.Hour {
+		if ref == nil || !(ref.OwnerProposal && ref.NoExpiry) && b.clock().Sub(ref.At) > botCardsDays*24*time.Hour {
 			delete(b.st.Cards, id)
 		}
 	}
 	for len(b.st.Cards) > botCardsKeep {
 		oldest := ""
 		for id, ref := range b.st.Cards {
+			if ref != nil && ref.OwnerProposal && ref.NoExpiry {
+				continue // an unanswered reconstructable proposal has no age or count eviction
+			}
 			if oldest == "" || ref.At.Before(b.st.Cards[oldest].At) {
 				oldest = id
 			}
+		}
+		if oldest == "" {
+			break
 		}
 		delete(b.st.Cards, oldest)
 	}
@@ -339,6 +351,8 @@ func (s *Service) keepBotCardLocked(id string, card *botCard) {
 	}
 	b.st.Cards[id] = &botCardRef{MessageID: card.MessageID, Kind: card.Ix.Kind, MachineID: card.Ix.MachineID, SessionID: card.Ix.SessionID,
 		Thread: card.Thread, ChatID: card.ChatID, At: at.UTC(), ExpiresAt: card.Ix.ExpiresAt.UTC(), NudgedAt: card.NudgedAt.UTC(),
+		ApprovalBatchID: card.Ix.ApprovalBatchID, ApprovalItemID: card.Ix.ApprovalItemID, OwnerProposal: card.Ix.OwnerProposal,
+		Resumable: card.Ix.Resumable, NoExpiry: card.Ix.NoExpiry,
 		SkippedAt: card.SkippedAt.UTC(), Tries: card.Tries, TriedAt: card.TriedAt.UTC(), DeadlineNudge: card.DeadlineNudge}
 	s.saveBotStateLocked()
 }

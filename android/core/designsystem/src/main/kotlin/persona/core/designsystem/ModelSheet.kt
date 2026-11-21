@@ -32,11 +32,14 @@ fun JModelSheet(
     custom: Boolean = false,
     /** The launcher's display name, repeated on every model row when this sheet is a start's picker. */
     owner: String? = null,
+    /** A per-session pick can describe how the ID is used. Model settings describes saving it. */
+    customDetail: String? = null,
+    acceptsCustomId: (String) -> Boolean = { true },
 ) {
     var query by remember { mutableStateOf(initialQuery) }
     val shown = remember(models, query) { models.filter { !it.isDefault && it.matches(query) } }
     val unlisted = selected.takeIf { custom && it.isNotEmpty() && models.none { m -> m.id == it } }
-    val typed = if (custom) customModelId(models, query) else null
+    val typed = if (custom) customModelId(models, query)?.takeIf(acceptsCustomId) else null
     // Results start from the top: the list would otherwise keep the row it was at, and "Default" coming back in front of it
     // once the query is cleared would stay above the viewport.
     val scroll = rememberLazyListState()
@@ -75,7 +78,7 @@ fun JModelSheet(
             typed?.let { id ->
                 item("custom") {
                     JGroupItem(GroupPosition.Single, Modifier.padding(top = Tokens.Space.m)) {
-                        ModelChoice(stringResource(R.string.designsystem_model_use, id), stringResource(R.string.designsystem_model_use_detail), null, id == selected, owner) { onPick(id); onDismiss() }
+                        ModelChoice(stringResource(R.string.designsystem_model_use, id), customDetail ?: stringResource(R.string.designsystem_model_use_detail), null, id == selected, owner) { onPick(id); onDismiss() }
                     }
                 }
             }

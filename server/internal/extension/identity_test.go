@@ -16,6 +16,69 @@ import (
 	"testing"
 )
 
+// A snapshot taken during a write is never a valid hand-off base, even after overlapping writes finish. Removing and
+// reinstalling the same public ID also advances the stable epoch, so an old process specification cannot cross it.
+func TestSettingsEpochSeqlock(t *testing.T) {
+	ctx := context.Background()
+	r, _, _ := newTestRegistry(t)
+	packageDir := func() string {
+		dir := t.TempDir()
+		writePackage(t, dir, nil)
+		return dir
+	}
+	pv, err := r.Preview(ctx, "dir:"+packageDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Install(ctx, pv.ID, pv.Digest, "test"); err != nil {
+		t.Fatal(err)
+	}
+	id := "example-notes"
+	_, stable := r.SnapshotExactWithSettingsEpoch(id)
+	if stable&1 != 0 {
+		t.Fatalf("stable epoch is odd: %d", stable)
+	}
+	first := r.settingsWrite(id)
+	second := r.settingsWrite(id)
+	_, odd := r.SnapshotExactWithSettingsEpoch(id)
+	if odd&1 == 0 || !r.SettingsMoved(id, stable) || !r.SettingsMoved(id, odd) {
+		t.Fatalf("active epochs stable=%d odd=%d did not fence hand-off", stable, odd)
+	}
+	first.finish()
+	r.mu.Lock()
+	stillOdd := r.settingsEpoch[id]
+	r.mu.Unlock()
+	if stillOdd != odd {
+		t.Fatalf("last overlapping write closed early: got %d, want %d", stillOdd, odd)
+	}
+	second.finish()
+	_, even := r.SnapshotExactWithSettingsEpoch(id)
+	if even&1 != 0 || even == odd || r.SettingsMoved(id, even) || !r.SettingsMoved(id, odd) {
+		t.Fatalf("completed epochs odd=%d even=%d are not stable", odd, even)
+	}
+
+	if err := r.Uninstall(ctx, id, false, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if !r.SettingsMoved(id, even) {
+		t.Fatal("removal did not invalidate the stable epoch")
+	}
+	pv, err = r.Preview(ctx, "dir:"+packageDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Install(ctx, pv.ID, pv.Digest, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if !r.SettingsMoved(id, even) {
+		t.Fatal("reuse of the ID restored the old epoch")
+	}
+	_, reused := r.SnapshotExactWithSettingsEpoch(id)
+	if reused&1 != 0 || r.SettingsMoved(id, reused) {
+		t.Fatalf("fresh snapshot after reuse is not stable: %d", reused)
+	}
+}
+
 // identityStore models stable slots and both definite and indeterminate commits.
 type identityStore struct {
 	*memStore

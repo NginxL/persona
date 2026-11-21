@@ -59,15 +59,20 @@ export function grid(count: number, column: number, widest = PICTURES_W, gap = P
   return make(3, tile, Math.min(count, MOST_SHOWN));
 }
 
+import { isMachineRef } from "./files";
+import { isWebImage } from "./reply-images";
+
 export interface ReplyPicture {
   src: string;
   alt: string;
+  /** True when `src` points to a file on the session's machine rather than an http(s) URL. */
+  local?: boolean;
 }
 
-const PICTURE = /!\[([^\]\n]*)\]\(\s*<?(https?:\/\/[^\s)>]+)>?(?:\s+["'][^"'\n]*["'])?\s*\)/gi;
+const PICTURE = /!\[([^\]\n]*)\]\(\s*(?:<([^>\n]+)>|([^\s)]+))(?:\s+["'][^"'\n]*["'])?\s*\)/g;
 
-/** Every web picture the text names outside code, in order (block and inline): what the viewer pages through. */
-export function picturesIn(md: string): ReplyPicture[] {
+/** Every supported picture the text names outside code, in order (block and inline): what the viewer pages through. */
+export function picturesIn(md: string, opts?: { local?: boolean }): ReplyPicture[] {
   if (!md.includes("![")) return [];
   const out: ReplyPicture[] = [];
   let fence: string | null = null;
@@ -84,7 +89,11 @@ export function picturesIn(md: string): ReplyPicture[] {
     }
     if (/^ {4}|^\t/.test(line) || t.startsWith(">")) continue;
     const noCode = line.replace(/`[^`]*`/g, "");
-    for (const m of noCode.matchAll(PICTURE)) out.push({ src: m[2], alt: m[1].trim() });
+    for (const m of noCode.matchAll(PICTURE)) {
+      const dest = (m[2] ?? m[3] ?? "").trim();
+      if (isWebImage(dest)) out.push({ src: dest, alt: m[1].trim() });
+      else if (opts?.local && isMachineRef(dest)) out.push({ src: dest, alt: m[1].trim(), local: true });
+    }
   }
   return out;
 }

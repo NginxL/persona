@@ -51,6 +51,13 @@ struct UsageWindowsTests {
         #expect(UsageWindows.pace(win("5h", 300, used: 30, left: 400 * 60), now: now) == nil)
     }
 
+    @Test func noPaceForAnOutOfDateReading() {
+        // #12411: a stale account keeps its numbers but says nothing about how fast it is being used now.
+        let w = win("5h", 300, used: 80, left: 150 * 60)
+        #expect(UsageWindows.pace(w, stale: false, now: now)?.state == .over)
+        #expect(UsageWindows.pace(w, stale: true, now: now) == nil)
+    }
+
     @Test func resetLabel() {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!

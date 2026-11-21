@@ -81,5 +81,5 @@ export default async function persona(pi) {
   }
   // Not for one-shot runs (pi -p, --mode json): nothing to drive from the phone, outside pi-web's server.
   if (!piWebOf() && process.argv.some((a) => a === '-p' || a === '--print' || a === 'json')) return
-  host().register(pi, globalThis.__personaPiAskUser ? { Type } : undefined)
+  host().register(pi, { Type: globalThis.__personaPiAskUser ? Type : undefined, A2AType: Type })
 }

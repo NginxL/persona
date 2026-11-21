@@ -80,7 +80,7 @@ class ForwardShotsTest {
         status = "working", state = "working", agent = "codex", spaceName = "photos", updatedAt = ago(5))
     private val agents = listOf(blog, photos,
         Session(machineId = "macbook", sessionId = "notes", title = "整理发布说明", cwd = "/Users/me/code/site", status = "blocked",
-            state = "needs_you", agent = "claude", spaceName = "site", updatedAt = ago(9)),
+            state = "needs_you", agent = "trae-cli", spaceName = "site", updatedAt = ago(9)),
         Session(machineId = "macbook", sessionId = "weekly", title = "写周报", cwd = "/Users/me/docs", status = "idle", state = "idle",
             agent = "claude", updatedAt = ago(40)),
         Session(machineId = "studio", sessionId = "login", title = "修复登录超时", cwd = "/Users/me/code/app", status = "idle", state = "idle",
@@ -228,6 +228,7 @@ class ForwardShotsTest {
         // Never the chat it comes from; a Persona conversation in Recent says so under its title.
         assertFalse(sheetTexts().contains("博客迁移到 Astro"))
         assertTrue(sheetTexts().contains("周末出行安排"))
+        if (style != AppStyle.Glass) assertTrue(sheetTexts().contains("TRAE CLI"))
         capture("sheet-$name")
         scene = Scene.Composer
         settle()

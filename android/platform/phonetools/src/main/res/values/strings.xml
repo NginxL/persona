@@ -16,6 +16,8 @@
     <string name="phonetools_source_device_detail">System, battery, storage and network</string>
     <string name="phonetools_source_notifications">Notifications</string>
     <string name="phonetools_source_notifications_detail">Send local notifications and see Persona\'s current ones</string>
+    <string name="phonetools_source_calls">Phone calls</string>
+    <string name="phonetools_source_calls_detail">Open the dialer with your chosen number. Each call needs your OK</string>
     <string name="phonetools_status_unavailable">Unavailable</string>
     <string name="phonetools_status_granted">Allowed</string>
     <string name="phonetools_status_partial">Partly allowed</string>
@@ -45,6 +47,7 @@
     <string name="phonetools_deny">Deny</string>
     <string name="phonetools_confirm_channel">Phone action confirmations</string>
     <string name="phonetools_confirm_notification">Confirm a phone action</string>
+    <string name="phonetools_call_start">Call %1$s</string>
     <string name="phonetools_messages_channel">Notifications from Claude</string>
     <string name="phonetools_calendar_new">New event “%1$s”</string>
     <string name="phonetools_calendar_all_day">%1$s (all day)</string>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 设置 › 连接器 › 飞书 › 首页显示消息：可选的全部会话页面。 -->
+<resources>
+    <string name="inbox_lark_messages_title">消息</string>
+    <string name="inbox_lark_messages_loading">正在读取飞书会话</string>
+    <string name="inbox_lark_messages_empty_title">还没有会话</string>
+    <string name="inbox_lark_messages_empty_text">你的飞书私聊和群聊会显示在这里。</string>
+    <string name="inbox_lark_messages_load_failed">读不到飞书会话：%1$s</string>
+    <string name="inbox_lark_messages_unavailable">当前连接无法显示消息。</string>
+    <string name="inbox_lark_messages_preview_mine">我：%1$s</string>
+    <string name="inbox_lark_messages_preview_sender">%1$s：%2$s</string>
+</resources>

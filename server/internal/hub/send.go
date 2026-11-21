@@ -137,13 +137,33 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 	if !ok {
 		return
 	}
-	if id, _ := p["client_msg_id"].(string); strings.HasPrefix(id, assistantwire.FirstMessageIDPrefix) {
+	if id, _ := p["client_msg_id"].(string); strings.HasPrefix(id, assistantwire.FirstMessageIDPrefix) || strings.HasPrefix(id, proto.A2ADeliveryPrefix) {
 		// The manager's own, for a conversation's first message (assistant start.go humanStart): never an app's, so no
 		// later message carries one (and passes for that first message). Refused before anything else is done with it.
 		writeErrCode(w, http.StatusBadRequest, "client_msg_id_reserved", i18n.Err("hub-send.reserved_id"))
 		return
 	}
 	sid := r.PathValue("sid")
+	if terminalAgentSend(r.Context()) {
+		if _, ok := h.terminalAgentTarget(m, sid); !ok {
+			h.refuseTerminalAgent(w, r)
+			return
+		}
+		hold, present := p["hold_when_away"].(bool)
+		if !present || hold != requestDeclares(r, featureAgentMessageHold) {
+			writeCode(w, http.StatusBadRequest, "invalid_hold",
+				i18n.T(h.requestLang(r), "agent-send.invalid_hold"), map[string]any{"delivered": "none"})
+			return
+		}
+		text, _ := p["text"].(string)
+		if len(p) != 3 || strings.TrimSpace(text) == "" || len(text) > devicewire.MaxTerminalAgentMessageBytes {
+			writeCode(w, http.StatusBadRequest, "invalid_terminal_message",
+				i18n.T(h.requestLang(r), "agent-send.invalid_text"), map[string]any{"delivered": "none"})
+			return
+		}
+		delete(p, "hold_when_away")
+	}
+
 	if caller := principalOf(r.Context()); caller.Role == roleScoped {
 		row, exists := m.session(sid)
 		if !exists || healthSession(&row) {
@@ -242,6 +262,18 @@ func (h *Hub) messageSendState(mid, sid, id string, status int, body []byte) str
 
 func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine, p map[string]any) {
 	sid := r.PathValue("sid")
+	terminal := terminalAgentSend(r.Context())
+	var s proto.Session
+	var known bool
+	if terminal {
+		// The row used to route a terminal send must first pass the Agent
+		// check. Do not reclassify it as a Persona chat after owner callbacks.
+		s, known = h.terminalAgentTarget(m, sid)
+		if !known {
+			h.refuseTerminalAgent(w, r)
+			return
+		}
+	}
 	p["session_id"] = sid
 	todoID, _ := p["todo_id"].(string)
 	delete(p, "todo_id")
@@ -290,20 +322,26 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 			mergeTodoImages(p, images)
 		}
 	}
-	if s, ok := m.session(sid); ok && (m.isAssistant(s) || isText && strings.TrimSpace(text) != "") {
+	spokeSession, spokeKnown := s, known
+	if !terminal {
+		spokeSession, spokeKnown = m.session(sid)
+	}
+	if spokeKnown && (!terminal && m.isAssistant(spokeSession) || isText && strings.TrimSpace(text) != "") {
 		// The manager also observes owner messages to Agents before delivery, so a task's decision default can pause.
 		spoke := assistantwire.UserSpokeParams{SessionRef: assistantwire.SessionRef{MachineID: m.cfg.ID, SessionID: sid}}
-		if !m.isAssistant(s) && isText && personSent(r.Context()) {
+		if (terminal || !m.isAssistant(spokeSession)) && isText && personSent(r.Context()) {
 			spoke.Text = text
 		}
 		h.asstOf(h.sessionOwner(m.cfg.ID, sid)).userSpoke(r.Context(), spoke)
 	}
-	s, known := m.session(sid)
+	if !terminal {
+		s, known = m.session(sid)
+	}
 	picked := "" // a model picked in the chat's chip that the message runs on (#1644)
 	assistantConv := false
 	var asSent map[string]any // the app's message as it came, kept when it cannot go in (keepUndelivered)
 	note := ""                // the main chat runs on another launcher than configured (#4659): told in a delivered send's answer
-	if h.isMainOn(m.cfg.ID, sid) || (known && (s.Assistant || m.isAssistant(s))) {
+	if !terminal && (h.isMainOn(m.cfg.ID, sid) || known && (s.Assistant || m.isAssistant(s))) {
 		assistantConv = true
 		// One of the assistant's conversations: it says what the message runs on (and, the first one to a new main
 		// conversation started empty, what the old one left before it).
@@ -321,6 +359,14 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 			writeAssistantErr(w, err)
 			return
 		}
+		if target, _ := p["owner_approval_handled"].(string); target != "" {
+			// The manager verified and resolved this exact owner-action reply. It is
+			// not a conversation turn, so no node send or model execution follows.
+			delete(p, "owner_approval_handled")
+			body, _ := json.Marshal(map[string]any{"ok": true, "approval_reply": true, "interaction_id": target})
+			writeRaw(w, http.StatusOK, append(body, '\n'))
+			return
+		}
 		if kept, _ := p["model"].(string); strings.TrimSpace(asked) != "" && kept == strings.TrimSpace(asked) {
 			picked = kept
 		}
@@ -331,7 +377,10 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 	// its outcome is what the retry gets. Resuming an offline session can take a while (shell + claude startup).
 	// One sent while the session still starts waits for claude to be ready (node/starting.go); one to a session that is
 	// not running resumes it first. Either can wait minutes on a busy machine (node's claudeStartWait, #1396).
-	row, _ := m.session(sid)
+	row := s
+	if !terminal {
+		row, _ = m.session(sid)
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), sendWait(p, row))
 	defer cancel()
 	id, _ := p["client_msg_id"].(string)
@@ -339,9 +388,10 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		h.channelNoted(ch, m.cfg.ID, sid) // a voice conversation's errand (docs/extensions/channels.md "Source markers")
 	}
 	l := h.requestLang(r)
-	external := false
-	if s, ok := m.session(sid); ok {
-		external = s.SourceKind != ""
+	external := s.SourceKind != ""
+	if !terminal {
+		row, found := m.session(sid)
+		external = found && row.SourceKind != ""
 	}
 	if external && id == "" {
 		callErr(w, &rpc.Error{Code: "codex_send_guard", Message: i18n.T(l, "hub-send.guard_need_id"), Data: json.RawMessage(`{"delivered":"none"}`)})
@@ -355,7 +405,11 @@ func (h *Hub) sendMessageOnce(w http.ResponseWriter, r *http.Request, m *Machine
 		// for the Agent (NodeCall.Ordered: the manager refuses it, nothing typed, while they wait). From a client that
 		// draws a held message it may be held itself while the computer is away, answered held instead of offline
 		// (deliverOnce); one that does not would take 202 "later" for sent.
-		if h.requestWants(r, featureAgentMessageHold) {
+		holds := h.requestWants(r, featureAgentMessageHold)
+		if terminal {
+			holds = requestDeclares(r, featureAgentMessageHold)
+		}
+		if holds {
 			ctx = withHold(ctx, l)
 		} else {
 			ctx = withOrdered(ctx)

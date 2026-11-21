@@ -20,6 +20,8 @@ import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.answer.*
 import persona.feature.chat.SecretRunActions
 import persona.feature.chat.SecretRunSummary
+import persona.feature.chat.SecretHandoffActions
+import persona.feature.chat.SecretHandoffSummary
 import persona.feature.chat.rememberTransientSecret
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -61,7 +63,8 @@ internal fun RequestCard(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp.dense)) {
                 when (request.kind) {
                     // A password card (#1137), as in the chat: why, and every command exactly as it will run.
-                    "permission" -> if (request.isSecretRun) SecretRunSummary(request) else {
+                    "permission" -> if (request.isSecretRun) SecretRunSummary(request)
+                    else if (request.isSecretHandoff) SecretHandoffSummary(request) else {
                         val summary = request.permissionSummary()
                         val input = request.toolInput as? JsonObject
                         val command = (input?.get("command") as? JsonPrimitive)?.takeIf { it.isString }?.content
@@ -91,7 +94,7 @@ internal fun RequestCard(
                 request.sourceLabel(res, metadata)?.let { Text(it.replaceFirst("来自子 Agent · ", "来自子 Agent，"), // i18n-ignore: rewrites core:domain's source line
                     style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3) }
                 blockedNote?.let { Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.cautionText) }
-                if (request.needsFieldValues && !request.isSecretRun && approvable && !readOnly) Text(stringResource(R.string.agents_request_fields_elsewhere),
+                if (request.needsFieldValues && !request.isSecretRun && !request.isSecretHandoff && approvable && !readOnly) Text(stringResource(R.string.agents_request_fields_elsewhere),
                     style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
                 delivery?.let { RequestDeliveryStatus(it) }
             }
@@ -103,6 +106,11 @@ internal fun RequestCard(
                     canRun = enabled && AnswerBuilder.build(request, AnswerAction.Allow, AnswerDraft(password = password)).allowed,
                     onDecline = { password = ""; answer(AnswerAction.Deny) },
                     onRun = { onAnswer(request, AnswerAction.Allow, AnswerDraft(password = password), false); password = "" })
+                else if (request.isSecretHandoff) SecretHandoffActions(request,
+                    canDeny = enabled && AnswerBuilder.build(request, AnswerAction.Deny).allowed,
+                    canAllow = enabled && AnswerBuilder.build(request, AnswerAction.Allow).allowed,
+                    canAlways = enabled && AnswerBuilder.build(request, AnswerAction.Always).allowed,
+                    onDeny = { answer(AnswerAction.Deny) }, onAllow = { answer(AnswerAction.Allow) }, onAlways = { answer(AnswerAction.Always) })
                 else DecisionButtons(
                     // A card with fields to fill in cannot be allowed here yet (#4987).
                     primary = JAction(stringResource(R.string.agents_request_allow), enabled = enabled && !request.needsFieldValues, onClick = { answer(AnswerAction.Allow) }),
@@ -197,8 +205,8 @@ internal fun RequestDetail(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp.dense)) {
                         JButton(stringResource(R.string.agents_action_open_session), { onOpenChat(request) }, Modifier.weight(1f), kind = JButtonKind.Secondary)
                         // A session without a terminal (a Codex thread, an agent runtime's) has none to open; nor has the
-                        // assistant's own password card (#1137).
-                        onTerminal?.takeUnless { request.isSecretRun }?.let { JButton(stringResource(R.string.agents_request_open_terminal), it, Modifier.weight(1f), kind = JButtonKind.Secondary) }
+                        // assistant's own secret cards (#1137, #3962).
+                        onTerminal?.takeUnless { request.isSecretRun || request.isSecretHandoff }?.let { JButton(stringResource(R.string.agents_request_open_terminal), it, Modifier.weight(1f), kind = JButtonKind.Secondary) }
                     }
                 }
             }

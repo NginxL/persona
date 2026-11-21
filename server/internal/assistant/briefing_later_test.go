@@ -302,9 +302,9 @@ func TestBriefLaterRouteOnAStoreFailure(t *testing.T) {
 
 	restarted := newBoardEnvOn(t, e.st) // its to-dos are in memory: the question's one is still open
 	restarted.s.todos.todos["todo_a"] = &Todo{ID: "todo_a", Title: "todo_a", Origin: "conv1"}
-	e.st.failSetting = errors.New("database unavailable")
+	e.st.setFailSetting(errors.New("database unavailable"))
 	failed(restarted.s, "not read")
-	e.st.failSetting = nil
+	e.st.setFailSetting(nil)
 
 	if code := post(restarted.s, a.ID); code != http.StatusOK {
 		t.Fatalf("the press after the store is back: %d", code)

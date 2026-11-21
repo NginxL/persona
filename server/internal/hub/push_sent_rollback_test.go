@@ -21,8 +21,8 @@ type sentRecordStore interface {
 	pushSentStore
 }
 
-// oldBuild is the hub from before hub_push_sent as far as the delivered pushes go (lnmode.go on main before #8257):
-// at start it reads only the hub.push_sent setting and keeps the entries inside the 14 days (loadLnState), and every
+// oldBuild is the hub from before hub_push_sent as far as the delivered pushes go (push_grading.go on main before #8257):
+// at start it reads only the hub.push_sent setting and keeps the entries inside the 14 days (loadPushGradingState), and every
 // delivered push writes the whole list back (addSentLocked, saveIntercepts: PutSetting). It knows nothing of the
 // table. Its pusher has no store, so the list is in memory and the daily counts are the real reader's.
 type oldBuild struct {
@@ -38,7 +38,7 @@ func startOldBuild(t *testing.T, store sentRecordStore, now time.Time) *oldBuild
 	if _, err := store.Setting(t.Context(), pushSentSettingKey, &delivered); err != nil {
 		t.Fatalf("the old build reads %s: %v", pushSentSettingKey, err)
 	}
-	cutoff := now.Add(-lnInterceptAge)
+	cutoff := now.Add(-heldPushMaxAge)
 	for _, e := range delivered {
 		if e.At.After(cutoff) {
 			p.sent = append(p.sent, e)
@@ -50,9 +50,9 @@ func startOldBuild(t *testing.T, store sentRecordStore, now time.Time) *oldBuild
 func (o *oldBuild) deliver(t *testing.T, manager, key string, at time.Time) {
 	t.Helper()
 	o.p.recordSent(pushPolicy{manager: manager, relatedKey: key}, "p1", at)
-	o.p.lnMu.Lock()
+	o.p.gradingMu.Lock()
 	list := slices.Clone(o.p.sent)
-	o.p.lnMu.Unlock()
+	o.p.gradingMu.Unlock()
 	if err := o.store.PutSetting(t.Context(), pushSentSettingKey, list); err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +70,8 @@ func startNewBuild(t *testing.T, store sentRecordStore, now time.Time) *Pusher {
 
 // history is a pusher's delivered pushes as what they hold, in order: the time to the microsecond the table keeps.
 func history(p *Pusher) []string {
-	p.lnMu.Lock()
-	defer p.lnMu.Unlock()
+	p.gradingMu.Lock()
+	defer p.gradingMu.Unlock()
 	out := make([]string, len(p.sent))
 	for i, e := range p.sent {
 		out[i] = fmt.Sprintf("%s %s %s %q", e.At.UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano), e.Level, e.Manager, e.RelatedKey)
@@ -91,7 +91,7 @@ func tableRows(t *testing.T, store sentRecordStore) int {
 // sentStores runs a test on the in-memory store and, with a test database, on Postgres (a database of its own: the
 // table and the setting are the whole hub's).
 func sentStores(t *testing.T, run func(t *testing.T, store sentRecordStore)) {
-	t.Run("memory", func(t *testing.T) { run(t, newLnStore()) })
+	t.Run("memory", func(t *testing.T) { run(t, newGradingStore()) })
 	t.Run("postgres", func(t *testing.T) {
 		base := os.Getenv(dbtest.Env)
 		if base == "" {
@@ -137,7 +137,7 @@ func TestPushSentSurvivesSwitchBackAndForward(t *testing.T) {
 		old.deliver(t, "manager-b", "old-2", now.Add(-26*time.Hour))
 		old.deliver(t, "", "old-twin", now.Add(-3*time.Hour))
 		old.deliver(t, "", "old-twin", now.Add(-3*time.Hour))
-		old.deliver(t, "manager-a", "expired", now.Add(-lnInterceptAge-time.Hour))
+		old.deliver(t, "manager-a", "expired", now.Add(-heldPushMaxAge-time.Hour))
 		old = startOldBuild(t, store, now) // as it starts again: the expired entry is not read
 		wantOld, historyOld := statsViews(old.p), history(old.p)
 		if len(historyOld) != 4 {
@@ -264,7 +264,7 @@ func TestPushSentSwitchBackAfterKill(t *testing.T) {
 }
 
 // failingAdopt is a store whose start could not read the old setting into the table.
-type failingAdopt struct{ *lnStore }
+type failingAdopt struct{ *gradingStore }
 
 func (failingAdopt) AdoptPushSentSetting(context.Context, string, time.Time, int) (int, bool, error) {
 	return 0, false, errors.New("database away")
@@ -274,7 +274,7 @@ func (failingAdopt) AdoptPushSentSetting(context.Context, string, time.Time, int
 // the setting alone rather than write its shorter list over what an older build delivered.
 func TestPushSentKeepsSettingItCouldNotRead(t *testing.T) {
 	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
-	store := newLnStore()
+	store := newGradingStore()
 	old := startOldBuild(t, store, now)
 	old.deliver(t, "manager-a", "old-1", now.Add(-time.Hour))
 	old.deliver(t, "manager-a", "old-2", now.Add(-time.Minute))
@@ -303,7 +303,7 @@ func TestPushSentKeepsSettingItCouldNotRead(t *testing.T) {
 func TestPushSentWrittenAtStopAndBeforeGoingBack(t *testing.T) {
 	now := time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)
 	start := func(t *testing.T) (*Hub, func() int) {
-		store := newLnStore()
+		store := newGradingStore()
 		h := newTestHub(t)
 		h.push = startNewBuild(t, store, now)
 		recordAndSave(t, h.push, "manager-a", "p1", "new-1", now)

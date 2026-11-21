@@ -136,6 +136,33 @@ describe("the usage sources page", () => {
     expect(dialog()).toBeNull();
   });
 
+  it("adds a relay read with an API key (#12311): its key is required, and a test says when the key shares no allowances", async () => {
+    testAnswer = { ok: true, accounts: 0, windows: 0, listed: 0, providers: {}, quota_hidden: true };
+    await open();
+    await act(async () => byText(host, "添加来源")!.click());
+    await flush();
+    const relayKey = [...dialog()!.querySelectorAll<HTMLElement>('[role="radio"]')].find((b) => b.textContent === "中转（API Key）")!;
+    await act(async () => relayKey.click());
+    await flush();
+    expect(relayKey.getAttribute("aria-checked")).toBe("true");
+    expect(dialog()!.textContent).toContain("启动器用的 Base URL");
+    expect(dialog()!.textContent).toContain("不需要管理 Key");
+    await typeInto(input("地址"), "https://relay.example.com/v1");
+    const test = byText(dialog()!, "测试连接") as HTMLButtonElement;
+    const save = byText(dialog()!, "保存") as HTMLButtonElement;
+    expect(test.disabled).toBe(true); // no key yet
+    expect(save.disabled).toBe(true);
+    await typeInto(input("Key"), SECRET);
+    expect(test.disabled).toBe(false);
+    await act(async () => test.click());
+    await flush();
+    expect(dialog()!.textContent).toContain("中转没有对这把 Key 开放账号额度");
+    expect(calls.find((c) => c.path === "/usage-sources/test")?.body).toMatchObject({ type: "relay_key", url: "https://relay.example.com/v1", key: SECRET });
+    await act(async () => save.click());
+    await flush();
+    expect(calls.find((c) => c.method === "POST" && c.path === "/usage-sources")?.body).toMatchObject({ type: "relay_key", key: SECRET });
+  });
+
   it("says why a test failed", async () => {
     testAnswer = { ok: false, code: "unauthorized" };
     await open();

@@ -69,6 +69,8 @@ func TestQuickMetaKeepsAnAssistantConversationWhereItStarted(t *testing.T) {
 		{"health into its reports", health, filepath.Join(health, "reports"), health},
 		{"assistant out to the data directory", assistant, filepath.Join(home, ".persona", "data"), assistant},
 		{"health out to /tmp", health, "/tmp/x", health},
+		{"health subdirectory out to /tmp", filepath.Join(health, "reports"), "/tmp/x", filepath.Join(health, "reports")},
+		{"another manager's health subdirectory", filepath.Join(home, ".persona", "health-m-0b0b0b", "reports"), "/tmp/x", filepath.Join(home, ".persona", "health-m-0b0b0b", "reports")},
 		{"another manager's assistant", filepath.Join(home, ".persona", "assistant-m-0b0b0b"), "/tmp/x", filepath.Join(home, ".persona", "assistant-m-0b0b0b")},
 		{"an agent into a subfolder", "/work/app", "/work/app/web", "/work/app/web"},
 		{"an agent into the assistant's skills", "/work/app", skill, skill},
@@ -276,6 +278,14 @@ func TestStartRecordPlacesARowAtRest(t *testing.T) {
 	n.decorate(&s)
 	if s.Cwd != "/work/x" {
 		t.Errorf("a pane's row decorated: %q", s.Cwd)
+	}
+	const healthRun = "eeeeeeee-0000-0000-0000-000000000004"
+	healthWork := filepath.Join(n.home, ".persona", "health", "work")
+	n.state.Sessions[healthRun] = sessionState{Cwd: healthWork, Launcher: "claude", StartedAt: time.Now()}
+	s = proto.Session{SessionID: healthRun, Cwd: "/work/x", PaneID: "w1:p1"}
+	n.decorate(&s)
+	if s.Cwd != "/work/x" || s.Space != identity.SpaceHealth {
+		t.Errorf("health pane: cwd %q, space %q", s.Cwd, s.Space)
 	}
 	n.state.Sessions["eeeeeeee-0000-0000-0000-000000000003"] = sessionState{Cwd: "/work/app", Launcher: "claude", StartedAt: time.Now()}
 	s = proto.Session{SessionID: "eeeeeeee-0000-0000-0000-000000000003", Cwd: "/work/app/web"}

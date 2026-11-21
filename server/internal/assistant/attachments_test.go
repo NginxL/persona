@@ -155,12 +155,12 @@ func TestTaskPlanHandsAttachmentsToItsAgent(t *testing.T) {
 	ctx := context.Background()
 	f.sessions["server"] = nil
 	ff := newFakeFiles(f, map[string][]byte{"/x/conv1/images/1.png": []byte("png-bytes")})
-	bad, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{"title": "看图", "prompt": "看看这张图", "machine": "box", "cwd": "/code/app",
+	bad, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{"title": "看图", "prompt": "看看这张图", "role": "worker", "machine": "box", "cwd": "/code/app",
 		"readonly": true, "why": "-", "attachments": []string{"/home/me/.ssh/id_ed25519"}}}})
 	if _, err := s.toolTaskPlanFrom(ctx, "server", "conv1", bad); err == nil || !strings.Contains(err.Error(), "task 1: attachment") {
 		t.Fatalf("a disallowed attachment: %v", err)
 	}
-	good, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{"title": "看图", "prompt": "看看这张图", "machine": "box", "cwd": "/code/app",
+	good, _ := json.Marshal(map[string]any{"tasks": []map[string]any{{"title": "看图", "prompt": "看看这张图", "role": "worker", "machine": "box", "cwd": "/code/app",
 		"readonly": true, "why": "-", "attach_from": "box", "attachments": []string{"/x/conv1/images/1.png"}}}})
 	if _, err := s.toolTaskPlanFrom(ctx, "server", "conv1", good); err != nil {
 		t.Fatal(err)

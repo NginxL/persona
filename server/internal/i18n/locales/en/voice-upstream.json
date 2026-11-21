@@ -1,3 +1,4 @@
 {
+  "dictation_lost": "The dictation connection was lost. Start dictation again ({reason})",
   "unavailable": "The realtime voice service is unavailable for the moment. Try again later, or pick another voice model ({reason})"
 }

@@ -13,6 +13,7 @@ import { agentId, agentName, providerAgent } from "./agent-kind";
 import { explicitLauncherModel } from "./compatibility";
 import type { AssistantSetup } from "./assistant-models";
 import { ALL_EFFORTS, defaultModel, modelName, modelSupportsFast, typedModelOffered, type AgentModel, type LauncherModels } from "./launcher-models";
+import { launcherSupervisionPolicy } from "./launcher-supervision";
 import { validModelId } from "./model-id";
 import { cleanSetup, type PanelConfig, type PanelModel, type PanelProvider, type PanelState } from "./model-panel";
 import { providerTitle } from "./provider-names";
@@ -45,6 +46,9 @@ export interface AssistantPanelOptions {
   /** The chat already runs on `engine`: a provider of another engine can't take it over (the hub refuses it, 409
    *  `launcher_other_kind`), so it is listed off with why. Not set on the new-conversation page. */
   running?: boolean;
+  /** A capable hub uses a separate, explicitly confirmed conversation switch. */
+  switching?: boolean;
+  supervision?: boolean;
   /** A new conversation may choose an advertised native speed for its first turn. */
   starting?: boolean;
   /** The chat has Codex's Fast speed: the model it runs offers it ("as it runs": on when `fastOn`). */
@@ -79,7 +83,8 @@ export function assistantPanel(setup: AssistantSetup, info: AssistantLaunchers |
       p.models = models;
     }
     // the provider it runs on stays as it is, whatever its kind: it is what the panel says the chat runs
-    if (running && kind !== runs && l.name !== setup.provider) p.unavailable = t("chat-modelpanel.other_engine", { from: agentName(runs), to: agentName(kind) });
+    if (running && !o.switching && kind !== runs && l.name !== setup.provider) p.unavailable = t("chat-modelpanel.other_engine", { from: agentName(runs), to: agentName(kind) });
+    else if (o.supervision && !launcherSupervisionPolicy(l)) p.unavailable = t("chat-modelpanel.supervision_unavailable");
     else if (typed && typedModelOffered(kind, e.list)) p.typable = true;
     return p;
   });

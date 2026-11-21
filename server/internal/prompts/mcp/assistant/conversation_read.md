@@ -1,4 +1,4 @@
-Read the recent part of another Persona conversation (an id from conversations_list): the user's messages, what was answered, tool calls in short form, cut like agent_read. `turns` = how many recent exchanges (default 2, max 10).
+Read the recent part of another Persona conversation (an id from conversations_list): the user's messages, what was answered, tool calls in short form, cut like agent_read. `turns` = how many recent exchanges (default 2, max 10).{{template "shared/mcp_language" .}}
 
 ```json
 {

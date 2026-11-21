@@ -67,7 +67,7 @@ func (x *workFirstFixture) start(t *testing.T, kind string) string {
 	began := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	s, err := x.n.startWorkAgent(ctx, x.n.hosts.Get(host.Herdr).(*herdrHost), x.home, kind, kind, "", "", agyFirstMessage, "w1", "")
+	s, err := x.n.startWorkAgent(ctx, x.n.hosts.Get(host.Herdr).(*herdrHost), x.home, kind, kind, "", "", "", agyFirstMessage, "w1", "")
 	if err != nil {
 		t.Fatalf("start: %v\nherdr calls:\n%s", err, strings.Join(x.f.trace(), "\n"))
 	}

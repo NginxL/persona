@@ -18,13 +18,13 @@ const link = (sid: string, patch: object = {}) => ({ machine_id: "m1", session_i
 const noMutes = { spaces: [], sessions: [] };
 
 describe("By to-do: to-dos at the top level, no repository rows (#2526, #6458)", () => {
-  it("lists the to-dos in sortTodos's order with no repository over them, and the agents on no to-do directly under their group", () => {
+  it("lists the to-dos in static sortTodos order with live states in place, and no repository or extra loose-Agent group", () => {
     const all = [s("a", "working", "/code/persona"), s("b", "unread", "/code/persona/.worktrees/x"), s("c", "needs_you", "/code/botmux"), s("loose", "idle", "/code/persona"), s("loose2", "idle", "/code/other")];
     const todos = [todo("t1", [link("a")]), todo("t2", [link("b")]), todo("t3", [link("c")])];
     const tree = buildTodoTree(all, machines, todos, noMutes, NOW);
     expect(tree.projects).toEqual([]);
-    // the task board's order: Needs you (t3), Working (t1), Finished (t2), #4896
-    expect(tree.todos.map((td) => [td.todoId, td.state])).toEqual([["t3", "needs_you"], ["t1", "working"], ["t2", "done"]]);
+    // Live Agent rank does not move a to-do group; each group's state still updates (#11801).
+    expect(tree.todos.map((td) => [td.todoId, td.state])).toEqual([["t1", "working"], ["t2", "done"], ["t3", "needs_you"]]);
     expect(tree.loose.map((g) => [g.key, g.agents.map((a) => a.session.session_id)])).toEqual([["todo:none", ["loose", "loose2"]]]);
   });
 
@@ -187,6 +187,7 @@ describe("来源：飞书群 / 终端 / 桌面端 (#2526)", () => {
     expect(sessionSource(s("x", "idle", "/", { space_kind: "codex_app", source_kind: "codex_history" }))).toBe("desktop");
     expect(sessionSource(s("p", "idle", "/", { host: "paseo", source_kind: "runtime", source_instance_id: "paseo" }))).toBe("desktop");
     expect(sessionSource(s("cy", "idle", "/", { host: "cindy", source_kind: "runtime", source_instance_id: "cindy" }))).toBe("desktop");
+    expect(sessionSource(s("t3", "idle", "/", { host: "t3code", source_kind: "runtime", source_instance_id: "t3code" }))).toBe("desktop");
     expect(sessionSource(s("q", "idle", "/", { source_kind: "runtime", source_instance_id: "orca", space_kind: "orca" }))).toBe("desktop");
     expect(sessionSource(s("d", "idle", "/", { source_kind: "runtime", source_instance_id: "dsh" }))).toBeUndefined();
     expect(sessionSource(s("n", "idle", "/"))).toBeUndefined();

@@ -8,6 +8,8 @@ import persona.core.designsystem.LocalizedFormats
 import persona.core.domain.sort.AgentSession
 import persona.core.domain.sort.isNestedSubtask
 import persona.core.domain.sort.foldRows
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.ZoneId
@@ -16,6 +18,9 @@ import kotlin.math.abs
 
 internal fun percent(used: Number?, total: Number?): Double? =
     if (used != null && total != null && total.toDouble() > 0) used.toDouble() * 100 / total.toDouble() else null
+
+internal fun loadPerCore(load: Double?, cores: Int?): Double? =
+    if (load != null && load.isFinite() && load >= 0 && cores != null && cores > 0) load / cores else null
 
 /**
  * The live machine list (pushed over the WebSocket) sees a computer come and go before the next metrics poll does:
@@ -38,7 +43,7 @@ internal fun alerts(sample: MetricSample?, cores: Int?): List<MetricAlert> {
     add(R.string.machines_alert_cpu, sample.cpu, 75.0, 90.0)
     add(R.string.machines_alert_memory, percent(sample.memUsed, sample.memTotal), 80.0, 90.0)
     add(R.string.machines_alert_disk, percent(sample.diskUsed, sample.diskTotal), 80.0, 90.0)
-    add(R.string.machines_alert_load, cores?.takeIf { it > 0 }?.let { sample.load?.div(it) }, 1.0, 2.0)
+    add(R.string.machines_alert_load, loadPerCore(sample.load, cores), 1.0, 2.0)
     return result.sortedByDescending { it.critical }
 }
 
@@ -99,6 +104,9 @@ internal object MetricFormat {
     private fun oneDecimal(format: NumberFormat) = format.apply { minimumFractionDigits = 1; maximumFractionDigits = 1 }
     fun number(value: Double?, locale: Locale): String =
         value?.takeIf(Double::isFinite)?.let { oneDecimal(NumberFormat.getNumberInstance(locale)).format(it) } ?: "—"
+    /** Round the binary sample like the web's toFixed(1), then format in the app language. */
+    fun loadPerCore(value: Double, locale: Locale): String =
+        oneDecimal(NumberFormat.getNumberInstance(locale)).format(BigDecimal(value).setScale(1, RoundingMode.HALF_UP))
     /** [value] is already a percentage (0–100). */
     fun percent(value: Double?, locale: Locale): String =
         value?.takeIf(Double::isFinite)?.let { oneDecimal(NumberFormat.getPercentInstance(locale)).format(it / 100) } ?: "—"
@@ -122,6 +130,11 @@ internal object MetricFormat {
     }
     /** How long it has been up, in minutes, or null without a boot time. */
     fun uptimeMinutes(boot: Double?, now: Long): Long? = boot?.takeIf { it.isFinite() && it > 0 && it <= now }?.let { (now - it.toLong()) / 60 }
+}
+
+@Composable
+internal fun loadPerCoreText(load: Double?, cores: Int?, locale: Locale): String? = loadPerCore(load, cores)?.let {
+    stringResource(R.string.machines_load_per_core, MetricFormat.loadPerCore(it, locale))
 }
 
 /** How long it has been up: 3d 4h in English, the Chinese or Japanese form otherwise. */

@@ -1,7 +1,7 @@
 // What an opened step shows besides its raw input (iOS ToolViews.swift ToolDetail, Android ToolDetails.kt /
 // ContentPresentation.kt): a Codex patch as a diff, the questions an AskUserQuestion or the assistant's ask_user asked
 // (with what the user picked), and the hub's cut texts (full_size) with the mark it adds where it cut them.
-import type { Op } from "./compare";
+import type { Op } from "./diff-lines";
 import { parseDiff, toolFile } from "./files";
 import type { Interaction } from "./types";
 

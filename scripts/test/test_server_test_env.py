@@ -395,7 +395,7 @@ class ServerTestEnvironmentTests(unittest.TestCase):
                 "PGPASSFILE": str(profile / "passwords"), "PGOPTIONS": "synthetic", "PG_FUTURE_SETTING": "synthetic",
             }
             # The whole module runs through the staged go_test_partitioned.py: the other packages in one go test and
-            # internal/node in go_partitions.py's two -run partitions. A -run passes through unchanged.
+            # internal/node in go_partitions.py's three -run partitions. A -run passes through unchanged.
             flags = ["test", "-count=1", "-p", "1"]
             # A listing call's -list pattern is the runner's choice; compare it by its shape.
             is_listing = lambda call: call[:1] == ["list"] or call[:2] == ["test", "-list"]

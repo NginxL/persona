@@ -1,4 +1,4 @@
-Read one iMessage / SMS conversation of the user's: its newest messages, oldest first, with who wrote each one and when (what a reply answers, attachments as [图片] / [文件 name] / [语音], group changes as lines; one-time codes masked). Ask again with the before value it gives for earlier messages.
+Read one iMessage / SMS conversation of the user's: its newest messages, oldest first, with who wrote each one and when (what a reply answers, attachments as [图片] / [文件 name] / [语音], group changes as lines; one-time codes masked). Ask again with the before value it gives for earlier messages.{{template "shared/mcp_language" .}}
 
 ```json
 {

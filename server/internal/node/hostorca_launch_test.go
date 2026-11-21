@@ -199,10 +199,10 @@ func TestOrcaResumesAnOfflineSession(t *testing.T) {
 		t.Errorf("Orca was asked %v", c)
 	}
 
-	// Only Claude sessions: a TRAEX resume is refused, and so is one an Orca native chat owns (its runtime's).
+	// Only Claude sessions: a TRAE CLI resume is refused, and so is one an Orca native chat owns (its runtime's).
 	_, err = request(t, n, "session.start", map[string]any{"session_id": id, "resume_session_id": id, "cwd": projDir, "launcher": traexAgent})
 	if !isRefusal(err, "orca_resume") {
-		t.Errorf("TRAEX resume: %v", err)
+		t.Errorf("TRAE CLI resume: %v", err)
 	}
 	if n.runtimes == nil {
 		n.runtimes = newRuntimeRegistry()

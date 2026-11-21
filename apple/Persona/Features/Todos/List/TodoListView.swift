@@ -3,19 +3,23 @@ import PersonaWire
 import SwiftUI
 
 extension TodosListDeps {
-    /// The app's: the shared store, the hub and the knowledge base's projects.
+    /// The app's: the shared store and outbox, the hub, the knowledge base's projects and the app's toast.
     @MainActor static var live: TodosListDeps {
         let app = AppModel.shared
-        return TodosListDeps(store: TodoStore.shared, api: { app.api }, now: { Date() }, calendar: { TodoCalendar.userCalendar },
-                             projects: { TodoProjects.shared.list })
+        return TodosListDeps(store: TodoStore.shared, outbox: TodoOutbox.shared, api: { app.api }, now: { Date() },
+                             calendar: { TodoCalendar.userCalendar }, projects: { TodoProjects.shared.list },
+                             toast: { app.toast = $0 }, show: { app.show($0) },
+                             assistive: { UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning })
     }
 }
 
 /// The V1 To-dos list (#10465; docs/design/proposals/todos-redesign.md 3.3, 3.4; DESIGN_SYSTEM 3.4 "To-dos list"): the
 /// section bar (`TodosBar`, on the Inbox's `CapsuleFilterBar`, the grouping at its end), the sections in the hub's order
 /// with Can wait and Someday folded, and the rows (`TodoListRow`). The calm rule hides the bar and the headers while only
-/// plain To do rows exist. Rows open today's to-do page until the to-do's own page arrives; ticking, swiping and New To-Do
-/// arrive in the next step. iOS only: visionOS keeps today's To-dos.
+/// plain To do rows exist. A row ticks, swipes (Done, Someday) and has a long-press menu (`TodoRowActions`); New To-Do
+/// floats at the foot; the writes wait out their Undo on the device (`TodoOutbox`). While the hub is out of reach the
+/// list is the one last read, under one line that says so. Rows open today's to-do page until the to-do's own page
+/// arrives. iOS only: visionOS keeps today's To-dos.
 struct TodoListView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.shownTree) private var shownTree
@@ -28,6 +32,8 @@ struct TodoListView: View {
     /// Whether this page has put its list back where the place was left: once, as the page is made. A list kept in its
     /// navigation stack keeps its own place when a to-do pushed over it pops.
     @State private var placed = false
+    /// New To-Do's sheet (the row's confirmations and Date… are the model's, presented from their row).
+    @State private var creating = false
     private let workspace = TodoWorkspace.shared
 
     /// Whether this page's tree is the one the window shows: a tree on its way out leaves the workspace alone.
@@ -52,6 +58,7 @@ struct TodoListView: View {
                             .listRowSeparator(.hidden)
                             .themedRow()
                     }
+                    TodosOfflineLine(model: model)
                     content
                 }
             }
@@ -63,6 +70,9 @@ struct TodoListView: View {
                 if drawsBar && Self.pinsBar { TodosSectionBar(model: model, grouping: $grouping) }
             }
             .refreshable { await model.refresh() }
+            .floatingFooter(over: Theme.pageBackground) {
+                if model.ready { TodoNewPill { creating = true } }
+            }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentInsets.top } action: { _, top in sight.covered = top }
             .onScrollPhaseChange { old, phase in
                 model.hold.set(.scrolling, phase != .idle)
@@ -106,6 +116,16 @@ struct TodoListView: View {
         .pageToolbar {
             ToolbarItem(placement: .primaryAction) { moreMenu }
         }
+        .sheet(item: Binding(get: { model.dating.flatMap { key in model.item(key).map { DueTarget(key: key, item: $0) } } },
+                             set: { model.dating = $0?.key })) { target in
+            TodoDueSheet(item: target.item) { due in model.setDue(target.key, to: due) }
+        }
+        .sheet(isPresented: $creating) {
+            // A new to-do the hub turned down comes back with what it said (its toast's Edit).
+            TodoNewSheet(draft: model.draft) { title, notes in model.create(title: title, notes: notes) }
+                .onAppear { model.tookDraft() }
+        }
+        .onChange(of: model.draft) { _, draft in if draft != nil { creating = true } }
         .onChange(of: grouping) { _, g in model.grouping = g }
         .onChange(of: sort) { _, s in model.sort = s }
         // Each minute while the page is in front, and as it comes back to the front: the rows' times, and what the clock
@@ -146,11 +166,8 @@ struct TodoListView: View {
 
     @ViewBuilder private func row(_ key: String) -> some View {
         if let cell = model.row(key) {
-            // The row is the to-do: the link under it, so no chevron on every row (as the Inbox's rows; iOS 18 draws the
-            // chevron of a link that is the row whatever it is told).
-            TodoListRow(row: cell)
-                .background { NavigationLink(value: TodoDetailRoute(id: cell.todoID)) { EmptyView() }.opacity(0) }
-                .themedRow()
+            // Its cell and the model, never closures or its content: a list update that leaves it alone skips it (P6).
+            TodoListCell(cell: cell, model: model)
             .onAppear { sight.visible.insert(key) }
             .onDisappear {
                 sight.visible.remove(key)
@@ -214,6 +231,13 @@ struct TodoListView: View {
         }
     }
 
+    /// Date…'s row and its to-do.
+    private struct DueTarget: Identifiable {
+        var key: String
+        var item: TodoItem
+        var id: String { key }
+    }
+
     // MARK: Menus
 
     /// The list's ⋯: the order inside each section, and Someday and Done today shown or folded.
@@ -228,7 +252,7 @@ struct TodoListView: View {
             .pickerStyle(.menu)
             Section {
                 Toggle(isOn: foldBinding(TodoListSection.someday)) {
-                    Label(String(localized: "Show Someday [To-dos List]"), systemImage: Theme.Icon.time)
+                    Label(String(localized: "Show Someday [To-dos List]"), systemImage: Theme.Icon.someday)
                 }
                 Toggle(isOn: foldBinding(TodoListSection.done)) {
                     Label(String(localized: "Show Done Today [To-dos List]"), systemImage: Theme.Icon.success)
@@ -309,17 +333,54 @@ private struct TodosSectionHeader: View {
     var group: TodosListGroup
     var title: String
 
+    private static var backed: Bool {
+        if #available(iOS 26.0, *) { true } else { false }
+    }
+
     var body: some View {
         let count = group.needs ? model.needsYou : group.count
         SectionHeader(title: title, count: count, tone: group.needs ? StatusPalette.needsYou : StatusPalette.idle)
             .font(Theme.Font.sectionHeader)
             .textCase(nil)
             .lineLimit(1)
+            // Pinned over the rows it heads, where iOS 26 gives a plain list's header no backing: the page's own color
+            // behind it across the list's width, so a row scrolling under it never reads as run into its words (as the
+            // web's pinned headings, DESIGN_SYSTEM 3.4). On the page it is the page; iOS 18 draws its own strip.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                if Self.backed { Theme.pageBackground.padding(.horizontal, -Theme.Space.xl).padding(.vertical, -Theme.Space.xs) }
+            }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(title)
             .accessibilityValue(String(count))
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("todos.section." + group.id)
+    }
+}
+
+/// "Can't reach your hub · showing what was saved 10:14": the list's one line, its first row, while the hub is out of
+/// reach as the titles say it (`ConnectionStatus`, after its delay). A view of its own, so only it follows the hub's link
+/// and when the list was last read (P5). It says the link itself: the shell's pill stays away while it is in sight, so
+/// the link is said once and the bar's counts stay clear (`titleSaysLink`, docs/apple/shell.md "Said once").
+private struct TodosOfflineLine: View {
+    @Environment(AppModel.self) private var app
+    var model: TodosListModel
+
+    private var offline: Bool {
+        switch app.connection.shown {
+        case .waitingForNetwork, .connecting, .rejected: true
+        case .online, .updating: false
+        }
+    }
+
+    var body: some View {
+        if offline && model.hasRows {
+            NoticeBanner(text: model.offlineLine, tone: .caution, symbol: Theme.Icon.offline)
+                .titleSaysLink()
+                .accessibilityIdentifier("todos.offline")
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
     }
 }
 

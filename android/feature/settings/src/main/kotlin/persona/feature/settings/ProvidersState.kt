@@ -11,6 +11,7 @@ import persona.core.contracts.api.ImportedProvider
 import persona.core.contracts.api.LauncherCheck
 import persona.core.contracts.api.LauncherImportResult
 import persona.core.contracts.api.ProviderSetup
+import persona.core.contracts.isTraeCliId
 import persona.core.designsystem.UiText
 import persona.core.designsystem.failureReasonText
 import persona.core.hub.HubFailure
@@ -24,12 +25,15 @@ internal data class ProviderGroups(val managed: List<HubLauncher>, val zshrc: Li
         fun of(list: List<HubLauncher>, query: String = "", machineName: (String) -> String = { it }): ProviderGroups {
             val q = query.trim()
             val shown = if (q.isEmpty()) list else list.filter { l ->
-                (listOfNotNull(l.name, l.model, l.smallModel, l.baseUrl) + l.machines.map(machineName)).any { it.contains(q, ignoreCase = true) }
+                (listOfNotNull(l.name, l.settingsTitle, l.model, l.smallModel, l.baseUrl) + l.machines.map(machineName)).any { it.contains(q, ignoreCase = true) }
             }
             return ProviderGroups(shown.filter { it.managed }, shown.filter { !it.managed && !it.hidden }, shown.filter { !it.managed && it.hidden })
         }
     }
 }
+
+internal val HubLauncher.settingsTitle: String
+    get() = if (isTraeCliId(name) || isTraeCliId(harness)) title else name
 
 /** A gateway's host, for the row (the whole address is on the provider's page). */
 internal fun providerHost(baseUrl: String?): String? =
@@ -80,7 +84,7 @@ internal class ProvidersModel(private val api: ProviderSetup) {
         return try { call(); true }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) {
-            mutable.update { it.copy(launchers = before, notice = ResText.of(R.string.settings_providers_change_failed, launcher.name, failureReasonText(error))) }
+            mutable.update { it.copy(launchers = before, notice = ResText.of(R.string.settings_providers_change_failed, launcher.settingsTitle, failureReasonText(error))) }
             false
         }
     }

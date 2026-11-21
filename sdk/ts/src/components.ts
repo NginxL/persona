@@ -104,3 +104,7 @@ export const Carousel = native<ComponentProps<"carousel">>("carousel");
 export type GraphNodeProps = Omit<Wire.GraphNode, "action"> & { action?: NativeAction | CallbackAction };
 export type GraphProps = Omit<ComponentProps<"graph">, "nodes"> & { nodes: GraphNodeProps[] };
 export const Graph = native<GraphProps>("graph");
+/** A scene's pin (UI version 11). It carries an id too, so its action is mapped here as a graph node's is. */
+export type ScenePinProps = Omit<Wire.ScenePin, "action"> & { action?: NativeAction | CallbackAction };
+export type SceneProps = Omit<ComponentProps<"scene">, "pins"> & { pins?: ScenePinProps[] };
+export const Scene = native<SceneProps>("scene");

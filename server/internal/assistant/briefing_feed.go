@@ -53,6 +53,17 @@ type briefBody struct {
 	// of the last 7 days' asks or background rounds. Only on the first briefing of a week, and only when it names
 	// something; left out otherwise (a client that does not draw it skips it).
 	Setup []setupSuggestion `json:"setup,omitempty"`
+	// PRFollowups are closed to-dos whose own delivery PRs are still open and have been silent for a while, oldest
+	// first. They never reopen a to-do; older clients ignore the field.
+	PRFollowups []briefBodyPRFollowup `json:"pr_followups,omitempty"`
+}
+
+// briefBodyPRFollowup is one stale post-closure PR subscription as the briefing shows it.
+type briefBodyPRFollowup struct {
+	TodoID string `json:"todo_id"`
+	Title  string `json:"title"`
+	PRURL  string `json:"pr_url"`
+	State  string `json:"state,omitempty"`
 }
 
 // briefBodyNorthStar is a `brief` item's north star: the lines as the report says them, and today's and yesterday's
@@ -155,6 +166,17 @@ func (f *briefFacts) body(s *Service, title string) briefBody {
 	for _, p := range f.Progress {
 		b.Progress = append(b.Progress, briefBodyProgress{ID: p.ID, Title: p.Title, Stage: p.Stage, StageKind: p.StageKind})
 	}
+	briefCtx, briefCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	for _, fup := range s.stalePRFollowups(briefCtx, f.At) {
+		title := fup.TodoID
+		if t, ok := s.todoNow(fup.TodoID); ok {
+			title = t.Title
+		}
+		b.PRFollowups = append(b.PRFollowups, briefBodyPRFollowup{
+			TodoID: fup.TodoID, Title: title, PRURL: fup.PRURL, State: fup.State,
+		})
+	}
+	briefCancel()
 	return b
 }
 
@@ -204,17 +226,27 @@ func (s *Service) briefRoutes() {
 			return
 		}
 		var in struct {
-			AskedAt  string `json:"asked_at"`
-			Option   string `json:"option"`
-			Response string `json:"response"`
+			AskedAt  string            `json:"asked_at"`
+			Option   string            `json:"option"`
+			Response string            `json:"response"`
+			Answers  map[string]string `json:"answers"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.AskedAt == "" {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); err != nil || in.AskedAt == "" {
 			apierr.Write(w, http.StatusBadRequest, errors.New("asked_at is required"))
 			return
 		}
 		var result acceptResult
 		var err error
 		switch {
+		case isAskTodo(r.PathValue("id")):
+			if in.Response != "" {
+				apierr.Write(w, http.StatusBadRequest, errDecisionOption)
+				return
+			}
+			result, err = s.chooseExpiredQuestion(r.Context(), r.PathValue("id"), in.AskedAt, in.Option, in.Answers)
+		case in.Answers != nil:
+			apierr.Write(w, http.StatusBadRequest, errDecisionOption)
+			return
 		case in.Response != "" && in.Option != "":
 			apierr.Write(w, http.StatusBadRequest, errors.New("give option or response, not both"))
 			return

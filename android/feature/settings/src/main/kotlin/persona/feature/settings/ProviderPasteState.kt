@@ -69,7 +69,7 @@ internal fun ProviderPasteDraft.defaultAction(): ProviderPasteAction =
 internal fun ProviderPasteDraft.existingDraft(existing: HubLauncher, action: ProviderPasteAction): NewProviderDraft {
     val base = providerDraftOf(existing)
     return when (action.kind) {
-        PasteActionKind.Key -> base.copy(apiKey = provider.apiKey.orEmpty())
+        PasteActionKind.Key -> base.copy(apiKey = provider.apiKey.orEmpty(), apiKeyByReference = false)
         PasteActionKind.Merge -> {
             val added = modelsForProvider().filter { candidate -> base.models.none { it.id == candidate.id } }.distinctBy { it.id }
             base.copy(models = base.models + added)

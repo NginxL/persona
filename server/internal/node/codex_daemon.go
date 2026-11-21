@@ -38,6 +38,9 @@ type codexJoinState struct {
 // joinCodexPanes joins, in the background, every live Codex pane whose thread runs on a connected app-server and is
 // not joined yet. A failed join waits codexJoinRetry before the next try.
 func (n *Node) joinCodexPanes(ctx context.Context) {
+	if n == nil {
+		return
+	}
 	n.mu.Lock()
 	var ids []string
 	for id, a := range n.agents {

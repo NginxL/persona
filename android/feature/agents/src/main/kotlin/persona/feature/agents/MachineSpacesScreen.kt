@@ -43,7 +43,7 @@ internal fun MachineSpacesScreen(
         pluralStringResource(persona.core.designsystem.R.plurals.designsystem_tab_agents, shown.agents, shown.agents))
     val agentsOf = { count: Int -> resources.getQuantityString(persona.core.designsystem.R.plurals.designsystem_tab_agents, count, count) }
     JListPage(
-        title = machine?.displayName ?: machineId, onBack = onBack, largeTitle = PersonaTheme.style == AppStyle.Glass,
+        title = machine?.displayName ?: machineId, onBack = if (LocalIsSidebarRoot.current) null else onBack, largeTitle = PersonaTheme.style == AppStyle.Glass,
         actions = { JIconButton(PersonaIcons.info, stringResource(R.string.agents_projects_details), onDetails) },
     ) {
         if (machine != null) item("summary", contentType = "summary") {

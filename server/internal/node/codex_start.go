@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,8 +38,24 @@ import (
 // launch, whose first message is exactly this one — with that thread's id, so the phone opens the session that is
 // there; it fails, with what the tab shows, when none comes in time. Without a message it returns a waiting row (codex_waiting.go).
 
-// codexStartWait is how long a start waits for Codex's thread (a trust dialog, a slow ~/.zshrc, the first turn).
-var codexStartWait = 60 * time.Second
+// PERSONA_CODEX_START_WAIT is a positive Go duration such as "90s" or "4m" on the node.
+const codexStartWaitEnv = "PERSONA_CODEX_START_WAIT"
+const defaultCodexStartWait = 180 * time.Second
+
+// Fresh terminal starts wait for the composer or for the first message to appear in the thread.
+var codexStartWait = codexStartWaitFromEnv()
+
+func codexStartWaitFromEnv() time.Duration {
+	value := strings.TrimSpace(os.Getenv(codexStartWaitEnv))
+	if value != "" {
+		wait, err := time.ParseDuration(value)
+		if err == nil && wait > 0 {
+			return wait
+		}
+		log.Printf("%s must be a positive duration; using %s", codexStartWaitEnv, defaultCodexStartWait)
+	}
+	return defaultCodexStartWait
+}
 
 // codexArgv is how a Codex launcher runs: plain codex, or an alias's words; ok false when the launcher is not Codex's.
 func (n *Node) codexArgv(launcher string) ([]string, bool) {
@@ -195,7 +212,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	}
 	if n.codexOnSharedDaemon(argv) {
 		if err := codexDaemonSocketGone(n.codexHome()); err != nil {
-			return nil, err // a new tab would only show codex failing to connect, after a minute's wait
+			return nil, err // a new tab would only show Codex failing to connect after the startup wait
 		}
 	}
 	key := cwd + "\x00" + launcher
@@ -253,7 +270,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	defer done()
 	var id string
 	if waiting {
-		err = n.waitCodexBox(ctx, pane)
+		err = n.waitCodexBox(ctx, pane, codexStartWait)
 		if errors.Is(err, errCodexBoxLate) {
 			// Codex runs but its box has not come up yet: the row all the same, and its tab stays. Nothing is queued in it
 			// that could run later; the first message waits for the box itself (codexBoxFor).
@@ -304,6 +321,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		return n.openCodexWait(ctx, pane, cwd, launcher, mode, execution, began), nil
 	}
 	defer n.unclaimCodexThread(id)
+	id = n.codexPublicID(n.codexPaneHome(pane), id)
 	n.bindPane(pane, id)
 	n.namePersonaTab(ctx, pane, id) // the tab was marked before the thread was known (personatab.go)
 	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: began.UTC(), Model: execution.Model, ModelEffort: execution.Effort, TaskInstructions: execution.TaskInstructions}
@@ -318,6 +336,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 	}
 	n.putAgentState(ctx, launch, id, st)
 	_ = n.refreshHosts(ctx)
+	n.joinCodexPanes(ctx)
 	a, ok := n.agent(id)
 	if !ok {
 		a = host.Agent{Agent: "codex", PaneID: pane, Cwd: cwd, AgentStatus: proto.StatusWorking}
@@ -376,7 +395,8 @@ func (n *Node) unclaimCodexThread(id string) {
 // for: the folder is trusted (they chose it), an update is skipped. A launcher that fails ends the wait at once.
 func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, began time.Time) (string, error) {
 	poll := n.readinessPoll()
-	deadline := time.Now().Add(codexStartWait)
+	maxWait := codexStartWait
+	deadline := time.Now().Add(maxWait)
 	resolved := cwd
 	if r, err := filepath.EvalSymlinks(cwd); err == nil {
 		resolved = r
@@ -391,7 +411,7 @@ func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, be
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(poll):
+		case <-time.After(min(time.Until(deadline), poll)):
 		}
 		for _, home := range homes {
 			for _, r := range rollouts(home) {
@@ -430,7 +450,7 @@ func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, be
 			_ = sleepCtx(ctx, codexDialogPause)
 		}
 	}
-	message := fmt.Sprintf("Codex 已经在电脑上的新标签里打开了，但 %d 秒内没认出它这次的会话（第一条消息还没进它的会话记录）", int(codexStartWait.Seconds()))
+	message := fmt.Sprintf("Codex 已经在电脑上的新标签里打开了，但 %g 秒内没认出它这次的会话（第一条消息还没进它的会话记录）", maxWait.Seconds())
 	if agent, err := n.paneAgent(ctx, pane); err == nil && agent != nil && agent.Agent == "codex" {
 		return "", &rpc.Error{Code: proto.CodeAgentStartStalled, Message: message}
 	}

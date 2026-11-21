@@ -70,8 +70,14 @@ func (c *conversation) connect(woken bool) error {
 		Target: snap, Waiting: waiting, Paused: woken,
 	}
 	tools := c.toolSet()
-	rate, err := c.startSession(dctx, up, w, p, model, voice, in, tools)
-	if err != nil && len(tools) > 0 && auto && refusedTools(err) {
+	var rate int
+	partial := false
+	if c.dictation {
+		rate, partial, up, err = c.startDictation(dctx, up, p, w, model, c.instructions(in, nil))
+	} else {
+		rate, err = c.startSession(dctx, up, w, p, model, voice, in, tools)
+	}
+	if err != nil && !c.dictation && len(tools) > 0 && auto && refusedTools(err) {
 		// The service does not take function tools (#1420): the same session without them, once. Remembered only once
 		// that one starts: a session refused all the same was not refused for its tools.
 		c.logf("provider %s: the service refused the function tools as the session started (%s); starting it again without them", p.ID, failure(err))
@@ -96,6 +102,7 @@ func (c *conversation) connect(woken bool) error {
 		return errors.New("closed")
 	}
 	c.up, c.ready, c.connectedAt = up, true, time.Now()
+	c.dictationPartial = partial
 	gen := c.gen
 	first := !c.started
 	why := "first"
@@ -119,7 +126,9 @@ func (c *conversation) connect(woken bool) error {
 	if first {
 		c.started, c.outRate = true, rate
 		ready := map[string]any{"type": "ready", "input_rate": p.inputRate(), "output_rate": rate, "model": c.modelID, "voice": nilIfEmpty(voice)}
-		if c.version >= 2 {
+		if c.dictation {
+			ready["protocol"], ready["features"], ready["voice"] = infoProtocol, features, nil
+		} else if c.version >= 2 {
 			ready["protocol"], ready["features"], ready["target"] = infoProtocol, features, c.target.frame()
 		}
 		c.sendApp(ready)
@@ -144,6 +153,9 @@ func (c *conversation) connect(woken bool) error {
 		c.runs.reconnected()
 		return nil
 	}
+	if c.dictation {
+		return nil // no cards, runs, observed conversations or resume state for an unbound dictation
+	}
 	c.runs.arm() // its cards (asks.go): the call is set up; before the runs handed back, which a card may cover
 	if len(resume) > 0 {
 		c.runs.resume(resume)
@@ -162,7 +174,7 @@ func (c *conversation) connect(woken bool) error {
 // the rate of its audio. A failure closes up; the service's refusal is a *sessionRefused.
 func (c *conversation) startSession(ctx context.Context, up upLink, w wire, p *Provider, model, voice string,
 	in prompts.VoiceInstructions, tools []string) (int, error) {
-	s := session{Model: model, Voice: voice, InputRate: p.inputRate(), Instructions: c.instructions(in, tools), Tools: toolDecls(tools, c.meeting != nil)}
+	s := session{Model: model, Voice: voice, InputRate: p.inputRate(), Instructions: c.instructions(in, tools), Tools: toolDecls(tools, c.meeting != nil, string(c.language()))}
 	return startUpstream(ctx, up, w, p, s)
 }
 
@@ -178,7 +190,8 @@ func (c *conversation) instructions(in prompts.VoiceInstructions, tools []string
 
 // startUpstream sends session s's start on up and waits for the service to start it: the rate of its audio. A failure
 // closes up; the service's refusal is a *sessionRefused. A call's sessions and a read-aloud's (speak.go) start alike.
-func startUpstream(ctx context.Context, up upLink, w wire, p *Provider, s session) (int, error) {
+// onStarted, when given, receives the started event before the return (dictation reads its interim-caption grant).
+func startUpstream(ctx context.Context, up upLink, w wire, p *Provider, s session, onStarted ...func(event)) (int, error) {
 	if err := writeJSON(ctx, up, w.start(s)); err != nil {
 		_ = up.CloseNow()
 		return 0, err
@@ -195,6 +208,9 @@ func startUpstream(ctx context.Context, up upLink, w wire, p *Provider, s sessio
 		for _, e := range w.decode(b) {
 			switch e.kind {
 			case evStarted:
+				if len(onStarted) > 0 {
+					onStarted[0](e)
+				}
 				if e.rate == 0 {
 					return w.outputRate(p.inputRate()), nil
 				}
@@ -301,6 +317,8 @@ func dialUpstream(ctx context.Context, p *Provider, w wire, model string) (upLin
 func (c *conversation) toolSet() []string {
 	declare, _ := c.p.toolsMode()
 	switch {
+	case c.dictation:
+		return nil // transcription only: no function tools, however the provider's ordinary calls are configured
 	case !declare || c.toolless.Load():
 		return nil
 	case c.meeting != nil:
@@ -381,7 +399,13 @@ func (c *conversation) readUpstream(up upLink, gen int) {
 			c.mu.Unlock()
 			return
 		}
-		for _, e := range c.w.decode(b) {
+		var events []event
+		if c.dictation {
+			events = c.dictationEvents(b)
+		} else {
+			events = c.w.decode(b)
+		}
+		for _, e := range events {
 			c.handle(gen, e)
 		}
 		c.mu.Unlock()
@@ -390,6 +414,10 @@ func (c *conversation) readUpstream(up upLink, gen int) {
 
 // handle applies one upstream event (mu held).
 func (c *conversation) handle(gen int, e event) {
+	if c.dictation {
+		c.handleDictation(gen, e)
+		return
+	}
 	switch e.kind {
 	case evAudio:
 		now := time.Now()
@@ -558,6 +586,12 @@ func (c *conversation) lost(gen int, why error) {
 		held = time.Since(c.connectedAt).Round(time.Second)
 	}
 	c.logf("upstream: session %d lost after %v: %v", sessionNo(gen), held, why)
+	if c.dictation {
+		down, text := c.down.session == sessionNo(gen), c.down.text
+		c.mu.Unlock()
+		c.dictationLost(down, text, why)
+		return
+	}
 	if !c.connectedAt.IsZero() && time.Since(c.connectedAt) >= stableAfter {
 		c.reconnects = 0 // it held: a drop now is not one of a run of them (docs/assistant/voice.md "Reconnect and resume")
 	}

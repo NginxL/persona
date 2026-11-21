@@ -54,7 +54,7 @@ func TestSupervisionPRConflictDedupKeepsPermanentEntriesDuringOrdinaryExpiry(t *
 	ctx, now := context.Background(), time.Now()
 	e := prompts.SuperviseEntry{ID: "todo_example", Last: "No task delivery yet."}
 	conflict := superviseSignal{Todo: e.ID, Kind: sigPRConflict, Key: "https://github.com/example/app/pull/12@head-a"}
-	idle := superviseSignal{Todo: e.ID, Kind: sigIdle, Key: "turn-a"}
+	idle := superviseSignal{Todo: e.ID, Kind: sigNeedsYou, Key: "turn-a"} // a kind that keeps the short window (keptUntilChange)
 	for _, g := range []superviseSignal{conflict, idle} {
 		if _, _, _, err := s.reserveSupervision(ctx, []prompts.SuperviseEntry{e}, []superviseSignal{g}, now); err != nil {
 			t.Fatal(err)

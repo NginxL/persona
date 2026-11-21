@@ -230,3 +230,61 @@ func TestAgyCallWithoutResultDoesNotShiftLaterResults(t *testing.T) {
 		t.Fatalf("results by call = %q, want %q", got, want)
 	}
 }
+
+func TestAgyInterruptedErrorNoteIsDropped(t *testing.T) {
+	const afterSystem = `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","status":"DONE","created_at":"2026-01-01T00:00:00Z","content":"run task"}
+{"step_index":1,"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","created_at":"2026-01-01T00:00:01Z","content":"Working on it."}
+{"step_index":2,"type":"SYSTEM_MESSAGE","status":"DONE","created_at":"2026-01-01T00:00:02Z","content":"background notice"}
+{"step_index":3,"type":"ERROR_MESSAGE","source":"SYSTEM","status":"DONE","created_at":"2026-01-01T00:00:03Z","error":"The stream was interrupted. Please continue the task you were working on."}
+`
+	steps, _ := parseAgySteps([]byte(afterSystem), agyTestID)
+	stopped := mapAgySteps(steps, time.Time{}, nil)
+	if stopped.seq != 4 {
+		t.Fatalf("stopped seq = %d, want 4", stopped.seq)
+	}
+	var stoppedTexts []string
+	for _, it := range stopped.items {
+		if it.Wake {
+			t.Fatalf("interrupted stop note must not trigger a wake notice: %+v", it)
+		}
+		stoppedTexts = append(stoppedTexts, it.Text)
+	}
+	if want := []string{"run task", "Working on it."}; !slices.Equal(stoppedTexts, want) {
+		t.Fatalf("stopped items = %q, want %q", stoppedTexts, want)
+	}
+
+	const fixture = `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","status":"DONE","created_at":"2026-01-01T00:00:00Z","content":"run task"}
+{"step_index":1,"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","created_at":"2026-01-01T00:00:01Z","tool_calls":[{"name":"run_command","args":{"CommandLine":"sleep 10"}}]}
+{"step_index":2,"type":"ERROR_MESSAGE","source":"SYSTEM","status":"DONE","created_at":"2026-01-01T00:00:02Z","content":"The stream was interrupted."}
+{"step_index":3,"type":"USER_INPUT","source":"USER_EXPLICIT","status":"DONE","created_at":"2026-01-01T00:00:03Z","content":"try again"}
+{"step_index":4,"type":"PLANNER_RESPONSE","source":"MODEL","status":"DONE","created_at":"2026-01-01T00:00:04Z","tool_calls":[{"name":"view_file","args":{"AbsolutePath":"/tmp/a"}}]}
+{"step_index":5,"type":"GENERIC","status":"DONE","created_at":"2026-01-01T00:00:05Z","content":"file body"}
+{"step_index":6,"type":"ERROR_MESSAGE","source":"SYSTEM","status":"DONE","created_at":"2026-01-01T00:00:06Z","error":"The stream was interrupted: 503 unavailable"}
+`
+	steps, _ = parseAgySteps([]byte(fixture), agyTestID)
+	history := mapAgySteps(steps, time.Time{}, nil)
+	if history.seq != 7 {
+		t.Fatalf("seq = %d, want 7", history.seq)
+	}
+	var texts []string
+	var uses []string
+	results := map[string]string{}
+	for _, it := range history.items {
+		if it.Kind == "tool_use" {
+			uses = append(uses, it.ToolUseID)
+		}
+		if it.Kind == "tool_result" {
+			results[it.ToolUseID] = it.Text
+		}
+		if it.Kind == "text" {
+			texts = append(texts, it.Text)
+		}
+	}
+	wantTexts := []string{"run task", "try again", "API Error: The stream was interrupted: 503 unavailable"}
+	if !slices.Equal(texts, wantTexts) {
+		t.Fatalf("text items = %q, want %q", texts, wantTexts)
+	}
+	if len(uses) != 2 || results[uses[0]] != "" || results[uses[1]] != "file body" {
+		t.Fatalf("tool call pairing after interrupt = uses:%v results:%v", uses, results)
+	}
+}

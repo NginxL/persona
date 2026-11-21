@@ -624,6 +624,10 @@ func assertAssistantBypassClassification(t *testing.T, command string, cards int
 			n.larkCfg.CLI = &proto.LarkCLI{Bin: "/nonexistent/lark-cli"}
 			// Seed metadata without starting the CLI or executing the classified commands.
 			n.larkRisks = map[string]string{"\x00docs +fetch": "read", "\x00docs +create": "write", "\x00im messages get": larkCLIMissing}
+			// The login shell's PATH: what the assistant's Bash resolves programs in, which this process's own PATH
+			// may lack (#12483). No shell is asked in tests.
+			n.larkPATH = []string{"/opt/login/bin"}
+			n.larkPATHAt = time.Now()
 			n.noteModes(testThread, proto.ModeBypass, "")
 			fh.answer = func(proto.Interaction) proto.Resolution { no := false; return proto.Resolution{Allow: &no} }
 			decision, want := "", "allow"

@@ -1,4 +1,4 @@
-Set saved-source links. [] clears; absent/empty titles keep. Reread conflicts. Metadata only.
+Set saved-source links. [] clears; absent/empty titles keep. Reread conflicts. Metadata only.{{template "shared/mcp_language" .}}
 
 ```json
 {
@@ -45,6 +45,14 @@ Set saved-source links. [] clears; absent/empty titles keep. Reread conflicts. M
             "type": "string",
             "description": "Plain source title; trim; ≤1024 UTF-8 bytes.",
             "maxLength": 1024
+          },
+          "role": {
+            "type": "string",
+            "description": "delivery (default): this task's own deliverable, verified by the delivery gate; reference: related work, shown but never verified at acceptance.",
+            "enum": [
+              "delivery",
+              "reference"
+            ]
           }
         },
         "additionalProperties": false,

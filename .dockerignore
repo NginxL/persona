@@ -8,6 +8,7 @@
 !integrations/antigravity/
 !integrations/claude-code-plugin/
 !integrations/dsh/
+!integrations/opencode/
 !integrations/paseo/
 !integrations/pi/
 !integrations/runtime-sdk/

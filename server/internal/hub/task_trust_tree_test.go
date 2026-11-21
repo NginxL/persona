@@ -55,7 +55,7 @@ func TestRememberedKindCoversItsFolderTreeOverTheBus(t *testing.T) {
 	plan := func(cwd string) (startedAtOnce bool, id string) {
 		t.Helper()
 		task := map[string]any{"title": "改 " + cwd, "prompt": "在 " + cwd + " 里改一处并补测试", "machine": "box", "cwd": cwd,
-			"why": "这个目录在 box 上", "goal": "改好", "expect_minutes": 10, "done_when": []string{"改好并补了测试"}}
+			"why": "这个目录在 box 上", "role": "worker", "goal": "改好", "expect_minutes": 10, "done_when": []string{"改好并补了测试"}}
 		raw, _ := json.Marshal(map[string]any{"tasks": []map[string]any{task}})
 		res, err := taskPlan(h, "conv1", raw)
 		if err != nil {

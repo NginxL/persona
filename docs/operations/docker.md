@@ -218,13 +218,13 @@ With them a crash can lose up to about 3 s of the hub's last writes, a stuck dat
 
 **Redeploy** (and the update of every computer after the hub's) sends each computer the node build for its OS and architecture, and persona-node to a device that runs it (`docs/operations/node-update.md` ("Node packages")):
 
-1. a build of the hub's version that you put in the data volume's `data/bin/nodes/` (`personad-<os>-<arch>`, as `scripts/release/publish.sh` publishes it, unpacked; a release's `persona-node-<os>-<arch>` is not used from there, as only one of the hub's own version counts, which a release build never reports on an image hub: devices get personad from there instead);
+1. a build you put in the data volume's `data/bin/nodes/`. Unpack `personad-<os>-<arch>` for a node that runs `personad`. For a node that runs `persona-node`, unpack `persona-node-<os>-<arch>` and add a `.version` sidecar matching the hub's version;
 2. the image's own builds (its platform's, or all four in an image built without `UPDATE_URL`);
 3. the release of the hub's version from the publisher's site: the image knows where if it was built with one (the build argument `UPDATE_URL`, a release's `dl/`), or `node_packages.url` in hub.json (or `PERSONA_NODE_PACKAGES` in `.env`) says;
 4. when there is no release of the hub's version (an `edge` image, or one built with a version of your own; a build with the default `VERSION=dev` never fetches), the newest release whose node this hub drives (the node protocol, `docs/protocol/protocol.md` ("Node handshake")); the computer's card then shows the build it got, and no update is offered while it runs it. Such a build (another version than the hub's) is never sent by itself: a computer on another build is offered it, and gets it when you choose **Redeploy**;
 5. otherwise **Redeploy** is not offered, and the card says why.
 
-A device that runs persona-node gets personad into its file when there is no persona-node of the build it should run; it does everything persona-node does.
+Devices that run `persona-node` require that program in the image, the node directory or the release feed. Older feeds that contain only `personad` still serve nodes running `personad`.
 
 Fetched builds are checked before they are used (the release manifest's sha256 of the archive and of the binary, over HTTPS; that it is a build of that platform and kind; nothing is signed, `docs/operations/hub-update.md` ("Security: no signing")) and kept in `data/cache/nodes/` (the hub's version, and other versions until a day after they were last used). Downloads go through `node_packages.proxy` in hub.json when set (an `http://` proxy; the container's `HTTPS_PROXY` is not used). When the site does not answer, the builds found or fetched before are used again.
 

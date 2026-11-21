@@ -1,7 +1,12 @@
 """redact_transcript.py runs on macOS's own Python 3.9 (#579): its datetime.fromisoformat takes only 3 or 6 fraction
 digits, while Go writes RFC 3339 times with 0 to 9 (trailing zeros dropped)."""
 import importlib.util
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 
 spec = importlib.util.spec_from_file_location("redact_transcript", Path(__file__).with_name("redact_transcript.py"))
@@ -62,6 +67,63 @@ class KeptAsIsTests(unittest.TestCase):
         for word in ["requirements", "wsplaceholder"]:
             with self.subTest(word=word):
                 self.assertNotIn(word, r.text(f"see {word} here"))
+
+
+class RangeTests(unittest.TestCase):
+    def test_parse_keeps_sorted_intervals(self):
+        path, ranges = redact.parse_spec("fixture.jsonl:8000,1-5000,2-7")
+        self.assertEqual(path, "fixture.jsonl")
+        self.assertEqual(ranges, [range(1, 5001), range(2, 8), range(8000, 8001)])
+
+    def test_range_selection_preserves_source_order_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "source.jsonl", root / "output.jsonl"
+            source.write_text("".join(json.dumps({"line": i}) + "\n" for i in range(1, 12)))
+            selection = str(source) + ":7,4-5,2-4,3,9-6,10-200"
+            run = subprocess.run([sys.executable, "-B", redact.__file__, "-o", str(output), selection],
+                                 capture_output=True, text=True, timeout=10)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual([json.loads(line)["line"] for line in output.read_text().splitlines()],
+                             [2, 3, 4, 5, 7, 10, 11])
+
+
+class OutputTests(unittest.TestCase):
+    def test_refuses_output_alias_of_an_input(self):
+        transcript = b'{"type":"user","signature":"synthetic fixture"}\n'
+        for alias in ("direct", "symlink", "hardlink"):
+            with self.subTest(alias=alias), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                first, source = root / "first.jsonl", root / "source.jsonl"
+                first.write_bytes(transcript)
+                source.write_bytes(transcript)
+                output = root / "output.jsonl"
+                if alias == "direct":
+                    output = source
+                elif alias == "symlink":
+                    output.symlink_to(source.name)
+                else:
+                    os.link(source, output)
+                run = subprocess.run([sys.executable, "-B", redact.__file__, "-o", str(output),
+                                      str(first), str(source) + ":1"], capture_output=True, text=True, timeout=10)
+                self.assertEqual(source.read_bytes(), transcript)
+                self.assertEqual(first.read_bytes(), transcript)
+                self.assertTrue(output.samefile(source))
+                self.assertEqual(run.returncode, 2, run.stderr)
+                self.assertIn("output must not refer to an input transcript", run.stderr)
+
+    def test_overwrites_existing_separate_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "source.jsonl", root / "output.jsonl"
+            transcript = '{"type":"user","signature":"synthetic fixture"}\n'
+            source.write_text(transcript)
+            output.write_text("old output")
+            run = subprocess.run([sys.executable, "-B", redact.__file__, "-o", str(output), str(source)],
+                                 capture_output=True, text=True, timeout=10)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(json.loads(output.read_text()), {"type": "user", "signature": ""})
+            self.assertEqual(source.read_text(), transcript)
 
 
 if __name__ == "__main__":

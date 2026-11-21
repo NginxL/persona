@@ -17,12 +17,20 @@ const (
 	ProjectMemoryDecision      = "decision"
 	ProjectMemoryPitfall       = "pitfall"
 	ProjectMemoryAgentReported = "agent_reported"
+	// A lesson learned from an accepted task, and the tombstone of one the owner deleted (project_lessons.go).
+	ProjectMemoryLesson        = "lesson"
+	ProjectMemoryLessonRetired = "lesson_retired"
+	// Verification of a lesson: learned when the supervisor accepted its task, or written by the owner.
+	ProjectMemoryAccepted = "accepted"
+	ProjectMemoryOwner    = "owner"
 )
 
 // ProjectMemoryRecord is one worker outcome, decision or pitfall in a project's memory.jsonl. Turn is the transcript
 // sequence that opens the turn and ItemIndex the outcome item's offset in it; together with the todo and agent they
 // form the base ID. Decision and pitfall IDs add a kind and index. Optional fields keep M1 records readable: an empty
-// Type is a legacy outcome, whose Decision and Reason describe one agent-reported decision.
+// Type is a legacy outcome, whose Decision and Reason describe one agent-reported decision. A lesson (#12295) keeps
+// its text in Conclusion and adds Kind, how many accepted tasks taught it (Seen), when it was first and last taught,
+// and the to-dos that taught it (Sources, the newest last).
 type ProjectMemoryRecord struct {
 	ID           string   `json:"id"`
 	TodoID       string   `json:"todo_id"`
@@ -38,6 +46,11 @@ type ProjectMemoryRecord struct {
 	Verification string   `json:"verification,omitempty"`
 	RecordedAt   string   `json:"recorded_at,omitempty"`
 	SupersedesID string   `json:"supersedes_id,omitempty"`
+	Kind         string   `json:"kind,omitempty"`
+	Seen         int      `json:"seen,omitempty"`
+	FirstSeenAt  string   `json:"first_seen_at,omitempty"`
+	LastSeenAt   string   `json:"last_seen_at,omitempty"`
+	Sources      []string `json:"sources,omitempty"`
 }
 
 // ProjectMemoryDispatch is the bounded, newest-first project context for a dispatch. Decisions superseded by a newer

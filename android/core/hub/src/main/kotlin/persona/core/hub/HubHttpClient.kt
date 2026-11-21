@@ -484,3 +484,26 @@ internal suspend fun Call.awaitResponse(buffered: Boolean = true): Response = su
         }
     })
 }
+
+/** Consume a bounded response on OkHttp's thread while the awaiting coroutine still owns Call.cancel. */
+internal suspend fun <T> Call.awaitConsumedResponse(consume: (Response) -> T): T = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation { cancel() }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (!continuation.isCancelled) continuation.resumeWithException(HubFailure.from(e))
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            try {
+                val value = response.use {
+                    if (continuation.isCancelled) return
+                    consume(it)
+                }
+                continuation.resumeWith(Result.success(value))
+            } catch (failure: Exception) {
+                if (!continuation.isCancelled)
+                    continuation.resumeWithException(if (failure is IOException) HubFailure.from(failure) else failure)
+            }
+        }
+    })
+}

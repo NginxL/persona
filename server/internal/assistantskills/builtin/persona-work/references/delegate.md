@@ -8,7 +8,7 @@ When the person asks a Persona Agent or a configured Codex worker to do work on 
 
 Independent pieces can have separate tasks. For rework on a started task, keep the same to-do through the continuation or retry path in the tool contract.
 
-Give the Agent the goal, the owner's scope, checkable completion criteria and expected minutes. Include requested files in `attachments`. Choose an available computer and directory from the owner's request, known project and machine information. A repository association alone cannot identify a checkout. From main, set `supervisor` for work that belongs to an existing direction. Leave it unset for one-off work.
+Give the Agent the goal, the owner's scope, checkable completion criteria and expected minutes. Set every new task's `role` explicitly: `worker` for ordinary execution, or `leader` only when its Agent will dispatch and review direct workers. Include requested files in `attachments`. Choose an available computer and directory from the owner's request, known project and machine information. A repository association alone cannot identify a checkout. From main, set `supervisor` for work that belongs to an existing direction. Leave it unset for one-off work.
 
 Respect an explicitly requested model and effort. Otherwise use a configured tier whose description fits the work. Start bounded work below the usual tier if available, open-ended investigations at the usual tier, and large multi-Agent migrations at the highest suitable tier. For rework, increase effort before moving up a tier. Leave unknown overrides empty and explain the choice in `why`.
 

@@ -98,6 +98,18 @@ func TestSourcePermissionExternalTranscriptAndGeneration(t *testing.T) {
 		t.Fatalf("wrong profile: %+v", p)
 	}
 	c := n.liveClaudes()[0]
+	modeTranscript(t, home, home, "plan")
+	argv := processArgv
+	t.Cleanup(func() { processArgv = argv })
+	processArgv = func(int) ([]string, error) {
+		return []string{"claude", "--allow-dangerously-skip-permissions"}, nil
+	}
+	if peerSessionClass(n, c, sidA) != peerModeBypass {
+		t.Fatal("owner delivery no longer recognizes bypass-capable plan mode")
+	}
+	if get().Valid() {
+		t.Error("external plan mode supplied a source permission")
+	}
 	if sourceRegistryMatches(c, "linux:impossible") || sourceRegistryMatches(c, "") {
 		t.Error("reused/unknown generation accepted")
 	}
@@ -117,6 +129,9 @@ func TestSourcePermissionDeliveryIsSeparateFromOwnerAndRawParameters(t *testing.
 	inbox := newFakeInbox(t, modeTranscript(t, home, home, proto.ModeBypass))
 	inbox.setMode(peerModeBypass)
 	writeOutsideClaude(t, home, sidA, "claude-desktop", "idle", inbox, nil)
+	if _, err := request(t, n, "node.info", map[string]any{"manager_features": []string{nodeproto.SourcePermissions}}); err != nil {
+		t.Fatal(err)
+	}
 	proof := proto.SourcePermission{At: time.Now(), Session: sidB, Generation: "process-1", Class: peerModeBypass, Digest: proto.SourceCallDigest("agent_send", json.RawMessage(`{}`))}
 	for i, method := range []string{"session.send", nodeproto.SourceSend} {
 		_, err := request(t, n, method, map[string]any{"session_id": sidA, "text": "synthetic report", "source_permission": proof, "from_mode": "bypass"})
@@ -138,6 +153,34 @@ func TestSourcePermissionDeliveryIsSeparateFromOwnerAndRawParameters(t *testing.
 	_, err := request(t, n, nodeproto.SourceSend, map[string]any{"session_id": sidA, "text": "different source class", "source_permission": proof})
 	if refusalCode(err) != peerHeld || !strings.Contains(envelopeHead(t, inbox, 2), `from-mode="prompting"`) {
 		t.Fatalf("class chosen to suit recipient: %v", err)
+	}
+}
+
+func TestSourcePermissionDeliveryRequiresInitialManagerNegotiation(t *testing.T) {
+	n, f, home := herdrNode(t)
+	noPaneEnv(t)
+	shortPeerWait(t, 100*time.Millisecond)
+	f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
+	inbox := newFakeInbox(t, modeTranscript(t, home, home, proto.ModeBypass))
+	inbox.setMode(peerModeBypass)
+	writeOutsideClaude(t, home, sidA, "claude-desktop", "idle", inbox, nil)
+	reject := func() {
+		t.Helper()
+		proof := proto.SourcePermission{At: time.Now(), Session: sidB, Generation: "process-1", Class: peerModeBypass, Digest: proto.SourceCallDigest("agent_send", json.RawMessage(`{}`))}
+		_, err := request(t, n, nodeproto.SourceSend, map[string]any{"session_id": sidA, "text": "synthetic report", "source_permission": proof})
+		if refusalCode(err) != "source_permissions_not_negotiated" {
+			t.Fatalf("source delivery without negotiated support: %v", err)
+		}
+		if len(inbox.users()) != 0 {
+			t.Fatal("unnegotiated delivery reached the recipient")
+		}
+	}
+	reject()
+	for _, p := range []map[string]any{{}, {"manager_features": []string{nodeproto.SourcePermissions}}} {
+		if _, err := request(t, n, "node.info", p); err != nil {
+			t.Fatal(err)
+		}
+		reject()
 	}
 }
 

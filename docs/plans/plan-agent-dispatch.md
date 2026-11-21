@@ -80,6 +80,10 @@ Do not borrow:
 
 ## Design
 
+New calls to `dispatch_start` use [A2A](../integrations/a2a.md). The manager
+stores task and delivery state before launch, then returns questions and
+results to the initiating session. The sections below describe the original rollout.
+
 ### Step 1 (implemented): the Agents' `dispatch_start` and `dispatch_read`
 
 Code: `server/internal/assistant/dispatch.go`; tool definitions in `server/internal/prompts/mcp/dispatch/`; the child's first message in `server/internal/prompts/agents/dispatch_task.md`.

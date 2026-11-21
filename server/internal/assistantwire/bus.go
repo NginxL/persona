@@ -81,6 +81,8 @@ const (
 	// (#6282, docs/protocol/protocol.md "Assistant chat search"). The hub lists the assistant_search feature only while
 	// the default manager names it; the apps keep filtering titles and last messages without it.
 	CapabilityAssistantSearch = "assistant_search"
+	// CapabilityAssistantSegments promises persistent logical routing and explicit switches.
+	CapabilityAssistantSegments = "assistant_segments"
 	// CapabilityDirectionSessions: the manager files sessions under a direction and reads one direction
 	// (PUT /api/v1/assistant/sessions/{mid}/{sid}/direction, GET /api/v1/assistant/directions/{id}, and the tree's
 	// additive sessions; #11391). The hub lists direction_sessions only while the default manager names it.
@@ -202,6 +204,8 @@ const (
 	CodeConversationBusy = "busy"
 	// CodeSupervisionRuntime means the runtime cannot receive separate supervision instructions. Nothing was sent.
 	CodeSupervisionRuntime = "assistant_supervision_runtime"
+	// CodeSupervisionAccount means the engine supports the channel but this account has not enabled it.
+	CodeSupervisionAccount = "assistant_supervision_account"
 	// CodeBodyIncomplete: MethodHTTPStreamed's body did not arrive whole (the relay was not there, broke or carried
 	// another size). Nothing ran: the hub sends the request again as MethodHTTP.
 	CodeBodyIncomplete = "body_incomplete"
@@ -247,6 +251,12 @@ type HTTPResponse struct {
 	Body           []byte                     `json:"body,omitempty"`
 }
 
+const (
+	StarredImportPath        = "/api/v1/assistant/starred/import"
+	StarredImportPreviewPath = StarredImportPath + "/preview"
+	StarredImportBodyMax     = 8 << 20
+)
+
 // Routes are the routes the assistant answers (net/http patterns): the hub relays the apps' requests on them as
 // http.request. The assistant registers exactly these (assistant.TestRoutesAreTheWireOnes).
 var Routes = []string{
@@ -279,6 +289,7 @@ var Routes = []string{
 	"GET /api/v1/assistant/worker-presets",
 	"GET /api/v1/assistant/start-defaults",
 	"PUT /api/v1/assistant/start-defaults",
+	"POST /api/v1/assistant/start-defaults/preview",
 	"GET /api/v1/assistant/availability",
 	"GET /api/v1/assistant/directions/tree",
 	"GET /api/v1/assistant/directions/offers",
@@ -303,6 +314,8 @@ var Routes = []string{
 	"PUT /api/v1/assistant/tasks/{id}",
 	"DELETE /api/v1/assistant/tasks/{id}",
 	"POST /api/v1/assistant/tasks/{id}/run",
+	"POST /api/v1/assistant/tasks/{id}/skip-next",
+	"DELETE /api/v1/assistant/tasks/{id}/skip-next",
 	"POST /api/v1/assistant/tasks/{id}/fresh",
 	"DELETE /api/v1/assistant/tasks/{id}/start-grant",
 	"GET /api/v1/assistant/places",
@@ -322,6 +335,12 @@ var Routes = []string{
 	"PUT /api/v1/assistant/saved-prompts/order",
 	"PUT /api/v1/assistant/saved-prompts/{id}",
 	"DELETE /api/v1/assistant/saved-prompts/{id}",
+	"GET /api/v1/assistant/starred",
+	"POST /api/v1/assistant/starred",
+	"DELETE /api/v1/assistant/starred/{id}",
+	"GET " + StarredImportPath,
+	"POST " + StarredImportPreviewPath,
+	"POST " + StarredImportPath,
 	"GET /api/v1/assistant/runs",
 	"GET /api/v1/assistant/routines",
 	"PUT /api/v1/assistant/routines",
@@ -364,6 +383,9 @@ var Routes = []string{
 	"PUT /api/v1/todos/{id}/agents/{mid}/{sid}",
 	"DELETE /api/v1/todos/{id}/agents/{mid}/{sid}",
 	"GET /api/v1/todos/{id}/decisions",
+	"POST /api/v1/decisions",
+	"GET /api/v1/decisions/{id}",
+	"POST /api/v1/decisions/{id}/withdraw",
 	"GET /api/v1/todos/{id}/timeline", // its conversation's rounds (todo_timeline.go, #10465)
 	"POST /api/v1/todos/{id}/decisions",
 	"PATCH /api/v1/todos/{id}/decisions/{did}",
@@ -428,8 +450,19 @@ var Routes = []string{
 	"GET /api/v1/kb/chats/{id}/context",
 	"GET /api/v1/kb/chats/{id}/days/{day}",
 	"GET /api/v1/kb-search",
+	// A project's lessons from accepted tasks (task_lessons_routes.go there, #12295): the owner's apps only.
+	"GET /api/v1/kb/projects/{id}/lessons",
+	"PUT /api/v1/kb/projects/{id}/lessons/{lesson}",
+	"DELETE /api/v1/kb/projects/{id}/lessons/{lesson}",
 	// The assistant's chat search (search_routes.go there, docs/protocol/protocol.md "Assistant chat search", #6282).
 	"GET /api/v1/assistant/search",
+	"GET /api/v1/assistant/history",
+	"PUT /api/v1/assistant/history",
+	"GET /api/v1/assistant/segments",
+	"PUT /api/v1/assistant/segments",
+	"GET /api/v1/assistant/conversations/{id}/segments",
+	"POST /api/v1/assistant/conversations/{id}/switch",
+	"GET /api/v1/assistant/conversations/{id}/switch/{operation}",
 	// The selection: what the knowledge base brings in and keeps (kb_selection.go there).
 	"GET /api/v1/kb/selection",
 	"PUT /api/v1/kb/selection",
@@ -468,4 +501,9 @@ var Routes = []string{
 // (extwire.MethodAccept) to the default manager, as it relays the extensions' routes, never as http.request; the
 // manager's extensions layer hands them to the assistant (extmgr.Options.AssistantSocket). The assistant serves exactly
 // these on its socket handler (assistant.Service.ServeSocket).
-var SocketRoutes = []string{"GET /api/v1/recordings/{id}/audio"}
+const (
+	A2ARPC  = "POST /api/v1/a2a/{mid}/{sid}/rpc"
+	A2ACard = "GET /api/v1/a2a/{mid}/{sid}/.well-known/agent-card.json"
+)
+
+var SocketRoutes = []string{"GET /api/v1/recordings/{id}/audio", A2ARPC, A2ACard}

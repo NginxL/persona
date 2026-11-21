@@ -18,5 +18,10 @@
   "files": "ファイルとフォルダ",
   "sessions": "セッション",
   "workspaces": "ワークスペース",
+  "repositories": "リポジトリ",
+  "repo_context_title": "リポジトリ：{title}",
+  "repo_context_path": "パス：{path}",
+  "repo_context_url": "URL：{url}",
+  "repo_context_purpose": "用途：{purpose}",
   "search_skills": "スキル、ファイル、セッションを検索"
 }

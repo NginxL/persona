@@ -179,7 +179,8 @@ internal fun ProactiveScreen(
                 val page = stack.last()
                 holder.SaveableStateProvider(page.key) {
                     when (page) {
-                        ProactivePage.Overview -> OverviewPage(state, machines, now, zone, ::pop, actions)
+                        ProactivePage.Overview -> OverviewPage(state, machines, now, zone,
+                            if (persona.core.designsystem.LocalIsSidebarRoot.current) null else ::pop, actions)
                         is ProactivePage.EditRoutine -> TaskEditorPage(page.id, null, state, store, now, zone, ::pop, onOpenConversation,
                             onAllRuns = { push(ProactivePage.RunList(it)) }, onRunNow = runTask, onModelConfiguration = onModelConfiguration)
                         is ProactivePage.AddRoutine -> TaskEditorPage(null, RoutineTemplates.getOrNull(page.template)?.draft(say) ?: BlankTask,

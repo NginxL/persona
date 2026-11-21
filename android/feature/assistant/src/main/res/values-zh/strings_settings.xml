@@ -174,4 +174,12 @@
     <string name="assistant_settings_supervise_model">后台督办的模型</string>
     <string name="assistant_settings_unavailable">暂时打不开助手设置</string>
     <string name="assistant_settings_unavailable_detail">先配对 hub，或退出体验模式。</string>
+    <string name="assistant_settings_owner_approval_header">精确回复审批</string>
+    <string name="assistant_settings_owner_approval">用精确回复批准一批操作</string>
+    <string name="assistant_settings_owner_approval_persistent">未回复的提议一直保留到处理</string>
+    <string name="assistant_settings_owner_approval_caption">默认关闭。精确回复只批准当前展示的原始文字、收件人和操作，且只用一次；修改后必须重新批准，绝不会生成“总是允许”规则。</string>
+    <string name="assistant_settings_owner_approval_phrases">批准短语</string>
+    <string name="assistant_settings_owner_approval_phrases_placeholder">每行一个精确短语</string>
+    <string name="assistant_settings_owner_approval_phrases_caption">整条回复必须匹配一个短语。留空会关闭回复批准，普通允许和拒绝仍可使用。</string>
+    <string name="assistant_settings_owner_approval_save_phrases">保存短语</string>
 </resources>

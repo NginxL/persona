@@ -1,4 +1,4 @@
-# Engines: herdr, Herdr App, Orca, Tern, Paseo, Cindy
+# Engines: herdr, Herdr App, Orca, Tern, Rex, Paseo, Cindy, T3 Code
 
 **One engine per computer**: Persona sees and drives Claude Code / Codex through an engine. Each computer selects one; Agents shows live sessions only from it.
 Sessions elsewhere (other engines, ordinary terminals) appear only as "Not running" history. Default herdr preserves existing machines without an explicit choice.
@@ -8,11 +8,11 @@ plus Herdr App on another computer opening terminals through remote). Sessions m
 
 On computers with **botmux**, its sessions appear alongside the selected engine ("botmux" below). It is not an engine option and needs no selection.
 
-**Paseo** and **Cindy** are terminal-free: they run Agents through provider SDKs and runtimes, with node connected through a bridge; see `docs/integrations/paseo.md` and `server/internal/node/cindybridge.go`.
+**Paseo**, **Cindy** and **T3 Code** are terminal-free: they run Agents through provider SDKs and runtimes, with node connected through a bridge; see `docs/integrations/paseo.md`, `server/internal/node/cindybridge.go` and "T3 Code" below.
 
 ## Host sets (#2576)
 
-A computer can **enable several engines at once**, any combination of herdr, Herdr App, Orca, Tern, Paseo and Cindy, or none at all, plus a **default engine**:
+A computer can **enable several engines at once**, any combination of herdr, Herdr App, Orca, Tern, Rex, Paseo, Cindy and T3 Code, or none at all, plus a **default engine**:
 where new sessions started from the phone go. A retired session resumes in its previous terminal host while that host remains enabled;
 an explicit host selection overrides it. Other offline sessions use the default host. Each single choice above is a special case of a set: herdr is `{herdr}`, and
 "herdr + Herdr App" is `{herdr, herdr-core}` with herdr the default. API and storage: `docs/protocol/protocol.md` "Engines" ("Host sets").
@@ -77,8 +77,10 @@ iOS and Android also offer "No Terminal Engine", the empty set, last in Choose E
 | `herdr-both` | herdr + Herdr App | Both above | Both runtimes detected |
 | `orca` | Orca | Terminals and native Claude chats (structured sessions) in Orca desktop app, or its remote runtime launched here over SSH by Orca on another computer | Orca desktop / remote runtime running, with a Persona-compatible version |
 | `tern` | Tern | Terminal blocks in Tern's sessions, in any of its windows ("Tern" below) | `tern` found (PATH, `~/.local/bin`, the app bundle) and its session daemon answering `tern inspect` |
+| `rex` | Rex | Terminal blocks in Rex's sessions and windows ("Rex" below) | `rex` found (PATH, `~/.local/bin`, macOS Application Support / app bundle) and `rex --autostart=false api call server.status` answering |
 | `paseo` | Paseo | Paseo Agents (desktop app, `paseo` command; Claude Code, Codex, ACP all count) | Paseo daemon running; address in its home's `paseo.pid` responds |
 | `cindy` | Cindy | Cindy Agents (desktop app and `cindy-host`; Claude Code, Codex, Pi) | Cindy installed, running, or its loopback host endpoint / profile database present |
+| `t3code` | T3 Code | T3 Code's threads (desktop app, `t3` server; Codex, Claude Code and its other providers) | `t3` command line found, or a T3 server running on this computer ("T3 Code" below) |
 
 herdr and Herdr App are from the same developer but separate: neither sees the other's sessions. If using only one, select it;
 if both are used and should appear on the phone, choose "herdr + Herdr App (side by side)."
@@ -100,19 +102,19 @@ iOS / Android have both entry points (Android Machines is under Agents: **List s
 
 ## Capabilities by engine
 
-| Capability | herdr | Herdr App | Orca | Tern | Paseo |
-| --- | --- | --- | --- | --- | --- |
-| List sessions, show state (Needs you / Working / Unread) | Yes | Yes | Yes (polls each second) | Yes (`tern events` pushes changes) | Yes (Paseo pushes changes) |
-| Send messages (multiline as one message) | Yes | Yes | Yes | Yes | Yes (while working, injects into current turn) |
-| Keys (Enter, Esc, arrows…), interrupt | Yes | Yes | Yes | Yes | Interrupt only |
-| Answer dialogs (permissions, options) | Yes | Yes (screen-based) | Yes (screen-based) | Yes (screen-based) | Yes (cards, also answerable in Paseo app) |
-| Close sessions from phone | Yes | Yes | Yes | Yes | Backend supports archiving in Paseo; app button currently only for terminal sessions |
-| Create sessions from phone; Resume a stopped one from its terminal page (a message does not, #4754) | Yes | Yes (a new tab in the Herdr App space for the directory, #2532) | Yes (create; resume a stopped Claude session, #5548) | Yes | Yes (each Paseo provider is a launcher; a message continues a Paseo session) |
-| Create a worktree from a workspace ([terminal.md](terminal.md), "23. New worktree…") | Yes (herdr 0.9 creates it; older versions fall back to git) | Yes (Persona falls back to git and opens a Herdr App space) | Yes (Orca creates it under the original workspace and owns the checkout directory) | No | Yes on the web (Paseo creates it in its own worktrees folder as a Paseo workspace, #6295, and deletes one it made, #6297; `docs/integrations/paseo.md` ("Spaces and workspaces")) |
-| Rename spaces / tabs | Yes | Yes (written into Herdr App's layout) | No | Yes | Spaces (Paseo's projects) and workspace titles on the web, #6297; no tabs (backend supports session names; app button currently only for terminal sessions) |
-| Live terminal, phone takeover | Yes | No | No | No | No (no terminal) |
-| Colored screen reads, draft detection | Yes | No (plain text, dialogs only) | No (plain text, dialogs only) | Yes | No (no terminal) |
-| Change permission mode / thinking effort | Yes | Supported, untested | Supported, untested | Supported, untested | Yes (end-to-end tested) |
+| Capability | herdr | Herdr App | Orca | Tern | Rex | Paseo |
+| --- | --- | --- | --- | --- | --- | --- |
+| List sessions, show state (Needs you / Working / Unread) | Yes | Yes | Yes (polls each second) | Yes (`tern events` pushes changes) | Yes (`rex events --all --json` pushes changes) | Yes (Paseo pushes changes) |
+| Send messages (multiline as one message) | Yes | Yes | Yes | Yes | Yes (`block.event` paste + `enter`) | Yes (while working, injects into current turn) |
+| Keys (Enter, Esc, arrows…), interrupt | Yes | Yes | Yes | Yes | Yes (`rex send-key`) | Interrupt only |
+| Answer dialogs (permissions, options) | Yes | Yes (screen-based) | Yes (screen-based) | Yes (screen-based) | Yes (screen-based) | Yes (cards, also answerable in Paseo app) |
+| Close sessions from phone | Yes | Yes | Yes | Yes | Yes (`block.close` / `session.close_window`) | Backend supports archiving in Paseo; app button currently only for terminal sessions |
+| Create sessions from phone; Resume a stopped one from its terminal page (a message does not, #4754) | Yes | Yes (a new tab in the Herdr App space for the directory, #2532) | Yes (create; resume a stopped Claude session, #5548) | Yes | Yes (`session.create` / `session.new_window` with `focus: false`) | Yes (each Paseo provider is a launcher; a message continues a Paseo session) |
+| Create a worktree from a workspace ([terminal.md](terminal.md), "23. New worktree…") | Yes (herdr 0.9 creates it; older versions fall back to git) | Yes (Persona falls back to git and opens a Herdr App space) | Yes (Orca creates it under the original workspace and owns the checkout directory) | No | No (git fallback) | Yes on the web (Paseo creates it in its own worktrees folder as a Paseo workspace, #6295, and deletes one it made, #6297; `docs/integrations/paseo.md` ("Spaces and workspaces")) |
+| Rename spaces / tabs | Yes | Yes (written into Herdr App's layout) | No | Yes | Yes (`session.set_label` / `session.set_window_label`) | Spaces (Paseo's projects) and workspace titles on the web, #6297; no tabs (backend supports session names; app button currently only for terminal sessions) |
+| Live terminal, phone takeover | Yes | No | No | No | No | No (no terminal) |
+| Colored screen reads, draft detection | Yes | No (plain text, dialogs only) | No (plain text, dialogs only) | Yes | Yes (`rex capture --format=vt`) | No (no terminal) |
+| Change permission mode / thinking effort | Yes | Supported, untested | Supported, untested | Supported, untested | Supported, untested | Yes (end-to-end tested) |
 
 Windows: herdr has native Windows support since 0.9.5; except live terminal, capabilities match above. Orca works too. See [windows.md](../operations/windows.md), "herdr."
 
@@ -129,7 +131,7 @@ Unsupported actions explain failure instead of partially acting. Orca rejects se
 there with Claude not in front, saying "Claude is not in foreground (possibly suspended); nothing sent," or asking to reopen on the computer.
 
 Orca New Agent creates terminals inside already-open Orca workspaces or subdirectories, starting in the selected directory. Unopened Git-repository directories attempt automatic registration; any other directory gets a terminal in the first local Orca workspace that `cd`s there (refused only when Orca has no workspace open). The `cd` is typed into the shell's line editor, so a directory whose name holds a control character (a tab, a line break) is refused before any terminal opens (`directory_untypable`). It never takes over an existing terminal.
-Resume of a running session returns it. A Claude session whose agent exited is continued like on herdr (#5548): a new terminal in the Orca workspace holding its directory (the same rules as New Agent), `cd` there, the launcher that started it with `--resume`, then the message. Never a second writer: a session a live claude still has open (Claude's desktop app, another terminal, suspended) is refused (`open_elsewhere`), and so is one whose last pane is still open (its agent may be suspended there; close the pane to resume elsewhere). A session an Orca native chat owns is refused too. Codex, TRAEX and pi sessions are not resumed in Orca. Orca's own `terminal create --agent claude --resume` is not used: it exists only in some Orca builds' CLI, and it starts Orca's claude command, not the session's launcher.
+Resume of a running session returns it. A Claude session whose agent exited is continued like on herdr (#5548): a new terminal in the Orca workspace holding its directory (the same rules as New Agent), `cd` there, the launcher that started it with `--resume`, then the message. Never a second writer: a session a live claude still has open (Claude's desktop app, another terminal, suspended) is refused (`open_elsewhere`), and so is one whose last pane is still open (its agent may be suspended there; close the pane to resume elsewhere). A session an Orca native chat owns is refused too. Codex, TRAE CLI and pi sessions are not resumed in Orca. Orca's own `terminal create --agent claude --resume` is not used: it exists only in some Orca builds' CLI, and it starts Orca's claude command, not the session's launcher.
 
 Herdr App New Agent (#2532) opens a terminal the way the app does (the machine's shell, kept, with the app's terminal identity) as a new tab of
 the Herdr App space whose folder matches the directory, else of a new space for the directory, and adds it to the app's layout document, so the app
@@ -248,7 +250,7 @@ workspace behavior.
   block's foreground process, four at a time: `claude`, `codex` (also behind `node` / `bun`). A shell or classic herdr's client in front is no agent
   of Tern's (herdr run in a Tern tab keeps its own panes). Tern reports no agent state, and its own `working` flag misses Claude thinking quietly:
   a Claude's state is the status Claude Code keeps in its `sessions/<pid>.json` (busy, idle, shell when idle with a background command running, or waiting on a dialog of its own), else its transcript
-  and hooks as on the other hosts (`docs/protocol/agent-states.md`, "Claude in a Tern block").
+  and hooks as on the other hosts (`docs/protocol/agent-states.md`, "Claude in a Tern or Rex block").
 - **Changes**: `tern events` for the first window (blocks spawned, exited or closed, layouts, titles, working directories, bells; a bell is urgent).
   The node still snapshots every 10 seconds, which covers other windows. Every `tern` call is a client of its own, so the `client_*` events are
   left out of the stream.
@@ -262,6 +264,59 @@ workspace behavior.
 - **Not yet**: live terminal and phone takeover (no stream), new worktrees, events from windows other than the first.
 - **Live test**: `go test -tags ternlive -run TernLive ./internal/node/ -v` opens a hidden session of its own, drives it and closes it again;
   the user's own sessions are only counted. Pitfalls: `docs/lessons/tern.md`.
+
+## Rex
+
+Rex is a multiplexing terminal driven through its `rex` CLI and server control API (`server/internal/rexcli`,
+`server/internal/node/hostrex.go`, #12334). `rex` is located on PATH, in `~/.local/bin/rex`, or on macOS inside
+`~/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex` and
+the Rex app bundles. Every command passes `--autostart=false` so probing and snapshotting never launch a Rex server
+unexpectedly.
+
+- **Spaces, slots, panes**: Rex sessions are spaces, windows are slots, and `com.superlogical.terminal` blocks are
+  panes stored as `rex:<block id>` (where `<block id>` is Rex's full `block:<uuid>`, matching the `REX_BLOCK`
+  environment variable Rex sets in block processes and Persona hooks read via `nodeclient.HookPane`). Non-terminal
+  blocks (such as onboarding) are skipped.
+- **Agents**: Rex does not report which Agent runs in a block, so each refresh calls `block call process` (up to four
+  in parallel) and identifies `claude`, `codex` (including behind `node`/`bun`), and `traex` from the foreground
+  process while ignoring shells and nested classic `herdr`. Claude Code state is read from `sessions/<pid>.json`,
+  transcripts, hooks, and screen dialogs, using the same path as Tern.
+- **Changes**: `rex --autostart=false events --all --json` streams server, session and block events (block events
+  come only with `--all`). Every `rex` command is a client of its own, so the `client_*` server events and the
+  `client_connected` / `client_disconnected` session events the node's own calls raise are ignored, or each refresh
+  would set off the next. Sessions, windows, blocks and labels changing, and the terminal events `process_changed`,
+  `child_exited`, `title_changed` and `pwd_changed`, trigger a refresh; `bell` and `desktop_notification` an urgent one.
+- **Screens and input**: `rex capture --format=vt --trim` reads colored screens (and `--unwrap` for unwrapped recent
+  reads). `Prompt` verifies an Agent is in front, sends a `block.event` paste (neutralizing escapes), pauses, rechecks
+  foreground, and presses `enter` via `rex send-key`. `SendText` writes to `rex send` over stdin.
+- **Starting, splitting, renaming, closing**: `session.create` opens a space, `session.new_window` (`focus: false`)
+  opens a slot, and `session.new_split` (`focus: false`) splits a pane. `session.set_label` and
+  `session.set_window_label` rename spaces and slots. `block.close` / `session.close_window` close panes and slots; an
+  empty session with no attached clients is destroyed via `session.destroy`.
+- **Not yet**: live terminal streaming and phone takeover.
+
+## T3 Code
+
+[T3 Code](https://github.com/pingdotgg/t3code) runs coding agents in threads that its own server owns; its desktop, web and phone clients
+all talk to that server. With T3 Code enabled, the node runs an in-process runtime bridge to it (`server/internal/node/t3codebridge.go`, #11784):
+
+- **Finding the server**: the state file the server writes while it runs, `<T3 home>/userdata/server-runtime.json` (the T3 home is
+  `$T3CODE_HOME`, else `~/.t3`), names its origin, process and version. Only a loopback `http` origin whose process is alive counts.
+- **Signing in**: the bridge issues itself an MCP client session with T3 Code's command line on this computer
+  (`t3 auth session issue --subject mcp-client`, labelled Persona, so it shows in T3 Code's settings), keeps the token in memory only and revokes
+  the session when the bridge stops. A session T3 Code no longer takes ends the bridge, which issues a new one.
+- **Reading**: projects, threads and timelines through the server's `/mcp` endpoint (`t3_project_list`, `t3_thread_list`, `t3_thread_read`),
+  every 2 seconds. A thread is session `t3code-<thread id>`; its project's folder is its space. Messages, reasoning and tool calls are shown;
+  checkpoints and other bookkeeping items are not.
+- **Writing**: a message is `t3 thread send` and a new thread `t3 thread start` (the message on standard input), which run with the machine
+  owner's authority as T3 Code's own clients do. A session the bridge issues has T3 Code's narrowest mode ceiling (approval-required), which
+  would refuse sending to threads in T3 Code's default full-access mode. A new thread goes to the T3 project whose folder is the deepest one holding
+  the chosen directory, with that project's default model and mode; a directory outside every T3 project is refused.
+- **Interrupting and closing**: Stop is `t3_thread_interrupt`, which the session's ceiling allows only for threads at approval-required; a
+  thread above it is refused with a line saying to stop it in T3 Code. Closing archives the thread.
+- **Not supported**: answering approvals and questions (T3 Code's MCP tools cannot; such a thread shows as Needs you and is answered in T3
+  Code), pictures (refused, never dropped), changing modes, choosing the model, worktrees, rewinding. Not yet tested against a live T3 Code
+  install; the tests run a synthetic MCP server and command line.
 
 ## tmux (approvals only)
 
@@ -283,7 +338,7 @@ when `botmux` is on the computer's PATH, node adds a botmux host alongside the s
 Typical use: work Agents in botmux, personal Agents in herdr, viewed together.
 
 - **Listing and state**: each refresh runs `botmux observe --include-raw` (all sessions from all daemons, reused within 5 seconds, immediately reread after sending; 0.3–0.9 seconds for about 500 local sessions; occasional observe failures retain the previous list). botmux exits 1 when one daemon's probe failed (`unauthorized`, `unreachable`, `daemon_offline`) and still prints every daemon's answer: the sessions of the daemons that answered are listed, a failed daemon's stay as it last listed them, and a message to one of those is refused with its probe error, nothing posted. Only when no daemon answered is the observe a failure (#8949).
-  Lists Claude Code, Codex, and the compatible Codex fork (`cli.id: claude-code / codex / traex`), with identical state rules: running sessions use botmux state (dialog `tuiPromptActive` or botmux Needs you → Needs you; `working` / `starting` / `analyzing` → Working;
+  Lists Claude Code, Codex, and TRAE CLI (`cli.id: claude-code / codex / traex`), with identical state rules: running sessions use botmux state (dialog `tuiPromptActive` or botmux Needs you → Needs you; `working` / `starting` / `analyzing` → Working;
   others → Done). Suspended (`not_running`, not closed, active within 7 days) appear Not running. For Claude Code, botmux session ID is the Claude ID used to start it, so transcript handling is unchanged.
   For Codex / the compatible fork, observe omits CLI session ID (stored in botmux database), but every prompt starts with `<session_id><botmux-session-id></session_id>`.
   Node searches rollout beginnings in the same working directory (first 512 KB, stopping each file after finding the marker). Matching rollout is the thread (newest-written among forks),

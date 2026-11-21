@@ -1,4 +1,5 @@
 """SSH publication setup fails closed without leaking proxy connections."""
+import copy
 import json
 from pathlib import Path
 import sys
@@ -11,6 +12,7 @@ with patch.dict(sys.modules, {'paramiko': Mock()}):
     import publish_hub_release as publisher
 import promote_hub_release as promoter
 from promote_hub_release import validate_next
+from test_node_artifacts import release
 
 
 class PublisherSetupTests(unittest.TestCase):
@@ -197,9 +199,15 @@ class PublisherSetupTests(unittest.TestCase):
             config = root / 'config.json'
             config.write_text(json.dumps({'credentials_command': ['credentials'],
                                          'remote_root': str(runtime), **extra}))
-            (root / 'latest.json').write_text(json.dumps({
-                'build': 1, 'files': {'linux-amd64': {'name': 'artifact.gz'}}}))
-            (root / 'artifact.gz').write_bytes(b'fixture')
+            if extra.get('publish_nodes'):
+                packages = release(root, nodes=True)
+                hub = copy.deepcopy(packages)
+                hub.pop('nodes')
+                hub['files'].pop('darwin-arm64')
+            else:
+                hub = {'build': 1, 'files': {'linux-amd64': {'name': 'artifact.gz'}}}
+                (root / 'artifact.gz').write_bytes(b'fixture')
+            (root / 'latest.json').write_text(json.dumps(hub))
             sftp = Mock()
             sftp.lstat.side_effect = lambda path: Path(path).lstat()
             sftp.normalize.side_effect = lambda path: str(Path(path).resolve(strict=True))
@@ -219,6 +227,15 @@ class PublisherSetupTests(unittest.TestCase):
                 finally:
                     self.last = (connect, client)
             return client.exec_command.call_args.args[0]
+
+    def test_node_publication_uploads_both_programs_once(self):
+        self.publish_with({'publish_nodes': True})
+        _, client = self.last
+        sftp = client.open_sftp.return_value.__enter__.return_value
+        names = [Path(call.args[0]).name for call in sftp.put.call_args_list]
+        self.assertCountEqual(names, ['latest.json', 'node-manifest.json'] + [
+            f'{program}-{platform}-aaaaaaaaaaaa.gz'
+            for program in ('personad', 'persona-node') for platform in ('linux-amd64', 'darwin-arm64')])
 
     def test_remote_program_runs_under_python3_by_default(self):
         self.assertEqual(self.publish_with({}), 'python3 -')

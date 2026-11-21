@@ -28,6 +28,8 @@ MOCK_TODO_MANAGERS=2  the Weather App's to-dos are the second manager's (the fir
 GET /mock/churn?todos=1[&n=20&ms=3000]  n times, ms apart, the newsletter's working line moves on and `todos` is
                       pushed, for measuring a push's cost on the list (/mock/churned counts the rounds).
 GET /mock/todo-view   the mode, whether the hello names the view now, the late phase and the managers.
+GET /mock/todo-view?seen_hours=25  until /mock/reset, a finished to-do's seen mark counts as that many hours old, so a
+                      row seen now reads as seen a day ago: To do with finished_seen (the list's Mark Done).
 
 Time: the moment the mock starts plays the prototype's now (Wednesday 18 November 2026, 10:14), and every time is
 placed from it as the prototype places it, so a row the prototype shows as 16 minutes old is 16 minutes old when the
@@ -89,7 +91,7 @@ HELP = ["MOCK_TODO_VIEW=1|old|late  the To-dos view from the design prototype's 
 
 _hub = {}  # mock_hub.py's globals (install)
 _state = {"phase": 0, "late_run": 0, "churn": 0, "bases": {}, "homes": {}, "order": [], "owners": {}, "legacy": {},
-          "settles": {}, "answers": {}, "sessions": {}, "card": None}
+          "settles": {}, "answers": {}, "sessions": {}, "card": None, "seen_hours": 0.0}
 
 
 def stamp(t):
@@ -350,7 +352,7 @@ def finished(t, v, now, seen):
     """Row 9: finished_unseen until the owner looks at it, finished_recent for 24 hours after, then To do (row 11)."""
     if not seen:
         return v
-    end = parse(t["seen_at"]) + timedelta(hours=24)
+    end = parse(t["seen_at"]) - timedelta(hours=_state["seen_hours"]) + timedelta(hours=24)
     if now < end:
         return dict(v, reason="finished_recent", next_change_at=stamp(end))
     return {"phase": "todo", "section": "todo", "reason": "finished_seen",
@@ -844,6 +846,7 @@ def reset():
     """/mock/reset, before mock_hub.py puts the to-dos back: the answers, the churn, the runs' sessions and the Widget's
     plan card as they started, and under late the hellos from the start of their sequence."""
     _state["churn"] = 0
+    _state["seen_hours"] = 0.0
     _state["answers"].clear()
     first = _state["sessions"]
     _hub["SESSIONS"][:] = [copy.deepcopy(first[s["session_id"]]) if s["session_id"] in first else s
@@ -859,6 +862,9 @@ def reset():
 def route(h, method, path):
     """The routes above; False for anything else, which mock_hub.py answers."""
     if method == "GET" and path == "/mock/todo-view":
+        hours = parse_qs(urlparse(h.path).query).get("seen_hours")
+        if hours:
+            _state["seen_hours"] = float(hours[0])
         return h.send_json({"mode": MODE, "listed": listed(), "phase": _state["phase"], "managers": managers(),
                             "churn": _state["churn"]}) or True
     query = parse_qs(urlparse(h.path).query) if path == "/mock/churn" else {}

@@ -119,14 +119,49 @@ describe('MCP proxy (#7333)', { timeout: 15_000 }, () => {
   })
 })
 
+describe('command gate tools', { timeout: 15_000 }, () => {
+  // What the node adds for a runtime's assistant chat (server/internal/node/assistant_runtime.go gateTools,
+  // gateToolSchema): the assistant's instructions name it, so agy must see it declared, its schema as the node gives it.
+  const gateSchema = (command) => ({
+    type: 'object', required: ['args'],
+    properties: { args: { type: 'array', items: { type: 'string' }, description: `The words after ${command}: METHOD PATH [JSON body] and its flags, one per item` } },
+  })
+  const chatAPI = {
+    name: 'chat_api',
+    description: 'Run the `ex` helper of the chat skill: `args` are the words after `ex`, e.g. ["GET", "/me"], ["GET", "/conversations?scope=group&limit=100"], ["POST", "/conversations/FEED_ID/messages", "{\\"text\\":\\"hi\\"}"]. Reads run at once; writes other people see are confirmed on the phone first, and a refusal comes back as the result. Returns what ex prints.',
+    inputSchema: gateSchema('ex'),
+  }
+
+  it('declares it with its schema unchanged and passes its calls on by name', async (t) => {
+    const { call } = proxied(t, [chatAPI, { name: 'agents_list', description: 'List the Agents', inputSchema: { type: 'object', properties: {} } }])
+    const listed = await call('tools/list', {})
+    assert.deepEqual(listed.result.tools.map((x) => x.name), ['chat_api', 'persona_call'])
+    assert.deepEqual(listed.result.tools[0], chatAPI)
+    const args = { args: ['GET', '/me'] }
+    for (const params of [{ name: 'chat_api', arguments: args }, { name: 'persona_call', arguments: { name: 'chat_api', arguments: args } }]) {
+      const res = await call('tools/call', params)
+      assert.deepEqual(JSON.parse(res.result.content[0].text), { name: 'chat_api', args })
+    }
+  })
+
+  it('keeps one with a short description reachable through persona_call, with its arguments', async (t) => {
+    const short = { name: 'ex_api', description: 'Run ex.', inputSchema: gateSchema('ex') }
+    const { call } = proxied(t, [short])
+    const listed = await call('tools/list', {})
+    assert.deepEqual(listed.result.tools.map((x) => x.name), ['persona_call'])
+    const text = (await call('tools/call', { name: 'persona_call', arguments: {} })).result.content[0].text
+    assert.ok(text.includes(`- ex_api: Run ex. Arguments: ${JSON.stringify(short.inputSchema)}`), text)
+  })
+})
+
 describe('MCP declaration enums (#9944)', { timeout: 15_000 }, () => {
-  const prompt = readFileSync(new URL('../../../server/internal/prompts/mcp/agents/task_review.md', import.meta.url), 'utf8')
-  const taskSchema = JSON.parse(prompt.match(/```json\s*\n([\s\S]*?)\n```/)[1])
-  const taskTool = { name: 'task_review', description: 'Review a task', inputSchema: taskSchema }
+  // The template has language branches and is not JSON until the server renders it. Use its recorded MCP wire form.
+  const rendered = JSON.parse(readFileSync(new URL('../../../server/internal/hub/testdata/prompts/mcp_tools/assistant/task_review.golden', import.meta.url), 'utf8'))
+  const taskTool = { name: rendered.name, description: rendered.description, inputSchema: rendered.input_schema }
   const catalogTool = { name: 'tool_catalog', inputSchema: { type: 'object' } }
 
   it('projects the real task_review schema without its boolean enum and keeps boolean call arguments', async (t) => {
-    assert.deepEqual(taskSchema.properties.evidence.properties.ready.enum, [true])
+    assert.deepEqual(taskTool.inputSchema.properties.evidence.properties.ready.enum, [true])
     const { call } = proxied(t, [taskTool])
     const listed = await call('tools/list', {})
     const expected = structuredClone(taskTool)
@@ -198,6 +233,15 @@ describe('MCP declaration enums (#9944)', { timeout: 15_000 }, () => {
 })
 
 describe('mcpServers', () => {
+  it('allows a regular agent to keep ordinary tools alongside a separate scoped A2A server', () => {
+    const agent = mcpServers('/bin/personad', 'agy-1', false, 'test-ticket')
+    const chat = mcpServers('/bin/personad', 'agy-2', true, 'test-ticket')
+    assert.deepEqual(agent.map(({ name }) => name), ['persona', 'persona_a2a'])
+    assert.ok(agent[0].env.every(({ name }) => name !== 'PERSONA_A2A_TOKEN'))
+    assert.ok(agent[0].env.some(({ name, value }) => name === 'PERSONA_MCP_EXCLUDE_A2A' && value === '1'))
+    assert.ok(agent[1].env.some(({ name, value }) => name === 'PERSONA_A2A_TOKEN' && value === 'test-ticket'))
+    assert.ok(chat[0].env.every(({ name }) => name !== 'PERSONA_A2A_TOKEN'))
+  })
   it('passes one persona server; an assistant chat\'s through the proxy', () => {
     const agent = mcpServers('/bin/personad', 'agy-1', false)
     assert.deepEqual(agent.map((s) => [s.name, s.command, s.args]), [['persona', '/bin/personad', ['mcp']]])

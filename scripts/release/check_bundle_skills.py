@@ -18,6 +18,13 @@ EMBED_GO = Path(__file__).resolve().parents[2] / "server" / "internal" / "assist
 FRONTMATTER = re.compile(rb"---\r?\n((?:(?!---)[^\n]*\n){1,30}?)---")
 NAME = re.compile(rb"(?m)^name:[ \t]*[\"']?([A-Za-z0-9_.-]+)[\"']?[ \t]*\r?$")
 DESCRIPTION = re.compile(rb"(?m)^description:")
+# A runtime agent is not a SKILL.md, even though it also uses YAML frontmatter. Its explicit agent-policy fields
+# distinguish the generated Antigravity definition from actual skill content; this is not an allowlist of its name.
+RUNTIME_AGENT = re.compile(rb"(?m)^mainAgent:[ \t]*(?:true|false)[ \t]*\r?$")
+
+
+def bundled_skill(block: bytes) -> bool:
+    return bool(DESCRIPTION.search(block) and not RUNTIME_AGENT.search(block))
 
 
 def redistributable(source: str) -> set:
@@ -38,7 +45,7 @@ def redistributable(source: str) -> set:
 
 
 def check(binary: bytes, allowed: set) -> list:
-    names = sorted({m.group(1).decode() for block in FRONTMATTER.findall(binary) if DESCRIPTION.search(block)
+    names = sorted({m.group(1).decode() for block in FRONTMATTER.findall(binary) if bundled_skill(block)
                     for m in [NAME.search(block)] if m})
     if not names:
         return ["no embedded skill found: the scan is broken or the built-in skills are gone"]

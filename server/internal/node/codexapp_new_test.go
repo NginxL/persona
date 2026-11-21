@@ -205,8 +205,22 @@ func TestTheCodexAppLauncherIsOfferedWhereTheAppRuns(t *testing.T) {
 	if !added || list[1] != (proto.Launcher{Name: "codex-app", Source: "codex_app", Agent: "codex"}) {
 		t.Fatalf("list %+v", list)
 	}
-	if models, err := n.launcherModels(context.Background(), "codex-app", "", false); err != nil || models.Agent != "codex" || len(models.Models) != 0 || models.Locked == "" {
+	if models, err := n.launcherModels(context.Background(), "codex-app", "", false); err != nil || models.Agent != "codex" || len(models.Models) != 0 || models.Locked != "" {
 		t.Fatalf("models %+v %v", models, err)
+	}
+	cacheJSON := `{"models":[
+		{"slug":"acme/gpt-5-pro","display_name":"Acme gpt-5-pro","visibility":"list","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"}]},
+		{"slug":"beta/gpt-5-pro","display_name":"Beta gpt-5-pro","visibility":"list","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"high"},{"effort":"xhigh"}]},
+		{"slug":"hidden/internal","visibility":"hide"}
+	]}`
+	if err := os.WriteFile(filepath.Join(n.codexHome(), "models_cache.json"), []byte(cacheJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(n.codexHome(), "config.toml"), []byte("model = \"beta/gpt-5-pro\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if models, err := n.launcherModels(context.Background(), "codex-app", "", true); err != nil || models.Locked != "" || len(models.Models) != 2 || models.Models[0].ID != "acme/gpt-5-pro" || models.Models[0].Name != "Acme gpt-5-pro" || !models.Models[1].Default {
+		t.Fatalf("cached models %+v %v", models, err)
 	}
 	if !n.knownLauncher(context.Background(), "codex-app") {
 		t.Fatal("not known")

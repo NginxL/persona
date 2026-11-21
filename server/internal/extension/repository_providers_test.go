@@ -101,6 +101,9 @@ func TestRepositoryProvidersRefusals(t *testing.T) {
 			it["hosts"] = []string{strings.Repeat(strings.Repeat("a", 62)+".", 4) + "t"}
 		}), true, false},
 		{"two items", []map[string]any{repositoryItem("acme", "code.acme.test"), repositoryItem("mirror", "mirror.acme.test")}, true, false},
+		{"pull request states", edit(func(it map[string]any) { it["capabilities"] = []string{"pr_status"} }), true, false},
+		{"an unknown capability", edit(func(it map[string]any) { it["capabilities"] = []string{"pr_events"} }), false, false},
+		{"a capability twice", edit(func(it map[string]any) { it["capabilities"] = []string{"pr_status", "pr_status"} }), false, false},
 
 		{"no hosts", edit(func(it map[string]any) { it["hosts"] = []string{} }), false, false},
 		{"seventeen hosts", edit(func(it map[string]any) { it["hosts"] = hosts(17) }), false, false},

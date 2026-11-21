@@ -202,7 +202,8 @@ func readCodexThreads(ctx context.Context, db, where string) (map[string]codexAp
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	q := func(settings string) string {
-		return `SELECT id, rollout_path AS rolloutPath, COALESCE(NULLIF(name, ''), title) AS title, cwd, source, ` +
+		// Native threads can store the whole opening prompt in title. Project unnamed titles before caching or sending them.
+		return `SELECT id, rollout_path AS rolloutPath, COALESCE(NULLIF(name, ''), substr(title, 1, 256)) AS title, cwd, source, ` +
 			`COALESCE(updated_at_ms, updated_at * 1000) AS updatedAtMs` + settings + ` FROM threads WHERE ` + where
 	}
 	target := codexDBTarget(db)

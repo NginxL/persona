@@ -468,8 +468,9 @@ func (s *Service) claimedHost(raw string) bool {
 
 // importReportedLinks records the links an agent reported (only: the one kind kept, "" for any): built-in and saved
 // ones now, offline as before; the ones a provider must be asked about later, off the hub's event loops
-// (askReportedLater). A link whose provider is off or gone is skipped and logged.
-func (s *Service) importReportedLinks(ctx context.Context, id string, raws []string, only string) error {
+// (askReportedLater). A link whose provider is off or gone is skipped and logged. Reported roles (delivery/reference)
+// ride along on each link; an absent role keeps the delivery default.
+func (s *Service) importReportedLinks(ctx context.Context, id string, raws []string, only string, roles map[string]string) error {
 	src := s.linkSources(ctx, id)
 	var links []repository.LinkInput
 	var later []string
@@ -481,10 +482,13 @@ func (s *Service) importReportedLinks(ctx context.Context, id string, raws []str
 		case ask:
 			later = append(later, raw)
 		case in != nil:
+			if role := roles[raw]; role != "" {
+				in.Role = role
+			}
 			links = append(links, *in)
 		}
 	}
-	s.askReportedLater(ctx, id, later, only)
+	s.askReportedLater(ctx, id, later, only, roles)
 	return s.importReported(ctx, id, links)
 }
 
@@ -545,7 +549,7 @@ var reportedLinkStart = time.Minute
 // restart's replay of every task session's last reply) never wait on an extension, and one reply asks about an
 // address once, its PR included. Each address has a provider budget of its own, so a slow answer about one never
 // leaves the next without time.
-func (s *Service) askReportedLater(ctx context.Context, id string, raws []string, only string) {
+func (s *Service) askReportedLater(ctx context.Context, id string, raws []string, only string, roles map[string]string) {
 	if len(raws) == 0 {
 		return
 	}
@@ -592,11 +596,14 @@ func (s *Service) askReportedLater(ctx context.Context, id string, raws []string
 				s.logf("task %s: repository link skipped: %v", id, err)
 			case handled:
 				if kept := keptLink(in, only); kept != nil {
+					if role := roles[raw]; role != "" {
+						kept.Role = role
+					}
 					links = append(links, *kept)
 				}
 			default:
 				if _, link, err := repository.ParseTaskLink(raw); err == nil && (only == "" || link.Kind == only) {
-					links = append(links, repository.LinkInput{URL: link.CanonicalURL})
+					links = append(links, repository.LinkInput{URL: link.CanonicalURL, Role: roles[raw]})
 				}
 			}
 		}
@@ -626,9 +633,11 @@ func providerAnswered(err error) bool {
 	return pe.Code == "not_found" || pe.Code == "not_signed_in" || pe.Code == "refused"
 }
 
-// importReported records reported links: by address alone when no provider resolved any, as before.
+// importReported records reported links: by address alone when no provider resolved any and no link carries a role,
+// as before. A role needs the details path so it survives into the stored TaskLink.
 func (s *Service) importReported(ctx context.Context, id string, links []repository.LinkInput) error {
-	if !slices.ContainsFunc(links, func(in repository.LinkInput) bool { return in.Resolved != nil }) {
+	hasDetails := slices.ContainsFunc(links, func(in repository.LinkInput) bool { return in.Resolved != nil || in.Role != "" })
+	if !hasDetails {
 		urls := make([]string, 0, len(links))
 		for _, in := range links {
 			urls = append(urls, in.URL)

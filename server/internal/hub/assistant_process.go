@@ -114,10 +114,26 @@ func (h *Hub) superviseAssistant(ctx context.Context) {
 	first, most := time.Second, time.Minute
 	delay := first
 	for ctx.Err() == nil {
+		// A Web development snapshot stops the manager and starts it again
+		// afterward (quiesce.go); while paused the supervisor waits here.
+		if !h.assistantProc.waitResumed(ctx) {
+			return
+		}
 		began := time.Now()
-		err := h.runAssistant(ctx, token)
+		runCtx, cancel := context.WithCancel(ctx)
+		exit := make(chan struct{})
+		if !h.assistantProc.register(exit, cancel) {
+			cancel()
+			continue
+		}
+		err := h.runAssistant(runCtx, token)
+		cancel()
+		paused := h.assistantProc.unregister()
 		if ctx.Err() != nil {
 			return
+		}
+		if paused {
+			continue // the pause stopped it on purpose: no backoff, no restart yet
 		}
 		if time.Since(began) >= time.Minute {
 			delay = first

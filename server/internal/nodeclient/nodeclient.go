@@ -61,6 +61,7 @@ type Request struct {
 	SessionID string          `json:"session_id,omitempty"`
 	// CodexThreadID is the tool process's CODEX_THREAD_ID; the node resolves it in its own Codex registry.
 	CodexThreadID string `json:"codex_thread_id,omitempty"`
+	A2AToken      string `json:"a2a_token,omitempty"`
 	Assistant     bool   `json:"assistant,omitempty"` // the caller is the assistant's MCP server
 	Guest         bool   `json:"guest,omitempty"`     // a guest conversation's MCP server (assistant_guest.go)
 	// ToolSet: mcp.tools of a process started with a narrower tool set (PERSONA_TOOL_SET: "supervise", a background

@@ -220,6 +220,7 @@ describe("agents by space", () => {
 
   it("label the tab and a non-Claude agent", () => {
     expect(agentMeta(sess("x", { slot_name: "2", agent: "codex" }))).toBe("#2 · Codex");
+    expect(agentMeta(sess("x", { slot_name: "2", agent: "traex", agent_label: "traex" }))).toBe("#2 · TRAE CLI");
     expect(agentMeta(sess("x", { slot_name: "widget", agent: "claude" }))).toBe("widget");
     expect(agentMeta(sess("x", { agent: "dsh", agent_label: "DSH" }))).toBe("DSH");
   });

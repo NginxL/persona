@@ -291,7 +291,7 @@ func refuseOutputInsideCollectedTree(home, output string) error {
 		for _, candidate := range []string{filepath.Dir(output), resolvedOutput} {
 			for _, base := range []string{tree, resolveExisting(tree)} {
 				if rel, err := filepath.Rel(base, candidate); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-					return fmt.Errorf("--output is inside %s, which the backup collects: choose a directory outside the knowledge base and the runtime's managers/assistant, extensions, skills and hub.machines_kept directories", tree)
+					return fmt.Errorf("--output is inside %s, which the backup collects: choose a directory outside the knowledge base and the runtime's managers/assistant, extensions, skills, hub.machines_kept and tls directories", tree)
 				}
 			}
 		}

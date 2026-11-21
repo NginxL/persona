@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/ai"
@@ -305,11 +306,26 @@ func (s *Service) outcomeDecisions(ctx context.Context, t Todo, key string, by o
 
 // outcomeLog appends "Outcome: …" (in Chinese) to the timeline of the project t was put in (todo_project.go), or, when it has
 // none (or it is gone), of each project an agent of t worked in (kb.ProjectsForWork), once a project: «to-do · <title>», not
-// bounded like an agent's turns (kb_bus.go).
+// bounded like an agent's turns (kb_bus.go). Nothing of a to-do whose history holds the health space's words
+// (todoVerdicts' todoHidden, #10941): its outcome is read off its runs' last replies, and a project's timeline is
+// outside the space, where kb.read reads it. Nor yet of one whose verdict cannot be told now (todoUntold): its line
+// waits (holdOutcomeLine), and is written once the verdict is told shown.
 func (s *Service) outcomeLog(ctx context.Context, t Todo, agents []outcomeAgent, o taskOutcome) {
 	if !s.kbWritable(ctx) {
 		return
 	}
+	switch s.todoVerdicts(ctx, []string{t.ID}, map[string]Todo{t.ID: t}, nil)[t.ID] {
+	case todoHidden:
+		return
+	case todoUntold:
+		s.holdOutcomeLine(heldOutcomeLine{t: t, agents: agents, o: o})
+		return
+	}
+	s.writeOutcomeLine(ctx, t, agents, o)
+}
+
+// writeOutcomeLine is outcomeLog's write, its verdict told shown.
+func (s *Service) writeOutcomeLine(ctx context.Context, t Todo, agents []outcomeAgent, o taskOutcome) {
 	e, err := s.kbGet(ctx)
 	if errors.Is(err, errKBNotOpen) {
 		select { // it opens once the hub's hello came and the archive's zone is read: one more try
@@ -328,6 +344,105 @@ func (s *Service) outcomeLog(ctx context.Context, t Todo, agents []outcomeAgent,
 			s.logf("task %s: outcome log %s: %v", t.ID, p.Slug, err)
 		}
 	}
+}
+
+// heldOutcomeLine is an outcome line whose to-do's verdict could not be told when its task closed: the to-do as it was
+// then, its agents and what it came to.
+type heldOutcomeLine struct {
+	t      Todo
+	agents []outcomeAgent
+	o      taskOutcome
+}
+
+// outcomeLines are the outcome lines that wait for their to-do's verdict (holdOutcomeLine), in order; armed: a judgement
+// again is scheduled, tries how many in a row found one still untold (todoRetryDelay). In memory only: a manager that
+// starts again has none, and such an outcome stays in its to-do's decisions alone.
+type outcomeLines struct {
+	mu    sync.Mutex
+	held  []heldOutcomeLine
+	armed bool
+	tries int
+	after func(d time.Duration, f func()) // tests replace the timer
+}
+
+// holdOutcomeLine keeps l, whose to-do's verdict could not be told, to be judged again after todoRetryDelay, as a held
+// todo.decision is (todoHold): written once its verdict is told shown, dropped once hidden. Past todoEventLimit the
+// oldest held is dropped.
+func (s *Service) holdOutcomeLine(l heldOutcomeLine) {
+	h := &s.outcomeLines
+	h.mu.Lock()
+	if len(h.held) >= todoEventLimit {
+		h.held = h.held[1:]
+		s.logf("task %s: %d outcome lines wait for their to-do's verdict: the oldest is dropped", l.t.ID, todoEventLimit)
+	}
+	h.held = append(h.held, l)
+	arm := !h.armed
+	h.armed = true
+	delay := todoRetryDelay(h.tries)
+	after := h.after
+	h.mu.Unlock()
+	if !arm {
+		return
+	}
+	if after == nil {
+		after = func(d time.Duration, f func()) { time.AfterFunc(d, f) }
+	}
+	after(delay, s.retryOutcomeLines)
+}
+
+// retryOutcomeLines judges the held outcome lines again, each to-do as it is kept now (as it was at its close once it is
+// deleted): a line told shown is written, one hidden dropped, one still untold held again.
+func (s *Service) retryOutcomeLines() {
+	h := &s.outcomeLines
+	h.mu.Lock()
+	h.armed = false
+	held := h.held
+	h.held = nil
+	h.mu.Unlock()
+	if len(held) == 0 || s.runCtx().Err() != nil {
+		return
+	}
+	ids := make([]string, 0, len(held))
+	gone := make(map[string]Todo, len(held))
+	for _, l := range held {
+		ids = append(ids, l.t.ID)
+		gone[l.t.ID] = l.t
+	}
+	ctx, cancel := context.WithTimeout(s.runCtx(), todoNoticeTimeout)
+	verdicts := s.todoVerdicts(ctx, ids, gone, nil)
+	cancel()
+	var again []heldOutcomeLine
+	for _, l := range held {
+		switch verdicts[l.t.ID] {
+		case todoShown:
+			wctx, wcancel := context.WithTimeout(s.runCtx(), outcomeWriteTimeout)
+			if s.kbWritable(wctx) {
+				s.writeOutcomeLine(wctx, l.t, l.agents, l.o)
+			}
+			wcancel()
+		case todoUntold:
+			again = append(again, l)
+		}
+	}
+	h.mu.Lock()
+	if len(again) == 0 {
+		h.tries = 0
+	} else {
+		h.tries++
+	}
+	h.held = append(again, h.held...)
+	arm := len(h.held) > 0 && !h.armed
+	h.armed = h.armed || arm
+	delay := todoRetryDelay(h.tries)
+	after := h.after
+	h.mu.Unlock()
+	if !arm {
+		return
+	}
+	if after == nil {
+		after = func(d time.Duration, f func()) { time.AfterFunc(d, f) }
+	}
+	after(delay, s.retryOutcomeLines)
 }
 
 // outcomeProjects are the projects whose timelines get t's outcome: the one it was put in, else those its agents worked
@@ -431,6 +546,11 @@ func (s *Service) renderProjectContexts(ctx context.Context, e *kb.Engine, proje
 		block := s.renderProjectMemory(ctx, e, p, language, fromExtensions[p.Slug])
 		if block == "" {
 			block = s.renderLegacyProject(e, p, language, fromExtensions[p.Slug])
+		}
+		// The lessons its accepted tasks taught (task_lessons.go): a block of their own after the project's, so either
+		// rendering above stays as it was.
+		if lessons := s.renderProjectLessons(ctx, e, p, language); lessons != "" {
+			block = strings.TrimSpace(block + "\n\n" + lessons)
 		}
 		if block != "" {
 			blocks = append(blocks, block)

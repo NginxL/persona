@@ -287,7 +287,7 @@
     <string name="settings_off">Off</string>
     <string name="settings_retry_cleanup">Retry cleanup</string>
     <string name="settings_try_demo">No hub? Try the demo</string>
-    <string name="settings_style_title">Interface style</string>
+    <string name="settings_style_title">Appearance</string>
     <string name="settings_avatar_title">Avatar</string>
     <string name="settings_about_persona">About Persona</string>
     <string name="settings_phone_data_title">Phone data</string>

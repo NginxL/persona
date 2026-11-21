@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 APPLE = ROOT / 'apple'
@@ -24,6 +25,27 @@ OTHER_PROJECTS = {
     'scripts/app/island_peer.sh': 'apple/IslandPeer',
 }
 NOTE = 'scripts/app/lean-build-note.sh'
+
+
+def generate_position(text):
+    """The first non-comment XcodeGen command line, without a greedy prefix regex."""
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        if not line.lstrip(' \t').startswith('#') and re.search(r'xcodegen +generate', line):
+            return offset
+        offset += len(line)
+    return None
+
+
+def xcodegen_callers(root):
+    # Keep the original tracked-file scope; a literal shortlist avoids backtracking on unrelated long lines.
+    result = subprocess.run(['git', '-C', str(root), 'grep', '-lFz', 'xcodegen', '--', '.',
+                             ':!docs', ':!*.md', ':!scripts/test'],
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode not in (0, 1):
+        result.check_returncode()
+    return [path for path in result.stdout.split('\0') if path and
+            generate_position((root / path).read_text()) is not None]
 
 
 def dump(**switches):
@@ -91,21 +113,34 @@ class LeanDevBuildCallersTests(unittest.TestCase):
         self.assertIn('${ARGS[@]+"${ARGS[@]}"}', sim)
 
     def test_release_ci_and_ui_tests_build_every_slice_of_the_rust_core(self):
-        for path in ('scripts/release/release.sh', 'scripts/ci/apple.sh', 'scripts/app/ui-test.sh',
+        for path in ('scripts/release/release.sh', 'scripts/app/ui-test.sh',
                      'scripts/app/perf-test.sh', 'scripts/diag/stream-scroll/run-ios.sh'):
             with self.subTest(path=path):
                 text = (ROOT / path).read_text()
                 self.assertIn('build-apple.sh', text)
                 self.assertNotIn('--simulator', text)
 
+    def test_apple_ci_keeps_the_simulator_only_core_in_the_ios18_lane(self):
+        text = (ROOT / 'scripts/ci/apple.sh').read_text()
+        block = re.search(r'^if \[ "\$LANE" = ios18 \]; then\n  ci_run \'Build PersonaCore.*?^fi$',
+                          text, re.MULTILINE | re.DOTALL).group()
+        # Execute the real lane branch, replacing only its build runner with argument capture.
+        runner = 'ci_run() { shift 2; printf "%s\\n" "$@"; }\n'
+        for lane in ('all', 'ios', 'ios18', 'packages', 'ios-build'):
+            with self.subTest(lane=lane):
+                result = subprocess.run(['bash', '-eu', '-c', runner + block],
+                                        env=dict(os.environ, LANE=lane, SOURCE='/fixture'),
+                                        capture_output=True, text=True, timeout=30, check=True)
+                expected = ['/fixture/native/app-core/scripts/build-apple.sh']
+                if lane == 'ios18':
+                    expected.append('--simulator')
+                self.assertEqual(result.stdout.splitlines(), expected)
+
     def test_every_other_caller_of_xcodegen_generates_the_whole_project(self):
         # Each clears the switch before it generates the project, so a value the shell exported cannot drop the watch
         # app from a TestFlight build or the share extension from the tests that share into it. Search for new callers
         # too, ignoring full-line comments that only describe the command.
-        generate = '^[ \t]*([^# \t].*)?xcodegen +generate'
-        listed = subprocess.run(['git', '-C', str(ROOT), 'grep', '-lE', generate, '--', '.',
-                                 ':!docs', ':!*.md', ':!scripts/test'],
-                                capture_output=True, text=True, timeout=60, check=True).stdout.split()
+        listed = xcodegen_callers(ROOT)
         for path in OTHER_PROJECTS:
             self.assertIn(path, listed, 'stale entry in OTHER_PROJECTS')
         callers = [p for p in listed if p not in OTHER_PROJECTS and p != 'scripts/app/sim.sh']
@@ -117,13 +152,70 @@ class LeanDevBuildCallersTests(unittest.TestCase):
                 self.assertNotIn(SWITCH + '=', text)
                 cleared = text.find('unset ' + SWITCH + '\n')
                 self.assertNotEqual(cleared, -1, 'generates the project without clearing ' + SWITCH)
-                self.assertLess(cleared, re.search(generate, text, re.MULTILINE).start(), 'clears it too late')
+                self.assertLess(cleared, generate_position(text), 'clears it too late')
 
     def test_only_a_lean_build_names_the_check_it_skipped(self):
         sim = (ROOT / 'scripts/app/sim.sh').read_text()
         lean = sim[sim.index('if [ "$LEAN" = YES ]; then'):]
         self.assertIn('../' + NOTE, lean[:lean.index('\nfi\n')])
         self.assertEqual(sim.count('lean-build-note.sh'), 2)  # the call and the header that names it
+
+
+class XcodegenCallerScanTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='persona-xcodegen-callers-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        # Synthetic Git must not inherit a parent repository's index or refs.
+        environment = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+        patch = mock.patch.dict(os.environ, environment, clear=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.git('init', '-q')
+
+    def git(self, *args):
+        subprocess.run(['git', '-C', str(self.root), *args], capture_output=True, text=True, timeout=30, check=True)
+
+    def write(self, path, text, tracked=True):
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+        if tracked:
+            self.git('add', '--', path)
+
+    def test_preserves_tracked_scope_including_unexpected_callers_and_spaced_paths(self):
+        # Extensionless fixture scripts are not real repository dependencies for the check-fast input inventory.
+        self.write('scripts/app/known', 'xcodegen generate\n')
+        self.write('.github/workflows/build.yml', '  run: xcodegen  generate --spec apple/project.yml\n')
+        self.write('unexpected/extensionless launcher', 'tool && xcodegen generate\n')
+        self.write('scripts/app/modified', 'echo before\n')
+        (self.root / 'scripts/app/modified').write_text('xcodegen generate\n')
+        for path in ('docs/run', 'guide.md', 'scripts/test/fixture'):
+            self.write(path, 'xcodegen generate\n')
+        self.write('untracked.sh', 'xcodegen generate\n', tracked=False)
+        self.assertEqual(set(xcodegen_callers(self.root)), {
+            'scripts/app/known', '.github/workflows/build.yml',
+            'unexpected/extensionless launcher', 'scripts/app/modified',
+        })
+
+    def test_comments_and_long_unrelated_lines_do_not_become_callers(self):
+        self.write('comments.sh', '# xcodegen generate\n \t# xcodegen generate\n')
+        self.write('long-source', 'x' * 200000 + 'xcodegen not-a-command\n')
+        self.write('dump.sh', 'xcodegen dump\nxcodegen\tgenerate\n')
+        self.assertEqual(xcodegen_callers(self.root), [])
+        self.write('after-comment.sh', '# xcodegen generate\n  xcodegen generate\n')
+        self.assertEqual(xcodegen_callers(self.root), ['after-comment.sh'])
+        self.assertEqual(generate_position('# xcodegen generate\n  xcodegen generate\n'), 20)
+
+    def test_no_literal_matches_is_an_empty_inventory(self):
+        self.write('other.sh', 'echo no generator\n')
+        self.assertEqual(xcodegen_callers(self.root), [])
+
+    def test_git_errors_are_not_an_empty_inventory(self):
+        with mock.patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess(
+                ['git'], 128, stdout='', stderr='fatal: unavailable repository')):
+            with self.assertRaises(subprocess.CalledProcessError):
+                xcodegen_callers(self.root)
 
 
 class LeanBuildNoteTests(unittest.TestCase):

@@ -125,6 +125,8 @@ func (e *todoEnv) sessions(machine string, list ...proto.Session) {
 	}
 	e.f.setSessions(machine, copied...)
 	e.s.SessionsChanged(context.Background(), DeviceSessions{MachineID: machine, Sessions: copied})
+	// The conversations' spaces it noted are in the store (conversation_space.go), as a while after a list.
+	waitFor(e.t, "the listed conversations' spaces written", e.s.listedSpacesWritten)
 }
 
 // todoOf is the todo the agent works for, as the hub is told (the report: what its session list shows); "" for none.

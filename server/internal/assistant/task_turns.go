@@ -107,18 +107,22 @@ func turnEndOf(items []proto.Item) (turnClose, bool) {
 // signals name it), the judgment written for it and the signal it raised. Receipt: a turn with no Key has its done
 // receipt in the feed (a named one's receipt is found there by its id).
 type taskTurn struct {
-	Machine string      `json:"machine"`
-	Session string      `json:"session"`
-	Key     string      `json:"key,omitempty"`
-	Open    string      `json:"open,omitempty"`
-	Rev     int64       `json:"rev,omitempty"`
-	Seen    time.Time   `json:"seen,omitzero"`
-	State   string      `json:"state"`
-	Work    time.Time   `json:"work"`
-	At      time.Time   `json:"at"`
-	Receipt bool        `json:"receipt,omitempty"`
-	Judged  *turnJudged `json:"judged,omitempty"`
-	Signal  *turnSignal `json:"signal,omitempty"`
+	Machine string    `json:"machine"`
+	Session string    `json:"session"`
+	Key     string    `json:"key,omitempty"`
+	Open    string    `json:"open,omitempty"`
+	Rev     int64     `json:"rev,omitempty"`
+	Seen    time.Time `json:"seen,omitzero"`
+	State   string    `json:"state"`
+	Work    time.Time `json:"work"`
+	At      time.Time `json:"at"`
+	Receipt bool      `json:"receipt,omitempty"`
+	// JudgeFailures counts failed judgment passes while Judged is still nil; JudgeError keeps the latest service or
+	// parse failure for diagnostics. Both survive a manager restart and reset when a new stretch of work starts.
+	JudgeFailures int         `json:"judge_failures,omitempty"`
+	JudgeError    string      `json:"judge_error,omitempty"`
+	Judged        *turnJudged `json:"judged,omitempty"`
+	Signal        *turnSignal `json:"signal,omitempty"`
 	// Silent: the turn, taken up as interrupted, had no output at all (proto.TurnErrorNoOutput, or
 	// proto.TurnErrorStopped when Persona's Stop interrupted it): what the Agent's row says of it (silent_turns.go).
 	Silent string `json:"silent,omitempty"`
@@ -466,7 +470,8 @@ func (s *Service) takeTurnAs(ctx context.Context, t Todo, last proto.Session, it
 	// A turn the sweep kept as seen (turnBefore) is not one taken up: that only says the sweep makes nothing of it. An
 	// end that is told for it is handled as any first one.
 	if cur, ok := b.doc.Turns[t.ID]; ok && cur.State != turnBefore && (cur.of(last, end) || cur.sameUnnamed(last, items, end) || !named && cur.sameRow(last)) {
-		changed := !cur.Work.Equal(since) || cur.Rev != last.Rev
+		workChanged := !cur.Work.Equal(since)
+		changed := workChanged || cur.Rev != last.Rev
 		if named && cur.Key == "" {
 			cur.Key, cur.Open, changed = end.Key, fresh.Open, true // its name, now that the transcript has it
 		}
@@ -474,6 +479,9 @@ func (s *Service) takeTurnAs(ctx context.Context, t Todo, last proto.Session, it
 			cur.Silent, changed = silent, true
 		}
 		if changed {
+			if workChanged && cur.Judged == nil {
+				cur.JudgeFailures, cur.JudgeError = 0, "" // judge the latest stretch with a fresh retry budget
+			}
 			cur.Work, cur.Rev, cur.Seen = since.UTC(), last.Rev, last.UpdatedAt.UTC() // the stretch it closes now, as the judgment and the signals name it
 			b.doc.Turns[t.ID] = cur
 			s.saveTurnsLocked(ctx)
@@ -631,7 +639,11 @@ func (s *Service) turnAgain(ctx context.Context, t Todo, e taskTurn, last proto.
 	}
 	j := e.Judged
 	if j == nil {
-		s.autoFinishTask(t, since, worked)
+		if e.JudgeFailures > 0 {
+			s.autoFinishTaskRetry(t, since, worked)
+		} else {
+			s.autoFinishTask(t, since, worked)
+		}
 		return
 	}
 	if !worked || !since.After(j.At) || j.Skip != "" {
@@ -855,7 +867,14 @@ func (s *Service) recoverTurn(ctx context.Context, t Todo, last proto.Session) (
 	b.mu.Lock()
 	if !closed {
 		delete(b.closed, ref)
+		e, known := b.doc.Turns[t.ID]
 		b.mu.Unlock()
+		if known && e.State == turnDone && e.Judged == nil && e.JudgeFailures > 0 && e.Key == "" &&
+			e.Machine == last.MachineID && e.Session == last.SessionID && e.sameRow(last) {
+			// This unnamed turn's receipt already proved that its agents stopped. Its failed judgment is resumed here even
+			// when an older runtime never writes a native end; taskCompletionCurrent still rejects any newer work.
+			return s.resumeTurn(ctx, t, e)
+		}
 		return true // open, or nothing to go by: looked at again when its row moves
 	}
 	b.closed[ref] = lookOf(last)
@@ -932,17 +951,19 @@ func (s *Service) recoverTurn(ctx context.Context, t Todo, last proto.Session) (
 }
 
 // resumeTurn finishes what a manager before this one, or a look that failed, left of task t's turn e: its judgment.
-// The sweep replays its untold signal after matching the revision or the native end. When the last of turnJudgeTries
-// judgments did not land either it is told unjudged at once, so that the supervisor hears of the stop in any case.
+// The sweep replays its untold signal after matching the revision or the native end. Failed judgment calls use their
+// own durable bounded retry budget. When the last of turnJudgeTries judgments whose result did not land is lost too,
+// the turn is told unjudged at once, so that the supervisor hears of the stop in any case.
 // looked: nothing more to try now.
 func (s *Service) resumeTurn(ctx context.Context, t Todo, e taskTurn) (looked bool) {
 	if e.State != turnDone || e.Judged != nil {
 		return true // judged: only the telling is left
 	}
 	b := &s.tasks.turns
+	serviceRetry := e.JudgeFailures > 0
 	b.mu.Lock()
 	judging := b.settling(t.ID)
-	if !judging {
+	if !judging && !serviceRetry {
 		b.tries[t.ID]++
 	}
 	tries := b.tries[t.ID]
@@ -965,12 +986,20 @@ func (s *Service) resumeTurn(ctx context.Context, t Todo, e taskTurn) (looked bo
 			b.mu.Lock()
 			if cur, ok := b.doc.Turns[t.ID]; ok && cur.Key == e.Key && cur.Session == e.Session && !cur.Work.Equal(work) {
 				cur.Work = work.UTC()
+				cur.JudgeFailures, cur.JudgeError = 0, "" // a new stretch gets the full service-failure retry budget
 				b.doc.Turns[t.ID] = cur
 				s.saveTurnsLocked(ctx)
 			}
 			b.mu.Unlock()
 		}
 		return work
+	}
+	if serviceRetry {
+		s.autoFinishTaskRetry(t, stretch(), true)
+		if now, ok := s.turnOf(ctx, t.ID); ok && now.Judged != nil {
+			return true
+		}
+		return false // a failed judgment call is retried by the sweep, later each time
 	}
 	if tries <= turnJudgeTries {
 		s.autoFinishTask(t, stretch(), true)

@@ -124,7 +124,7 @@ struct UsageAccountBlock: View {
                     Text(problem).font(Theme.Font.label).foregroundStyle(Theme.cautionText).fixedSize(horizontal: false, vertical: true)
                 }
             }
-            ForEach(a.windows, id: \.key) { w in UsageWindowRow(name: a.name, window: w, now: now) }
+            ForEach(a.windows, id: \.key) { w in UsageWindowRow(name: a.name, window: w, stale: a.stale, now: now) }
         }
         .opacity(a.stale ? 0.6 : 1)
         .accessibilityElement(children: .contain)
@@ -141,11 +141,13 @@ struct UsageAccountBlock: View {
 struct UsageWindowRow: View {
     var name: String
     var window: UsageWindow
+    /// The account's reading is out of date: no pace is judged from it (#12411).
+    var stale = false
     var now: Date
 
     var body: some View {
         let w = window
-        let pace = UsageWindows.pace(w, now: now)
+        let pace = UsageWindows.pace(w, stale: stale, now: now)
         let used = UsageWindows.percentText(w.usedPercent)
         let reset = UsageWindows.resetLabel(w.resetsAt, now: now)
         VStack(alignment: .leading, spacing: Theme.Space.xs) {

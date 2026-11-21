@@ -247,9 +247,12 @@ struct IPhoneSetupView: View {
                     stateCard(.needsYou, String(localized: "\(name) puts a small developer component from Apple on this iPhone. Nothing is reinstalled or erased. It goes away when the iPhone restarts, and the computer adds it again by itself."))
                 }
                 details(String(localized: "Apple’s developer disk image. Each time, Apple’s signing server makes it for this iPhone, so Apple receives this iPhone’s chip ID."))
-            case .preparing:
+            case .preparing(let step):
                 developerOn
-                stateCard(.working, setup.computer?.job("prepare")?.step ?? String(localized: "\(name) is getting this iPhone ready…"))
+                stateCard(.working, step ?? String(localized: "\(name) is getting this iPhone ready…"))
+            case .prepareFailed(let reason, let developerModeOn):
+                if developerModeOn { developerOn }
+                stateCard(.needsYou, IPhoneControlText.prepareFailure(reason))
             case .problem(let note):
                 developerOn
                 stateCard(.needsYou, note.isEmpty ? String(localized: "This iPhone can’t be reached right now.") : note)
@@ -434,6 +437,8 @@ struct IPhoneSetupView: View {
             switch IPhoneSetupFlow.devPhase(setup.input) {
             case .prepare(auto: false) where setup.computer?.noXcode != true:
                 primary(String(localized: "Continue"), id: "iphone-setup-prepare", busy: setup.busy == .preparing) { Task { await setup.prepare() } }
+            case .prepareFailed:
+                primary(String(localized: "Retry"), id: "iphone-setup-prepare") { Task { await setup.prepare() } }
             case .turnOn, .problem, .prepare:
                 secondary(String(localized: "Check Again [Browser Section 953cf0]"), id: "iphone-setup-recheck") { Task { await setup.load() } }
             default:

@@ -629,6 +629,12 @@ func (h *Hub) fleetRoutesRelayed(api *http.ServeMux) {
 			}
 		}
 		if pr.Role == roleExtension {
+			// A pending card the token is never shown (health space, private) is answered as if it did not exist, the
+			// same 404 its read routes give, before any answer is forwarded (#12216).
+			if _, hidden := h.pendingCardHiddenFromExtensions(r.PathValue("id")); hidden {
+				writeErr(w, http.StatusNotFound, errDeleteUnknown)
+				return
+			}
 			if why, mode, mid, sid := h.extensionResolveRefused(pr, r.PathValue("id"), res); why != "" { // extension_modes.go
 				h.refuseExtensionMode(w, r, pr, mid, sid, mode, why)
 				return
@@ -702,9 +708,9 @@ func (h *Hub) fleetRoutesRelayed(api *http.ServeMux) {
 		}
 		h.forwardOwned(w, r, h.byRequest)
 	})
-	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/seen", h.withMachine(func(w http.ResponseWriter, r *http.Request, _ *Machine) {
+	api.HandleFunc("POST /api/v1/sessions/{mid}/{sid}/seen", h.extensionControllable(h.withMachine(func(w http.ResponseWriter, r *http.Request, _ *Machine) {
 		h.forwardOwned(w, r, h.bySession)
-	}))
+	})))
 }
 
 // ---- what the manager asks of the hub for the nodes ----
@@ -815,7 +821,7 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 	switch n.Kind {
 	case assistantwire.NotifyPush: // one with an id shows once, sent again however late (a day recap's push)
 		policy := pushPolicy{level: levelFor(n.Kind, n.Level), relatedKey: n.RelatedKey, todoID: relatedTodoID(n.RelatedKey, !n.Asked)}
-		policy.level = h.lnNotifyPushLevel(n, policy.level)
+		policy.level = h.pushGradingNotifyLevel(n, policy.level)
 		o := h.notifyDoneUnder(from, "assistant", n.DeviceID, n.Subtitle, n.SessionID, n.Title, n.Body, pushWants{}, managerPushCollapseID(from, n.ID),
 			pushRecordingID(n.RecordingID), policy)
 		out = &o
@@ -837,13 +843,13 @@ func (h *Hub) deliverPushFrom(from string, n assistantwire.Notification) (out *p
 	return out, nil
 }
 
-// lnNotifyPushLevel is a notify_user push's effective level while ln mode is on. A level the caller named explicitly
+// pushGradingNotifyLevel is a notify_user push's effective level while push grading is on. A level the caller named explicitly
 // (P0/P1/P2) always stands. A notice that named none and came from the main conversation still interrupts (P0): the
 // owner talking to Persona directly keeps its alerts. Every other conversation's ordinary notice is P1 — held for the
 // "Needs you" list and the briefing instead of alerting. With the switch off the level the caller named stands, so
 // delivery is exactly as before.
-func (h *Hub) lnNotifyPushLevel(n assistantwire.Notification, derived string) string {
-	if h.push == nil || !h.push.lnModeOn() {
+func (h *Hub) pushGradingNotifyLevel(n assistantwire.Notification, derived string) string {
+	if h.push == nil || !h.push.pushGradingOn() {
 		return derived
 	}
 	if n.Level != "" {

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_task_brief_show_all">展开全部</string>
+    <string name="chat_task_brief_asked_owner">你在 %1$s 说：</string>
+    <string name="chat_task_brief_asked_cut">这里截短了，完整的话在原对话里。</string>
+    <string name="chat_task_brief_started_assistant">%1$s 由助理发起</string>
+    <string name="chat_task_brief_started_leader">%1$s 由负责人对话发起</string>
+    <string name="chat_task_brief_started_routine">%1$s 由例行任务发起</string>
+    <string name="chat_task_brief_started_hub">%1$s 由 Persona 自动发起</string>
+    <string name="chat_task_brief_started_unknown">%1$s 发起，没有记录是谁要的。</string>
+    <string name="chat_task_brief_started_why">%1$s：%2$s</string>
+    <string name="chat_task_brief_reconstructed">事后补建：当初的原话没有记录</string>
+    <string name="chat_task_brief_handover">交接提示词</string>
+    <string name="chat_task_brief_done_when">验收标准</string>
+    <string name="chat_task_brief_expected_time">预计用时</string>
+    <string name="chat_task_brief_expect_hours">约 %1$s 小时</string>
+    <string name="chat_task_brief_out_of_bounds">不能做</string>
+    <string name="chat_task_brief_summary_minutes">约 %1$d 分钟</string>
+    <string name="chat_task_brief_summary_hours">约 %1$s 小时</string>
+    <plurals name="chat_task_brief_summary_criteria">
+        <item quantity="other">%1$d 条验收标准</item>
+    </plurals>
+    <plurals name="chat_task_brief_summary_bounds">
+        <item quantity="other">%1$d 条不能做</item>
+    </plurals>
+</resources>

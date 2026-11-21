@@ -152,7 +152,7 @@ func NewBusHub(o BusOptions) *BusHub {
 					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityAgentAutoname, assistantwire.CapabilityMachinesOwn,
 					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
 					assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingNotes, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
-					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityDirectionSessions, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
+					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityAssistantSegments, assistantwire.CapabilityDirectionSessions, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
 					assistantwire.CapabilityMCPWait, assistantwire.CapabilitySessionsSideFold, assistantwire.CapabilityRemoteImages, assistantwire.CapabilityTodoView,
 					assistantwire.CapabilityTodoPlaces, assistantwire.CapabilityTodoAsks, assistantwire.CapabilityTodoTimeline, assistantwire.CapabilityTodoImages, devicewire.SharingCapability}}
 		},
@@ -203,6 +203,9 @@ func (b *BusHub) Run(ctx context.Context, svc *Service) error {
 
 // Serve is Run without svc's own work: the connection alone. It lets svc's knowledge base go for good when it ends.
 func (b *BusHub) Serve(ctx context.Context, svc *Service) error {
+	if svc.devs != nil {
+		b.opts.Devices = svc.devs
+	}
 	b.mu.Lock()
 	b.svc, b.ctx = svc, ctx
 	b.mu.Unlock()
@@ -612,6 +615,10 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 			s.appSendRefused(p.MachineID, p.SessionID, err) // the hub sends nothing: no ConversationSent (north_star.go)
 			return nil, err
 		}
+		if target, _ := params[ownerApprovalHandledParam].(string); target != "" {
+			s.notesOwnerRefused(ctx, carry) // an approval is not a model turn or a conversation message
+			return map[string]any{"params": params}, nil
+		}
 		s.notesOwnerSent(ctx, carry, msg)
 		if *note != "" {
 			return map[string]any{"params": params, "launcher_note": *note}, nil
@@ -717,6 +724,12 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 				if err := s.conversationParamsAvailable(ctx, d.Canonical(p.MachineID), p.Params); err != nil {
 					return nil, err
 				}
+			}
+			if out, handled, err := s.logicalCall(context.WithValue(ctx, logicalTransportKey{}, p), d.Canonical(p.MachineID), p.Method, p.Params); handled {
+				return out, err
+			}
+			if out, handled, err := s.historyCall(ctx, d.Canonical(p.MachineID), p.Method, p.Params); handled {
+				return out, err
 			}
 		}
 		if out, ok, err := d.Request(ctx, method, params); ok { // devices.* (devices.go)

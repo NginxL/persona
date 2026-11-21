@@ -18,6 +18,7 @@ const (
 	sigIdle          = "idle"           // its agents stopped, and the work is not finished
 	sigUnjudged      = "unjudged"       // its agents stopped, and the judge could not say whether the work is finished
 	sigNeedsYou      = "needs_you"      // an agent waits for an answer
+	sigTimedOut      = "timed_out"      // terminal agents stopped after unattended lack of progress
 	sigStalled       = "stalled"        // working, but nothing moved for long
 	sigNoProgress    = "no_progress"    // working, its session moves, but only waits and repeats: no real progress (supervise_progress.go)
 	sigAllStopped    = "all_stopped"    // every current participant stopped with nothing scheduled to resume it
@@ -110,6 +111,8 @@ type superviseSignal struct {
 	// Decision: the decision a recheck or an owner_cannot_answer signal is about, as it was asked (decision.go); for
 	// owner_cannot_answer Detail is the owner's answer (decide_yourself, not_what_i_asked, explain_first).
 	Decision *prompts.SuperviseDecision
+	// Told: a check's decided signal whose answer is already in the task Agent's chat (decisionTold, checkDecided).
+	Told bool
 	// Inbox: the Inbox item an inbox signal names, and how many new messages it tells (supervise_inbox.go).
 	Inbox *prompts.SuperviseInbox
 	// Optional routine batching keeps these in memory only, after routing and before delivery. They are never part of
@@ -159,8 +162,8 @@ func (g superviseSignal) id() string {
 func (g superviseSignal) urgent() bool {
 	switch g.Kind {
 	case sigNeedsYou, sigIdle, sigUnjudged, sigAllStopped, sigFailed, sigInterrupted, sigStarted, sigPRConflict, sigDraftPR, sigEscalated, sigAsk, sigOrphaned, sigDecide, // started: the user waits to hear it
-		sigRecheck, sigUndecidable, sigOwnerCannot, sigEstimateDue, // the owner or an automatic review deadline waits
-		sigParkDecided, sigDecisionReply, sigHandoffResult:
+		sigRecheck, sigUndecidable, sigOwnerCannot, sigEstimateDue, sigTimedOut, // the owner, an automatic deadline or a stopped task waits
+		sigParkedDue, sigParkDecided, sigDecisionReply, sigHandoffResult:
 		return true
 	case sigReport:
 		return g.Report != upReportProgress
@@ -170,10 +173,9 @@ func (g superviseSignal) urgent() bool {
 	return false
 }
 
-// immediate: a signal that does not wait out the gap after the last message, only p.gather. A start that failed is
-// the supervisor's to retry and nobody else's; the gap is shared by every supervisor, so a message just sent to
-// another (the background supervisor) held it back for minutes while the task sat as if finished.
-func (g superviseSignal) immediate() bool { return g.Kind == sigFailed }
+// immediate signals need a decision and wait only for gathering, never the shared spacing or routine cooldown.
+// An explicit NotBefore (a deferred failed-start batch) still applies.
+func (g superviseSignal) immediate() bool { return supervisionBatchImmediate(g) }
 
 type superviseBook struct {
 	mu      sync.Mutex
@@ -191,6 +193,8 @@ type superviseBook struct {
 	last                time.Time                    // when the last supervision message went out
 	queued              map[string][]superviseSignal // conversation → the signals of the message still waiting in its queue
 	batch               map[string]time.Time         // conversation → its routine batch's first-signal deadline
+	batchInterval       time.Duration                // last scheduled optional interval, to release it when disabled
+	told                map[string]time.Time         // conversation → last accepted supervision message
 	timer               *time.Timer
 	timerAt             time.Time
 
@@ -225,6 +229,9 @@ func (b *superviseBook) init() {
 // package's superviseGather, superviseEvery or superviseUrgentEvery).
 type superviseTimings struct {
 	gather, every, urgent time.Duration
+	// cooldown: how long routine signals for a conversation wait after a supervision message went to it (zero:
+	// routineCooldown's default).
+	cooldown time.Duration
 }
 
 // superviseTimings are s's own timings, the package's for each one it does not set. Tests set them on their Service,
@@ -260,6 +267,9 @@ func digestWait(now, last time.Time, pending []superviseSignal, p superviseTimin
 			if next := last.Add(gap); next.After(at) {
 				at = next
 			}
+		}
+		if !supervisionBatchImmediate(g) && g.batchUntil.After(at) {
+			at = g.batchUntil // held for its recipient's routine cooldown (gateDigestBatches)
 		}
 		if due.IsZero() || at.Before(due) {
 			due = at
@@ -351,11 +361,13 @@ func (s *Service) queueSignal(g superviseSignal) {
 // scheduleDigestLocked sets the timer for when the pending signals are due; s.supervise.mu is held.
 func (s *Service) scheduleDigestLocked(now time.Time) {
 	b := &s.supervise
+	batch := s.supervisionBatchInterval(context.Background())
+	b.syncBatchInterval(batch)
 	list := make([]superviseSignal, 0, len(b.pending))
 	for _, g := range b.pending {
 		list = append(list, g)
 	}
-	wait, ok := digestWaitWithBatch(now, b.last, list, s.superviseTimings(), s.supervisionBatchInterval(context.Background()))
+	wait, ok := digestWaitWithBatch(now, b.last, list, s.superviseTimings(), batch)
 	if !ok {
 		return
 	}
@@ -398,6 +410,10 @@ func watchSignals(t Todo, agents []proto.Session, now time.Time, groups ...super
 		return nil
 	}
 	switch v.state(t) {
+	case reviewClosing, reviewUserCheck:
+		return nil
+	case reviewTimedOut:
+		return []superviseSignal{{Todo: t.ID, Kind: sigTimedOut, Key: reviewKey(v)}}
 	case reviewPending:
 		if h := v.handoffResult(); h != nil {
 			if h.ToldAt.IsZero() {
@@ -521,6 +537,12 @@ func (s *Service) superviseWatch(ctx context.Context, now time.Time) {
 		s.remedyWatch(ctx, t, now, history) // a failed start's kept tab expired (start_remedy.go)
 		t = s.checkTaskHandoff(ctx, t, now)
 		agents := s.taskAgentsIn(ctx, t, lists)
+		s.closeStalledTask(ctx, t, agents, now)
+		if current, ok := s.todoNow(t.ID); ok {
+			t = current
+		} else {
+			continue
+		}
 		group := s.allStoppedGroup(ctx, t, groups[t.ID], lists)
 		allStopped := false
 		stalled := map[string]bool{}

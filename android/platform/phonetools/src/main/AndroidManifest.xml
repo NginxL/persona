@@ -27,6 +27,10 @@
     <queries>
         <!-- Health Connect is an app on Android 8-13: without this its status always reads as missing. -->
         <package android:name="com.google.android.apps.healthdata" />
+        <!-- Report a missing dialer before handoff. ACTION_DIAL itself needs no CALL_PHONE permission. -->
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+        </intent>
     </queries>
 
     <application>

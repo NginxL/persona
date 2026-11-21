@@ -29,6 +29,8 @@ const (
 	auditBotTopicHome = "bot_topic_home"
 	// {chat_id}: the owner's "@bot /ai …" was taken from a group chat that is not opted in (#6146). Never the words.
 	auditBotAITaken = "bot_ai_taken"
+	// {chat_id}: the owner's "@bot /read …" was taken from a group chat (#11803). Never the words.
+	auditBotReadTaken = "bot_read_taken"
 )
 
 // botRecord is an audit record of the bot's, written once its lock is let go.

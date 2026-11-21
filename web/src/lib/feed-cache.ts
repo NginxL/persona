@@ -89,7 +89,7 @@ function validItem(value: unknown): value is Item {
   if (!object(value) || typeof value.id !== "string" || !value.id || !Number.isSafeInteger(value.seq)) return false;
   if (!["user", "assistant", "system"].includes(String(value.role))) return false;
   if (!["text", "thinking", "tool_use", "tool_result", "notice", "image", "fold", "recap"].includes(String(value.kind))) return false;
-  if (!strings(value, ["text", "ts", "tool_use_id", "tool_name", "from", "client_msg_id"]) || !numbers(value, ["full_size"])) return false;
+  if (!strings(value, ["text", "ts", "tool_use_id", "tool_name", "from", "client_msg_id", "source_fingerprint"]) || !numbers(value, ["full_size"])) return false;
   if (["is_error", "queued", "wake"].some((field) => value[field] !== undefined && typeof value[field] !== "boolean")) return false;
   if (value.image !== undefined && (!object(value.image) || typeof value.image.mime !== "string"
     || !numbers(value.image, ["size", "width", "height"]) || (value.image.lazy !== undefined && typeof value.image.lazy !== "boolean"))) return false;

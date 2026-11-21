@@ -88,7 +88,7 @@ const retry = async () => {
   await flush();
 };
 
-it.each(["launcher", "empty text"])("retires captured Traex startup when editing %s (#1842)", async (edit) => {
+it.each(["launcher", "empty text"])("retires captured TRAE CLI startup when editing %s (#1842)", async (edit) => {
   const fixture = await retryFixture();
   if (edit === "launcher") typeRetry(host.querySelector("input")!, "claude");
   else typeRetry(host.querySelector("textarea")!, " ");
@@ -101,7 +101,7 @@ it.each(["launcher", "empty text"])("retires captured Traex startup when editing
   expect(getState().launches[fixture.item.id].agentType).toBeUndefined();
 });
 
-it("retries the same valid Traex snapshot inline without an ordinary first message", async () => {
+it("retries the same valid TRAE CLI snapshot inline without an ordinary first message", async () => {
   const fixture = await retryFixture();
   await retry();
   expect(fixture.starts()).toHaveLength(1);
@@ -120,7 +120,7 @@ it("preserves Codex's optional empty inline retry", async () => {
   expect(body).not.toHaveProperty("prompt");
 });
 
-it("keeps a repeat-only Traex target locked", async () => {
+it("keeps a repeat-only TRAE CLI target locked", async () => {
   const fixture = await retryFixture({ repeatOnly: true });
   expect(host.querySelector("input")).toBeNull();
   expect(host.querySelector("textarea")).toBeNull();
@@ -138,7 +138,7 @@ it("keeps an uncertain target without dispatch when confirmation is declined", a
   expect(getState().launches[fixture.item.id].agentType).toBe("traex");
 });
 
-it("replays an inline Traex attempt with the same operation and payload after a gap", async () => {
+it("replays an inline TRAE CLI attempt with the same operation and payload after a gap", async () => {
   vi.useFakeTimers();
   const fixture = await retryFixture({ startPromptOpId: "00000000-1111-4000-8000-000000000002" }, true);
   await retry();

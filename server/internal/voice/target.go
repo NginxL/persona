@@ -38,8 +38,8 @@ type startFrame struct {
 	} `json:"resume"`
 	// EchoCancellation false: the app records without echo cancellation (absent: not said, taken as with it).
 	EchoCancellation *bool `json:"echo_cancellation"`
-	// Mode "meeting" (protocol 2) is a meeting call bound to recording RecordingID's room (meeting.go); any other mode
-	// is an ordinary call.
+	// Mode "meeting" (protocol 2) is a meeting call bound to recording RecordingID's room (meeting.go). Mode
+	// "dictation" (protocol 2) is an unbound, text-only dictation session (dictation.go). Any other mode is an ordinary call.
 	Mode        string `json:"mode"`
 	RecordingID string `json:"recording_id"`
 	// SpeechGate false: the user turned the user-speech gate off on this device (#5904, gate.go; true or absent: on).
@@ -73,7 +73,8 @@ type resumeRun struct {
 // speak is POST /speak (speak.go), outside a call. speech_gate (#5904): a run the user-speech gate refused (unprompted)
 // can be sent again (resend), and start takes speech_gate. meeting is the meeting call (meeting.go, #3862 phase 4). hold
 // (#9290): the app's hold frame pauses the upstream at once and nothing wakes it until the hold is off (suspend.go).
-var features = []string{"target", "runs", "asks", "resume", "suspend", "speak", "speech_gate", "meeting", "hold"}
+// dictation (#2083): start mode dictation opens one unbound, text-only transcription session (dictation.go).
+var features = []string{"target", "runs", "asks", "resume", "suspend", "speak", "speech_gate", "meeting", "hold", "dictation"}
 
 const (
 	// snapshotWait is how long the snapshot's parts that may be left out are waited for (docs/assistant/voice.md 4.5): it is
@@ -126,14 +127,19 @@ type prepared struct {
 
 // agentLabel is what the voice calls the agent in s.
 func agentLabel(s *proto.Session) string {
+	agent := strings.ToLower(s.Agent)
+	switch agent {
+	case "traex", "traecli", "trae-cli":
+		switch strings.ToLower(strings.TrimSpace(s.AgentLabel)) {
+		case "", "traex", "traecli", "trae-cli", "trae cli":
+			return "TRAE CLI"
+		}
+	}
 	if s.AgentLabel != "" {
 		return s.AgentLabel
 	}
-	switch strings.ToLower(s.Agent) {
-	case "codex":
+	if agent == "codex" {
 		return "Codex"
-	case "traex":
-		return "TRAEX"
 	}
 	return "Claude Code"
 }

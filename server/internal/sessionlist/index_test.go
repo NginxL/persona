@@ -100,7 +100,7 @@ func TestExactIdentityLookup(t *testing.T) {
 func TestOrderingAndZeroValue(t *testing.T) {
 	var i Index
 	empty := mustQuery(t, &i, Options{})
-	if empty.Total != 0 || empty.HasMore || empty.Sessions == nil || empty.Remove == nil || empty.Revision == "" {
+	if empty.Total != 0 || empty.HasMore || empty.Sessions == nil || empty.Remove == nil || empty.Added == nil || empty.Revision == "" {
 		t.Fatalf("empty = %+v", empty)
 	}
 	before := i.Revision()
@@ -129,7 +129,7 @@ func TestOrderingAndZeroValue(t *testing.T) {
 		t.Fatal("caller changed cached counts")
 	}
 	wire, err := json.Marshal(empty)
-	if err != nil || !strings.Contains(string(wire), `"sessions":[]`) || !strings.Contains(string(wire), `"remove":[]`) || strings.Contains(string(wire), "next_cursor") {
+	if err != nil || !strings.Contains(string(wire), `"sessions":[]`) || !strings.Contains(string(wire), `"remove":[]`) || !strings.Contains(string(wire), `"added":[]`) || strings.Contains(string(wire), "next_cursor") {
 		t.Fatalf("wire = %s, %v", wire, err)
 	}
 }
@@ -379,6 +379,33 @@ func TestDeltaChangesAndFilteredExit(t *testing.T) {
 	noChanges := mustQuery(t, &i, Options{Since: i.Revision()})
 	if noChanges.Total != 0 || len(noChanges.Sessions)+len(noChanges.Remove) != 0 {
 		t.Fatalf("empty delta = %+v", noChanges)
+	}
+}
+
+func TestDeltaAddedDistinguishesCreationFromFilterEntrance(t *testing.T) {
+	var i Index
+	a := testItem("a", 1)
+	i.Replace("batch", []Item{a})
+	baseline := i.Revision()
+	changed := a
+	changed.State = "idle"
+	i.Replace("batch", []Item{changed, testItem("b", 2)})
+
+	first := mustQuery(t, &i, Options{Since: baseline, Limit: 1})
+	if got := sessionIDs(first); !reflect.DeepEqual(got, []string{"b"}) || !reflect.DeepEqual(first.Added, []string{"b"}) {
+		t.Fatalf("created row = %+v", first)
+	}
+	second := mustQuery(t, &i, Options{Since: baseline, Cursor: first.NextCursor, Limit: 1})
+	if got := sessionIDs(second); !reflect.DeepEqual(got, []string{"a"}) || len(second.Added) != 0 {
+		t.Fatalf("updated row = %+v", second)
+	}
+	entered := mustQuery(t, &i, Options{Since: baseline, State: "idle"})
+	if got := sessionIDs(entered); !reflect.DeepEqual(got, []string{"a"}) || len(entered.Added) != 0 {
+		t.Fatalf("filter entrance is not creation = %+v", entered)
+	}
+	full := mustQuery(t, &i, Options{})
+	if len(full.Added) != 0 {
+		t.Fatalf("full page added = %v", full.Added)
 	}
 }
 

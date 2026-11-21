@@ -3,6 +3,7 @@ package persona.feature.settings
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -27,6 +28,8 @@ class ProviderWizardTest {
 
     private class Hub(val presets: List<ProviderPreset>) : ProviderSetup {
         override val builtinPresets = flowOf(true)
+        val referencesAvailable = MutableStateFlow(true)
+        override val secretReferencesAvailable = referencesAvailable
         val owners = mutableListOf<String?>()
         private suspend fun noteOwner() { owners += kotlinx.coroutines.currentCoroutineContext()[RequestManager]?.id }
         val created = mutableListOf<NewProvider>()
@@ -156,6 +159,55 @@ class ProviderWizardTest {
         hub.gate!!.complete(Unit)
         first.await()
         assertNull(model.state.value.keyTest)
+    }
+
+    @Test fun aPresetReferenceSkipsTheKeyTestAndCreatesOnlyAReference() = runBlocking {
+        val hub = Hub(listOf(deepseek))
+        val model = NewProviderModel(hub)
+        model.load(hubNames = true)
+        model.choose(deepseek.id)
+        model.editKey(model.state.value.draft.copy(apiKey = "op://Dev/DeepSeek/key", apiKeyByReference = true))
+        model.testKey()
+        assertTrue("an unresolved reference is never sent to the model gateway", hub.tests.isEmpty())
+        assertTrue(model.saveKey())
+        val created = hub.created.single()
+        assertNull(created.apiKey)
+        assertEquals("op://Dev/DeepSeek/key", created.apiKeyReference)
+        assertEquals(deepseek.id, created.preset)
+    }
+
+    @Test fun changingPresetsCannotReclassifyAReferenceAsAnOrdinaryKey() = runBlocking {
+        val hub = Hub(listOf(deepseek, responses))
+        val model = NewProviderModel(hub)
+        model.load(hubNames = true)
+        model.choose(deepseek.id)
+        model.editKey(model.state.value.draft.copy(apiKey = "op://Dev/DeepSeek/key", apiKeyByReference = true))
+        model.choose(responses.id)
+        assertFalse(model.state.value.draft.apiKeyByReference)
+        assertEquals("", model.state.value.draft.apiKey)
+        model.testKey()
+        assertTrue(hub.tests.isEmpty())
+
+        model.editKey(model.state.value.draft.copy(apiKey = "sk-example-key"))
+        model.testKey()
+        assertEquals("sk-example-key", hub.tests.single().apiKey)
+        assertTrue(model.saveKey())
+        assertEquals("sk-example-key", hub.created.single().apiKey)
+        assertNull(hub.created.single().apiKeyReference)
+    }
+
+    @Test fun aPresetReferenceSaveRechecksTheLiveGate() = runBlocking {
+        val hub = Hub(listOf(deepseek))
+        val model = NewProviderModel(hub)
+        model.load(hubNames = true)
+        model.choose(deepseek.id)
+        model.editKey(model.state.value.draft.copy(apiKey = "op://Dev/DeepSeek/key", apiKeyByReference = true))
+        hub.referencesAvailable.value = false
+        assertFalse(model.saveKey())
+        assertTrue(hub.created.isEmpty())
+        assertFalse(model.state.value.draft.apiKeyByReference)
+        assertEquals("", model.state.value.draft.apiKey)
+        assertEquals(R.string.settings_provider_reference_unavailable, model.state.value.error?.id)
     }
 
     @Test fun directApiProtocolsMatchTheHubKeyTestAndClaudeCompatibility() {

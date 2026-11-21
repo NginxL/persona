@@ -42,6 +42,7 @@
       "message_send_state": 1,
       "min_app_build": 0,
       "protocol": 1,
+      "push_grading": false,
       "server_version": "fixture-version",
       "tls_port": 0,
       "todo_send_state": 1,

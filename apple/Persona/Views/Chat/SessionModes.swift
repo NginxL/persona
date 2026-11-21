@@ -243,7 +243,7 @@ nonisolated enum SessionModes {
 
     /// The header shows an agent's mode when there is one to see or to change: Claude Code's, before its first prompt
     /// too (it can be set), and the modes an agent lists (#8261), on its own approval too. Not an assistant conversation
-    /// (its page has its own bar), nor an agent whose mode can be neither read nor changed (Codex, TRAEX, runtimes
+    /// (its page has its own bar), nor an agent whose mode can be neither read nor changed (Codex, TRAE CLI, runtimes
     /// without modes).
     static func showsInHeader(_ s: Session) -> Bool {
         !s.assistant && (s.permissionMode != nil || s.canChangeModes || s.listedModes != nil)
@@ -331,7 +331,7 @@ nonisolated enum SessionModes {
     }
 
     /// The model can be switched on the running session (#3119): Claude Code in a herdr pane, which takes `/model`, or a
-    /// session whose node takes a model (`Session.switchesModel`, #6294). Codex and TRAEX in a terminal pick theirs in a
+    /// session whose node takes a model (`Session.switchesModel`, #6294). Codex and TRAE CLI in a terminal pick theirs in a
     /// full-screen menu the phone cannot drive; the assistant's has its own chip.
     static func switchesModel(_ s: Session?) -> Bool { s?.switchesModel == true }
 
@@ -588,7 +588,7 @@ struct SessionModesMenu: View {
     /// Claude Code in a herdr pane: picking a model sends `/model <alias>`; a session whose node takes the model (#6294,
     /// `Session.picksModelByModes`) gets the pick through POST …/modes.
     var picksModel = false
-    /// Effort and permission mode can change (Claude Code, the assistant; not Codex or TRAEX).
+    /// Effort and permission mode can change (Claude Code, the assistant; not Codex or TRAE CLI).
     var setsModes = true
     /// Only the effort can change, among the session's own levels (a Codex thread on its app-server, `Session.setsEffortOnly`).
     var setsEffortOnly = false

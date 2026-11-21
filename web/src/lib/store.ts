@@ -11,6 +11,7 @@ import { mainConversationMachine, clearMemoryPages, discardFeedCache, feedCacheS
 import { useRef, useSyncExternalStore } from "react";
 import { AGENTS_PAGE_COUNTS_FEATURE, agentsChanged, refreshAgentPrefs, refreshAgentSessions, resetAgents, setAgentListMode, setPersonalPageCounts } from "./agents";
 import { onRuntimeChanges, runtimeAgents, runtimeIdentity, runtimeRemoval, runtimeSessions, SESSIONS_LOOKUP_FEATURE, SESSIONS_PAGE_COUNTS_FEATURE, setRuntimePageCounts, supportsPagedAgents } from "./runtime-list";
+import { isHeldLevel } from "./attention";
 import { sameValue } from "./stable-lines";
 import { SESSIONS_LIST_CHANGES_FEATURE, SESSIONS_LIST_FEATURE, type ListCounts } from "./session-list";
 import { SESSIONS_HIERARCHY_FEATURE } from "./child-sessions";
@@ -27,6 +28,7 @@ import { NO_PINS, pinsOf, type AgentPins } from "./pins";
 import type { AssistantInfo, Interaction, Item, Machine, MeshHub, Session } from "./types";
 import type { Resolution } from "./answered";
 import { answersIn, type DelegatedAnswer, type Reanswer } from "./delegate";
+import { nextLaunchExpiry, registerLaunchRowObserver, settledLaunches } from "./launch-handoff";
 import type { AgentLaunch } from "./new-agent";
 import { isSpacesSupported, makeSessionLookup, type SessionLookup, type Todo } from "./todos";
 import { releaseAttachments } from "./attachments";
@@ -66,6 +68,8 @@ export interface State {
   version: string;
   /** What the hub can do (hello `features`): terminal_stream, terminal_control… */
   features: string[];
+  /** Whether the hub's push grading switch is enabled (`hello.push_grading` / `push_grading` event). */
+  pushGrading: boolean;
   /** This hub's name and its interconnected group (docs/archive/operations/plan-hub-mesh.md 2.6); empty on older hubs. */
   hubName: string;
   mesh: MeshHub[];
@@ -109,6 +113,7 @@ let state: State = {
   link: { ...NO_LINK, networkUp: networkUp() },
   version: "",
   features: [],
+  pushGrading: false,
   hubName: "",
   mesh: [],
   machines: [],
@@ -171,10 +176,42 @@ function set(patch: Partial<State>) {
     if (patch.assistant?.conversations.every(availableConversation) === false) next.assistant = { ...patch.assistant, conversations: patch.assistant.conversations.filter(availableConversation) };
   }
   state = holdSeen(next, patch);
+  state = settleLaunchState(state, patch);
   if (viewed.size && ("sessions" in patch || "sessionSummaries" in patch || "assistant" in patch)) seeViewed(false);
   if (pushing) notifySoon();
   else notify();
 }
+
+let handoffTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleLaunchExpiry(launches: Record<string, AgentLaunch>, now: number) {
+  clearTimeout(handoffTimer);
+  handoffTimer = undefined;
+  const delay = nextLaunchExpiry(launches, now);
+  if (delay === undefined) return;
+  handoffTimer = setTimeout(() => {
+    handoffTimer = undefined;
+    const rows = [...Object.values(state.sessions).flat(), ...state.sessionSummaries];
+    const next = settledLaunches(state.launches, rows, Date.now());
+    if (next !== state.launches) set({ launches: next });
+  }, delay + 10);
+}
+
+/** Settles ready launch handoffs once hub session rows confirm working / terminal state or the handoff window expires (#12380). */
+function settleLaunchState(next: State, patch: Partial<State>): State {
+  if (!Object.keys(next.launches).length || !("sessions" in patch || "sessionSummaries" in patch || "launches" in patch)) return next;
+  const now = Date.now();
+  const rows = [...Object.values(next.sessions).flat(), ...next.sessionSummaries];
+  const launches = settledLaunches(next.launches, rows, now);
+  scheduleLaunchExpiry(launches, now);
+  return launches === next.launches ? next : { ...next, launches };
+}
+
+registerLaunchRowObserver((rows) => {
+  if (!Object.keys(state.launches).length) return;
+  const launches = settledLaunches(state.launches, rows, Date.now());
+  if (launches !== state.launches) set({ launches });
+});
 
 /** Rows whose seen mark still waits for the hub are shown seen, whichever way they came in (a push, a page of the
  *  list, an HTTP answer); marks the hub's rows show recorded, or no longer about this turn, go (lib/seen-outbox.ts). */
@@ -737,6 +774,7 @@ let authenticatedSocket: WebSocket | null = null;
 let socketToken = "";
 let retry = 0;
 let retryTimer: number | undefined;
+let sidebarTimer: ReturnType<typeof setTimeout> | undefined;
 let lastMessage = 0;
 let lastPing = 0;
 let stopped = true;
@@ -776,12 +814,23 @@ export function sayHello() {
 
 export function connect() {
   setCompatibilityFeatures([]);
+  const cold = stopped && !state.loaded;
   stopped = false;
   clearTimeout(retryTimer);
   ws?.close();
   socketChanged(false);
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   socketToken = getToken();
+  if (cold && socketToken) {
+    const owner = credentialOwner();
+    // Give a fast hello the only read. If it takes longer, show the REST snapshots while waiting for the socket.
+    // The normal hello refresh still covers changes between these snapshots and the start of the event stream.
+    sidebarTimer = setTimeout(() => {
+      if (owner !== credentialOwner()) return;
+      void refreshAssistant().catch(() => {});
+      void refreshTodos();
+    }, 250);
+  }
   directionTreeAwaitsHello(true); // its hello reads the direction tree: the screens wait for that read
   const sock = new WebSocket(`${proto}//${location.host}${BASE}/api/v1/ws?${wsQuery(socketToken, cursor, [SESSIONS_LIST_FEATURE, SESSIONS_LIST_CHANGES_FEATURE, SESSIONS_DELTA_FEATURE, SESSION_LIVE_FEATURE, "extension_ui_stream_v1", "persona_contracts_v1"])}`);
   ws = sock;
@@ -887,6 +936,7 @@ export function disconnect() {
   stopped = true;
   // a reconnect scheduled after a drop would otherwise fire connect(), which clears stopped (signed out: an empty token)
   clearTimeout(retryTimer);
+  clearTimeout(sidebarTimer);
   back();
   ws?.close();
   ws = null;
@@ -950,12 +1000,13 @@ export function onHello(f: () => void): () => void {
 }
 
 // The assistant's live updates about the page itself rather than one conversation: only the shown manager's count.
-const PAGE_EVENTS = new Set(["assistant_schedule", "assistant_saved_prompts"]);
+const PAGE_EVENTS = new Set(["assistant_schedule", "assistant_saved_prompts", "assistant_starred"]);
 
 function onMessage(msg: Record<string, unknown>) {
   cursor = msg.type === "hello" ? afterHello(cursor, msg) : afterEvent(cursor, msg);
   switch (msg.type) {
     case "hello": {
+      clearTimeout(sidebarTimer);
       receiptOwner = msg.message_send_state === 1 ? credentialOwner() : undefined;
       setCompatibilityFeatures(Array.isArray(msg.features) ? msg.features as string[] : []);
       const mesh = (msg.mesh as { hubs?: MeshHub[] } | undefined)?.hubs;
@@ -966,6 +1017,7 @@ function onMessage(msg: Record<string, unknown>) {
         link: { ...state.link, nextTry: 0, restarting: false, networkUp: true },
         version: String(msg.server_version ?? ""),
         features: Array.isArray(msg.features) ? (msg.features as string[]) : [],
+        pushGrading: msg.push_grading === true,
         hubName: typeof msg.hub_name === "string" ? msg.hub_name : "",
         mesh: Array.isArray(mesh) ? mesh : [],
       });
@@ -1066,13 +1118,24 @@ function onMessage(msg: Record<string, unknown>) {
     }
     case "interaction": {
       const ix = msg.interaction as Interaction;
-      if (!endedHere.has(ix.id)) changeInteraction(ix.id, ix);
+      const prev = state.interactions.find((i) => i.id === ix.id);
+      if (!endedHere.has(ix.id)) {
+        changeInteraction(ix.id, ix);
+        refreshCountsForCard(prev, ix);
+      }
       break;
     }
-    case "interaction_resolved":
+    case "interaction_resolved": {
+      const id = msg.id as string;
+      const prev = state.interactions.find((i) => i.id === id);
       if (msg.answered_by === "assistant") answeredForUser(msg);
-      changeInteraction(msg.id as string, null);
-      cardWithdrawn(msg.id as string);
+      changeInteraction(id, null);
+      cardWithdrawn(id);
+      refreshCountsForCard(prev, undefined);
+      break;
+    }
+    case "push_grading":
+      set({ pushGrading: msg.enabled === true });
       break;
     case "interaction_reanswered":
       noteReanswer(msg.id as string, answersIn((msg.resolution as { answers?: unknown } | undefined)?.answers));
@@ -1353,6 +1416,20 @@ let ixRev = 0;
 const ixChanges = new Map<string, { rev: number; ix: Interaction | null }>();
 const IX_CHANGES_KEPT = 500;
 
+function refreshCountsForCard(prev: Interaction | undefined, next: Interaction | undefined) {
+  if (!isHeldLevel(prev?.push_level) && !isHeldLevel(next?.push_level)) return;
+  if (supportsPagedAgents(state.features)) {
+    const agentsList = runtimeAgents.getSnapshot();
+    if (agentsList.loaded || agentsList.loading || agentsList.error !== null) runtimeAgents.invalidate();
+  } else if (state.features.includes(SESSIONS_LIST_FEATURE)) {
+    runtimeSessions.invalidate();
+  }
+}
+
+export function setPushGrading(pushGrading: boolean) {
+  if (state.pushGrading !== pushGrading) set({ pushGrading });
+}
+
 function changeInteraction(id: string, ix: Interaction | null) {
   ixChanges.delete(id); // re-inserted: the oldest are dropped first
   ixChanges.set(id, { rev: ++ixRev, ix });
@@ -1478,10 +1555,11 @@ function numbered<T>(path: string) {
   return {
     ask() {
       const n = ++asked;
+      const owner = credentialOwner();
       const answer = api<T>(path);
       /** Whether this answer may be applied (no later request's answer is in place); if so it is the one in place now. */
       const fresh = () => {
-        if (n < applied) return false;
+        if (n < applied || owner !== credentialOwner()) return false;
         applied = n;
         return true;
       };
@@ -1520,16 +1598,11 @@ export async function refresh() {
   // the answers count only if this page changes nothing while they are on their way, and had no change out when they left
   const mutesAt = mutesSaves.out ? -1 : mutesSaves.rev;
   const pinsAt = pinsSaves.out ? -1 : pinsSaves.rev;
-  const asked = todosAsked.ask();
   // The main conversation must not wait for the slowest sidebar request. refreshAssistant also guards
   // against an earlier login or manager's answer and invalidates a superseded cached main conversation.
   const assistantDone = refreshAssistant().catch(() => {});
-  // the todos go in as soon as they answer: By to-do (the default, #2812) waits for them, not for /sessions, which can
-  // take seconds on a busy hub while the socket has pushed the sessions already
-  const todosDone = asked.answer.then(
-    (res) => applyTodos({ status: "fulfilled", value: res }, asked.fresh),
-    (reason: unknown) => applyTodos({ status: "rejected", reason }, asked.fresh),
-  );
+  // By to-do (the default, #2812) can use the to-dos as soon as they answer.
+  const todosDone = refreshTodos();
   const [sessions, interactions, machines, mutes, pins] = await Promise.allSettled([
     state.features.includes(SESSIONS_LIST_FEATURE)
       ? runtimeSessions.load().then(() => null)
@@ -1846,6 +1919,8 @@ export function reset() {
   clearMemoryPages();
   clearTimeout(seenTimer);
   seenTimer = undefined;
+  clearTimeout(handoffTimer);
+  handoffTimer = undefined;
   Object.values(state.launches).forEach((launch) => releaseAttachments(launch.attachments));
   set({
     machines: [],
@@ -1870,6 +1945,8 @@ export function reset() {
     todosError: null,
     spacesSupported: true,
     loaded: false,
+    features: [],
+    pushGrading: false,
     conn: "connecting",
     link: { ...NO_LINK, networkUp: networkUp() },
   });

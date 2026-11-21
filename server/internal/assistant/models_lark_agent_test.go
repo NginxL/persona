@@ -28,7 +28,7 @@ func TestLarkAgentModelOverrideAndReset(t *testing.T) {
 		t.Helper()
 		p := purposeOf(t, s, purposeLarkAgent)
 		if p.Effective != want || p.Revision != revision || p.CategoryID != "agent.new" || p.Parent != "agent.new" ||
-			!slices.Equal(p.Fields, []string{"provider", "model", "effort"}) {
+			!slices.Equal(p.Fields, []string{"provider", "model", "effort", "permission_mode"}) {
 			t.Fatalf("purpose: %+v; want binding %+v at revision %d", p, want, revision)
 		}
 		if overridden {

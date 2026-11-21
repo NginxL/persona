@@ -1,4 +1,4 @@
-Note a call you made on the Persona todo you work on, so whoever picks it up next (another agent, you after compaction, the user) does not decide it again: a choice between ways of doing it, a default you settled on, something you ruled out. It shows in the todo as noted by an agent, not as the user's. Not for progress (that is report_to_supervisor) and not for what only the user can decide: ask them. To change an earlier decision an agent made, name it in supersedes_id (its id from todo_decisions); the user's own decisions you cannot replace: ask them.
+Note a call you made on the Persona todo you work on, so whoever picks it up next (another agent, you after compaction, the user) does not decide it again: a choice between ways of doing it, a default you settled on, something you ruled out. It shows in the todo as noted by an agent, not as the user's. Not for progress (that is report_to_supervisor) and not for what only the user can decide: ask them. To change an earlier decision an agent made, name it in supersedes_id (its id from todo_decisions); the user's own decisions you cannot replace: ask them.{{template "shared/mcp_language" .}}
 
 ```json
 {

@@ -34,10 +34,18 @@
   "reason_no_takeover": "新しいバージョンが引き継げませんでした：{error}",
   "reason_not_confirmed": "新しいバージョンが3分以内に確認されませんでした",
   "err_program_unreplaced": "バージョン{version}には{platform}用の{program}がありませんが、{service}がそれを実行しています。インストールすると{program}が古いバージョンのまま残ります。{program}を含むリリースを待ってください",
-  "err_development_config": "先にhub側でバックアップ時の書き込み停止・再開コマンドを設定してください。",
+  "err_development_config": "hub.jsonのバックアップ用の書き込み停止・再開コマンドは両方設定するか、両方空にしてhub内蔵の停止を使ってください。",
   "err_development_topology": "開発版の更新にはhub内蔵の子プロセス型アシスタントが必要です。独立したアシスタントのコンピューターは元の更新経路を使用してください。",
+  "err_development_platform": "開発版の更新にはLinuxまたはmacOSのhubが必要です。",
+  "err_development_quiesce": "バックアップのためにhubの書き込みを停止できませんでした：{error}",
   "err_computer_packages": "hubは更新されましたが、コンピューター用パッケージを準備できませんでした。hub側に一時ファイルを保持しています。更新ログを確認してから再デプロイしてください。",
   "err_development_recovery": "中断した開発版更新の復旧が必要です。hub側のupdate/development/adopting.jsonと保持したスナップショットを確認してから更新元を変更・更新してください。",
   "err_development_phase": "開発版更新の準備に失敗しました。hub側のupdate/development/{phase}.logを確認してください。元のビルドと検証済みスナップショットは保持しています。",
-  "err_development_backup": "このプログラムバックアップは利用できません。バックアップ一覧を更新してください。"
+  "err_development_backup": "このプログラムバックアップは利用できません。バックアップ一覧を更新してください。",
+  "err_development_backup_path": "このバックアップフォルダーは使えません：{error}",
+  "err_development_backup_retain": "スナップショットの保持数は1〜{max}にしてください。",
+  "err_development_backup_recovery": "現在のスナップショットフォルダーは、変更する前に復旧が必要です：{error}",
+  "err_quiesced": "hubはバックアップのために書き込みを停止しています。少し待ってからもう一度お試しください。",
+  "err_quiesce_timeout": "バックアップのために内蔵アシスタントを時間内に停止できませんでした。",
+  "err_development_docker": "Docker内のhubでは開発版の更新を使えません。新しいイメージで更新してください。"
 }

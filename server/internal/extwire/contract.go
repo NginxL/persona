@@ -19,6 +19,9 @@ const (
 	ScopeAssistantAsk  = "assistant.ask"
 	ScopeTodosRead     = "todos.read"
 	ScopeTodosWrite    = "todos.write"
+	// ScopeDecisionsRaise lets an explicitly authorized caller raise, poll and
+	// withdraw its own pending owner decisions. It never grants owner answers.
+	ScopeDecisionsRaise = "decisions.raise"
 	// ScopeLeadersRead: being told of the leader conversations (leader.changed) and what they report (leader.report),
 	// and listing them (GET /api/v1/assistant/leaders); #3484.
 	ScopeLeadersRead = "leaders.read"

@@ -98,6 +98,7 @@ describe("session capability contract", () => {
   it("says a runtime's session comes from its agent, by name, never a raw id (#8142)", () => {
     const paseo: Session = { ...legacy, source_kind: "runtime", source_instance_id: "paseo", capabilities: { read: true, send: true } };
     expect(sourceSubtitle({ ...paseo, agent: "paseo", agent_label: "Grok", launcher: "grok" })).toBe("Grok");
+    expect(sourceSubtitle({ ...paseo, agent: "paseo", agent_label: "TRAE CLI", launcher: "traecli" })).toBe("TRAE CLI");
     expect(sourceSubtitle({ ...paseo, agent: "claude", launcher: "my-claude" })).toBe("Claude Code");
     // a row Paseo names no label for yet: its provider, never "paseo"
     expect(sourceSubtitle({ ...paseo, agent: "paseo", launcher: "kimi" })).toBe("kimi");

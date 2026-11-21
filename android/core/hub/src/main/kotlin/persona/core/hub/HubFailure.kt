@@ -64,8 +64,15 @@ class HubFailure(
         private fun isPinRejection(error: Throwable) =
             error is SSLPeerUnverifiedException || error is CertificateException
 
-        internal fun from(response: Response): HubFailure {
-            val raw = runCatching { response.peekBody(64 * 1024).string() }.getOrNull()
+        private const val MaxErrorBodyBytes = 64L * 1024
+
+        internal fun from(response: Response, requireReadableBody: Boolean = false): HubFailure {
+            val raw = if (requireReadableBody) {
+                val error = response.peekBody(MaxErrorBodyBytes + 1)
+                if (error.contentLength() > MaxErrorBodyBytes)
+                    throw HubFailure(HubError.Protocol, status = response.code)
+                error.string()
+            } else runCatching { response.peekBody(MaxErrorBodyBytes).string() }.getOrNull()
             val body = raw?.let { runCatching { JsonCodec.decodeFromString<ErrorBody>(it) }.getOrNull() }
             val path = response.request.url.encodedPath
             val knowledge = path == "/api/v1/kb" || path.startsWith("/api/v1/kb/") || path == "/api/v1/kb-search" ||

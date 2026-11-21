@@ -5,6 +5,7 @@ import org.junit.Test
 import persona.core.contracts.api.ExtensionDependent
 import persona.core.contracts.api.ExtensionDetail
 import persona.core.contracts.api.ExtensionPackMember
+import persona.core.contracts.api.supportsExtensionSecretReferences
 
 class ExtensionDetailTest {
     @Test fun integerStepDecodesFromTheFormAndIsOptional() {
@@ -61,5 +62,39 @@ class ExtensionDetailTest {
         assertFalse(detail.packMembersFollow)
         assertTrue(detail.packOn.isEmpty())
         assertTrue(detail.packOff.isEmpty())
+    }
+
+    @Test fun secretReferencesUsersAndRulesDecodeAndOldHubsDefaultToEmpty() {
+        val detail = ExtensionDetail.decode(JsonCodec.parseToJsonElement("""{
+            "id":"example-vault",
+            "secrets":[{"name":"token","set":true,"reference":{"provider":"example-vault","provider_name":"Example Vault","reference":"op://Dev/Notes/token","title":"Notes token"}}],
+            "secret_users":[
+                {"kind":"extension","extension":"example-notes","extension_name":"Notes","secret":"api_key","secret_title":"API Key","reference":"op://Dev/Notes/token"},
+                {"kind":"launcher","launcher":"work","launcher_name":"Work Gateway","machine":"m-1","reference":"op://Dev/Notes/token"}
+            ],
+            "handoff_rules":[{"id":"0123456789abcdef","reference":"op://Dev/Notes/token","launcher":"work","machine":"m-1","by":"owner","at":"2026-11-20T08:00:00Z"}],
+            "unknown_future_field":{"value":"not read"}
+        }"""))
+        val reference = detail.secrets.single().reference!!
+        assertEquals("Example Vault", reference.providerLabel)
+        assertEquals("op://Dev/Notes/token", reference.reference)
+        assertEquals("Notes token", reference.title)
+        assertEquals(listOf("extension", "launcher"), detail.secretUsers.map { it.kind })
+        assertEquals("Work Gateway", detail.secretUsers[1].launcherName)
+        assertEquals("m-1", detail.secretUsers[1].machine)
+        assertEquals("0123456789abcdef", detail.handoffRules.single().id)
+        assertEquals("owner", detail.handoffRules.single().by)
+
+        val old = ExtensionDetail.decode(JsonCodec.parseToJsonElement("""{"id":"old","secrets":[{"name":"token","set":true}]}"""))
+        assertNull(old.secrets.single().reference)
+        assertTrue(old.secretUsers.isEmpty())
+        assertTrue(old.handoffRules.isEmpty())
+    }
+
+    @Test fun canonicalAndCompatibilitySecretReferenceFeaturesAreRecognized() {
+        assertTrue(supportsExtensionSecretReferences(setOf("extension_secret_references")))
+        assertTrue(supportsExtensionSecretReferences(setOf("plugin_secret_references")))
+        assertFalse(supportsExtensionSecretReferences(setOf("launcher_secret_references")))
+        assertFalse(supportsExtensionSecretReferences(emptySet()))
     }
 }

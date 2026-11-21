@@ -223,7 +223,7 @@ beforeEach(() => {
   namedLauncher = false;
   panel.props = null;
   toast.mockClear();
-  Object.assign(getState(), { features: [], sessions: {} });
+  Object.assign(getState(), { features: [], sessions: {}, launches: {} });
   calls = [];
   listAnswer = (url) => (url.includes("/cx/") ? json({ agent: "codex", models: [{ id: "gpt-5.5", name: "gpt-5.5", efforts: ["low", "high"] }] }) : json(claudeList()));
   modesAnswer = () => json({ ok: true });
@@ -521,6 +521,86 @@ describe("an Agent's pill", () => {
     expect(await act(() => panel.props!.onPick({ provider: "gateway", model: "opus", effort: "high" }))).toBe(true);
     expect(modes()).toEqual([{ launcher: "gateway", from: "gateway" }]);
     expect(getSession(s.machine_id, "s1")?.pending_switch).toBeUndefined();
+  });
+
+  it("keeps a launch-only advertised model display-only so picks and pending-switch cleanup still target the real session", async () => {
+    Object.assign(getState(), { features: ["launcher_switch"] });
+    const s = agent({ model: undefined, effort: "high", pending_switch: { launcher: "claude", model: "haiku", at: "2026-11-12T10:00:00Z" } });
+    Object.assign(getState(), {
+      launches: {
+        "local-1": {
+          id: "local-1",
+          machineId: s.machine_id,
+          cwd: s.cwd,
+          launcher: "",
+          displayLauncher: "gateway",
+          displayEngine: "claude",
+          displayModel: "opus",
+          text: "",
+          attachments: [],
+          phase: "ready",
+          session: s,
+          uploaded: {},
+          startOpId: "op-1",
+          startPromptOpId: "op-2",
+          messageId: "msg-1",
+        },
+      },
+    });
+    await show(s);
+    await open();
+
+    // Presentation reflects the advertised launch model while session.model is still unset.
+    expect(panel.props!.state.current).toMatchObject({ provider: "gateway", model: "opus", effort: "high" });
+
+    // Updating effort on the real session does not persist the display-only model into the store.
+    expect(await act(() => panel.props!.onApplyCurrent!({ effort: "low" }))).toBe(true);
+    expect(modes()).toEqual([{ effort: "low" }]);
+    expect(getSession(s.machine_id, "s1")?.model).toBeUndefined();
+
+    // Selecting the advertised model before the session reports a real model still clears pending_switch and sends the model request.
+    calls.length = 0;
+    const updated = getSession(s.machine_id, "s1")!;
+    act(() => root.render(<AgentModelPill session={updated} />));
+    await flush();
+    expect(await act(() => panel.props!.onPick({ provider: "gateway", model: "opus", effort: "low" }))).toBe(true);
+    expect(modes()).toEqual([{ launcher: "gateway", from: "gateway" }, { model: "opus" }]);
+    expect(getSession(s.machine_id, "s1")?.pending_switch).toBeUndefined();
+    expect(getSession(s.machine_id, "s1")?.model).toBe("opus");
+  });
+
+  it("sends the model request when picking the launch-advertised model without a pending switch, and rolls back to undefined on failure", async () => {
+    const s = agent({ model: undefined, effort: "high" });
+    Object.assign(getState(), {
+      launches: {
+        "local-2": {
+          id: "local-2",
+          machineId: s.machine_id,
+          cwd: s.cwd,
+          launcher: "",
+          displayLauncher: "gateway",
+          displayEngine: "claude",
+          displayModel: "opus",
+          text: "",
+          attachments: [],
+          phase: "ready",
+          session: s,
+          uploaded: {},
+          startOpId: "op-1",
+          startPromptOpId: "op-2",
+          messageId: "msg-1",
+        },
+      },
+    });
+    await show(s);
+    expect(pill()!.textContent).toContain("Opus 5.5");
+    await open();
+    expect(panel.props!.state.current).toMatchObject({ provider: "gateway", model: "opus", effort: "high" });
+
+    modesAnswer = () => json({ error: "busy" }, 409);
+    expect(await act(() => panel.props!.onPick({ provider: "gateway", model: "opus", effort: "high" }))).toBe(false);
+    expect(modes()).toEqual([{ model: "opus" }]);
+    expect(getSession(s.machine_id, "s1")?.model).toBeUndefined();
   });
 
   it("is a label where nothing switches (offline), and nothing at all without a model", async () => {

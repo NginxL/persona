@@ -49,8 +49,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.transform
+import persona.core.domain.secrets.hasEnabledSecretProvider
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Singleton
 
@@ -130,6 +132,10 @@ object MachineManagementModule {
         override suspend fun purpose(id: String) = api().purpose(id)
         override suspend fun save(purpose: ModelPurpose, draft: ModelConfigurationDraft) = api().save(purpose, draft)
         override suspend fun providerModels(provider: String, refresh: Boolean, machine: String?) = api().providerModels(provider, refresh, machine)
+        override suspend fun profiles() = api().profiles()
+        override suspend fun applyProfile(id: String) = api().applyProfile(id)
+        override suspend fun rollbackProfile() = api().rollbackProfile()
+        override suspend fun saveProfile(id: String, input: ModelProfileSaveInput) = api().saveProfile(id, input)
     }
 
     // The setup checklist's main-conversation steps: the selected group's hub, while its hello says assistant_readiness.
@@ -151,7 +157,7 @@ object MachineManagementModule {
 
     // "Add model provider" from model configuration: the selected group's hub keeps the provider.
     @OptIn(ExperimentalCoroutinesApi::class)
-    @Provides @Singleton fun providers(runtime: ConnectionRuntime, application: Application): ProviderSetup = object : ProviderSetup {
+    @Provides @Singleton fun providers(runtime: ConnectionRuntime, application: Application, extensions: ExtensionManagement): ProviderSetup = object : ProviderSetup {
         private fun api() = HttpProviderSetup(runtime.connection())
         override fun ownsMachine(id: String) = GroupKeys.namespaceOf(id) == runtime.selected.value?.namespace
         override val builtinPresets: Flow<Boolean> = (application as PersonaApp).hub
@@ -163,6 +169,13 @@ object MachineManagementModule {
         override val launcherImportParse: Flow<Boolean> = (application as PersonaApp).hub
             .flatMapLatest { hub -> hub?.connection?.serverFeatures ?: flowOf(emptySet()) }
             .map { LauncherImportParseFeature in it }.distinctUntilChanged()
+        private val providerChanges = extensions.changes.map { }.onStart { emit(Unit) }
+        override val secretReferencesAvailable: Flow<Boolean> = (application as PersonaApp).hub
+            .flatMapLatest { hub -> hub?.connection?.serverFeatures ?: flowOf(emptySet()) }
+            .map { LauncherSecretReferencesFeature in it }.distinctUntilChanged()
+            .flatMapLatest { supported ->
+                if (!supported) flowOf(false) else providerChanges.mapLatest { hasEnabledSecretProvider(extensions) }
+            }.distinctUntilChanged()
         override suspend fun presets() = api().presets()
         override suspend fun add(provider: NewProvider) = api().add(provider)
         override suspend fun create(provider: NewProvider) = api().create(provider)
@@ -217,6 +230,7 @@ object MachineManagementModule {
         private val features = (application as PersonaApp).hub
             .flatMapLatest { hub -> hub?.connection?.serverFeatures ?: flowOf(emptySet()) }
         override val available: Flow<Boolean> = features.map { "extension_manager" in it || "plugin_manager" in it }.distinctUntilChanged()
+        override val secretReferencesAvailable: Flow<Boolean> = features.map(::supportsExtensionSecretReferences).distinctUntilChanged()
         // Extensions' UI slots (docs/extensions/extensions.md "UI slots") and the badge events of the selected hub.
         override val slotsAvailable: Flow<Boolean> = features.map { "extension_ui_slots" in it || "plugin_ui_slots" in it }.distinctUntilChanged()
         override val nativeStream = runtime.selected.flatMapLatest { group ->
@@ -267,7 +281,9 @@ object MachineManagementModule {
         override suspend fun setAutoUpgrades(auto: Boolean) = changed { api().setAutoUpgrades(auto) }
         override suspend fun setConfig(id: String, config: JsonObject) = api().setConfig(id, config)
         override suspend fun setSecret(id: String, name: String, value: String) = api().setSecret(id, name, value)
+        override suspend fun setSecretReference(id: String, name: String, reference: String) = api().setSecretReference(id, name, reference)
         override suspend fun clearSecret(id: String, name: String) = api().clearSecret(id, name)
+        override suspend fun removeHandoffRule(id: String, rule: String) = api().removeHandoffRule(id, rule)
         override suspend fun listing() = api().listing()
         override suspend fun uiPlaces(placement: String, launcher: String?, machine: String?) = api().uiPlaces(placement, launcher, machine)
         override suspend fun renderUi(extension: String, ui: String, context: ExtensionUiContext?, state: String?) =

@@ -14,8 +14,8 @@ import { operations, operationsListed, opOf, watchOperations } from "../../lib/e
 import { extensionsRoute, routeSub } from "../../lib/extension-market";
 import { composing } from "../../lib/send-history";
 import {
-  asksFirst, changed, checkError, choiceLabel, clearedSecrets, clearExtensionSecret, compact, configError, fieldLabel, fieldTitle, isDirty, listItems, listExtensionsInfo, listSummary, numberProblems,
-  placeholder, extensionDetail, extensionState, extensionTone, pointText, readNumber, rebaseDraft, runNote, same, secretState, setupSecret, setAt, setContribution, setExtensionConfig, setExtensionEnabled,
+  asksFirst, changed, checkError, choiceLabel, clearedSecrets, clearExtensionSecret, compact, configError, entryID, entryItems, entryKey, fieldLabel, fieldPath, fieldTitle, isDirty, isEntryList, listItems, listExtensionsInfo, listSummary, numberProblems,
+  placeholder, extensionDetail, extensionState, extensionTone, pointText, readNumber, rebaseDraft, runNote, same, secretState, setupSecret, setAt, setContribution, setExtensionConfig, setExtensionConfigPreservingEntries, setExtensionEnabled,
   channelOf, machineStatus, nodeProgramStatus, pickerChoices, sandboxState, saveFooter, setExtensionAutoUpgrade, setExtensionSecret, sourceText, stateLine, valueAt,
   removeHandoffRule, setExtensionSecretReference, type HandoffRule, type SecretUser,
   type HubExtension, type HubExtensionDetail, type Json, type JsonObject, type ExtensionField, type ExtensionNodeState, type ExtensionSandbox, type ExtensionSecret,
@@ -501,9 +501,10 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
   useEffect(() => (signsIn ? onHubEvent("hello", (m) => !isResumed(m) && authChanged()) : undefined), [id, signsIn]);
 
   const problems = useMemo(() => numberProblems(typed), [typed]);
-  const dirty = !!detail && (isDirty(draft, detail.config) || Object.keys(problems).length > 0);
-  const canSave = dirty && !Object.keys(problems).length && !saving && !offline;
   const fields = detail?.form?.fields ?? [];
+  const requiredEntryLists = new Set(fields.filter((f) => isEntryList(f) && f.required).map((f) => f.name));
+  const dirty = !!detail && (isDirty(draft, detail.config, requiredEntryLists) || Object.keys(problems).length > 0);
+  const canSave = dirty && !Object.keys(problems).length && !saving && !offline;
   const editable = !!detail && !detail.read_only && detail.source !== "dev" && detail.source !== "hub.json";
   const setupTarget = editable ? setupSecret(detail?.needs_setup, detail?.secrets) : undefined;
   // Nothing to set here: the configuration's heading stands over "No configuration required". Otherwise every group in
@@ -527,7 +528,7 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
     const edits = base.current ? { base: base.current, draft, typed } : unsaved.get(keptKey);
     base.current = config;
     if (!edits) return;
-    const next = rebaseDraft(edits, config);
+    const next = rebaseDraft(edits, config, requiredEntryLists);
     setDraft(next.draft);
     setTyped(next.typed);
   }, [config, keptKey]);
@@ -546,6 +547,12 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
   // pushed meanwhile is old.
   const dirtyNow = useRef(dirty);
   dirtyNow.current = dirty;
+  // A save answers to the local revision it submitted, which may be older than the form by then.
+  const editRevision = useRef(0);
+  const draftNow = useRef(draft);
+  const typedNow = useRef(typed);
+  draftNow.current = draft;
+  typedNow.current = typed;
   const backNow = useRef(onBack);
   backNow.current = onBack;
   useEffect(() => {
@@ -569,20 +576,23 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
   }, [id, manager]);
 
   const edit = (path: string[], value: Json | undefined) => {
+    editRevision.current++;
     setDraft((d) => setAt(d, path, value));
-    const key = path.join(".");
+    const key = fieldPath(path);
     if (fieldErrors[key] || fieldErrors[""]) setFieldErrors(({ [key]: _a, [""]: _b, ...rest }) => rest);
     setCheckFailed("");
   };
   const type = (path: string[], text: string, integer: boolean) => {
-    const key = path.join(".");
+    const key = fieldPath(path);
     setTyped((t) => ({ ...t, [key]: { text, integer } }));
     setCheckFailed("");
     const n = readNumber(text, integer);
     if (!n.error) edit(path, n.value);
+    else editRevision.current++;
   };
   const revert = () => {
     if (!detail) return;
+    editRevision.current++;
     setDraft(detail.config ?? {});
     setTyped({});
     setFieldErrors({});
@@ -595,10 +605,24 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
     setFieldErrors({});
     setCheckFailed("");
     const n = writing();
+    const submitted = draft;
+    const revision = editRevision.current;
     try {
-      const d = await setExtensionConfig(id, compact(draft));
-      if (wrote(n, d)) apply(d);
-      setTyped({});
+      const d = await setExtensionConfig(id, compact(draft, requiredEntryLists));
+      const unchanged = editRevision.current === revision;
+      if (wrote(n, d)) {
+        if (unchanged) apply(d);
+        else {
+          // Only edits made after submission remain local; submitted and untouched fields take the authoritative answer.
+          const fresh = d.config ?? {};
+          const next = rebaseDraft({ base: submitted, draft: draftNow.current, typed: typedNow.current }, fresh, requiredEntryLists);
+          base.current = fresh;
+          setDraft(next.draft);
+          setTyped(next.typed);
+          setError("");
+        }
+      }
+      if (unchanged) setTyped({});
       toast(t("settings-extensions.saved_restart"), "ok");
     } catch (e) {
       const ce = configError(e);
@@ -667,10 +691,11 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
   const saveNow = async (path: string[], value: Json | undefined) => {
     if (!detail) return;
     const saved = detail.config ?? {};
+    editRevision.current++;
     setDraft((d) => setAt(d, path, value));
     const n = writing();
     try {
-      const d = await setExtensionConfig(id, compact(setAt(saved, path, value)));
+      const d = await setExtensionConfigPreservingEntries(id, compact(setAt(saved, path, value), requiredEntryLists));
       if (wrote(n, d)) setDraft((cur) => setAt(cur, path, valueAt(d.config ?? {}, path)));
     } catch (e) {
       setDraft((cur) => setAt(cur, path, valueAt(saved, path)));
@@ -679,7 +704,7 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
   };
   const computers = !!detail?.contributes?.computer;
   const nodes = detail?.node_machines ? { field: detail.node_machines, states: detail.nodes ?? [] } : undefined;
-  const launchers = useFormLaunchers(!!detail?.form?.fields?.some((f) => f.format === "launcher" || f.fields?.some((g) => g.format === "launcher")), detail?.id);
+  const launchers = useFormLaunchers(hasLauncherField(detail?.form?.fields), detail?.id);
 
   // A secret's answer is a whole detail too; keep the form's draft as it is.
   // The dialog's request is numbered as it leaves, like the page's own writes.
@@ -782,7 +807,7 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
                   {fields
                     .filter((f) => f.type !== "object")
                     .map((f) => (
-                      <FieldRow key={f.name} field={f} path={[f.name]} draft={draft} typed={typed} errors={fieldErrors} problems={problems} onEdit={edit} onType={type} onSaveNow={saveNow} computers={computers} nodes={nodes} launchers={launchers} />
+                      <FieldRow key={f.name} field={f} path={[f.name]} draft={draft} typed={typed} errors={fieldErrors} problems={problems} onEdit={edit} onType={type} onSaveNow={saveNow} computers={computers} nodes={nodes} launchers={launchers} secrets={p.secrets} onSecret={setSecret} />
                     ))}
                 </Group>
               )}
@@ -798,9 +823,9 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
             </>
           )}
 
-          {editable && !!p.secrets?.length && (
+          {editable && !!p.secrets?.some((s) => !s.list) && (
             <Group title={t("settings-extensions.secrets_title")} footer={t("settings-extensions.secrets_footer")}>
-              {p.secrets.map((s) => (
+              {p.secrets.filter((s) => !s.list).map((s) => (
                 <Row
                   key={s.name}
                   label={
@@ -892,7 +917,7 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
       )}
 
 
-      {secret && <SecretDialog extension={id} secret={secret} onClose={() => setSecret(null)} onStart={secretStart} onDone={secretDone} />}
+      {secret && <SecretDialog extension={id} secret={secret.list && secret.entry_title ? { ...secret, title: `${secret.entry_title} · ${secret.title}` } : secret} onClose={() => setSecret(null)} onStart={secretStart} onDone={secretDone} />}
     </div>
   );
 }
@@ -968,6 +993,9 @@ interface FieldProps {
   nodes?: { field: string; states: ExtensionNodeState[] };
   /** The hub's launchers, for a field of format launcher. */
   launchers: FormLaunchers;
+  /** Live entry-secret views; no values. */
+  secrets?: ExtensionSecret[];
+  onSecret?: (secret: ExtensionSecret) => void;
 }
 
 interface FormLaunchers {
@@ -978,7 +1006,7 @@ interface FormLaunchers {
 /** One field of the form, by its type; its title above (or beside a switch), its description and error below. */
 function FieldRow(props: FieldProps) {
   const { field: f, path, draft, errors, problems, onEdit } = props;
-  const key = path.join(".");
+  const key = fieldPath(path);
   const err = errors[key] ?? problems[key];
   const title = fieldTitle(f);
   const id = `extension-field-${key}`;
@@ -1042,11 +1070,15 @@ function TurnOnDialog({ name, sentence, onCancel, onConfirm }: { name: string | 
   );
 }
 
-function Control({ field: f, path, draft, typed, onEdit, onType, onSaveNow, computers, nodes, launchers, id, invalid }: FieldProps & { id: string; invalid: boolean }) {
+function Control({ field: f, path, draft, typed, errors, problems, onEdit, onType, onSaveNow, computers, nodes, launchers, secrets, onSecret, id, invalid }: FieldProps & { id: string; invalid: boolean }) {
   const ring = invalid ? "shadow-[inset_0_0_0_1px_var(--red)]" : "shadow-inset-field";
   const v = valueAt(draft, path);
 
   if (f.type === "string" && f.name === "triage_rules") return <TriageRuleField id={id} value={typeof v === "string" ? v : ""} placeholder={placeholder(f)} maxLength={f.max_length} invalid={invalid} onChange={(text) => onEdit(path, text || undefined)} />;
+
+  if (isEntryList(f)) {
+    return <EntryListControl field={f} path={path} draft={draft} typed={typed} errors={errors} problems={problems} onEdit={onEdit} onType={onType} onSaveNow={onSaveNow} computers={computers} nodes={nodes} launchers={launchers} secrets={secrets} onSecret={onSecret} id={id} ring={ring} />;
+  }
 
   if (f.type === "array" && f.items?.format === "machine") {
     return <MachineSwitches field={f} path={path} draft={draft} onSaveNow={onSaveNow} computers={computers} nodes={nodes?.field === f.name ? nodes.states : undefined} id={id} />;
@@ -1071,7 +1103,7 @@ function Control({ field: f, path, draft, typed, onEdit, onType, onSaveNow, comp
   }
 
   if (f.type === "integer" || f.type === "number") {
-    const key = path.join(".");
+    const key = fieldPath(path);
     const text = typed[key]?.text ?? (typeof v === "number" ? String(v) : "");
     const range = [f.minimum !== undefined ? t("settings-extensions.min", { value: f.minimum }) : "", f.maximum !== undefined ? t("settings-extensions.max", { value: f.maximum }) : ""].filter(Boolean).join(t("settings-extensions.range_separator"));
     return (
@@ -1105,6 +1137,10 @@ function Control({ field: f, path, draft, typed, onEdit, onType, onSaveNow, comp
       className={cx(inputClass, ring, f.format && "font-mono")}
     />
   );
+}
+
+function hasLauncherField(fields?: ExtensionField[]): boolean {
+  return !!fields?.some((f) => f.format === "launcher" || hasLauncherField(f.fields) || hasLauncherField(f.items?.fields));
 }
 
 /** The hub's launchers for the form's launcher pickers, read once while the page is open (GET /launchers asks every
@@ -1195,6 +1231,78 @@ function MachineSwitches({ field: f, path, draft, onSaveNow, computers, nodes, i
         </div>
       ))}
       <TurnOnDialog name={asking?.name ?? null} sentence={f.confirm} onCancel={() => setAsking(null)} onConfirm={() => { if (asking) save(asking.id, true); setAsking(null); }} />
+    </div>
+  );
+}
+
+function entryDisplayTitle(list: ExtensionField, entry: JsonObject, index: number): string {
+  const fields = list.items?.fields ?? [];
+  for (const preferred of [true, false]) {
+    for (const field of fields) {
+      if (preferred && field.name !== "name") continue;
+      const value = entry[field.name];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return t("settings-extensions.entry_untitled", { count: index + 1 });
+}
+
+/** A user-managed list of flat entries. IDs and secrets never become editable text fields. */
+function EntryListControl(props: FieldProps & { id: string; ring: string }) {
+  const { field: f, path, draft, errors, onEdit, secrets, onSecret, id, ring } = props;
+  const entries = entryItems(draft, path);
+  const [removing, setRemoving] = useState<{ key: string; title: string } | null>(null);
+  const store = (next: JsonObject[]) => onEdit(path, next.length || f.required ? next : undefined);
+  const max = f.max_items ?? 32;
+  const clearsOnRebind = !!f.items?.fields?.some((field) => field.clears_secret);
+  return (
+    <div id={id} role="group" aria-label={fieldLabel(f)} data-entry-list={f.name} className={cx("flex flex-col gap-2 rounded-control", ring)}>
+      {entries.map((entry, index) => {
+        const key = entryKey(entry);
+        const savedID = entryID(entry);
+        const secret = savedID ? secrets?.find((s) => s.name === savedID && s.list === f.name) : undefined;
+        const title = entryDisplayTitle(f, entry, index);
+        return (
+          <section key={key} data-entry-key={key} className="overflow-hidden rounded-control bg-surface shadow-hairline">
+            <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-meta font-medium text-ink">{title}</p>
+                <p className={cx("mt-0.5 text-submeta", secret && !secret.set && secret.required ? "text-orange" : "text-ink-3")}>
+                  {secret ? secretState(secret) : t("settings-extensions.entry_save_before_secret")}
+                </p>
+              </div>
+              <Button tone="quiet" icon="key" disabled={!secret || !onSecret} onClick={() => secret && onSecret?.(secret)}>
+                {t("settings-extensions.entry_secret")}
+              </Button>
+              <IconButton icon="x" label={t("settings-extensions.entry_remove", { entry: title })} disabled={!!f.required && entries.length <= (f.min_items ?? 0)} onClick={() => setRemoving({ key, title })} />
+            </div>
+            {errors[`${f.name}[${index}]._id`] && <p role="alert" className="px-4 pt-2 text-submeta text-red">{errors[`${f.name}[${index}]._id`]}</p>}
+            {(f.items?.fields ?? []).map((field) => (
+              <FieldRow key={field.name} {...props} field={field} path={[...path, String(index), field.name]} />
+            ))}
+          </section>
+        );
+      })}
+      <div className="px-1 pt-1">
+        <Button tone="secondary" icon="plus" disabled={entries.length >= max} onClick={() => store([...entries, {}])}>
+          {t("settings-extensions.entry_add")}
+        </Button>
+        <p className="mt-2 text-submeta leading-relaxed text-ink-3">
+          {t("settings-extensions.entry_editor_hint")}
+          {clearsOnRebind ? ` ${t("settings-extensions.entry_rebind_hint")}` : ""}
+        </p>
+      </div>
+      <Dialog
+        open={!!removing}
+        title={removing ? t("settings-extensions.entry_remove_title", { entry: removing.title }) : undefined}
+        onClose={() => setRemoving(null)}
+        footer={<><Button tone="quiet" onClick={() => setRemoving(null)}>{t("common.cancel")}</Button><Button tone="danger" onClick={() => {
+          if (removing) store(entries.filter((entry) => entryKey(entry) !== removing.key));
+          setRemoving(null);
+        }}>{t("settings-extensions.entry_remove_confirm")}</Button></>}
+      >
+        <p className="text-meta leading-relaxed text-ink-2">{t("settings-extensions.entry_remove_body")}</p>
+      </Dialog>
     </div>
   );
 }
@@ -1440,14 +1548,14 @@ function SecretProviderGroups({ extension, users, rules, editable, onStart, onDo
       ? u.machine
         ? t("settings-extensions.user_launcher_machine", { name: u.launcher_name || u.launcher || "", machine: machineName(u.machine) })
         : t("settings-extensions.user_launcher", { name: u.launcher_name || u.launcher || "" })
-      : `${u.extension_name || u.extension || ""} › ${u.secret_title || u.secret || ""}`;
+      : `${u.extension_name || u.extension || ""} › ${u.secret_title || u.secret || ""}${u.entry_title ? ` (${u.entry_title})` : ""}`;
   return (
     <>
       {!!users?.length && (
         <div data-secret-users>
           <Group title={t("settings-extensions.users_title")} footer={t("settings-extensions.users_footer")}>
             {users.map((u, i) => (
-              <Row key={`${u.kind}/${u.extension ?? u.launcher}/${u.secret ?? u.machine ?? ""}/${i}`} label={userLabel(u)} hint={u.reference} />
+              <Row key={`${u.kind}/${u.extension ?? u.launcher}/${u.secret ?? u.machine ?? ""}/${i}`} label={userLabel(u)} hint={u.entry_title ? `${u.entry_title} · ${u.reference}` : u.reference} wrapHint={!!u.entry_title} />
             ))}
           </Group>
         </div>

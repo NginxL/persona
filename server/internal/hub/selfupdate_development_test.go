@@ -159,6 +159,213 @@ func TestDevelopmentAppliesOlderProgramBackupThroughSharedInstaller(t *testing.T
 	}
 }
 
+func TestDevelopmentAvailableWithBuiltInQuiesce(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("development updates are unsupported on Windows")
+	}
+	h := newTestHub(t)
+	u := h.upd
+	// No hub.json development section: the hub pauses its own writers.
+	h.cfg.Update.Development = nil
+	if !u.developmentAvailable() {
+		t.Fatal("built-in pause did not make development updates available")
+	}
+	v, _ := getUpdate(t, u)
+	if !v.Development.Configured || v.Development.Why != "" {
+		t.Fatalf("development view: %+v", v.Development)
+	}
+	// Hooks are an override and must be a pair.
+	h.cfg.Update.Development = &update.DevelopmentConfig{Backup: update.DevelopmentBackupConfig{Quiesce: []string{"pause"}}}
+	if u.developmentAvailable() {
+		t.Fatal("a quiesce without resume was accepted")
+	}
+	if v, _ := getUpdate(t, u); v.Development.Configured || v.Development.Why == "" {
+		t.Fatalf("half-configured override: %+v", v.Development)
+	}
+	h.cfg.Update.Development.Backup = update.DevelopmentBackupConfig{Quiesce: []string{"pause"}, Resume: []string{"resume"}}
+	if !u.developmentAvailable() {
+		t.Fatal("a complete hook pair was refused")
+	}
+	if v, _ := getUpdate(t, u); v.Development.BuiltinQuiesce {
+		t.Fatal("external hooks still reported as the built-in pause")
+	}
+}
+
+func TestDevelopmentBackupSettingsAreValidatedAndExposed(t *testing.T) {
+	h := newTestHub(t)
+	u := h.upd
+	dir := filepath.Join(t.TempDir(), "snapshots")
+	w := nodePolicyRequest(t, u, http.MethodPut, fmt.Sprintf(`{"development_backup_directory":%q,"development_backup_retain":5}`, dir))
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	v, raw := getUpdate(t, u)
+	if v.Development.BackupDirectory != dir || v.Development.BackupRetain != 5 || !v.Development.BuiltinQuiesce {
+		t.Fatalf("settings not exposed: %+v", v.Development)
+	}
+	if v.Development.BackupDefaultDirectory != filepath.Join(h.cfg.dir, "update", "development-backups") {
+		t.Fatalf("recommended directory = %q", v.Development.BackupDefaultDirectory)
+	}
+	if raw["development"].(map[string]any)["backup_retain"] != float64(5) {
+		t.Fatal("retention missing from the JSON view")
+	}
+	// Empty restores the recommended folder.
+	if w := nodePolicyRequest(t, u, http.MethodPut, `{"development_backup_directory":""}`); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	if v, _ := getUpdate(t, u); v.Development.BackupDirectory != v.Development.BackupDefaultDirectory {
+		t.Fatalf("reset directory = %q", v.Development.BackupDirectory)
+	}
+	// An omitted field keeps the stored folder, including across a retention change.
+	if w := nodePolicyRequest(t, u, http.MethodPut, `{"development_backup_retain":4}`); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	if v, _ := getUpdate(t, u); v.Development.BackupDirectory != v.Development.BackupDefaultDirectory || v.Development.BackupRetain != 4 {
+		t.Fatalf("omitted folder changed it: %+v", v.Development)
+	}
+	// Collected data, relative paths and an out-of-range count are refused
+	// without changing the stored settings.
+	inside := filepath.Join(h.cfg.dir, "data", "snapshots")
+	for _, body := range []string{
+		fmt.Sprintf(`{"development_backup_directory":%q}`, inside),
+		`{"development_backup_directory":"relative/dir"}`,
+		`{"development_backup_retain":51}`,
+		`{"development_backup_retain":0}`,
+		`{"development_backup_retain":-1}`,
+	} {
+		if w := nodePolicyRequest(t, u, http.MethodPut, body); w.Code != http.StatusConflict {
+			t.Fatalf("%s -> %d: %s", body, w.Code, w.Body.String())
+		}
+	}
+	if v, _ := getUpdate(t, u); v.Development.BackupRetain != 4 {
+		t.Fatalf("refused request changed the retention: %+v", v.Development)
+	}
+}
+
+// An explicit Web choice of the recommended folder wins over hub.json's
+// directory, while an omitted field keeps hub.json's.
+func TestDevelopmentRecommendedFolderOverridesHubConfig(t *testing.T) {
+	h := newTestHub(t)
+	u := h.upd
+	custom := filepath.Join(t.TempDir(), "hub-config-snapshots")
+	h.cfg.Update.Development = &update.DevelopmentConfig{Backup: update.DevelopmentBackupConfig{Directory: custom}}
+	if v, _ := getUpdate(t, u); v.Development.BackupDirectory != custom {
+		t.Fatalf("hub.json directory = %q", v.Development.BackupDirectory)
+	}
+	if v, _ := getUpdate(t, u); v.Development.BackupDirectory == v.Development.BackupDefaultDirectory {
+		t.Fatal("fixture has no hub.json directory")
+	}
+	// Omitting the field keeps hub.json's directory.
+	if w := nodePolicyRequest(t, u, http.MethodPut, `{"development_backup_retain":2}`); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	if v, _ := getUpdate(t, u); v.Development.BackupDirectory != custom {
+		t.Fatalf("omitted field lost hub.json's directory: %q", v.Development.BackupDirectory)
+	}
+	// "Use recommended" (an explicit empty value) selects the recommended one.
+	if w := nodePolicyRequest(t, u, http.MethodPut, `{"development_backup_directory":""}`); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	v, _ := getUpdate(t, u)
+	if v.Development.BackupDirectory != v.Development.BackupDefaultDirectory {
+		t.Fatalf("explicit recommended folder = %q, want %q", v.Development.BackupDirectory, v.Development.BackupDefaultDirectory)
+	}
+	u.mu.Lock()
+	got := u.developmentBackupConfigLocked().Directory
+	u.mu.Unlock()
+	if got != v.Development.BackupDefaultDirectory {
+		t.Fatalf("snapshot folder = %q, want %q", got, v.Development.BackupDefaultDirectory)
+	}
+}
+
+// Snapshots that still need recovery keep the folder they are in: changing it
+// would pause and dump writers again past the helper's fail-closed gates.
+func TestDevelopmentFolderChangeRefusedWhileRecoveryPending(t *testing.T) {
+	h := newTestHub(t)
+	u := h.upd
+	current := filepath.Join(t.TempDir(), "current")
+	if w := nodePolicyRequest(t, u, http.MethodPut, fmt.Sprintf(`{"development_backup_directory":%q}`, current)); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	if err := os.WriteFile(filepath.Join(current, "coordination-pending.json"), []byte(`{"phase":"quiescing"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(t.TempDir(), "other")
+	w := nodePolicyRequest(t, u, http.MethodPut, fmt.Sprintf(`{"development_backup_directory":%q}`, other))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("folder changed with a coordination marker: %d %s", w.Code, w.Body.String())
+	}
+	if v, _ := getUpdate(t, u); v.Development.BackupDirectory != current {
+		t.Fatalf("refused change moved the folder: %q", v.Development.BackupDirectory)
+	}
+	if err := os.Remove(filepath.Join(current, "coordination-pending.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(current, ".incomplete-fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if w := nodePolicyRequest(t, u, http.MethodPut, fmt.Sprintf(`{"development_backup_directory":%q}`, other)); w.Code != http.StatusConflict {
+		t.Fatalf("folder changed with an incomplete snapshot: %d %s", w.Code, w.Body.String())
+	}
+	if err := os.RemoveAll(filepath.Join(current, ".incomplete-fixture")); err != nil {
+		t.Fatal(err)
+	}
+	if w := nodePolicyRequest(t, u, http.MethodPut, fmt.Sprintf(`{"development_backup_directory":%q}`, other)); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	if v, _ := getUpdate(t, u); v.Development.BackupDirectory != other {
+		t.Fatalf("folder after recovery = %q", v.Development.BackupDirectory)
+	}
+}
+
+func TestDevelopmentBuiltInQuiescePausesWritesUntilResume(t *testing.T) {
+	h := newTestHub(t)
+	var ran bool
+	gated := h.quiesceGate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ran = true }))
+	serve := func(method string) int {
+		ran = false
+		w := httptest.NewRecorder()
+		gated.ServeHTTP(w, httptest.NewRequest(method, "/api/v1/example", nil))
+		return w.Code
+	}
+	resume, err := h.upd.quiesceDevelopmentWriters(context.Background(), update.DevelopmentBackupConfig{Builtin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := serve(http.MethodPost); code != http.StatusServiceUnavailable || ran {
+		t.Fatalf("write during pause: %d ran=%v", code, ran)
+	}
+	if code := serve(http.MethodGet); code != http.StatusOK || !ran {
+		t.Fatalf("read during pause: %d ran=%v", code, ran)
+	}
+	resume()
+	if code := serve(http.MethodPost); code != http.StatusOK || !ran {
+		t.Fatalf("write after resume: %d ran=%v", code, ran)
+	}
+	// A second resume is harmless.
+	resume()
+
+	// hub.json hooks are the helper's to run: the hub stays open.
+	resume, err = h.upd.quiesceDevelopmentWriters(context.Background(),
+		update.DevelopmentBackupConfig{Quiesce: []string{"pause"}, Resume: []string{"resume"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := serve(http.MethodPost); code != http.StatusOK || !ran {
+		t.Fatalf("external hooks paused the hub: %d ran=%v", code, ran)
+	}
+	resume()
+
+	// A half-configured override is never replaced by the built-in pause.
+	if _, err := h.upd.quiesceDevelopmentWriters(context.Background(),
+		update.DevelopmentBackupConfig{Quiesce: []string{"pause"}}); err == nil {
+		t.Fatal("half-configured hooks paused the hub")
+	}
+	if code := serve(http.MethodPost); code != http.StatusOK {
+		t.Fatal("refused quiesce left the hub paused")
+	}
+}
+
 func TestDevelopmentBackupsAPIDistinguishesFailureFromEmptyList(t *testing.T) {
 	h := newTestHub(t)
 	u := h.upd
@@ -280,8 +487,18 @@ func TestDevelopmentSettingsOptInAndActiveChannelGuard(t *testing.T) {
 		t.Fatal("switched during an update")
 	}
 	u.running = false
+	// The hub pauses its own writers, so no hub.json hook is needed.
+	if w := nodePolicyRequest(t, u, http.MethodPut, `{"auto":true}`); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	// A half-configured override is refused, not silently replaced by the
+	// built-in pause.
+	u.h.cfg.Update.Development.Backup = update.DevelopmentBackupConfig{Quiesce: []string{"pause"}}
+	if u.developmentAvailable() {
+		t.Fatal("availability accepted a quiesce without resume")
+	}
 	if w := nodePolicyRequest(t, u, http.MethodPut, `{"auto":true}`); w.Code != 409 {
-		t.Fatal("enabled without backup coordination")
+		t.Fatal("enabled automatic updates with a half-configured override")
 	}
 	u.h.cfg.Update.Development.Backup = update.DevelopmentBackupConfig{Quiesce: []string{"pause"}, Resume: []string{"resume"}}
 	if w := nodePolicyRequest(t, u, http.MethodPut, `{"auto":true}`); w.Code != 200 {

@@ -248,6 +248,14 @@ type DispatchTask struct {
 
 func RenderDispatchTask(t DispatchTask) string { return render("agents/dispatch_task", t) }
 
+type A2AMessage struct {
+	ID, Sender, State, Text string
+	Language                string
+	Request                 bool
+}
+
+func RenderA2AMessage(t A2AMessage) string { return render("agents/a2a_message", t) }
+
 // TaskSuccessor is the first message of an agent Persona starts for a task whose agents have all stopped (#4754): who
 // worked on it before and its last reply, then the user's message on the task (agents/task_successor).
 type TaskSuccessor struct {
@@ -260,9 +268,17 @@ type TaskSuccessor struct {
 
 func RenderTaskSuccessor(t TaskSuccessor) string { return render("agents/task_successor", t) }
 
+// TaskLeader is what the task leader's note knows of how its Agent reaches its tools.
+type TaskLeader struct {
+	// Terminal: the assignment's verified entry is the terminal one (TaskHandoff.Terminal), named in the handoff note
+	// before this one; the note then says how task_plan and task_review run through it (#12136). False keeps the text
+	// an Agent with the Persona MCP gets.
+	Terminal bool
+}
+
 // RenderTaskLeader is what follows the prompt of a task whose agent is a task leader (agents/task_leader, #3656): that it
 // can hand direct workers to task_plan and how their reports reach it.
-func RenderTaskLeader() string { return render("agents/task_leader", struct{}{}) }
+func RenderTaskLeader(l TaskLeader) string { return render("agents/task_leader", l) }
 
 // RenderTaskWorker is what follows the prompt of a worker a task leader handed out (agents/task_worker).
 func RenderTaskWorker() string { return render("agents/task_worker", struct{}{}) }
@@ -284,6 +300,10 @@ type TaskHandoff struct {
 	MCP        bool   // the selected launcher has the existing scoped Persona MCP tools
 	Executable string // a verified node executable, encoded as a JSON string, never shell code
 }
+
+// Terminal: the entry rendered is the terminal one (`personad tool` through the verified Executable), not the MCP
+// tools, which win when both are known (agents/task_handoff).
+func (h TaskHandoff) Terminal() bool { return !h.MCP && h.Executable != "" }
 
 func RenderTaskHandoff(h TaskHandoff) string { return render("agents/task_handoff", h) }
 

@@ -3,6 +3,8 @@ package transcript
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"fmt"
@@ -125,10 +127,11 @@ type Meta struct {
 	// VersionAt is when the line that said Version was written (zero when it had no timestamp).
 	VersionAt      time.Time
 	PermissionMode string
-	// ModeAt / Effort / EffortAt: when the permission mode was last seen, and the effort level of the latest reply.
+	// ModeAt / Effort / EffortAt / ModelAt: when the permission mode was last seen, and when the latest reply or turn_context named Effort or Model.
 	ModeAt   time.Time
 	Effort   string
 	EffortAt time.Time
+	ModelAt  time.Time
 	// Ultracode is independent of effort: nil means the transcript has no dated evidence. Since, when set by a
 	// caller, ignores observations from before the current Claude process (resume resets the session-only switch).
 	Ultracode        *bool
@@ -314,6 +317,7 @@ func (m *Meta) ObserveNamingMetadata(line []byte) {
 		} `json:"message"`
 		Payload struct {
 			Type   string `json:"type"`
+			Model  string `json:"model"`
 			Effort string `json:"effort"`
 			Info   *struct {
 				Total struct {
@@ -327,6 +331,9 @@ func (m *Meta) ObserveNamingMetadata(line []byte) {
 	}
 	switch e.Type {
 	case "turn_context":
+		if e.Payload.Model != "" && !e.Timestamp.Before(m.ModelAt) {
+			m.Model, m.ModelAt = e.Payload.Model, e.Timestamp
+		}
 		if e.Payload.Effort != "" && !e.Timestamp.Before(m.EffortAt) {
 			m.Effort, m.EffortAt = e.Payload.Effort, e.Timestamp
 		}
@@ -466,12 +473,21 @@ func ParseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		meta.FirstUser = clipTo(meta.FirstUser, pageTextLen)
 	}
 	defer func() { meta.localInput = false }()
-	for _, it := range items {
+	var fingerprint string
+	for i := range items {
+		it := &items[i]
+		if (it.Kind == proto.KindText || it.Kind == proto.KindImage && it.Role == "user") && proto.PositionalItemID(it.ID) {
+			if fingerprint == "" {
+				digest := sha256.Sum256(line)
+				fingerprint = hex.EncodeToString(digest[:16])
+			}
+			it.SourceFingerprint = fingerprint
+		}
 		if it.Role != "system" && !it.TS.IsZero() && it.TS.After(meta.LastActivity) {
 			meta.LastActivity = it.TS
 		}
-		meta.trackActivity(it)
-		meta.trackPlan(it)
+		meta.trackActivity(*it)
+		meta.trackPlan(*it)
 		if it.Wake || it.Role == "user" && !it.Queued && (it.Kind == proto.KindText || it.Kind == proto.KindImage) {
 			// A new turn's words start afresh (TurnAnswer): a photo with no caption and a command that runs the model
 			// start one too, though they do not reach ClaudeTurnStarted.
@@ -882,6 +898,9 @@ func parseLine(seq int, line []byte, meta *Meta) []proto.Item {
 		}
 		if model != "" {
 			meta.Model = model
+			if !e.IsSidechain && !meta.Updated.IsZero() {
+				meta.ModelAt = meta.Updated
+			}
 			meta.observeReplyModel(model)
 		}
 		var blocks []block

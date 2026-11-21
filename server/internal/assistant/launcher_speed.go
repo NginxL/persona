@@ -2,10 +2,11 @@ package assistant
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -18,11 +19,11 @@ func validateStartSpeed(params map[string]any) (string, error) {
 	}
 	speed, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("speed must be a string: standard, fast or ultrafast")
+		return "", i18n.ErrEnglish("assistant-tasks.speed_type")
 	}
 	speed = strings.TrimSpace(speed)
 	if !proto.ValidSpeed(speed) {
-		return "", fmt.Errorf("invalid Agent speed %q: use standard, fast or ultrafast", speed)
+		return "", i18n.ErrEnglish("assistant-tasks.speed_invalid", i18n.Args{"speed": i18n.Verbatim(strconv.Quote(speed))})
 	}
 	params["speed"] = speed
 	return speed, nil
@@ -48,7 +49,7 @@ func checkStartSpeed(params map[string]any, agent startAgent, resume string) err
 		return nil
 	}
 	if resume != "" {
-		return fmt.Errorf("speed %q applies only to a new Agent start, not a resume; leave speed out to use the launcher's own setting", speed)
+		return i18n.ErrEnglish("assistant-tasks.speed_resume", i18n.Args{"speed": i18n.Verbatim(strconv.Quote(speed))})
 	}
 	source := compat.Source(agent.source)
 	terminal := source == "" || source == "zshrc" || source == "path" || source == "persona" || source == "builtin"
@@ -58,26 +59,51 @@ func checkStartSpeed(params map[string]any, agent startAgent, resume string) err
 		if kind == "" {
 			kind = source
 		}
-		return fmt.Errorf("launcher %q (%s) cannot apply speed %q to a new Agent start; leave speed out or choose standard", launcher, kind, speed)
+		return i18n.ErrEnglish("assistant-tasks.speed_unsupported", i18n.Args{
+			"launcher": i18n.Verbatim(strconv.Quote(launcher)), "kind": i18n.Verbatim(kind), "speed": i18n.Verbatim(strconv.Quote(speed)),
+		})
 	}
 	return nil
+}
+
+// resolveFitPlanTask is the read-only resolve -> machine-fit half of fitPlanTaskSpeed. The boolean is false only
+// when the machine disappeared, preserving that path's existing early return before speed validation; the resolved
+// params are still returned then so callers can read the configured permission mode.
+func (s *Service) resolveFitPlanTask(ctx context.Context, t *PlanTask) (startAgent, map[string]any, bool, error) {
+	params := map[string]any{"launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "speed": t.Speed, "tier": t.Tier}
+	own, err := s.resolveStart(ctx, params, false)
+	if err != nil {
+		return startAgent{}, nil, false, err
+	}
+	m, ok := s.machineByName(ctx, t.Machine)
+	if !ok {
+		return startAgent{}, params, false, nil // the ordinary machine check reports this
+	}
+	fit, err := s.fitTaskLauncher(ctx, t, m, own, params)
+	if err != nil {
+		return startAgent{}, nil, false, err
+	}
+	return fit, params, true, nil
 }
 
 // fitPlanTaskSpeed resolves a plan task's current tier and launcher before its
 // card or Start edit is accepted, and validates the resulting speed.
 func (s *Service) fitPlanTaskSpeed(ctx context.Context, t *PlanTask) (startAgent, error) {
-	params := map[string]any{"launcher": t.Launcher, "model": t.Model, "effort": t.Effort, "speed": t.Speed, "tier": t.Tier}
-	own, err := s.resolveStart(ctx, params, false)
+	fit, _, err := s.fitPlanTask(ctx, t)
+	return fit, err
+}
+
+// fitPlanTask resolves a plan task's tier, launcher and configured permission mode (from tier or agent.new)
+// and validates its resulting speed.
+func (s *Service) fitPlanTask(ctx context.Context, t *PlanTask) (startAgent, string, error) {
+	fit, params, ok, err := s.resolveFitPlanTask(ctx, t)
 	if err != nil {
-		return startAgent{}, err
+		return startAgent{}, "", err
 	}
-	m, ok := s.machineByName(ctx, t.Machine)
 	if !ok {
-		return startAgent{}, nil // the ordinary machine check reports this
+		configuredMode, _ := params["permission_mode"].(string)
+		return startAgent{}, configuredMode, nil // the ordinary machine check reports this
 	}
-	fit, err := s.fitTaskLauncher(ctx, t, m, own, params)
-	if err != nil {
-		return startAgent{}, err
-	}
-	return fit, checkStartSpeed(params, fit, "")
+	configuredMode, _ := params["permission_mode"].(string)
+	return fit, configuredMode, checkStartSpeed(params, fit, "")
 }

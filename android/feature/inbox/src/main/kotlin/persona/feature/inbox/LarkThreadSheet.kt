@@ -16,7 +16,7 @@ import persona.core.designsystem.*
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun LarkThreadSheet(root: LarkMessage, repository: InboxRepository, onDismiss: () -> Unit) {
+internal fun LarkThreadSheet(root: LarkMessage, repository: InboxRepository, mentionFeed: String? = null, onDismiss: () -> Unit) {
     val loader = remember(root.id, root.thread) { root.thread?.let { LarkThreadLoader(root.id, it) } }
     val scope = rememberCoroutineScope()
     val replies = remember(root.id, root.thread, repository) {
@@ -80,7 +80,8 @@ internal fun LarkThreadSheet(root: LarkMessage, repository: InboxRepository, onD
                     val reply by composer.state.collectAsStateWithLifecycle()
                     LaunchedEffect(reply.sent) { if (reply.sent) loader?.load() }
                     if (reply.sent) StatusText(stringResource(R.string.inbox_sent))
-                    ReplyComposerField(reply, composer::update, composer::send, stringResource(R.string.inbox_lark_thread_reply))
+                    LarkReplyComposerField(repository, composer, reply, mentionFeed, composer::send,
+                        stringResource(R.string.inbox_lark_thread_reply))
                 }
             }
         }

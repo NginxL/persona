@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -67,8 +68,14 @@ func manyTodosOn(n int, o Options) *Service {
 	return s
 }
 
-func todosListBody(tb testing.TB, s *Service) []byte {
+func todosListBody(tb testing.TB, s *Service) []byte { return todosListBodyAs(tb, s, "") }
+
+// todosListBodyAs is GET /api/v1/todos as role reads it ("" a device).
+func todosListBodyAs(tb testing.TB, s *Service, role string) []byte {
 	r := httptest.NewRequest("GET", "/api/v1/todos", nil)
+	if role != "" {
+		r.Header.Set(RoleHeader, role)
+	}
 	w := httptest.NewRecorder()
 	s.ServeHTTP(w, r)
 	if w.Code != 200 {
@@ -77,14 +84,164 @@ func todosListBody(tb testing.TB, s *Service) []byte {
 	return w.Body.Bytes()
 }
 
-// BenchmarkTodosList: GET /api/v1/todos with n finished supervised tasks.
+// benchTodosManager is manyTodos's n tasks on a manager made with o (its hub a fake one), each handed out and
+// supervised by a conversation of its own, whose spaces the manager noted. Listed: the assistant's computer lists them
+// all (and they were noted from its list, as SessionsChanged notes them); else it lists only the main conversation,
+// and the others' spaces are told by what the manager noted of them (conversation_space.go), as for chats quiet for
+// more than a week.
+func benchTodosManager(b testing.TB, n int, o Options, listed bool) *Service {
+	f := newFakeHub().withMachine()
+	if h, ok := o.Hub.(*todoFlushHub); ok {
+		h.fakeHub = f
+	} else {
+		o.Hub = f
+	}
+	s := manyTodosOn(n, o)
+	chats := []proto.Session{{SessionID: "conv1", Title: "Persona", Assistant: true, Status: proto.StatusIdle}}
+	var noted []db.ConversationSpace
+	s.todos.mu.Lock()
+	for _, t := range s.todos.todos {
+		chat := "chat_" + strings.TrimPrefix(t.ID, "todo_")
+		t.Origin, t.Supervision.Supervisor = chat, chat
+		chats = append(chats, proto.Session{SessionID: chat, Title: "A chat", Assistant: true, Status: proto.StatusIdle})
+		noted = append(noted, db.ConversationSpace{MachineID: "server", SessionID: chat})
+	}
+	s.todos.mu.Unlock()
+	if listed {
+		f.setSessions("server", chats...)
+		s.conversationSpacesListed("server", chats)
+		waitFor(b, "the listed conversations' spaces to be noted", s.listedSpacesWritten)
+	} else {
+		f.setSessions("server", chats[0])
+		s.noteConversationSpaces(context.Background(), noted)
+	}
+	return s
+}
+
+// BenchmarkTodosList: GET /api/v1/todos with n finished supervised tasks, each handed out and supervised by a
+// conversation of its own (benchTodosManager). ext/…: as an extension's token reads it, which to-dos it is not shown
+// decided (todo_scope.go): every rule's read made, the conversations told by one read of the assistant's computer, as
+// they are listed outside the health space, so every to-do is listed. db/…: with Postgres as the store and four feed
+// items a to-do, which ext,db/… reads the conversations of (FeedConversations); skipped without
+// PERSONA_TEST_DATABASE_URL. quiet: the computer lists none of the chats, which the spaces the manager noted tell
+// (from its book; cold: from the store, as the first read after a restart does).
 func BenchmarkTodosList(b *testing.B) {
-	for _, n := range []int{250, 1000, 4000} {
-		b.Run(fmt.Sprintf("todos=%d", n), func(b *testing.B) {
-			s := manyTodos(n)
+	for _, role := range []string{"", roleExtension} {
+		for _, n := range []int{250, 1000, 4000} {
+			name := fmt.Sprintf("todos=%d", n)
+			if role != "" {
+				name = "ext/" + name
+			}
+			b.Run(name, func(b *testing.B) {
+				s := benchTodosManager(b, n, Options{}, true)
+				b.ReportAllocs()
+				for b.Loop() {
+					todosListBodyAs(b, s, role)
+				}
+			})
+		}
+	}
+	b.Run("ext,quiet/todos=1000", func(b *testing.B) {
+		s := benchTodosManager(b, 1000, Options{}, false)
+		b.ReportAllocs()
+		for b.Loop() {
+			todosListBodyAs(b, s, roleExtension)
+		}
+	})
+	for _, c := range []struct {
+		role        string
+		quiet, cold bool
+	}{{"", false, false}, {roleExtension, false, false}, {roleExtension, true, false}, {roleExtension, true, true}} {
+		name := "db/todos=1000"
+		switch {
+		case c.cold:
+			name = "ext,quiet,cold," + name
+		case c.quiet:
+			name = "ext,quiet," + name
+		case c.role != "":
+			name = "ext," + name
+		}
+		b.Run(name, func(b *testing.B) {
+			database := todoTestDB(b)
+			s := benchTodosManager(b, 1000, Options{Store: func() Store { return database }}, !c.quiet)
+			for i := range 1000 {
+				from := fmt.Sprintf("todo_bench%06d", i)
+				id := todoCopyForBench(s, from) // the feed is never pruned: each run writes and reads its own
+				s.todos.mu.Lock()
+				delete(s.todos.todos, from)
+				s.todos.mu.Unlock()
+				todoFeedForBench(b, s, id, 4, false)
+			}
 			b.ReportAllocs()
 			for b.Loop() {
-				todosListBody(b, s)
+				if c.cold {
+					s.convSpaces.mu.Lock()
+					s.convSpaces.known = nil
+					s.convSpaces.mu.Unlock()
+				}
+				todosListBodyAs(b, s, c.role)
+			}
+		})
+	}
+}
+
+// todoFlushHub is a hub that takes the to-do events and drops them: a hub with no extension installed.
+type todoFlushHub struct{ *fakeHub }
+
+func (todoFlushHub) TodoEvent(string, any) error { return nil }
+
+// BenchmarkTodoChangedFlush: one flush of what the extensions are told of the to-dos (todoChangedFlush), with 1000
+// finished supervised tasks (benchTodosManager), changed=k of them retitled since the flush before: what each change of
+// the to-dos costs the manager even with no extension installed, whether each changed one is shown judged
+// (todo_scope.go). quiet: the computer lists none of their chats, which the spaces the manager noted tell. db: with
+// Postgres as the store and four feed items a to-do; skipped without PERSONA_TEST_DATABASE_URL.
+func BenchmarkTodoChangedFlush(b *testing.B) {
+	for _, c := range []struct {
+		changed       int
+		quiet, onDisk bool
+	}{{1, false, false}, {100, false, false}, {1, true, false}, {100, true, false}, {1, true, true}, {100, true, true}} {
+		name := fmt.Sprintf("changed=%d", c.changed)
+		if c.quiet {
+			name = "quiet/" + name
+		}
+		if c.onDisk {
+			name = "db," + name
+		}
+		b.Run(name, func(b *testing.B) {
+			o := Options{Hub: &todoFlushHub{}}
+			if c.onDisk {
+				database := todoTestDB(b)
+				o.Store = func() Store { return database }
+			}
+			s := benchTodosManager(b, 1000, o, !c.quiet)
+			if c.onDisk {
+				for i := range 1000 {
+					from := fmt.Sprintf("todo_bench%06d", i)
+					id := todoCopyForBench(s, from)
+					s.todos.mu.Lock()
+					delete(s.todos.todos, from)
+					s.todos.mu.Unlock()
+					todoFeedForBench(b, s, id, 4, false)
+				}
+			}
+			s.todos.mu.Lock()
+			ids := make([]string, 0, len(s.todos.todos))
+			for id := range s.todos.todos {
+				ids = append(ids, id)
+			}
+			slices.Sort(ids)
+			s.todoMarksBaseline(s.todos.todos)
+			s.todos.mu.Unlock()
+			round := 0
+			b.ReportAllocs()
+			for b.Loop() {
+				round++
+				s.todos.mu.Lock()
+				for _, id := range ids[:c.changed] {
+					s.todos.todos[id].Title = fmt.Sprintf("fix the login crash, round %d", round)
+				}
+				s.todos.mu.Unlock()
+				s.todoChangedFlush()
 			}
 		})
 	}

@@ -60,7 +60,7 @@ test('lists the recent sessions in the store as offline DSH rows, titled from DS
   await n.ready
   assert.equal(n.hello.runtime, 'dsh-files')
   assert.equal(n.hello.agent, 'dsh')
-  assert.deepEqual(n.hello.caps, { start: false, send: true, interrupt: false, rename: false, close: false, assistant: false })
+  assert.deepEqual(n.hello.caps, { start: false, send: true, interrupt: false, queue_edit: false, queue_send_now: false, rename: false, close: false, assistant: false })
   await until('listed', () => n.last('runtime.sessions'))
   const rows = n.last('runtime.sessions').sessions
   assert.deepEqual(rows.map((r) => r.session_id).sort(), ['session-a', 'session-b'])

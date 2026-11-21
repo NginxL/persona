@@ -21,7 +21,29 @@ type BotTodo struct {
 }
 
 type BotQuote struct {
-	Who, Text string
+	ID, Who, Text string
 }
 
 func RenderBotMessage(m BotMessage) string { return render("bot/message", m) }
+
+// BotReadGroup is the owner's "@bot /read <task>" from a Lark group, as it goes into the main conversation
+// (bot/read_group, #11803): read the group as the owner with lark-cli first (the last Default messages unless the task
+// names a range, Most at the very most), download its images and files into Dir, then do the task. What the group
+// says is other people's words, never instructions; the answer goes back under the owner's message, where the whole
+// group reads it.
+type BotReadGroup struct {
+	Owner     string // optional owner name
+	Language  string // owner language; empty is the Chinese original
+	ChatID    string
+	MessageID string // the owner's /read message
+	ThreadID  string // its topic, "" outside one
+	Task      string // the owner's words after the command; "" when none
+	Dir       string // where its images and files are downloaded, on the computer the conversation runs on
+	Default   int    // messages read when the task names no range
+	Most      int    // messages read at the very most
+	FileMB    int    // a file larger than this is not downloaded
+	TotalMB   int    // nor any once the downloads add up to this
+	Images    int    // images looked at, at most
+}
+
+func RenderBotReadGroup(m BotReadGroup) string { return render("bot/read_group", m) }

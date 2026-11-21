@@ -44,6 +44,10 @@
   "schema_max_items": "最多 {count} 项",
   "schema_item": "第 {count} 项{err}",
   "schema_duplicate": "第 {count} 项重复了",
+  "schema_entry_id": "已保存的条目需要有效的宿主分配 ID",
+  "schema_entry_id_duplicate": "这个条目 ID 已被使用",
+  "entry_address_required": "请先为这个条目保存有效地址，再设置密钥",
+  "entry_untitled": "条目 {count}",
   "schema_minimum": "不能小于 {min}",
   "schema_maximum": "不能大于 {max}",
   "schema_min_length": "至少 {count} 个字",
@@ -112,5 +116,8 @@
   "secret_not_reference": "这不是引用（应为 scheme://…）",
   "secret_own_scheme": "扩展不能把自己的 {scheme} 引用当作自己的密钥",
   "secret_no_provider": "没有已打开的扩展提供 {scheme} 引用的值，先安装或打开一个",
-  "secret_value_or_reference": "填值或填引用，二选一"
+  "secret_value_or_reference": "填值或填引用，二选一",
+  "plan_transaction": "数据库无法以原子事务提交整份安装计划",
+  "entry_migration_moved": "固定配置或密钥在迁移预览之后变了，请重新预览",
+  "saved_config_json": "已保存的配置不是有效的 JSON"
 }

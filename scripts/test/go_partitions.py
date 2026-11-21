@@ -12,10 +12,11 @@ import re
 import subprocess
 
 # The packages split into partitions and how many processes share each one's tests; each partition keeps the caller's
-# -p and its own -timeout. Two for internal/node keeps CI's four-CPU runners, which also drive a real browser there,
-# from contending much. internal/assistant took 570 s serially on the hub machine (#7644); its tests mostly wait on
-# timers and Postgres, and two partitions still took 244 and 291 s side by side, three about 150 to 200 s each.
-PACKAGES = {"./internal/node": 2, "./internal/assistant": 3}
+# -p and its own -timeout. internal/node has grown beyond two processes: 4,096 tests took about 569 and 572 seconds in
+# its two partitions before the unchanged 600-second lane cut both off while their subtests were still advancing.
+# Three keeps every test exactly once. internal/assistant took 570 s serially on the hub machine (#7644); its tests
+# mostly wait on timers and Postgres, and three took about 150 to 200 s each.
+PACKAGES = {"./internal/node": 3, "./internal/assistant": 3}
 # What `go test -run` selects: tests, examples and fuzz seeds. Benchmarks need -bench and are not listed here.
 TEST_NAME = re.compile(r"(?:Test|Example|Fuzz)\w*")
 # One argv string must stay well below Linux's 128 KiB limit for a single argument (MAX_ARG_STRLEN).

@@ -18,5 +18,10 @@
   "files": "文件与文件夹",
   "sessions": "会话",
   "workspaces": "工作区",
+  "repositories": "仓库",
+  "repo_context_title": "仓库：{title}",
+  "repo_context_path": "路径：{path}",
+  "repo_context_url": "地址：{url}",
+  "repo_context_purpose": "用途：{purpose}",
   "search_skills": "搜索技能、文件和会话"
 }

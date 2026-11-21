@@ -19,7 +19,7 @@ nonisolated enum Ultracode {
 
     // MARK: Where it shows
 
-    /// Whether a chat offers the switch: the hub has it, the agent is Claude Code (not TRAEX, Codex or a runtime's) whose
+    /// Whether a chat offers the switch: the hub has it, the agent is Claude Code (not TRAE CLI, Codex or a runtime's) whose
     /// thinking effort can change now (it takes messages, no read-only source, not offline), and it is not a Persona
     /// conversation (the main one included: the server refuses those).
     static func offered(_ s: Session?, features: Set<String>) -> Bool {

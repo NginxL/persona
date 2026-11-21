@@ -420,4 +420,21 @@
     </plurals>
     <string name="settings_ext_graph_under">上位: %1$s</string>
     <string name="settings_ext_graph_progress">%1$d%%</string>
+    <string name="settings_ext_use_reference">参照を使う</string>
+    <string name="settings_ext_reference_placeholder">op://vault/item/field</string>
+    <string name="settings_ext_reference_hint">この拡張機能が必要なときにプロバイダーが値を渡します。Persona は参照だけを保存します。</string>
+    <string name="settings_ext_from_provider">%1$sから</string>
+    <string name="settings_ext_secret_from_provider">%1$sから: %2$s</string>
+    <string name="settings_ext_secret_reference_saved">%1$sは参照を使うようになりました</string>
+    <string name="settings_ext_users_title">使用中</string>
+    <string name="settings_ext_users_footer">これらの設定はこのプロバイダーから値を取ります。設定を保存すると、その後も値を取ることを許可したことになります。</string>
+    <string name="settings_ext_user_launcher">「%1$s」のキー</string>
+    <string name="settings_ext_user_launcher_machine">%2$sの「%1$s」のキー</string>
+    <string name="settings_ext_rules_title">Agent に常に渡す</string>
+    <string name="settings_ext_rules_footer">このコンピュータでこのランチャーを使い、あなたが自分で始めた Agent は確認なしで値を受け取ります。</string>
+    <string name="settings_ext_rule_label">%2$sの「%1$s」</string>
+    <string name="settings_ext_rule_remove">削除</string>
+    <string name="settings_ext_rule_remove_title">このルールを削除しますか？</string>
+    <string name="settings_ext_rule_remove_body">次に%2$sの%1$sが必要とするとき、もう一度承認します。</string>
+    <string name="settings_ext_rule_removed">ルールを削除しました</string>
 </resources>

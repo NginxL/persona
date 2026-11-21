@@ -26,7 +26,20 @@ func Enabled(v url.Values) bool {
 // Parse strictly validates recognized parameters. Unknown parameters remain
 // available to adapters. The counts and catalog selectors are validated but are not
 // Options fields: adapters choose those answers, while Query ignores the selectors.
+// Provider remains a singleton here, preserving the runtime collection's contract.
 func Parse(v url.Values) (Options, error) {
+	return parse(v, false)
+}
+
+// ParseProviderSets is Parse for the personal-Agent paged collection when it
+// advertises agents_provider_or. One to 64 provider values form an OR set;
+// ordering and duplicates do not change its meaning. It does not change Enabled:
+// provider alone still selects the legacy unpaged route.
+func ParseProviderSets(v url.Values) (Options, error) {
+	return parse(v, true)
+}
+
+func parse(v url.Values, providerSet bool) (Options, error) {
 	o := Options{Limit: defaultLimit}
 	if values, exists := v["search"]; exists {
 		if len(values) != 1 || strings.TrimSpace(values[0]) == "" || !utf8.ValidString(values[0]) || len(values[0]) > 1024 {
@@ -40,7 +53,7 @@ func Parse(v url.Values) (Options, error) {
 		}
 	}
 	for _, key := range []string{"search", "limit", "cursor", "since", "summary", "state", "machine_id", "project", "group", "source", "provider", "q", "counts", "with_counts", "pane_source", "roots", "parent_session_id", "catalog", "todo", "waiting", "exclude_pane_source", "include_hidden", "agents_only", "just_finished"} {
-		if values, exists := v[key]; exists && len(values) != 1 {
+		if values, exists := v[key]; exists && len(values) != 1 && (key != "provider" || !providerSet) {
 			return Options{}, failure("invalid_query", key+" must have exactly one value")
 		}
 	}
@@ -102,6 +115,15 @@ func Parse(v url.Values) (Options, error) {
 	o.State, o.Machine = v.Get("state"), v.Get("machine_id")
 	o.Project, o.Group = v.Get("project"), v.Get("group")
 	o.Source, o.Provider, o.Q = v.Get("source"), v.Get("provider"), v.Get("q")
+	if providerSet {
+		if values, exists := v["provider"]; exists && !(len(values) == 1 && values[0] == "") {
+			if len(values) == 0 {
+				return Options{}, failure("invalid_query", "provider takes between 1 and 64 values")
+			}
+			o.Provider = ""
+			o.Providers = values
+		}
+	}
 	if values, exists := v["pane_source"]; exists {
 		if values[0] == "" {
 			return Options{}, failure("invalid_query", "pane_source must not be empty")
@@ -229,6 +251,18 @@ func validate(o Options) (Options, error) {
 	if err := validPlaces("space", o.Spaces); err != nil {
 		return Options{}, err
 	}
+	if len(o.Providers) > maxProviders {
+		return Options{}, failure("invalid_query", "provider takes between 1 and 64 values")
+	}
+	if o.Provider != "" && len(o.Providers) != 0 {
+		return Options{}, failure("invalid_query", "provider cannot combine scalar and set matching")
+	}
+	for _, provider := range o.Providers {
+		if provider == "" {
+			return Options{}, failure("invalid_query", "provider set members must not be empty")
+		}
+	}
+	o.Providers = normalizeProviders(o.Providers)
 	for _, origin := range []string{o.PaneSource, o.ExcludePaneSource} {
 		switch origin {
 		case "", "terminal", "feishu", "desktop", "unknown":
@@ -271,7 +305,7 @@ func validate(o Options) (Options, error) {
 func normalizeQ(s string) string { return strings.ToLower(s) }
 
 func (o Options) filters() filters {
-	return filters{ID: o.ID, State: o.State, Machine: o.Machine, Project: o.Project, Group: o.Group, Source: o.Source, Provider: o.Provider, Q: o.Q, PaneSource: o.PaneSource, Manager: o.Manager,
+	return filters{ID: o.ID, State: o.State, Machine: o.Machine, Project: o.Project, Group: o.Group, Source: o.Source, Provider: o.Provider, Providers: providersKey(o.Providers), Q: o.Q, PaneSource: o.PaneSource, Manager: o.Manager,
 		Roots: o.Roots, IncludeHidden: o.IncludeHidden, Under: o.Under, NoPrivate: o.NoPrivate, AgentsOnly: o.AgentsOnly, Places: placesKey(o.Places), Spaces: placesKey(o.Spaces), Todo: o.Todo, Waiting: o.Waiting, ExcludePaneSource: o.ExcludePaneSource, JustFinished: o.JustFinished}
 }
 

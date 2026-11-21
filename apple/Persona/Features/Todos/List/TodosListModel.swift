@@ -3,14 +3,23 @@ import Observation
 import PersonaWire
 
 /// What the To-dos list needs from the app (docs/apple/ios.md "Logic-layer choice"): the store whose rows, views and
-/// numbers it draws, the hub, the clock and the projects' names. `live` is the app's (`TodoListView.swift`); tests pass
-/// a store of their own and a `FakeHub`'s client.
+/// numbers it draws, the writes held on the device (`TodoOutbox`), the hub, the clock, the projects' names and where it
+/// says what it did (a toast). `live` is the app's (`TodoListView.swift`); tests pass a store and an outbox of their own
+/// and a `FakeHub`'s client.
 struct TodosListDeps {
     var store: TodoStore
+    var outbox: TodoOutbox
     var api: @MainActor () -> APIClient?
     var now: @MainActor () -> Date
     var calendar: @MainActor () -> Calendar
     var projects: @MainActor () -> [TodoProject]
+    var toast: @MainActor (Toast) -> Void
+    /// An error from a write the list made at once (the plan of a to-do: Today, Date…, Project).
+    var show: @MainActor (Error) -> Void
+    /// How long a tick, Someday or a delete waits for Undo before it goes (tests make it short).
+    var undoWindow: Duration = Theme.Motion.todoUndo
+    /// VoiceOver or Switch Control runs: a held write waits longer, and the rows offer its Undo.
+    var assistive: @MainActor () -> Bool = { false }
 }
 
 /// The V1 To-dos list (#10465; docs/design/proposals/todos-redesign.md 3.3, 3.4; DESIGN_SYSTEM 3.4 "To-dos list"): the
@@ -52,6 +61,8 @@ final class TodosListModel {
             var filed: TodoFiled
             var grouping: TodosListGrouping
             var projects: [TodoProject]
+            /// The owner's write on it still on the device (`TodoOutbox`): a tick waiting out its Undo, a new to-do.
+            var pending: TodoRowWrite?
         }
 
         fileprivate init(id: String, inputs: Inputs, content: TodoRowContent) {
@@ -99,11 +110,15 @@ final class TodosListModel {
     /// A minute passed while the list was held: every row's time is said again once it rests, not mid-glide.
     @ObservationIgnored private var clockWaits = false
 
-    /// What the list reads of the store and the app.
+    /// What the list reads of the store, the outbox and the app.
     private struct Snapshot: Equatable {
         var filed: [TodoFiled] = []
         var items: [String: TodoItem] = [:]
         var views: [String: TodoSummary] = [:]
+        /// The owner's writes still on the device, by to-do id.
+        var writes: [String: TodoOutbox.Entry] = [:]
+        /// The ids the hub just gave new to-dos made here: their rows take the place of the ones drawn for them.
+        var named: Set<String> = []
         var ready = false
         var projects: [TodoProject] = []
         static let empty = Snapshot()
@@ -165,6 +180,204 @@ final class TodosListModel {
         await deps.store.refresh(api: deps.api())
     }
 
+    // MARK: The owner's writes (the tick, the swipe, the menu, New To-Do)
+
+    /// What a tap on a row's tick does now.
+    enum Tick: Equatable {
+        /// An open to-do closes, after its Undo window.
+        case close
+        /// Persona or an Agent works on it, or an Agent waits for the owner on it: "Mark it done and stop?" first.
+        case askFirst
+        /// Ticked a moment ago: taken back (its write, `TodoOutbox` id).
+        case takeBack(UUID)
+        /// A closed to-do opens again.
+        case reopen
+    }
+
+    /// The row whose tick asks first ("Mark it done and stop?"), the row Delete… asks about, and Date…'s row: each
+    /// presented from its row (`TodoListCell`).
+    var stopping: String?
+    var deleting: String?
+    var dating: String?
+    /// The latest tick, Someday or delete made here that still waits out its window (VoiceOver's and Switch Control's
+    /// Undo on the rows, the toast being out of their reach).
+    private(set) var lastHeld: (id: UUID, todo: String, title: String, write: TodoOutbox.Write)?
+
+    func tick(of key: String) -> Tick? {
+        guard let row = cells[key] else { return nil }
+        // The outbox as it is now, not as last drawn: a second tap before the row redraws takes the first back.
+        if let entry = deps.outbox.writes[row.todoID], entry.write == .done(true) { return .takeBack(entry.id) }
+        if row.content.closed { return .reopen }
+        return row.content.working || row.content.agentWaits ? .askFirst : .close
+    }
+
+    /// The tick, the full swipe and Mark Done: closes, asks first, takes a tick of a moment ago back, or reopens.
+    func tapTick(_ key: String) {
+        switch tick(of: key) {
+        case .close?: close(key)
+        case .askFirst?: stopping = key
+        case .takeBack(let id)?: undo(id, of: .done(true))
+        case .reopen?: reopen(key)
+        case nil: break
+        }
+    }
+
+    /// What "Mark it done and stop?" says for row `key`: an Agent waiting for the owner's answer, else Persona working.
+    func stopTitle(_ key: String) -> String {
+        if let c = cells[key]?.content, c.agentWaits, !c.working {
+            return String(localized: "An Agent is waiting for your answer on this. Mark it done and stop it? [To-dos Actions]")
+        }
+        return String(localized: "Persona is still working on this. Mark it done and stop? [To-dos Actions]")
+    }
+
+    /// The tick, the full swipe and Mark Done: the row is drawn ticked and struck through at once and closes on the hub
+    /// once its Undo window ends ("Done · Undo"); it leaves for where the hub files it when the list rests. On a to-do
+    /// someone works on, after "Mark it done and stop?" (closing it stops its Agents' follow-ups).
+    func close(_ key: String) {
+        guard let row = cells[key], !row.content.saving else { return }
+        Haptics.tap()
+        held(.done(true), row, said: String(localized: "Done [To-dos Toast]"))
+    }
+
+    /// The tick on a closed to-do: it opens again at once.
+    func reopen(_ key: String) {
+        guard let row = cells[key] else { return }
+        Haptics.tap()
+        deps.outbox.add(.done(false), todo: row.todoID, manager: row.inputs.item.manager)
+    }
+
+    /// Someday: the row moves there at once, and the hub is told once its Undo window ends.
+    func someday(_ key: String) {
+        guard let row = cells[key], !row.content.saving else { return }
+        Haptics.tap()
+        held(.someday(true), row, said: String(localized: "Moved to Someday [To-dos Toast]"))
+    }
+
+    /// Out of Someday again: the hub files it where it belongs. Within Someday's own window it is that write taken back,
+    /// and nothing goes (`TodoOutbox.add`).
+    func outOfSomeday(_ key: String) {
+        guard let row = cells[key] else { return }
+        Haptics.tap()
+        deps.outbox.add(.someday(false), todo: row.todoID, manager: row.inputs.item.manager)
+    }
+
+    /// Delete…, once the owner confirmed it: the row goes at once; the hub deletes it only once the Undo window ends,
+    /// since nothing undeletes a to-do there.
+    func delete(_ key: String) {
+        guard let row = cells[key], !row.content.saving else { return }
+        Haptics.tap()
+        held(.delete, row, said: String(localized: "Deleted [To-dos Toast]"))
+    }
+
+    /// New To-Do: listed at once, first in To do ("Saving…"), and sent now; Undo deletes it again. false: nothing to add,
+    /// or no hub.
+    @discardableResult
+    func create(title: String, notes: String?) -> Bool {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return false }
+        let made = deps.store.manager(of: .current)
+        guard let entry = deps.outbox.add(.create(title: title, notes: notes?.isEmpty == false ? notes : nil),
+                                          todo: TodoOutbox.newID(), manager: made) else { return false }
+        Haptics.tap()
+        toast(String(localized: "Added [To-dos Toast]"), undo: entry.id, of: entry.write)
+        return true
+    }
+
+    /// Try Again on a new to-do nobody knows the hub made: sent again, as the owner asks.
+    func retry(_ key: String) {
+        guard let row = cells[key], let entry = deps.outbox.writes[row.todoID], entry.unsure else { return }
+        Haptics.tap()
+        deps.outbox.retry(entry.id)
+    }
+
+    /// Remove on a new to-do nobody knows the hub made: off the list; should the hub turn out to have it, it is deleted.
+    func removeUnsure(_ key: String) {
+        guard let row = cells[key], let entry = deps.outbox.writes[row.todoID], entry.unsure else { return }
+        Haptics.tap()
+        deps.outbox.takeBack(entry.id)
+    }
+
+    /// Undo of `write` on a toast, VoiceOver's Undo, or the tick of a row ticked a moment ago. One that can't be taken
+    /// back is a delete the hub has, or a write the outbox no longer remembers (many later ones, or the app ended since).
+    func undo(_ id: UUID, of write: TodoOutbox.Write) {
+        Haptics.tap()
+        guard deps.outbox.takeBack(id) else {
+            Haptics.error()
+            let said = write == .delete ? String(localized: "It was deleted already, so it can't come back. [To-dos Toast]")
+                                        : String(localized: "It can't be undone anymore. [To-dos Toast]")
+            deps.toast(Toast(said, style: .error))
+            return
+        }
+        if lastHeld?.id == id { lastHeld = nil }
+    }
+
+    /// The write VoiceOver's and Switch Control's Undo takes back while it waits out its window: the latest made here.
+    var undoable: (id: UUID, title: String, write: TodoOutbox.Write)? {
+        guard let held = lastHeld, deps.outbox.holds(held.id) else { return nil }
+        return (held.id, held.title, held.write)
+    }
+
+    /// Today: due today, at the time of day it was due at if it had one.
+    func setToday(_ key: String) {
+        guard let item = item(key) else { return }
+        let today = deps.calendar().startOfDay(for: deps.now())
+        setDue(key, to: Self.due(item, on: today, calendar: deps.calendar()))
+    }
+
+    /// A due date from Date… (nil: none), shown at once and saved as the to-do's own page saves it.
+    func setDue(_ key: String, to due: APIClient.TodoPlanChange.Due) {
+        guard let row = cells[key], !row.content.saving else { return }
+        Haptics.tap()
+        deps.store.reschedule(row.todoID, to: due, api: deps.api())
+    }
+
+    /// Due on `day`: at the time of day `item` was due at when it had one (moving a moment keeps its hour), else all day.
+    nonisolated static func due(_ item: TodoItem, on day: Date, calendar: Calendar) -> APIClient.TodoPlanChange.Due {
+        guard let at = item.dueAt else { return .day(TodoPlanText.day(day, calendar: calendar)) }
+        let time = calendar.dateComponents([.hour, .minute, .second], from: at)
+        let moved = calendar.date(bySettingHour: time.hour ?? 0, minute: time.minute ?? 0, second: time.second ?? 0, of: day)
+        return .at(moved ?? day)
+    }
+
+    /// Project: a knowledge-base project's slug, "" for none, shown at once.
+    func setProject(_ key: String, _ slug: String) {
+        guard let row = cells[key], !row.content.saving, slug != (row.inputs.item.project ?? "") else { return }
+        Haptics.tap()
+        deps.store.refile(row.todoID, project: slug, api: deps.api())
+    }
+
+    /// Delete… asks first, from its row.
+    func askDelete(_ key: String) { deleting = key }
+    /// Date… opens its sheet for row `key`.
+    func pickDate(_ key: String) { dating = key }
+
+    /// The to-do of row `key`, as the list has it (a new one's too).
+    func item(_ key: String) -> TodoItem? { cells[key]?.inputs.item }
+
+    /// What a new to-do the hub turned down said, back in New To-Do's sheet (its toast's Edit); `tookDraft` once it is.
+    var draft: TodoOutbox.Draft? { deps.outbox.draft }
+    func tookDraft() { deps.outbox.tookDraft() }
+
+    /// The list's line while the hub is out of reach, with when the hub last answered a read of it.
+    var offlineLine: String { TodoOfflineLine.text(readAt: deps.store.readAt, now: deps.now(), calendar: deps.calendar()) }
+
+    /// `write` held through its Undo window, said in a toast with Undo. While VoiceOver or Switch Control runs the window
+    /// is longer, and the rows offer the Undo (`undoable`): the toast's button is out of their reach (HIG-005).
+    private func held(_ write: TodoOutbox.Write, _ row: Row, said: String) {
+        let window = deps.assistive() ? Theme.Motion.todoUndoAssistive : deps.undoWindow
+        guard let entry = deps.outbox.add(write, todo: row.todoID, manager: row.inputs.item.manager, hold: window)
+        else { return }
+        lastHeld = (entry.id, row.todoID, row.inputs.item.title, write)
+        toast(said, undo: entry.id, of: write, window: window)
+    }
+
+    private func toast(_ said: String, undo id: UUID, of write: TodoOutbox.Write, window: Duration? = nil) {
+        deps.toast(Toast(said, style: .success, action: Toast.Action(title: String(localized: "Undo")) { [weak self] in
+            self?.undo(id, of: write)
+        }, duration: window ?? deps.undoWindow))
+    }
+
     // MARK: Following the store
 
     private func current() -> Snapshot {
@@ -182,8 +395,12 @@ final class TodosListModel {
 
     private func read() -> Snapshot {
         let store = deps.store
-        return Snapshot(filed: store.countsSource.filed, items: store.byID, views: store.views, ready: store.viewsRead,
-                        projects: deps.projects())
+        let writes = deps.outbox.writes
+        var items = store.byID
+        // A new to-do is drawn from what the owner wrote until the hub has it (`TodoCountsSource` files it).
+        for entry in writes.values { if let item = entry.newItem, items[item.id] == nil { items[item.id] = item } }
+        return Snapshot(filed: store.countsSource.filed, items: items, views: store.views, writes: writes,
+                        named: deps.outbox.named, ready: store.viewsRead, projects: deps.projects())
     }
 
     /// The store changed (or, `clock`, a minute passed): it all lands now, or once the list rests, but a row that comes
@@ -249,7 +466,8 @@ final class TodosListModel {
         if animated && !layout.groups.isEmpty {
             let fades = !Theme.Motion.reduced // with Reduce Motion it is there at once
             for key in Self.moved(from: layout, to: laid) {
-                guard let cell = cells[key] else { continue }
+                // A new to-do's own row in the place of the one drawn for it is the same row: it does not fade in again.
+                guard let cell = cells[key], !snapshot.named.contains(cell.todoID) else { continue }
                 cell.arrivals += 1
                 if fades { cell.entering = true }
             }
@@ -297,7 +515,10 @@ final class TodosListModel {
         for filed in snapshot.filed {
             guard let item = snapshot.items[filed.id] else { continue }
             let key = TodosListLayout.key(filed)
-            let inputs = Row.Inputs(item: item, view: snapshot.views[filed.id], filed: filed, grouping: grouping, projects: projects)
+            let inputs = Row.Inputs(item: item, view: snapshot.views[filed.id], filed: filed, grouping: grouping, projects: projects,
+                                    pending: snapshot.writes[filed.id].map {
+                                        TodoRowWrite(write: $0.write, waits: $0.waits && !$0.answered, unsure: $0.unsure)
+                                    })
             if let cell = cells[key], !force, cell.inputs == inputs {
                 if !held, let waiting = cell.waiting {
                     cell.waiting = nil
@@ -307,7 +528,8 @@ final class TodosListModel {
             }
             let content = TodoRowContentLogic.content(filed, item: item, view: inputs.view, grouping: grouping, now: now,
                                                       calendar: calendar,
-                                                      projectName: { TodoProjectLogic.name($0, in: projects) })
+                                                      projectName: { TodoProjectLogic.name($0, in: projects) },
+                                                      pending: inputs.pending)
             if let cell = cells[key] {
                 cell.inputs = inputs
                 if held {

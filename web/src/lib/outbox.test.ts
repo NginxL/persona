@@ -176,7 +176,8 @@ describe("sending from another page", () => {
       .mockResolvedValueOnce(response({ ok: true, delivered_as: "relayed", relay_reason: "busy" }))
       .mockResolvedValueOnce(response({ ok: true, delivered_as: "relayed", relay_reason: "plugin_unconfirmed" }))
       .mockResolvedValueOnce(response({ ok: true, delivered_as: "user_input" }))
-      .mockResolvedValueOnce(response({ ok: true, delivered_as: "relayed", relay_reason: "no_plugin" })));
+      .mockResolvedValueOnce(response({ ok: true, delivered_as: "relayed", relay_reason: "no_plugin" }))
+      .mockResolvedValueOnce(response({ ok: true, delivered_as: "relayed", relay_reason: "plugin_outdated" })));
     expect(await sendToSession("m", "s", { text: "可以合并" })).toBe(true);
     expect(toast).toHaveBeenLastCalledWith(t("lib-outbox.relayed_busy"), "info");
     expect(await sendToSession("m", "s", { text: "合并吧" })).toBe(true);
@@ -185,6 +186,9 @@ describe("sending from another page", () => {
     expect(await sendToSession("m", "s", { text: "合并" })).toBe(true); // in as your input: nothing to say
     expect(await sendToSession("m", "s", { text: "好" })).toBe(true); // no plugin there: it always used the inbox
     expect(toast).not.toHaveBeenCalled();
+    // busy, and the session's plugin is from before busy delivery: reopening the session fixes it
+    expect(await sendToSession("m", "s", { text: "继续" })).toBe(true);
+    expect(toast).toHaveBeenLastCalledWith(t("lib-outbox.relayed_old_plugin"), "info");
   });
 
   it.each(retryPrompts)("keeps $kind after a refusal and retries as another operation without changing its intent", async ({ text }) => {

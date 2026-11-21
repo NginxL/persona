@@ -194,6 +194,14 @@ func (n *Node) claudeResultKinds(id string) []string {
 	if f.text == "" {
 		return nil // no failed turn written (yet): the words decide
 	}
+	if f.kind == proto.TurnErrorUsageLimit && assistantwire.GatewayQuotaText(f.text) {
+		st, _ := n.state.get(id)
+		if !n.recoveryProtected(id) || st.TaskExecution {
+			// Workers and strict task turns keep their existing bounded same-model retry policy.
+			return []string{proto.TurnErrorTransient, assistantRecordKind}
+		}
+		// Ordinary protected conversations retain the reset wait, without choosing another model.
+	}
 	return []string{f.kind, assistantRecordKind}
 }
 
@@ -316,6 +324,7 @@ func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTu
 	missing := failed && assistantModelUnavailable(result)
 	unavailable := missing && n.recoverySwitched(p.id)
 	p.mu.Lock()
+	executionProtected := strictProtectedExecution(p.model)
 	strict := p.model.Strict
 	transient404 := missing && !unavailable && p.replyModel != "" && !p.repliedAt.IsZero() &&
 		time.Since(p.repliedAt) < assistantAnsweredRecently
@@ -334,6 +343,12 @@ func (n *Node) recoverAssistantResultFor(p *assistantProc, expected *assistantTu
 	toolSearch := failed && p.agent == "claude" && !p.toolSearch.forceOff && assistantwire.ToolSearchRefused(result)
 	if toolSearch && n.noteToolSearchRefused(p.launcher, p.model.Model, p.endpoint) {
 		n.logger.Printf("assistant %s: %s refused tool search for model %q: remembered, its next start loads every tool", short(p.id), p.launcher, p.model.Model)
+	}
+	// The owner selected this model for the main/supervisor conversation. Quota and service failures belong to
+	// the manager's durable wait/continuation path; a refusal must not select another model either. Tool search
+	// has one independent same-model restart below, which preserves the selected execution.
+	if !strict && !toolSearch && (executionProtected || n.recoveryProtected(p.id)) {
+		return false
 	}
 	if !ordinary && !toolSearch {
 		return false
@@ -612,6 +627,11 @@ func sendAssistantRecovery(ctx context.Context, n *Node, p *assistantProc, launc
 func (n *Node) runAssistantRecovery(p *assistantProc, r *assistantTurnRecovery, launcher, cwd string, execution modelExecution, current string, same bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	if !same && (strictProtectedExecution(execution) || n.recoveryProtected(p.id)) {
+		// A recovery queued before an upgrade/handover must obey the current policy too.
+		n.finishAssistantRecovery(p, r)
+		return
+	}
 	if !same {
 		list, err := assistantRecoveryModels(ctx, n, launcher)
 		if err != nil {

@@ -25,6 +25,7 @@ TEST_ONLY_TARGET_EXCEPTIONS = {
 TEST_ONLY_SCHEME_EXCEPTIONS = {
     'AboutVersionAccessibilityHost': 'Runs only the standalone About row accessibility UI tests (#11150).',
     'AboutVersionVisualTests': 'Builds PersonaTests without PersonaUITests for About row visual comparisons (#11150).',
+    'PersonaOfflineUnitTests': 'Builds and runs offline PersonaTests without PersonaUITests (#12474).',
 }
 
 
@@ -100,7 +101,7 @@ class AppleRenameTests(unittest.TestCase):
 
     def test_about_version_test_only_exceptions_are_narrow_and_reasoned(self):
         expected_targets = {'AboutVersionAccessibilityHost', 'AboutVersionAccessibilityUITests'}
-        expected_schemes = {'AboutVersionAccessibilityHost', 'AboutVersionVisualTests'}
+        expected_schemes = {'AboutVersionAccessibilityHost', 'AboutVersionVisualTests', 'PersonaOfflineUnitTests'}
         for exceptions, expected in ((TEST_ONLY_TARGET_EXCEPTIONS, expected_targets),
                                      (TEST_ONLY_SCHEME_EXCEPTIONS, expected_schemes)):
             self.assertEqual(set(exceptions), expected)

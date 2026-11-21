@@ -19,4 +19,14 @@
     <string name="chat_reanswer_old_hub">このハブはまだ回答の変更に対応していません。先にハブを更新してください</string>
     <string name="chat_reanswer_unreachable">ハブに接続できないため、操作は反映されていません</string>
     <string name="chat_reanswer_failed">回答を変更できませんでした：%1$s</string>
+    <string name="chat_delegate_looking">アシスタントが確認中</string>
+    <string name="chat_delegate_looking_hint">アシスタントが代わりに答えられるか判断しているところで、まだ通知していません。ここで答えることもでき、先に届いた回答が使われます。</string>
+    <string name="chat_delegate_context_title">アシスタントの補足</string>
+    <string name="chat_delegate_field_what">内容</string>
+    <string name="chat_delegate_field_why_now">今聞く理由</string>
+    <string name="chat_delegate_field_recommend">おすすめ</string>
+    <string name="chat_delegate_field_cost">選ばない場合</string>
+    <string name="chat_delegate_field_reason">あなたが決める理由</string>
+    <string name="chat_delegate_field_deadline">期限</string>
+    <string name="chat_delegate_recommended">アシスタントのおすすめ</string>
 </resources>

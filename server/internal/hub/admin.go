@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/osproc"
 )
@@ -155,6 +156,13 @@ func (h *Hub) adminRoutes(mux *http.ServeMux, api, web http.Handler) http.Handle
 				writeErrCode(w, http.StatusForbidden, code, err)
 				return
 			}
+			// The admin pages write settings and trusts: a snapshot must not see
+			// them, and the write is repeated after the update.
+			if !h.quiesce.begin() {
+				writeErr(w, http.StatusServiceUnavailable, i18n.Err("hub-selfupdate.err_quiesced"))
+				return
+			}
+			defer h.quiesce.end()
 		}
 		if _, pattern := open.Handler(r); pattern != "" {
 			open.ServeHTTP(w, r)

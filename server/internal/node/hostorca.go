@@ -484,7 +484,7 @@ var orcaStatus = map[string]string{
 	"working": proto.StatusWorking, "blocked": proto.StatusBlocked, "waiting": proto.StatusBlocked, "done": proto.StatusDone,
 }
 
-// agent is a terminal as an agent pane. Its agent is the claude or codex process in front in it (by its
+// agent is a terminal as an agent pane. Its agent is the supported agent process in front in it (by its
 // ORCA_PANE_KEY; not suspended, not in the background, not inside a herdr nested in the terminal): Orca keeps an
 // agent's row (and its identity on the terminal) after the agent exits, so neither alone says one runs there. Only
 // when the processes could not be listed do the row and the identity decide (for listing; writes are refused then).

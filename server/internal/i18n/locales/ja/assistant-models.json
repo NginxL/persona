@@ -1,5 +1,5 @@
 {
-  "name_assistant": "メインチャット",
+  "name_assistant": "会話の既定値",
   "name_agent_new": "Agents",
   "name_kb": "情報処理",
   "name_inbox_triage": "仕分け",
@@ -28,7 +28,7 @@
   "name_assistant_supervise": "バックグラウンド監督",
   "name_meeting_room": "会議中の会話",
   "name_meeting_minutes": "議事録",
-  "desc_assistant": "あなたと話し、仕事をタスクに分けて任せます。あなたが返信を待つのはこの会話だけです。",
+  "desc_assistant": "新しい会話と各アシスタント用途の既定設定です。個別の設定があればそちらを使います。",
   "desc_agent_new": "あなたのコンピュータでタスクを実行するエージェントです。タスクの開始時に個別のモデルも指定できます。",
   "desc_kb": "誰も待っていないテキスト処理です。翻訳、返信の下書き、タイトル付け、ナレッジの整理。",
   "desc_inbox_triage": "受信トレイに届いたものを仕分け、要約し、重要度を判定します。同じモデルが、エージェントが止まった理由と AI分身に任せる項目も判定します。小さな呼び出しが多い用途です。",
@@ -89,7 +89,7 @@
   "source_default": "デフォルト",
   "source_extension_default": "拡張機能のデフォルト",
   "source_auto": "自動選択（ハブから直接呼び出せる接続）",
-  "status_no_api": "このAPI用途には呼び出せるモデルが設定されていません。設定 › モデルプロバイダーでキー付きの接続を追加するか、Claude Codeランチャーを選択してください",
+  "status_no_api": "このAPI用途には呼び出せるモデルが設定されていません。設定 › モデルプロバイダーでキー付きの接続を追加するか、Claude Code・Codex・Antigravity のランチャーを選択してください",
   "status_codex_no_api": "このAPI用途には呼び出せるモデルが設定されていません。Codexはすべてのツールを無効にできないため、この種のリクエストには使用できません。設定 › モデルプロバイダーでキー付きの接続を追加するか、Claude Codeランチャーを選択してください",
   "status_provider_incompatible": "プロバイダーがないか、互換性がありません",
   "status_no_model": "モデル未設定",
@@ -148,5 +148,9 @@
   "err_candidates_not_callable": "{provider} は直接呼び出せないため候補にできません。直接 API のプロバイダーか、アドレスとキーのあるプロバイダーを選んでください",
   "candidate_not_offered": "設定済みのモデルプロバイダーはこのモデルを提供していません",
   "candidate_not_direct": "プロバイダー {provider} は直接呼び出せません",
-  "candidate_provider_gone": "プロバイダー {provider} は削除されたか、直接呼び出せません"
+  "candidate_provider_gone": "プロバイダー {provider} は削除されたか、直接呼び出せません",
+  "err_permission_mode_launcher_only": "権限モードはランチャー型のモデル用途でのみ設定できます",
+  "err_permission_mode_unsupported": "このランチャーは選択した権限モードに対応していません",
+  "name_assistant_main": "メインチャット",
+  "desc_assistant_main": "あなたと話し、タスクを任せます。この設定はメインチャットだけに適用され、新しい会話の既定値は変えません。"
 }

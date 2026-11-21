@@ -170,12 +170,55 @@ func TestSupervisionInstructionsFirstStartAndWarm(t *testing.T) {
 	}
 }
 
+func TestRelayAcknowledgementAndSilentSupervisionInstructions(t *testing.T) {
+	s, f := newQuietService(t)
+	ctx := context.Background()
+	yes := true
+	setSettings(t, s, func(v *Settings) { v.MainSupervisesOwnTasks = &yes })
+	background, err := s.startBackground(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const acknowledgement = "`conversation_send` 中继只需确认时，在本对话写一行正文，不调用 `conversation_send` 回传"
+	const relayHeader = "只是确认收到就不要回"
+	const silent = "call `supervision_finish visibility=\"silent\"` with a one-sentence summary, then stop without a user-facing reply"
+	for name, id := range map[string]string{"main": "conv1", "background": background} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := s.prepare(ctx, "server"); err != nil {
+				t.Fatal(err)
+			}
+			if md := f.prepared[len(f.prepared)-1]["claude_md"].(string); !strings.Contains(md, acknowledgement) {
+				t.Fatal("shared assistant instructions lack the local-only relay acknowledgement rule")
+			}
+
+			relay := relayMsg{From: "sender", FromTitle: "Example conversation", Tool: "conversation_send", Text: "The report is ready for reference."}
+			if err := s.deliverRelay(ctx, "server", id, relay); err != nil {
+				t.Fatal(err)
+			}
+			send := f.sends[len(f.sends)-1]
+			if send[holdPushesParam] == true || !strings.Contains(send["text"].(string), relayHeader) {
+				t.Fatal("conversation relay lost its legacy header or was dispatched as supervision")
+			}
+
+			event := relayMsg{Tool: superviseTool, Text: "Synthetic supervision event."}
+			if err := s.deliverRelay(ctx, "server", id, event); err != nil {
+				t.Fatal(err)
+			}
+			send = f.sends[len(f.sends)-1]
+			if send[holdPushesParam] != true || strings.Contains(send["text"].(string), relayHeader) ||
+				!strings.Contains(send["supervision_instructions"].(string), silent) {
+				t.Fatal("supervision event lost its silent disposition or gained the conversation relay header")
+			}
+		})
+	}
+}
+
 func TestSupervisionEventsContainFactsNotPolicy(t *testing.T) {
 	policy := prompts.RenderSupervisionInstructions()
 	for _, name := range []string{"overdue", "estimate_due", "parked_due", "park_decided", "inbox", "ask", "escalated", "leader_stuck", "recheck", "undecidable", "owner_cannot_answer", "decide", "all_stopped", "pr_conflict"} {
 		t.Run(name, func(t *testing.T) {
 			p := prompts.Supervise{Leader: true, Side: true, Background: true, Escalated: true, BackgroundEscalated: true,
-				LeaderStuck: true, Overdue: true, ParkedDue: true, ParkDecided: true, Asked: true, AskMinutes: 5, LowDistraction: true, Decisions: true, Inbox: true,
+				LeaderStuck: true, Overdue: true, ParkedDue: true, ParkDecided: true, Asked: true, AskMinutes: 5, PushGrading: true, Decisions: true, Inbox: true,
 				Entries: []prompts.SuperviseEntry{{ID: "todo_example", Title: "Example task", Kind: name, Last: "Task evidence"}}}
 			text := prompts.RenderSupervise(p)
 			for _, banned := range []string{"怎么处理", "task_review", "agent_send", "ask_escalate", "interaction_answer", "supervision_finish", "task_scope", "验收以它", "按任务本身", "Check each participant's stated wait", "Waiting on another stopped participant"} {

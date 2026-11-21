@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 )
@@ -61,7 +62,7 @@ func (s *Service) verifyBySupervisor(ctx context.Context, id string) (bool, erro
 }
 
 // verifySupervisedAsks passes every "Please verify" or done conclusion still waiting whose task its supervisor accepted
-// (supervisorVerified): the ones asked before #3240, and any a race left behind.
+// (supervisorVerified). It finishes persisted owner Passes and restores missing personal verification asks.
 func (s *Service) verifySupervisedAsks(ctx context.Context) {
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		s.logf("acceptance: supervisor verify: %v", err)
@@ -73,22 +74,87 @@ func (s *Service) verifySupervisedAsks(ctx context.Context) {
 		b.mu.Unlock()
 		return
 	}
-	var ids []string
+	ids := make(map[string]struct{})
 	for id, a := range b.asks {
-		if !decideAsk(a) && !a.AskedAt.IsZero() && a.AcceptedAt.IsZero() {
-			ids = append(ids, id)
+		if !decideAsk(a) && !a.AskedAt.IsZero() {
+			ids[id] = struct{}{}
 		}
 	}
 	b.mu.Unlock()
-	slices.Sort(ids)
-	for _, id := range ids {
-		if t, ok := s.todoNow(id); !ok || !supervisorVerified(t) {
-			continue
+	s.todos.mu.RLock()
+	for id, t := range s.todos.todos {
+		if t.DoneAt == nil && t.Supervision.state(*t) == reviewUserCheck {
+			ids[id] = struct{}{}
 		}
+	}
+	s.todos.mu.RUnlock()
+	for _, id := range slices.Sorted(maps.Keys(ids)) {
+		s.verifySupervisedAsk(ctx, id)
+	}
+}
+
+func (s *Service) verifySupervisedAsk(ctx context.Context, id string) {
+	s.reviewDismissals.actions.acquire(id)
+	defer s.reviewDismissals.actions.release(id)
+	t, ok := s.todoNow(id)
+	if !ok {
+		return
+	}
+	if a, ok := s.askCopy(id); ok && ownerPassPending(&a, t) {
+		if _, err := s.acceptTryAsDismissalLocked(ctx, id, "", a.AskedAt, false); err != nil {
+			s.logf("task %s: recover owner Pass: %v", id, err)
+		}
+		return
+	}
+	if t.Supervision != nil && t.Supervision.State == reviewUserCheck {
+		if t.DoneAt == nil && userCheckAsked(t) {
+			s.restoreUserCheckAsk(ctx, t)
+		}
+		return
+	}
+	if supervisorVerified(t) {
 		if ok, err := s.verifyBySupervisor(ctx, id); err != nil {
 			s.logf("task %s: supervisor verify: %v", id, err)
 		} else if ok {
 			s.logf("task %s: its \"Please verify\" passed by its supervisor's acceptance", id)
 		}
 	}
+}
+
+// restoreUserCheckAsk uses the stored review to recover a missing or unusable Pass while its task's action is locked.
+func (s *Service) restoreUserCheckAsk(ctx context.Context, t Todo) {
+	id := t.ID
+	b := &s.accept
+	b.mu.Lock()
+	if !s.loadAcceptLocked(ctx) {
+		b.mu.Unlock()
+		return
+	}
+	old := b.asks[id]
+	if old != nil && (old.AskedAt.IsZero() ||
+		(!old.Conclusion && !decideAsk(old) && !old.ByAssistant && !old.BySupervisor &&
+			old.AcceptedAt.IsZero() && !acceptAskStale(old, t))) {
+		b.mu.Unlock()
+		return
+	}
+	// Use the durable review's time so a retry belongs to that round, even if work reopens meanwhile.
+	review := t.Supervision.Reviews[len(t.Supervision.Reviews)-1]
+	ag := lastAgent(t)
+	a := &acceptAsk{AskedAt: review.At, MachineID: ag.MachineID, SessionID: ag.SessionID, Changed: clip(oneLine(t.Title), 40)}
+	if old != nil {
+		a.Earlier = lastOf(slices.Concat(old.Earlier, old.Messages), acceptEarlierMost)
+	}
+	b.asks[id] = a
+	if err := s.saveAcceptErrLocked(ctx); err != nil {
+		if old == nil {
+			delete(b.asks, id)
+		} else {
+			b.asks[id] = old
+		}
+		b.mu.Unlock()
+		s.logf("task %s: restore personal verification: %v", id, err)
+		return
+	}
+	b.mu.Unlock()
+	s.askChanged(ctx)
 }

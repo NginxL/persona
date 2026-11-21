@@ -8,7 +8,7 @@
 //     {{template "shared/user_rules" .}}.
 //   - The file's last newline is not part of the prompt (editors add one). A prompt that ends with a newline
 //     has an empty last line.
-//   - mcp/<scene>/<tool>.md are the MCP tools' descriptions and input schemas, read as they are (mcp.go).
+//   - mcp/<scene>/<tool>.md are the MCP tools' descriptions and input schemas, rendered with MCPData (mcp.go).
 package prompts
 
 import (

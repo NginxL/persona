@@ -223,6 +223,45 @@ func TestResolveRouteRightAfterAnotherAnswer(t *testing.T) {
 	}
 }
 
+// The re-check of #10941: an extension's token that resolves a card over already is told it was answered, never the
+// answer (a health card's, or what was typed into a card's fields), right after the answer or from the history.
+func TestResolveRouteToAnExtension(t *testing.T) {
+	ft, ix, done := answerFleet(t)
+	h := ft.s.fleetHandler(http.NotFoundHandler())
+	post := func(role, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/api/v1/interactions/"+ix.ID+"/resolve", strings.NewReader(body))
+		if role != "" {
+			r.Header.Set(RoleHeader, role)
+		}
+		h.ServeHTTP(w, r)
+		return w
+	}
+	told := func(what string, w *httptest.ResponseRecorder) {
+		t.Helper()
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"already":true`) || strings.Contains(w.Body.String(), "resolution") ||
+			strings.Contains(w.Body.String(), "不发") {
+			t.Fatalf("%s: %d %s", what, w.Code, w.Body)
+		}
+	}
+	ft.s.fleet.mu.Lock()
+	p := ft.s.fleet.interactions[ix.ID]
+	p.claimed, p.resolution = true, &proto.Resolution{Answers: map[string]string{"发吗？": "不发"}}
+	ft.s.fleet.mu.Unlock()
+	told("right after the answer", post(roleExtension, `{}`))
+	ft.s.fleet.mu.Lock()
+	p.claimed, p.resolution = false, nil
+	ft.s.fleet.mu.Unlock()
+	if w := post("", `{"answers":{"发吗？":"不发"}}`); w.Code != http.StatusOK {
+		t.Fatalf("the owner's answer: %d %s", w.Code, w.Body)
+	}
+	<-done
+	told("from the history", post(roleExtension, `{}`))
+	if w := post("", `{}`); !strings.Contains(w.Body.String(), "不发") {
+		t.Fatalf("a device is told the answer: %d %s", w.Code, w.Body)
+	}
+}
+
 // An MCP form or URL request (elicitation) is only shown while an app that takes one is connected (the hub says,
 // fleet.clients); else it goes back to the terminal at once. Its answer must be one of its actions.
 func TestElicitationNeedsAnApp(t *testing.T) {

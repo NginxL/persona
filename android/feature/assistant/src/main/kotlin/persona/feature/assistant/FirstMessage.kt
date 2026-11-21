@@ -23,6 +23,30 @@ import java.time.ZoneId
 internal data class FirstMessage(val text: String, val failed: Boolean = false, val reason: String? = null,
                                  val space: String? = null, val launcher: String? = null, val at: Long = System.currentTimeMillis())
 
+/** Delete on a failed first message, with the same page and Undo identity as the composer had. */
+internal fun deleteAssistantFirstMessage(
+    message: FirstMessage?,
+    page: String,
+    failedStarts: FailedStarts,
+    first: androidx.compose.runtime.MutableState<FirstMessage?>,
+    deleted: String,
+    undoLabel: String,
+    feedback: persona.core.designsystem.AppFeedback?,
+    toast: persona.core.designsystem.JToastState,
+) {
+    val failed = message?.takeIf { it.failed } ?: return
+    first.value = null
+    failedStarts.write(page, null)
+    val undo = persona.core.designsystem.FeedbackAction(undoLabel) {
+        if (first.value == null) {
+            first.value = failed
+            failedStarts.write(page, failed)
+        }
+    }
+    if (feedback?.notice(deleted, undo) != true)
+        toast.show(persona.core.designsystem.FeedbackNotice(deleted, undo))
+}
+
 /**
  * A first message whose start failed, kept on the device for the page it was sent from (one per assistant) until it is
  * sent again or deleted, as iOS keeps its `FailedStart` across launches: the composer gave its words to it.

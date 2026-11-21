@@ -28,6 +28,7 @@ public final class SSHTunnel: @unchecked Sendable {
     private let pinnedHostKey: String?
     private let timings: SSHTunnelTimings
     private let loop: EventLoop
+    let traceID = PersonaSSH.traceID("tunnel")
 
     /// Told of every new phase, on the tunnel's event loop. Set before `start`.
     public var onPhase: (@Sendable (Phase) -> Void)?
@@ -38,6 +39,7 @@ public final class SSHTunnel: @unchecked Sendable {
     private var listener: Channel?
     private var session: Channel?
     private var dialing: EventLoopFuture<Channel>?
+    private var connecting: DialAttempt?
     private var failures = 0
     private var retryAt = NIODeadline.uptimeNanoseconds(0)
     private var lastError: SSHTunnelError?
@@ -69,24 +71,43 @@ public final class SSHTunnel: @unchecked Sendable {
     /// last tunnel had, so addresses handed out stay good), else on any free one.
     @discardableResult
     public func start(preferring preferred: Int = 0) async throws -> Int {
-        try await loop.flatSubmit { self.connection() }
-            .flatMap { self.open(on: $0, joining: nil) }
-            .flatMap { self.listen(preferred) }
-            .get()
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let port = try await loop.flatSubmit { self.connection() }
+                .flatMap { self.open(on: $0, joining: nil) }
+                .flatMap { self.listen(preferred) }
+                .get()
+            try Task.checkCancellation()
+            return port
+        } onCancel: {
+            self.stop()
+        }
     }
 
     /// Connects, logs in and checks the hub's address opens, then closes: what 「测试连接」 does. Returns the
     /// server's key (its fingerprint and algorithm).
     public func verify() async throws -> (fingerprint: String, algorithm: String) {
         defer { stop() }
-        try await loop.flatSubmit { self.connection() }.flatMap { self.open(on: $0, joining: nil) }.get()
-        return try await loop.submit { self.seenHostKey ?? ("", "") }.get()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            try await loop.flatSubmit { self.connection() }.flatMap { self.open(on: $0, joining: nil) }.get()
+            try Task.checkCancellation()
+            return try await loop.submit { self.seenHostKey ?? ("", "") }.get()
+        } onCancel: {
+            self.stop()
+        }
     }
 
     /// Closes the listener and the session; nothing dials again.
     public func stop() {
         loop.execute {
             self.stopped = true
+            // The TCP channel exists before authentication puts it in `session`. Closing while logging in must
+            // finish its wait now, rather than leave the next foreground visit waiting for the old timeout.
+            let connecting = self.connecting
+            self.connecting = nil
+            connecting?.ready.fail(SSHTunnelError.stopped)
+            connecting?.channel?.close(promise: nil)
             self.listener?.close(promise: nil)
             self.listener = nil
             self.session?.close(promise: nil)
@@ -118,23 +139,28 @@ public final class SSHTunnel: @unchecked Sendable {
         if let dialing { return dialing }
         if let lastError, NIODeadline.now() < retryAt { return loop.makeFailedFuture(lastError) }
         set(.connecting)
-        let f = dial()
+        let attemptID = PersonaSSH.traceID("dial")
+        trace("\(traceID ?? "tunnel") connection requested: \(session == nil ? "no current session" : "current session inactive")")
+        let f = dial(attemptID)
         dialing = f
         f.whenComplete { result in
             self.dialing = nil
+            guard !self.stopped else {
+                if case .success(let channel) = result { channel.close(promise: nil) }
+                return
+            }
             switch result {
             case .success(let channel):
-                if self.stopped {
-                    channel.close(promise: nil)
-                    return
-                }
+                trace("\(self.traceID) \(attemptID) session authenticated")
                 self.session = channel
                 self.failures = 0
                 self.lastError = nil
                 self.set(.connected)
                 channel.closeFuture.whenComplete { _ in
+                    trace("\(self.traceID) \(attemptID) close observed")
                     guard self.session === channel else { return }
                     self.session = nil
+                    trace("\(self.traceID) \(attemptID) current owner cleared")
                     if !self.stopped { self.set(.idle) }
                 }
             case .failure(let error):
@@ -149,8 +175,11 @@ public final class SSHTunnel: @unchecked Sendable {
         return f
     }
 
-    private func dial() -> EventLoopFuture<Channel> {
-        let ready = loop.makePromise(of: Void.self)
+    private func dial(_ attemptID: String?) -> EventLoopFuture<Channel> {
+        trace("\(traceID) \(attemptID) dial start")
+        let attempt = DialAttempt(on: loop)
+        connecting = attempt
+        let ready = attempt.ready
         let hostKeys = HostKeyCheck(pinned: pinnedHostKey)
         let auth = KeyAuth(user: config.user, key: identity.nioKey)
         let tcp = NWProtocolTCP.Options()
@@ -168,11 +197,13 @@ public final class SSHTunnel: @unchecked Sendable {
             .channelOption(NIOTSChannelOptions.waitForActivity, value: false)
             .tcpOptions(tcp)
             .channelInitializer { channel in
-                channel.eventLoop.makeCompletedFuture {
+                guard !self.stopped else { return channel.eventLoop.makeFailedFuture(SSHTunnelError.stopped) }
+                attempt.channel = channel
+                return channel.eventLoop.makeCompletedFuture {
                     let sync = channel.pipeline.syncOperations
                     try sync.addHandler(NIOSSHHandler(role: .client(.init(userAuthDelegate: auth, serverAuthDelegate: hostKeys)),
                                                       allocator: channel.allocator, inboundChildChannelInitializer: nil))
-                    try sync.addHandler(SessionHandler(ready: ready))
+                    try sync.addHandler(SessionHandler(ready: ready, traceID: "\(self.traceID) \(attemptID)"))
                 }
             }
             .connect(host: config.host, port: config.port)
@@ -185,7 +216,10 @@ public final class SSHTunnel: @unchecked Sendable {
         }
         return ready.futureResult
             .flatMap { connected }
-            .always { _ in handshake.cancel() }
+            .always { _ in
+                handshake.cancel()
+                if self.connecting === attempt { self.connecting = nil }
+            }
             .flatMapError { error in
                 connected.whenSuccess { $0.close(promise: nil) }
                 return self.loop.makeFailedFuture(Self.classify(error, hostKeys: hostKeys, auth: auth, reached: reached.value))
@@ -224,6 +258,7 @@ public final class SSHTunnel: @unchecked Sendable {
         let over = LoopFlag()
         result.futureResult.whenComplete { _ in over.value = true }
         let timeout = loop.scheduleTask(in: .milliseconds(Int64(timings.open * 1000))) {
+            trace("\(self.traceID) channel open timed out after \(self.timings.open) seconds; closing its session")
             result.fail(SSHTunnelError.timedOut)
             session.close(promise: nil)
         }
@@ -289,6 +324,15 @@ public final class SSHTunnel: @unchecked Sendable {
     /// A flag set and read on the tunnel's event loop only.
     private final class LoopFlag: @unchecked Sendable {
         var value = false
+    }
+
+    /// Owned by `loop`, including the channel initializer and cancellation. Keeps the pre-authentication channel
+    /// reachable until the dial finishes, so `stop` also stops an unfinished TCP connection or SSH handshake.
+    private final class DialAttempt: @unchecked Sendable {
+        let ready: EventLoopPromise<Void>
+        var channel: Channel?
+
+        init(on loop: EventLoop) { ready = loop.makePromise(of: Void.self) }
     }
 
     private static let loopbackOrigin = try! SocketAddress(ipAddress: "127.0.0.1", port: 0)

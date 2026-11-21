@@ -1,0 +1,7 @@
+<persona-context kind="context" title="プロジェクト · Weather &quot;direction&quot; · 教訓" url="">
+このプロジェクトの承認済みタスクから学んだ教訓です（繰り返しの多い順）。既知の遠回りを避けるのに使ってください。このタスクの指示と食い違うときは、指示を優先します。
+- 知っておくべき背景：Use the stock simulator for layout bugs. · 3 回 · 2026-11-21
+- 繰り返したミス：Run the landscape screenshot test before handing in. · 2026-11-20
+- 時間を無駄にした手順：Skip the full rebuild; the focused target is enough.
+- よりよい進め方：Ask which device first. · 2 回 · 2026-11-19
+</persona-context>

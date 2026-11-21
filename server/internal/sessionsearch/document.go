@@ -54,8 +54,20 @@ func shortModel(value string) string {
 	return strings.Join(parts, " ")
 }
 
-var aliases = map[string]string{"claude-code": "claude", "claudecode": "claude", "codex-cli": "codex", "gemini-cli": "gemini", "cursor-agent": "cursor", "pi-web": "pi", "trae-cli": "trae", "traecli": "trae"}
-var names = map[string]string{"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode", "pi": "pi", "gemini": "Gemini CLI", "cursor": "Cursor", "trae": "Trae"}
+var aliases = map[string]string{"claude-code": "claude", "claudecode": "claude", "codex-cli": "codex", "gemini-cli": "gemini", "cursor-agent": "cursor", "pi-web": "pi", "trae-cli": "traex", "traecli": "traex"}
+var names = map[string]string{
+	"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode", "pi": "pi",
+	"gemini": "Gemini CLI", "cursor": "Cursor", "trae": "Trae",
+	"traex": "TRAE CLI",
+}
+
+func harnessID(value string) string {
+	id := strings.ToLower(strings.TrimSpace(value))
+	if alias, ok := aliases[id]; ok {
+		return alias
+	}
+	return id
+}
 
 // Document uses complete immutable rows, not the 180-character list summaries.
 func Document(item sessionlist.Item) (sessionlist.SearchDocument, error) {
@@ -90,15 +102,19 @@ func Document(item sessionlist.Item) (sessionlist.SearchDocument, error) {
 			d.State = "idle"
 		}
 	}
-	agent := strings.TrimSpace(strings.ToLower(row.Agent))
+	agent := harnessID(row.Agent)
 	if row.SourceKind == "codex_app_server" || row.SourceKind == "codex_history" {
 		agent = "codex"
 	}
-	labelAgent := first(agent, row.Launcher)
-	labelID := strings.ToLower(labelAgent)
-	if normalized, ok := aliases[labelID]; ok {
-		labelID = normalized
+	fromPaseo := agent == "paseo"
+	if agent == "" || fromPaseo {
+		// Older rows may carry only a launcher, and Paseo reports the engine in Agent.
+		if launcher := harnessID(row.Launcher); launcher == "traex" || launcher == "trae" {
+			agent = launcher
+		}
 	}
+	labelAgent := first(agent, row.Launcher)
+	labelID := harnessID(labelAgent)
 	if labelID == "" {
 		labelID = "claude"
 	}
@@ -111,14 +127,26 @@ func Document(item sessionlist.Item) (sessionlist.SearchDocument, error) {
 			}
 		}
 	}
-	if normalized, ok := aliases[agent]; ok {
-		agent = normalized
-	}
 	if agent == "" {
 		agent = "claude"
 	}
 	d.Harness = agent
 	d.HarnessLabel = first(names[labelID], row.AgentLabel, row.AgentName, labelAgent)
+	if agent == "traex" {
+		for _, value := range []string{row.AgentLabel, row.AgentName} {
+			label := strings.TrimSpace(value)
+			switch strings.ToLower(label) {
+			case "", "traex", "traecli", "trae-cli", "trae cli":
+				continue
+			case "paseo":
+				if fromPaseo {
+					continue
+				}
+			}
+			d.HarnessLabel = label
+			break
+		}
+	}
 	model := row.Model
 	if strings.TrimSpace(model) == "" {
 		model = launcherPrefix.ReplaceAllString(row.Launcher, "")
@@ -170,5 +198,8 @@ func Document(item sessionlist.Item) (sessionlist.SearchDocument, error) {
 		d.AgentText += shownWork
 	}
 	d.Metadata = strings.Join([]string{row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, d.HarnessLabel, shortModel(model), row.Activity}, " · ")
+	if agent == "traex" {
+		d.Metadata += " · traecli"
+	}
 	return d, nil
 }

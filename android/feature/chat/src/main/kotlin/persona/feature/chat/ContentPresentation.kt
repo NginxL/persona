@@ -7,6 +7,7 @@ import androidx.compose.runtime.compositionLocalOf
 import persona.core.contracts.Item
 import persona.core.contracts.Machine
 import persona.core.domain.lines.ChatLine
+import persona.core.domain.lines.EngineChanges
 import persona.core.domain.ComputerSteps
 import persona.core.domain.MessageContext
 import persona.core.domain.decodeXmlEntities
@@ -73,7 +74,9 @@ internal fun messageModel(raw: String, from: String? = null, user: Boolean = fal
     // The hub's interject note is model instructions, never a quote chip in the owner's bubble (#6595); parseContexts
     // already strips the block from the written text, so only drop it from the rendered contexts.
     val (parsedContexts, written) = parseContexts(raw)
-    val contexts = parsedContexts.filterNot(MessageContext::isInterjectContext)
+    val contexts = parsedContexts.filterNot {
+        it.isInterjectContext() || (user && EngineChanges.fromContext(it) != null)
+    }
     // Only the exact tag the hub ends a card's answer with, only on the user's own message.
     val card = if (user) persona.core.domain.views.PersonaActionTag.split(written) else null
     val (attached, text) = parseAttachedFiles(card?.first ?: written)

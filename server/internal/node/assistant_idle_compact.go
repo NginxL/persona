@@ -80,6 +80,16 @@ func (n *Node) recordIdleCompactionContext(id string, tokens int) {
 // Called with typing and assistantLife held, after resuming a stopped process
 // but before computing the snapshot delta or writing the unattended message.
 func (n *Node) idleCompactBeforeInput(ctx context.Context, p *assistantProc) error {
+	if _, a2a := ctx.Value(a2aIdleKey{}).(bool); a2a {
+		p.mu.Lock()
+		busy := p.busy || p.compacting
+		p.mu.Unlock()
+		if busy {
+			return a2aBusy()
+		}
+		// An A2A delivery has a short deadline and cannot start compaction.
+		return nil
+	}
 	input, ok := ctx.Value(idleCompactionInputKey{}).(idleCompactionInput)
 	if !ok {
 		return nil

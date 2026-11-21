@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -33,6 +34,8 @@ func (h *Hub) scopedDeviceRoute(r *http.Request) string {
 	}
 	_, pattern := h.apiMux.Handler(r)
 	switch pattern {
+	case assistantwire.A2ARPC, assistantwire.A2ACard:
+		return assistantwire.ScopeA2A
 	case "GET /api/v1/interactions/history", "POST /api/v1/interactions/{id}/reanswer":
 		// Stored answers have no pending card to prove their visibility or kind here.
 		return ""
@@ -46,7 +49,7 @@ func (h *Hub) scopedDeviceRoute(r *http.Request) string {
 
 func deviceAgentScope(scope string) bool {
 	switch scope {
-	case extwire.ScopeAgentsRead, extwire.ScopeAgentsControl, extwire.ScopeAgentsPermissionMode:
+	case extwire.ScopeAgentsRead, extwire.ScopeAgentsControl, extwire.ScopeAgentsPermissionMode, assistantwire.ScopeA2A:
 		return true
 	default:
 		return false

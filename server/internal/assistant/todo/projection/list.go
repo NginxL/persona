@@ -183,7 +183,7 @@ func carried(list []Facts, views []assistantwire.TodoSummary) []bool {
 	}
 	out := make([]bool, len(list))
 	for i, f := range list {
-		out[i] = f.PartOf != "" && f.PartOf != f.ID && open[f.PartOf]
+		out[i] = f.PartOf != "" && f.PartOf != f.ID && open[f.PartOf] && !outsideDecisionRow(f)
 	}
 	return out
 }

@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import os
 import PersonaWire
 
 /// Separate from Fleet's appearance files: this snapshot contains credentials and must never be exported or logged.
@@ -74,10 +75,26 @@ nonisolated struct ExtensionSurfaceSnapshot: Codable, Sendable {
     var groups: [String: ExtensionSurfaceGroup] = [:]
 }
 
+/// iOS kills a process that is suspended while it holds a file lock in a shared container (0xdead10cc, #11360).
+/// The containing app installs `provider`: background time that starts before the store's lock and ends only after the
+/// lock is released. With no provider (widgets, the watch, tests) no time is needed; a provider that returns nil granted
+/// none (the app is about to be suspended), and the transaction must not take the lock.
+nonisolated enum ExtensionSurfaceLockLease {
+    typealias End = @Sendable () -> Void
+    typealias Provider = @Sendable () -> End?
+    private static let installed = OSAllocatedUnfairLock<Provider?>(initialState: nil)
+    static var provider: Provider? {
+        get { installed.withLock { $0 } }
+        set { installed.withLock { $0 = newValue } }
+    }
+}
+
 /// Cross-process transactions serialize app/catalog/timeline writers; each transaction atomically replaces the file.
 /// No fallback to the app sandbox, UserDefaults, Keychain, or another group's credential.
 nonisolated struct ExtensionSurfaceStore: Sendable {
     var root: URL?
+    /// Background time around every lock (`ExtensionSurfaceLockLease`).
+    var lease: ExtensionSurfaceLockLease.Provider? = nil
     static var shared: Self {
         #if DEBUG
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil { return Self(root: nil) }
@@ -92,7 +109,7 @@ nonisolated struct ExtensionSurfaceStore: Sendable {
         #endif
         let name = Bundle.main.object(forInfoDictionaryKey: "PersonaAppGroup") as? String
         let container = name.flatMap { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) }
-        return Self(root: container?.appendingPathComponent("ExtensionSurfaces", isDirectory: true))
+        return Self(root: container?.appendingPathComponent("ExtensionSurfaces", isDirectory: true), lease: ExtensionSurfaceLockLease.provider)
     }
 
     func read() -> ExtensionSurfaceSnapshot {
@@ -161,8 +178,16 @@ nonisolated struct ExtensionSurfaceStore: Sendable {
         }
     }
 
-    @discardableResult private func transaction<T>(write: Bool = true, _ body: (inout ExtensionSurfaceSnapshot) throws -> T) throws -> T {
+    /// Internal for tests only: callers use the named operations above.
+    @discardableResult func transaction<T>(write: Bool = true, _ body: (inout ExtensionSurfaceSnapshot) throws -> T) throws -> T {
         guard let root else { throw CocoaError(.fileNoSuchFile) }
+        // Declared first, so it ends last: after the lock is released and its descriptor closed (#11360).
+        var end: ExtensionSurfaceLockLease.End?
+        if let lease {
+            guard let granted = lease() else { throw CancellationError() }
+            end = granted
+        }
+        defer { end?() }
         let fm = FileManager.default
         try fm.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         #if os(iOS) || os(watchOS) || os(visionOS)

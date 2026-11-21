@@ -1,3 +1,4 @@
+import { conversationPage } from "../../lib/conversation-page";
 // The unified entry in the assistant's conversation (docs/assistant/unified-entry.md; iOS Views/Assistant/Tasks): the plan card,
 // task cards that follow their agents, the hub's lines (answered, routed; receipts, reviews and reports are not drawn,
 // #8237), the "Today" card, message cards about
@@ -18,7 +19,6 @@ import {
   feedNotice,
   getFeedState,
   sentByPersona,
-  planEditsToSend,
   planUltracodeToSend,
   removeTask,
   retryKey,
@@ -70,7 +70,7 @@ import { SentLine } from "./Sent";
 import { feedWake, HandoffCard, HandoffCards, TASK_LINE_SLACK_MS, taskHandoffs } from "./Handoff";
 import { latestReview, parkedLine, progressLine } from "../../lib/supervision";
 import { namedLauncher, providerIdNote, providerTitle, useProviderNames } from "../../lib/provider-names";
-import { useChosenManager, useLinkManager } from "../../lib/manager-choice";
+import { useChosenManager, useLinkManager, useShownManager } from "../../lib/manager-choice";
 import { AnsweredSummary, InteractionCard, underCard } from "../chat/Interactions";
 import type { RuleCard } from "../../lib/rule-suggestion";
 import { cardLine } from "../chat/dock";
@@ -366,11 +366,12 @@ export function PlanCard({ plan }: { plan: TaskPlan }) {
       {editing && <Suspense fallback={<Loading />}>
         <PlanEditDialog
           plan={editedPlan}
+          original={plan}
           ultracode={ultracode}
           onClose={() => setEditing(false)}
           onStart={(edits) => {
             setEditing(false);
-            void run(() => startPlan(plan, remember, planEditsToSend(plan, edits, ultracodeBlockedNow), grant));
+            void run(() => startPlan(plan, remember, edits, grant));
           }}
         />
       </Suspense>}
@@ -772,7 +773,7 @@ function PlanHandoffs({ plan, since }: { plan: TaskPlan; since?: string }) {
       const id = planTaskTodo(plan, i, s.todos);
       // a later plan that continued the to-do holds it now; this plan's todo_id was cleared then (tasks_start.go)
       const superseded = Boolean(id && !task.todo_id && Object.values(plans).some((p) => p.id !== plan.id && p.tasks.some((x) => x.todo_id === id)));
-      return taskHandoffs(id ? s.todos.find((x) => x.id === id) : undefined, { key: `${plan.id}/${i}`, title: task.title, error: task.error, todoId: id, superseded }, "created", plans, s.todosLoaded, since);
+      return taskHandoffs(id ? s.todos.find((x) => x.id === id) : undefined, { key: `${plan.id}/${i}`, title: task.title, error: task.error, todoId: id, superseded }, task.continues ? "continuation" : "created", plans, s.todosLoaded, since);
     }),
   );
   return <HandoffCards handoffs={handoffs} />;
@@ -1037,7 +1038,7 @@ function OpenEntry({ title, onOpen }: { title: string; onOpen: () => void }) {
 /** The whole card of a Needs you row, or the one line it is. `nested`: inside its opened row, which carries the row's key. */
 export function NeedsYouBody({ item, nested = false }: { item: NeedsYouItem; nested?: boolean }) {
   const rowKey = nested ? undefined : item.key;
-  if (item.kind === "plan") return <PlanCard plan={item.plan} />;
+  if (item.kind === "plan") return <div><PlanCard plan={item.plan} /><OpenEntry title={t("assistant-tasks.needs_group_another")} onOpen={() => navigate(conversationPage(item.plan.conversation, undefined, item.plan.manager))} /></div>;
   if (item.kind === "message") return <MessageCard item={item.item} />;
   if (item.kind === "agent") {
     const { session, asks } = item;
@@ -1129,6 +1130,7 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
   const [board, setBoard] = useState(false);
   const [showShelved, setShowShelved] = useState(false);
   const trayId = useId();
+  const manager = useShownManager();
   const plans = useFeed((s) => s.plans);
   const feed = useFeed((s) => s.feeds[conversation] ?? EMPTY_FEED);
   const metadata = useFeed((s) => s.taskCards[conversation] ?? EMPTY_CARDS);
@@ -1147,9 +1149,9 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
     return () => window.clearInterval(id);
   }, []);
   const entries = useMemo(
-    () => assistantEntries({ conversation, main, todos, sessions: answeredSessions(sessionRows, interactions, answered), interactions, plans, feed, cards: metadata, deferred, lookup, restored, now: Date.now() }),
+    () => assistantEntries({ conversation, main, manager, todos, sessions: answeredSessions(sessionRows, interactions, answered), interactions, plans, feed, cards: metadata, deferred, lookup, restored, now: Date.now() }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick: re-read the clock once a minute
-    [conversation, main, todos, sessionRows, interactions, answered, plans, feed, metadata, deferred, lookup, restored, tick],
+    [conversation, main, manager, todos, sessionRows, interactions, answered, plans, feed, metadata, deferred, lookup, restored, tick],
   );
   const isAsking = (item: NeedsYouItem) => (item.kind === "task" || item.kind === "agent") && item.asks.length > 0;
   // While background rounds fold, rows other conversations supervise are grouped under them (#4314); with the

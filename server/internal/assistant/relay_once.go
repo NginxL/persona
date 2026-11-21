@@ -157,6 +157,11 @@ func (s *Service) tryQueuedRelay(ctx context.Context, machine, to string, head *
 	b := &s.relays
 	b.mu.Lock()
 	q := b.st.Queue[to]
+	if !b.loaded || len(q) == 0 || q[0] != previous {
+		// A reload can invalidate the selection before the attempt is saved. Let the next drain pick again.
+		b.mu.Unlock()
+		return previous, relayRetryGap, nil
+	}
 	q[0] = msg
 	err := s.saveRelayLocked()
 	if err != nil {

@@ -50,13 +50,15 @@ type Runner struct {
 	Dial   nodeclient.Dialer
 	Getenv func(string) string
 	Getwd  func() (string, error)
+	// ReadFile reads a decision's JSON document (replaced by tests).
+	ReadFile func(string) ([]byte, error)
 	// IsTerminal says whether r is a terminal a person types in.
 	IsTerminal func(io.Reader) bool
 }
 
 // Default is the machine this process runs on.
 func Default() Runner {
-	return Runner{Dial: nodeclient.DialInterruptible, Getenv: os.Getenv, Getwd: os.Getwd, IsTerminal: isTerminal}
+	return Runner{Dial: nodeclient.DialInterruptible, Getenv: os.Getenv, Getwd: os.Getwd, ReadFile: os.ReadFile, IsTerminal: isTerminal}
 }
 
 // isTerminal: a person types at r (not /dev/null, which is a character device too).

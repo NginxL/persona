@@ -4,10 +4,11 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { t } from "../../i18n";
 
 type Pending = { method: string; json?: unknown; resolve: (v: unknown) => void; reject: (e: unknown) => void };
 const pending: Pending[] = [];
-// The hub-wide low-distraction switch at the end of the page reads its own route (#8157, LowDistractionSettings.test.tsx):
+// The hub-wide push grading switch at the end of the page reads the legacy route (#8157, LowDistractionSettings.test.tsx):
 // kept apart, so pending is this device's prefs as before.
 const lnMode: Pending[] = [];
 vi.mock("../../lib/api", async (original) => ({
@@ -198,21 +199,26 @@ describe("设置 › 通知", () => {
   });
 });
 
-describe("Settings › Notifications › Low-distraction mode (#8157)", () => {
-  it("comes last, after the note that the rest is this browser's, once the hub answers", async () => {
+describe("Settings › Notifications › Push grading", () => {
+  const pushGrading = () => named(t("settings-notifications.low_distraction"));
+
+  it("comes after the browser-only settings and reflects the hub's answer", async () => {
     await render();
-    expect(named("低打扰模式")).toBeUndefined();
+    expect(pushGrading()).toBeUndefined();
+    expect(lnMode).toHaveLength(1);
+    expect(lnMode[0].method).toBe("GET");
     await act(async () => lnMode[0].resolve({ enabled: true }));
-    expect(named("低打扰模式")?.getAttribute("aria-checked")).toBe("true");
+    expect(pushGrading()?.getAttribute("aria-checked")).toBe("true");
     const text = host.textContent ?? "";
-    expect(text.indexOf("这些设置跟着这个浏览器走")).toBeGreaterThan(-1);
-    expect(text.indexOf("对你所有的设备生效")).toBeGreaterThan(text.indexOf("这些设置跟着这个浏览器走"));
+    const deviceNote = text.indexOf(t("settings-notifications.device_note"));
+    expect(deviceNote).toBeGreaterThan(-1);
+    expect(text.indexOf(t("settings-notifications.low_distraction_footer"))).toBeGreaterThan(deviceNote);
   });
 
-  it("has no switch on a hub without it, and says to update the hub", async () => {
+  it.each([404, 405])("explains unsupported push grading on an older hub (HTTP %s)", async (status) => {
     await render();
-    await act(async () => lnMode[0].reject(Object.assign(new Error("not found"), { status: 404 })));
-    expect(named("低打扰模式")).toBeUndefined();
-    expect(host.textContent).toContain("这台 hub 还不支持低打扰模式，更新 hub 后可以在这里开启");
+    await act(async () => lnMode[0].reject(Object.assign(new Error("not supported"), { status })));
+    expect(pushGrading()).toBeUndefined();
+    expect(host.textContent).toContain(t("settings-notifications.low_distraction_unsupported"));
   });
 });

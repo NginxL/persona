@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/nodeclient"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -133,6 +134,47 @@ func (n *Node) handleAsk(ctx context.Context, req sockRequest) nodeclient.AskRep
 		return nodeclient.AskReply{Status: nodeclient.AskDismissed}
 	}
 	return nodeclient.AskReply{Status: nodeclient.AskAnswered, Answer: answer}
+}
+
+// handleDecision carries a local script's non-blocking rich decision to the
+// manager. The connected machine is the caller identity; the pane's session
+// title is only its display source. These requests are deliberately not spooled:
+// a local queued id would not be a manager-durable id the script can poll.
+func (n *Node) handleDecision(ctx context.Context, req sockRequest) assistantwire.OutsideDecisionReply {
+	if n.peer == nil {
+		return assistantwire.OutsideDecisionReply{Code: "unavailable", Error: "this node is not connected to a hub"}
+	}
+	var params any
+	switch req.Kind {
+	case assistantwire.MethodDecisionRaise:
+		var in nodeclient.DecisionRaiseRequest
+		if err := json.Unmarshal(req.Input, &in); err != nil {
+			return assistantwire.OutsideDecisionReply{Code: "invalid_decision", Error: "bad request"}
+		}
+		sid, title := n.scriptSession(req.Pane, in.Cwd)
+		if n.sessionBlocked(sid, in.Cwd) {
+			return assistantwire.OutsideDecisionReply{Code: "forbidden", Error: "this folder is blocked in Persona"}
+		}
+		params = struct {
+			nodeclient.DecisionRaiseRequest
+			Source string `json:"source"`
+		}{DecisionRaiseRequest: in, Source: title}
+	case assistantwire.MethodDecisionGet, assistantwire.MethodDecisionWithdraw:
+		var in struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(req.Input, &in); err != nil || in.ID == "" {
+			return assistantwire.OutsideDecisionReply{Code: "invalid_decision", Error: "a decision id is required"}
+		}
+		params = in
+	default:
+		return assistantwire.OutsideDecisionReply{Code: "unavailable", Error: "this node does not support decisions"}
+	}
+	var reply assistantwire.OutsideDecisionReply
+	if err := n.peer.Call(ctx, req.Kind, params, &reply); err != nil {
+		return assistantwire.OutsideDecisionReply{Code: "unavailable", Error: err.Error()}
+	}
+	return reply
 }
 
 // cutRunes cuts s to at most n characters, ending in … when it was cut.

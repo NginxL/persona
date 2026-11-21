@@ -521,6 +521,7 @@
     <string name="chat_review_pending">Awaiting review</string>
     <string name="chat_review_rework">Rework round %1$d</string>
     <string name="chat_review_needs_user">Needs your call</string>
+    <string name="chat_review_user_check">Awaiting your verification</string>
     <string name="chat_review_accepted">Accepted</string>
     <string name="chat_review_cancelled">Cancelled</string>
     <string name="chat_review_line">Review</string>

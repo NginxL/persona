@@ -163,6 +163,22 @@ internal class SidebarRootHosts(val conversation: MutableList<NavKey>) {
         current = conversation
     }
 
+    /** Remove a disabled optional place, its drill-downs and its retained composition, leaving every other place alone. */
+    fun forgetPlace(root: NavKey) {
+        val id = sidebarHostId(root)
+        val wasCurrent = hostIdOf(current) == id
+        places.remove(id)
+        visited.remove(id)
+        val at = conversation.indexOfFirst { it == root }
+        if (at >= 0) {
+            while (conversation.size > at) conversation.removeAt(conversation.lastIndex)
+            if (conversation.isEmpty()) conversation.add(AssistantRoute)
+        }
+        if (wasCurrent) current = conversation
+        if (conversation.isEmpty()) conversation.add(AssistantRoute)
+        if (CONVERSATION !in visited) visited.add(0, CONVERSATION)
+    }
+
     private fun hostIdOf(stack: MutableList<NavKey>): String {
         if (stack === conversation) return CONVERSATION
         val root = stack.firstOrNull { it != AssistantRoute } ?: stack.firstOrNull() ?: return CONVERSATION

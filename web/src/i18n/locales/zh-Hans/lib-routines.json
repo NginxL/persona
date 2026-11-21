@@ -62,5 +62,7 @@
   "error_cron": "请写一个 cron 表达式，比如 0 9 * * 1-5",
   "cron_example_work_hours": "工作时间每 30 分钟",
   "cron_example_weekdays": "工作日 9:00",
-  "cron_example_monthly": "每月 1 号 10:00"
+  "cron_example_monthly": "每月 1 号 10:00",
+  "skip_next_pending": "将跳过 {when}",
+  "status_owner_skipped": "你跳过了本次运行"
 }

@@ -1,0 +1,5 @@
+{
+  "field_required": "{field}は必須です。",
+  "field_one_of": "{field}には次のいずれかを指定してください：{values}。",
+  "field_nonnegative": "{field}には0以上の値を指定してください。"
+}

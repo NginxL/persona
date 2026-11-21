@@ -306,6 +306,8 @@ describe("the leader conversations in the sidebar", () => {
     await flush();
     const unpin = () => [...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')]
       .find((el) => el.textContent?.includes("取消常驻"));
+    // The row menu is lazy; wait for its module before exercising the same two-step action.
+    await vi.waitFor(() => expect(unpin()).toBeDefined());
     expect([...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')]
       .some((el) => el.textContent?.includes("置顶"))).toBe(false);
     // the first tap only arms the row and says what moves; nothing has reached the hub

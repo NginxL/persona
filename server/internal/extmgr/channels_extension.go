@@ -58,8 +58,12 @@ func (h *Manager) extensionCall(ctx context.Context, id, method string, params, 
 
 // channelSendPiece sends one piece to channel id's owner (channels.send): again on a failure, with the same ref.
 func (h *Manager) channelSendPiece(ctx context.Context, id string, p channel.SendParams) (channel.SendResult, error) {
-	if _, ok := h.extensionChannel(id); !ok && h.channels.call == nil {
+	pc, ok := h.extensionChannel(id)
+	if !ok && h.channels.call == nil {
 		return channel.SendResult{}, fmt.Errorf("no channel %s", id)
+	}
+	if ok && !pc.item.Capabilities.ImagesOut {
+		p.Images = nil // only a channel that says it sends pictures gets them (#11986)
 	}
 	p.Contribution = ""
 	var out channel.SendResult

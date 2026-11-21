@@ -1,6 +1,7 @@
 package persona.core.contracts.api
 
 import persona.core.contracts.Item
+import persona.core.contracts.ItemsResponse
 import persona.core.contracts.ModeChange
 import persona.core.contracts.SessionKey
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +33,10 @@ interface ChatRepository {
     fun observe(session: SessionKey): Flow<ChatSnapshot>
 
     suspend fun loadOlder(session: SessionKey)
+    /** One read-only page of an earlier engine's transcript. Null only when the hub explicitly reports it gone. */
+    suspend fun earlierEnginePage(session: SessionKey, beforeSeq: Int?): ItemsResponse? =
+        throw UnsupportedOperationException("Earlier engine history unavailable")
+
     /** Read-only mode history, joined at presentation time rather than added to [ChatSnapshot.items]. */
     suspend fun modeChanges(session: SessionKey): List<ModeChange> = emptyList()
     suspend fun expandFold(session: SessionKey, fromSeq: Int, toSeq: Int): List<Item>

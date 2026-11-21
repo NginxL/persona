@@ -6,6 +6,7 @@ import android.os.Looper
 import android.provider.Settings
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -68,6 +69,8 @@ data class IosMassSpring(val mass: Float = 1f, val stiffness: Float, val damping
  * these (Brief and Board keep their own tweens only for the style-local state/layout springs in [PersonaMotion]).
  */
 object SharedMotion {
+    /** The immediate change Reduce Motion requests, without a page choosing its own animation spec. */
+    fun <T> instant(): FiniteAnimationSpec<T> = snap()
     /** Theme.Motion.expand (`Theme.swift:769`): smooth 0.4 s. */
     fun <T> expand(): FiniteAnimationSpec<T> =
         IosSpring(Tokens.Motion.Expand.duration, Tokens.Motion.Expand.bounce).spec()

@@ -3,6 +3,7 @@ package assistant
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -107,6 +108,9 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		return
 	}
 	st := t.Supervision.state(t)
+	if st == reviewUserCheck {
+		return // the supervisor finished its review; only the owner's Pass or feedback settles this check
+	}
 	key := work.UTC().Format(time.RFC3339Nano)
 	if err == nil && c.Verdict == verdictDone {
 		if s.autoReviewBegin(ctx, t, work, c.Reason) {
@@ -159,6 +163,9 @@ func (s *Service) superviseJudged(ctx context.Context, t Todo, work time.Time, c
 		// "stopped short" (#3111). The supervisor reads the agent's reply and decides. No model set up for the judge is
 		// said as such, not as a model error that a retry might mend.
 		detail := "判定模型出错" // i18n-ignore: the supervision message is the assistant's prompt
+		if errors.Is(err, errTaskDoneJudgeExhausted) {
+			detail = fmt.Sprintf("判定服务出错（自动重判 %d 次仍失败）", taskDoneDeferredRetries) // i18n-ignore: supervisor prompt
+		}
 		if ai.IsNotConfigured(err) {
 			detail = "判定模型未配置" // i18n-ignore: the supervision message is the assistant's prompt
 		}
@@ -226,15 +233,15 @@ func (s *Service) noteOwnerWait(ctx context.Context, t Todo, work time.Time, rea
 // and a parked task is parked no longer (someone sent its agent something: it is supervised as before, parked.go).
 func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 	s.autoReviewWorking(ctx, t)
-	if st := t.Supervision.state(t); st != reviewPending && st != reviewParked && (t.Supervision == nil || t.Supervision.Waits == nil) {
+	if st := t.Supervision.state(t); st != reviewPending && st != reviewParked && st != reviewTimedOut && st != reviewClosing && (t.Supervision == nil || t.Supervision.Waits == nil) {
 		return
 	}
 	if _, _, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-		if v.State != reviewPending && v.State != reviewParked && v.Waits == nil {
+		if v.State != reviewPending && v.State != reviewParked && v.State != reviewTimedOut && v.State != reviewClosing && v.Waits == nil {
 			return false
 		}
 		v.Waits = nil // its agent goes on: the owner's answer reached it, or the work changed (#1277)
-		if v.State != reviewPending && v.State != reviewParked {
+		if v.State != reviewPending && v.State != reviewParked && v.State != reviewTimedOut && v.State != reviewClosing {
 			return true
 		}
 		v.State = ""
@@ -248,6 +255,7 @@ func (s *Service) supervisedWorking(ctx context.Context, t Todo) {
 	b := &s.supervise
 	b.mu.Lock()
 	delete(b.pending, t.ID+"|"+sigReview)
+	delete(b.pending, t.ID+"|"+sigTimedOut)
 	delete(b.pending, t.ID+"|"+sigParkedDue)
 	delete(b.pending, t.ID+"|"+sigEstimateDue)
 	b.mu.Unlock()

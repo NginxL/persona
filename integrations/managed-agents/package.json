@@ -1,0 +1,10 @@
+{
+  "name": "persona-managed-agents-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Managed Agents (Ark cloud or a self-deployed compatible endpoint) as a Persona runtime",
+  "license": "MIT",
+  "scripts": { "test": "node --test test/*.test.js" },
+  "engines": { "node": ">=22.19.0" }
+}

@@ -54,6 +54,8 @@ class ProviderEditShotsTest {
         gateway, HubLauncher("cx_team", source = "persona", agent = "codex", baseUrl = "https://codex.example.com", model = "cx-1", hasKey = true, share = "all"),
         HubLauncher("triage_api", source = "persona", kind = "api", api = "responses", baseUrl = "https://api.example.com/v1", model = "api-mini", hasKey = true, share = "none"),
         HubLauncher("cc_local", source = "zshrc", model = "claude-sonnet", machines = listOf("mac")),
+        HubLauncher("traecli", agent = "paseo", machines = listOf("mac")),
+        HubLauncher("trae-cli", agent = "paseo", displayName = "Team CLI", machines = listOf("box")),
     )
 
     private val providers = object : ProviderSetup {
@@ -75,6 +77,13 @@ class ProviderEditShotsTest {
         for (y in 0 until bitmap.height step 7) for (x in 0 until bitmap.width step 7) if (bitmap.getPixel(x, y) != background) other++
         assertTrue("$name drew nothing", other > 100)
         File(out(), "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    @Test fun absentProviderUsesTheCliDisplayName() {
+        rule.setContent {
+            PersonaTheme { ProviderDetailPage(null, "trae-cli", machines, onBack = {}) }
+        }
+        rule.onNodeWithText("TRAE CLI").assertExists()
     }
 
     @Test fun drawsTheEditorTheComputersPageAndTheGroupedListInEveryStyle() {
@@ -117,6 +126,8 @@ class ProviderEditShotsTest {
             page = "legacy"; capture("provider-computers-legacy-$suffix")
             page = "proxy"; capture("provider-proxy-$suffix")
             page = "list"; capture("providers-grouped-$suffix")
+            rule.onNodeWithText("TRAE CLI").assertExists()
+            rule.onNodeWithText("Team CLI").assertExists()
         }
     }
 }

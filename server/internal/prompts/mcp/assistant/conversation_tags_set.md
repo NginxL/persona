@@ -1,4 +1,4 @@
-Replace a conversation's tags; [] clears them. These user-defined labels group conversations in apps and lists. They are trimmed and de-duplicated, at most 10 of 32 characters each. Tag only conversations in your own space when the user asks for tags or grouping; never invent them. This conversation is a valid id.
+Replace a conversation's tags; [] clears them. These user-defined labels group conversations in apps and lists. They are trimmed and de-duplicated, at most 10 of 32 characters each. Tag only conversations in your own space when the user asks for tags or grouping; never invent them. This conversation is a valid id.{{template "shared/mcp_language" .}}
 
 ```json
 {

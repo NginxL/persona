@@ -26,22 +26,24 @@ import Observation
 
     init(deps: Deps = .live) { self.deps = deps }
 
-    static func key(_ machine: MachineRef, _ launcher: String, purpose: String? = nil, manager: String? = nil) -> String {
-        "\(machine.path)|\(launcher)" + (purpose.map { "|\($0)" } ?? "") + (manager.map { "|\($0)" } ?? "")
+    static func key(_ machine: MachineRef, _ launcher: String, purpose: String? = nil, manager: String? = nil, host: String? = nil) -> String {
+        let owner = "\(machine.path)|\(launcher)" + (purpose.map { "|\($0)" } ?? "") + (manager.map { "|\($0)" } ?? "")
+        guard let host, !host.isEmpty else { return owner }
+        return owner + "|host=" + host
     }
 
-    private func catalogKey(_ machine: MachineRef, launcher: String, purpose: String?) -> String {
+    func catalogKey(_ machine: MachineRef, launcher: String, purpose: String? = nil, host: String? = nil) -> String {
         let api = deps.api(machine.group)
         let manager = purpose == "assistant" ? api?.currentAssistantSettings().managerID : api?.managerID
-        return Self.key(machine, launcher, purpose: purpose, manager: manager)
+        return Self.key(machine, launcher, purpose: purpose, manager: manager, host: host)
     }
 
     /// The IDs typed before, most recent first.
     var remembered: [AgentModel] { list?.models.filter(\.custom) ?? [] }
 
     /// Moves to another computer, launcher or purpose: the last one's list and what went wrong with it are dropped.
-    func select(_ machine: MachineRef, launcher: String, purpose: String? = nil) {
-        let k = catalogKey(machine, launcher: launcher, purpose: purpose)
+    func select(_ machine: MachineRef, launcher: String, purpose: String? = nil, host: String? = nil) {
+        let k = catalogKey(machine, launcher: launcher, purpose: purpose, host: host)
         guard k != key else { return }
         requestID += 1
         key = k
@@ -53,8 +55,8 @@ import Observation
 
     /// Reads the list for `machine` and `launcher` (again with `refresh`: the node asks the CLI once more). An answer
     /// that comes after the sheet moved to another launcher is dropped.
-    func load(_ machine: MachineRef, launcher: String, refresh: Bool = false, purpose: String? = nil) async {
-        select(machine, launcher: launcher, purpose: purpose)
+    func load(_ machine: MachineRef, launcher: String, refresh: Bool = false, purpose: String? = nil, host: String? = nil) async {
+        select(machine, launcher: launcher, purpose: purpose, host: host)
         let k = key
         guard let given = deps.api(machine.group) else { return }
         let api = purpose == "assistant" ? given.currentAssistantSettings() : given
@@ -64,19 +66,20 @@ import Observation
         error = nil
         defer { if key == k && requestID == request { loading = false } }
         do {
-            let answer = try await api.launcherModels(machine: machine.id, launcher: launcher, refresh: refresh, purpose: purpose)
+            let answer = try await api.launcherModels(machine: machine.id, launcher: launcher, refresh: refresh, purpose: purpose, host: host)
             guard key == k && requestID == request else { return }
             list = answer
         } catch {
             guard key == k, requestID == request, !error.isCancellation else { return }
+            if list?.supportsStartModel == true { list = nil } // a failed refresh cannot authorize another start
             if let e = error as? APIError, e.status == 404 { return } // an older hub or node: no list, as before
             self.error = error.shown
         }
     }
 
     /// Forgets a typed ID on the hub: off the list at once, back where it was when the hub says no.
-    func forget(_ id: String, machine: MachineRef, launcher: String, purpose: String? = nil) async {
-        guard catalogKey(machine, launcher: launcher, purpose: purpose) == key, let at = list?.models.firstIndex(where: { $0.id == id && $0.custom }),
+    func forget(_ id: String, machine: MachineRef, launcher: String, purpose: String? = nil, host: String? = nil) async {
+        guard catalogKey(machine, launcher: launcher, purpose: purpose, host: host) == key, let at = list?.models.firstIndex(where: { $0.id == id && $0.custom }),
               let row = list?.models[at] else { return }
         let given = deps.api(machine.group)
         let api = purpose == "assistant" ? given?.currentAssistantSettings() : given

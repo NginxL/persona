@@ -1699,6 +1699,3 @@ test('updated_at advances with session events and timeContext even when controll
   assert.equal(list[0].session_id, 'session-long', 'newly finished long turn ranks first')
   assert.equal(list[0].status, 'done')
 })
-
-
-

@@ -2,7 +2,7 @@ Create a recurring routine, or pass `id` from list_followups to edit only the fi
 
 Runs inherit Main chat's launcher/model/effort. Omit overrides to keep them; an empty launcher returns to Main chat. Permission mode stays the user's choice. `inbox` is only for requested Inbox results. `fresh_each_run: true` starts a new chat per run with its state note. See field descriptions for push and end-time edit rules.
 
-For approved work advancing a supervised to-do, pass its explicit `todo_id`; this conversation must supervise it. Omission keeps its association; "" clears it. From the second run Persona checks Agent answers, tool calls (not waits or repeats), criterion changes and progress reports; a long stall asks Change approach / Keep waiting, even with `push: asked`. Get owner consent before creating or changing recurring work.
+For approved work advancing a supervised to-do, pass its explicit `todo_id`; this conversation must supervise it. Omission keeps its association; "" clears it. From the second run Persona checks Agent answers, tool calls (not waits or repeats), criterion changes and progress reports; a long stall asks Change approach / Keep waiting, even with `push: asked`. Get owner consent before creating or changing recurring work.{{template "shared/mcp_language" .}}
 
 ```json
 {

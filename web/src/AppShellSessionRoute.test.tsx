@@ -10,7 +10,7 @@ vi.hoisted(() => {
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
 // every render of the shell draws its sidebar and the page's chat: these stand-ins count them and read nothing from the store
-const drawn = vi.hoisted(() => ({ sidebar: 0, chat: 0, chatSid: "" }));
+const drawn = vi.hoisted(() => ({ sidebar: 0, chat: 0, chatSid: "", at: undefined as string | undefined }));
 vi.mock("./views/Sidebar", () => ({
   Sidebar: () => {
     drawn.sidebar++;
@@ -19,9 +19,10 @@ vi.mock("./views/Sidebar", () => ({
   SidebarRail: () => null,
 }));
 vi.mock("./views/chat/ChatView", () => ({
-  ChatView: ({ sid }: { sid: string }) => {
+  ChatView: ({ sid, landAt }: { sid: string; landAt?: string }) => {
     drawn.chat++;
     drawn.chatSid = sid;
+    drawn.at = landAt;
     return null;
   },
 }));
@@ -34,6 +35,8 @@ vi.mock("./lib/store", async (load) => ({ ...(await load<typeof import("./lib/st
 import { getState, refresh, reset, upsertSession } from "./lib/store";
 import { doneSubagentLink, useSubagentLink } from "./lib/subagent-link";
 import { doneTeamAsk, useTeamAsk } from "./lib/team";
+import { doneSideAsk, useSideAsk } from "./lib/side-panel";
+import { setSideFold } from "./lib/side-fold";
 import { setToken } from "./lib/api";
 import type { Machine, Session } from "./lib/types";
 import { App } from "./App";
@@ -57,6 +60,8 @@ const sessions: Session[] = [
   row(TWIN_B, { activity_at: "2026-11-02T10:00:00Z" }),
   // a child session folded under s1 (#5120): a card in s1's chat, never a page of its own
   row("kid1", { folded_under: "s1", is_subagent: true, parent_session_id: "s1" }),
+  row("side1", { folded_under: "s1", folded_as: "side" }),
+  row("side-kid", { folded_under: "s1", folded_side: "side1", is_subagent: true, parent_session_id: "side1" }),
   // a herdr tab's lead and its worker (#5180): the worker is in the lead's Team panel, never a page of its own
   row("lead", { space_id: "ts", slot_id: "tt", pane_index: 0, children: { total: 1, workers: 1, needs_you: 1 } }),
   row("mate", { space_id: "ts", slot_id: "tt", pane_index: 1, folded_under: "lead", folded_as: "worker", state: "needs_you", status: "needs_you" }),
@@ -89,6 +94,8 @@ beforeEach(() => {
   setToken("tok");
   drawn.sidebar = drawn.chat = 0;
   drawn.chatSid = "";
+  drawn.at = undefined;
+  setSideFold(false);
   vi.stubGlobal("fetch", vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(answers[new URL(url, "http://x").pathname] ?? {}), { headers: { "Content-Type": "application/json" } }))));
   host = document.createElement("div");
   document.body.append(host);
@@ -174,7 +181,7 @@ describe("the shell's session links", () => {
   });
 
   it("opens a worker's /s and /t links as its lead's page, which is asked to show the worker in its Team panel", async () => {
-    let asked: string | undefined;
+    let asked: ReturnType<typeof useTeamAsk>;
     function Probe() {
       asked = useTeamAsk("mac", "lead");
       return null;
@@ -184,13 +191,19 @@ describe("the shell's session links", () => {
     await open("/s/mac/mate");
     expect(location.pathname).toBe("/t/mac/ts/tt/lead");
     expect(drawn.chatSid).toBe("lead");
-    expect(asked).toBe("mate");
+    expect(asked).toEqual({ worker: "mate" });
     act(() => doneTeamAsk("mac", "lead"));
     expect(asked).toBeUndefined();
     await open("/t/mac/ts/tt/mate");
     expect(location.pathname).toBe("/t/mac/ts/tt/lead");
     expect(drawn.chatSid).toBe("lead");
-    expect(asked).toBe("mate");
+    expect(asked).toEqual({ worker: "mate" });
+    act(() => doneTeamAsk("mac", "lead"));
+    await open("/s/mac/mate?at=worker-item");
+    expect(asked).toEqual({ worker: "mate", at: "worker-item" });
+    act(() => doneTeamAsk("mac", "lead"));
+    await open("/t/mac/ts/tt/mate?at=other-worker-item");
+    expect(asked).toEqual({ worker: "mate", at: "other-worker-item" });
     act(() => doneTeamAsk("mac", "lead"));
     // a tab link without a pane, whose most urgent pane is the waiting worker: the lead, not a link to the worker (its
     // panel opens or not as the lead's page decides)
@@ -199,6 +212,32 @@ describe("the shell's session links", () => {
     expect(drawn.chatSid).toBe("lead");
     expect(asked).toBeUndefined();
     act(() => probe.unmount());
+  });
+
+  it("delivers a side's message target to its own panel", async () => {
+    setSideFold(true);
+    let asked: ReturnType<typeof useSideAsk>;
+    function Probe() {
+      asked = useSideAsk("mac", "s1");
+      return null;
+    }
+    const probe = createRoot(document.createElement("div"));
+    act(() => probe.render(<Probe />));
+    await open("/s/mac/side1?at=side-item");
+    expect(drawn.chatSid).toBe("s1");
+    expect(drawn.at).toBeUndefined();
+    expect(asked).toEqual({ side: "side1", at: "side-item" });
+    act(() => doneSideAsk("mac", "s1", asked!));
+    act(() => probe.unmount());
+  });
+
+  it.each(["kid1", "side-kid", "conv-claude", "s1@child-agent"])("keeps %s's exact transcript for message links", async (sid) => {
+    setSideFold(true);
+    const at = `star:${"a".repeat(32)}:line12#0`;
+    await open(`/s/mac/${encodeURIComponent(sid)}?at=${encodeURIComponent(at)}`);
+    expect(drawn.chatSid).toBe(sid);
+    expect(drawn.at).toBe(at);
+    expect(location.pathname).toBe(`/s/mac/${encodeURIComponent(sid)}`);
   });
 
   it("opens an earlier engine's session of a conversation as the conversation's chat", async () => {

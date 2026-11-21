@@ -1592,6 +1592,46 @@ class RangeAndPushTests(unittest.TestCase):
                 self.assert_refused_cleanly(result, "refs/heads/" + branch)
                 self.assertIn(hit + ": private value", result.stderr)
 
+    SHOTS_HINT = ('pre-push: refused %s: screenshots never get a branch of their own; show them in the PR '
+                  '(docs/operations/collaboration.md, "Screenshots in PRs")')
+
+    def remote_has(self, remote, ref):
+        return self.run_command("git", "--git-dir", str(remote), "rev-parse", "--verify", "-q", ref).returncode == 0
+
+    def test_pre_push_refuses_screenshot_branches_with_one_line(self):
+        remote = self.root / "remote.git"
+        self.run_command("git", "init", "-q", "--bare", str(remote))
+        self.commit("clean.md", "nothing private here\n")
+        self.orphan("shots", "a clean picture\n")
+        for source, ref in (("shots", "refs/heads/artifacts/12-screenshots"), ("shots", "refs/heads/pr-assets/12"),
+                            ("topic", "refs/heads/pr-assets/12/dark"), ("topic", "refs/heads/artifacts/x")):
+            with self.subTest(ref=ref):
+                result = self.run_command("git", "push", "-q", str(remote), "%s:%s" % (source, ref))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual([l for l in result.stderr.splitlines() if l.startswith("pre-push:")],
+                                 [self.SHOTS_HINT % ref])
+                self.assertFalse(self.remote_has(remote, ref))
+        # One screenshot branch fails the whole push, without the privacy line for the clean branch beside it.
+        result = self.run_command("git", "push", "-q", str(remote), "topic", "shots:refs/heads/pr-assets/13")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([l for l in result.stderr.splitlines() if l.startswith("pre-push:")],
+                         [self.SHOTS_HINT % "refs/heads/pr-assets/13"])
+        self.assertFalse(self.remote_has(remote, "refs/heads/topic"))
+
+    def test_pre_push_lets_other_branches_and_screenshot_branch_deletions_through(self):
+        remote = self.root / "remote.git"
+        self.run_command("git", "init", "-q", "--bare", str(remote))
+        self.commit("clean.md", "nothing private here\n")
+        for ref in ("refs/heads/fix/12-pr-assets", "refs/heads/docs/artifacts/12", "refs/heads/artifacts"):
+            with self.subTest(ref=ref):
+                result = self.run_command("git", "push", "-q", str(remote), "topic:" + ref)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertTrue(self.remote_has(remote, ref))
+        self.git("push", "--no-verify", "-q", str(remote), "topic:refs/heads/pr-assets/12")  # one made before the rule
+        result = self.run_command("git", "push", "-q", str(remote), ":refs/heads/pr-assets/12")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.remote_has(remote, "refs/heads/pr-assets/12"))
+
     def test_range_with_unrelated_ends_scans_the_whole_head(self):
         self.orphan("shots", "a clean picture\n", message="clean")
         self.assertEqual(self.scan("--range", "HEAD..shots").returncode, 0)

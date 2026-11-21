@@ -275,6 +275,13 @@ func (h *Hub) passwordLoginRoutes(mux *http.ServeMux) {
 				writeErrCode(w, 403, code, err)
 				return
 			}
+			// Signing in writes a device token in the hub's database: a snapshot
+			// must not see it, and the sign-in succeeds again after the update.
+			if !h.quiesce.begin() {
+				writeErr(w, http.StatusServiceUnavailable, i18n.Err("hub-selfupdate.err_quiesced"))
+				return
+			}
+			defer h.quiesce.end()
 		}
 		open.ServeHTTP(w, r)
 	}))

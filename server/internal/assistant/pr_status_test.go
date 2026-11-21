@@ -423,14 +423,18 @@ func pendingPRConflict(s *Service, id string) (superviseSignal, bool) {
 	return g, ok
 }
 
-// Advance the signal queue without real sleeps or a timer racing the state changes under test.
+// Advance both the shared and recipient clocks without sleeps or a timer racing the state changes under test.
 func sendPendingPRConflicts(s *Service) {
 	b := &s.supervise
 	b.mu.Lock()
 	if b.timer != nil {
 		b.timer.Stop()
 	}
+	b.timer, b.timerAt = nil, time.Time{}
+	clear(b.told)
+	clear(b.batch)
 	for id, g := range b.pending {
+		g.batchTo, g.batchUntil = "", time.Time{}
 		g.At = time.Now().Add(-2 * time.Hour)
 		b.pending[id] = g
 	}

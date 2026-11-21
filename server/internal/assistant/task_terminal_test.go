@@ -173,7 +173,14 @@ func TestTaskTerminalReviewOnlyAfterAcceptance(t *testing.T) {
 				}
 			}
 			review()
-			if scenario.optIn {
+			if scenario.userCheck {
+				review()
+				got := todoNow(s, task.ID)
+				if got.DoneAt != nil || got.Supervision.state(got) != reviewUserCheck || askOf(s, task.ID) == nil {
+					t.Fatalf("personal verification closed or cleaned up a waiting task: %+v", got)
+				}
+			}
+			if scenario.optIn && !scenario.userCheck {
 				before := feedKinds(s, "conv1")
 				review()
 				if after := feedKinds(s, "conv1"); after != before {

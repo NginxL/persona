@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -118,6 +119,50 @@ class AssistantOwnCardShotsTest {
             val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
             val font = if (big) "large" else "default"
             File(out(), "title-$font-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream()
+                .use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        }
+    }
+
+    @Test fun ownerProposalExactReplyShots() {
+        val proposal = bash.copy(toolName = "mcp__persona__mail_send", toolTitle = "Send mail",
+            toolInput = buildJsonObject {
+                put("to", JsonPrimitive("me@example.com"))
+                put("subject", JsonPrimitive("Weekly report"))
+                put("body", JsonPrimitive("The draft is ready for review."))
+            }, ownerProposal = true, approvalBatchId = "batch-demo", approvalItemId = "item-mail-1",
+            ownerApprovalPhrases = listOf("发", "同意"), noExpiry = true, alwaysHonored = false)
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var large by mutableStateOf(false)
+        var allow = ""
+        var deny = ""
+        var reply = ""
+        var always = ""
+        rule.setContent {
+            allow = stringResource(R.string.chat_request_allow)
+            deny = stringResource(R.string.chat_request_deny)
+            reply = stringResource(R.string.chat_request_owner_reply, "发")
+            always = stringResource(persona.core.designsystem.R.string.designsystem_core_always_allow_session)
+            val configuration = Configuration(LocalConfiguration.current).apply { fontScale = if (large) 2f else 1f }
+            val density = Density(LocalDensity.current.density, if (large) 2f else 1f)
+            CompositionLocalProvider(LocalConfiguration provides configuration, LocalDensity provides density) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                    Column(Modifier.testTag("shot").width(400.dp).background(PersonaTheme.palette.background)) {
+                        InteractionPanel(listOf(proposal), null, 700.dp, null, emptySet(), { _, _ -> }, null, {})
+                    }
+                }
+            }
+        }
+        for (s in AppStyle.entries) for (d in listOf(false, true)) for (big in listOf(false, true)) {
+            style = s; dark = d; large = big
+            rule.waitForIdle()
+            rule.onNodeWithText(reply, useUnmergedTree = true).assertExists()
+            rule.onNodeWithText(allow, useUnmergedTree = true).assertExists()
+            rule.onNodeWithText(deny, useUnmergedTree = true).assertExists()
+            rule.onNodeWithText(always, useUnmergedTree = true).assertDoesNotExist()
+            val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+            val font = if (big) "large" else "default"
+            File(out(), "owner-proposal-$font-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream()
                 .use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
         }
     }

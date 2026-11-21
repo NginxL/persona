@@ -86,19 +86,23 @@ export function recordTeam(mid: string, sid: string, v: TeamRecord) {
 }
 
 // ── a link to a worker (App: `/s/<mid>/<worker>`, `/t/…/<worker>`, a worker's card): its lead's page, asked to show it ──
-const asks = new Map<string, string>();
+interface TeamAsk {
+  worker: string;
+  at?: string;
+}
+const asks = new Map<string, TeamAsk>();
 const askListeners = new Set<() => void>();
 const tellAsks = () => askListeners.forEach((l) => l());
 
 /** The lead's page is asked to open its Team panel on `worker` (a link to the worker); returns the lead, to open. */
-export function askTeamWorker(mid: string, lead: string, worker: string): string {
-  asks.set(leadKey(mid, lead), worker);
+export function askTeamWorker(mid: string, lead: string, worker: string, at?: string): string {
+  asks.set(leadKey(mid, lead), { worker, at });
   tellAsks();
   return lead;
 }
 
 /** The worker the lead's page was asked to show, until it did (`doneTeamAsk`). */
-export function useTeamAsk(mid: string, sid: string): string | undefined {
+export function useTeamAsk(mid: string, sid: string): TeamAsk | undefined {
   const read = () => asks.get(leadKey(mid, sid));
   return useSyncExternalStore(
     (l) => {
@@ -161,7 +165,7 @@ export function useTeamReveal(mid: string, sid: string, session: Session | undef
     const before = last && !(last.workers === 0 && now - last.since < TEAM_GONE_MS) ? last.workers : undefined;
     if (asked) doneTeamAsk(mid, sid);
     // the last worker gone: the team ends (the panel closes) only once none came back for a moment
-    if (workers === 0 && before !== undefined && before > 0) {
+    if (!asked && workers === 0 && before !== undefined && before > 0) {
       gone.current = window.setTimeout(() => {
         seen.current = { lead, workers: 0, since: 0 };
         if (!teamPanelOf(getPanel(), mid, sid)) return;
@@ -171,7 +175,7 @@ export function useTeamReveal(mid: string, sid: string, session: Session | undef
       return;
     }
     seen.current = { lead, workers, since };
-    if (teamReveal({ workers, before, record: teamRecord(mid, sid), wide, asked: Boolean(asked) }) !== "open") return;
+    if (!asked && teamReveal({ workers, before, record: teamRecord(mid, sid), wide, asked: false }) !== "open") return;
     // after the page's other effects: App keeps the panel of the session being left and may bring back this lead's own
     // (lib/panel-memory.ts), which an arrival's open does not replace; a link or a team starting does
     const arriving = !asked && before === undefined;
@@ -180,7 +184,9 @@ export function useTeamReveal(mid: string, sid: string, session: Session | undef
       const open = teamPanelOf(shown, mid, sid);
       if (arriving && shown && !open) return;
       recordTeam(mid, sid, "open");
-      if (!open || (asked && open.worker !== asked)) openPanel({ kind: "team", mid, sid, worker: asked ?? open?.worker });
+      if (!open || asked && (open.worker !== asked.worker || open.at !== asked.at)) {
+        openPanel({ kind: "team", mid, sid, worker: asked?.worker, at: asked?.at });
+      }
     });
     // the panel's own state is decided once per arrival and count: a later resize or panel change does not reopen it
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -94,3 +94,45 @@ test('persona-antigravity-runtime hashes companion, mcp-proxy, lib and runtime-s
   assert.equal(fromStore.hash, hash)
   assert.equal(fromStore.store, realpathSync(store))
 })
+
+test('persona-opencode-runtime hashes index, companion, lib and runtime-sdk identically across checkout and store', (t) => {
+  const store = mkdtempSync(join(tmpdir(), 'jrt-pkg-'))
+  const checkout = mkdtempSync(join(tmpdir(), 'jrt-co-'))
+  t.after(() => {
+    rmSync(store, { recursive: true, force: true })
+    rmSync(checkout, { recursive: true, force: true })
+  })
+  for (const f of [
+    'opencode/package.json',
+    'opencode/index.js',
+    'opencode/companion.mjs',
+    'opencode/lib/companion.js',
+    'opencode/install.mjs',
+    'runtime-sdk/package.json',
+    'runtime-sdk/index.js',
+    'runtime-sdk/lib/runtime.js',
+  ]) {
+    mkdirSync(join(checkout, f, '..'), { recursive: true })
+    writeFileSync(join(checkout, f), f)
+  }
+  const files = readShipped(checkout, PACKAGES['persona-opencode-runtime'])
+  assert.deepEqual(files.map((f) => f.path), [
+    'opencode/package.json',
+    'opencode/index.js',
+    'opencode/companion.mjs',
+    'opencode/lib/companion.js',
+    'runtime-sdk/package.json',
+    'runtime-sdk/index.js',
+    'runtime-sdk/lib/runtime.js',
+  ])
+  const hash = packageHash(files)
+  const fromCheckout = selfPackage(pathToFileURL(join(checkout, 'opencode', 'companion.mjs')).href, 'persona-opencode-runtime')
+  assert.equal(fromCheckout.name, 'persona-opencode-runtime')
+  assert.equal(fromCheckout.hash, hash)
+  assert.equal(fromCheckout.store, undefined)
+  installCurrent(store, hash, files)
+  const fromStore = selfPackage(pathToFileURL(join(store, 'current', 'opencode', 'companion.mjs')).href, 'persona-opencode-runtime')
+  assert.equal(fromStore.name, 'persona-opencode-runtime')
+  assert.equal(fromStore.hash, hash)
+  assert.equal(fromStore.store, realpathSync(store))
+})

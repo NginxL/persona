@@ -23,7 +23,7 @@ describe("agentName", () => {
   it("names the known agents by their product", () => {
     expect(["claude", "codex", "opencode", "pi", "gemini", "cursor", "trae"].map((a) => agentName(a)))
       .toEqual(["Claude Code", "Codex", "opencode", "pi", "Gemini CLI", "Cursor", "TRAE"]);
-    expect(agentName("traex")).toBe("TRAEX");
+    expect(["traex", "traecli", "TRAE CLI"].map((a) => agentName(a))).toEqual(Array(3).fill("TRAE CLI"));
     expect(agentName("")).toBe("Claude Code");
   });
 
@@ -57,7 +57,7 @@ describe("sessionAgent", () => {
 
   it("names a session's agent by its product, its provider's label, never the engine's id", () => {
     expect(sessionAgentName({ source_kind: "runtime", agent: "paseo", agent_label: "Grok", launcher: "grok" })).toBe("Grok");
-    expect(sessionAgentName({ source_kind: "runtime", agent: "paseo", agent_label: "TRAE CLI", launcher: "traecli" })).toBe("TRAE");
+    expect(sessionAgentName({ source_kind: "runtime", agent: "paseo", agent_label: "TRAE CLI", launcher: "traecli" })).toBe("TRAE CLI");
     expect(sessionAgentName({ source_kind: "runtime", agent: "paseo", launcher: "kimi" })).toBe("kimi");
     expect(sessionAgentName({ source_kind: "runtime", agent: "claude", launcher: "my-claude" })).toBe("Claude Code");
   });

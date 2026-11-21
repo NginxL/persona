@@ -98,7 +98,7 @@ func TestBotSourceReportLongReplyRetriesSameAttachment(t *testing.T) {
 		t.Fatalf("enable full replies: HTTP %d", code)
 	}
 	const source = "om_long_report"
-	w.h.takeAISource(askChat, source)
+	w.h.takeAISource(askChat, source, "")
 
 	var uploads atomic.Int32
 	var loseResponse atomic.Bool
@@ -185,7 +185,7 @@ func TestBotSourceReportLongReplyRetriesAfterBotRestart(t *testing.T) {
 		t.Fatalf("enable full replies: HTTP %d", code)
 	}
 	const source = "om_restart_report"
-	w.h.takeAISource(askChat, source)
+	w.h.takeAISource(askChat, source, "")
 
 	var replies atomic.Int32
 	api := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {

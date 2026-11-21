@@ -46,6 +46,7 @@ const fields: { [T in NativeType]: readonly (keyof Omit<Extract<Wire.Component, 
   comment_thread: ["title", "comments", "resolved", "reply"], composer: ["name", "placeholder", "value", "buttons"],
   image: ["src", "alt", "caption", "aspect", "fit", "no_zoom"], grid: ["tiles", "max_columns"], carousel: ["title", "tiles", "width"],
   graph: ["nodes", "edges", "layout", "direction", "selected", "folded"],
+  scene: ["alt", "caption", "poster", "camera", "shapes", "labels", "pins"],
 };
 // Length-prefixed segments stay unambiguous without repeatedly JSON-escaping ancestor paths.
 function pathPart(parent: string, ...segments: string[]): string {

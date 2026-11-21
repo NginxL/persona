@@ -58,7 +58,7 @@ import PersonaWire
         #expect(model.assistantConversations.map(\.title) == ["Home chat"])
         #expect(agents(model, stored: narrowed) == ["Home agent"])
 
-        model.selectHub("g1") // the Persona page's menu, the Inbox or Settings › hub
+        model.selectHub("g1") // the sidebar's assistant switcher, the Inbox or Settings › hub
         #expect(model.hub?.group == "g1")
         #expect(model.assistantConversations.map(\.title) == ["Work chat"])
         #expect(agents(model, stored: narrowed) == ["Work agent"], "the Agents list stayed on the hub before")

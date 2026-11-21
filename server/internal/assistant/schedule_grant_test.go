@@ -109,7 +109,7 @@ func numberItems(items []proto.Item) {
 // and what the tool said.
 func (g *grantFixture) plan(machine, session, cwd string, extra ...map[string]any) (string, string) {
 	g.t.Helper()
-	task := map[string]any{"title": "Update dependencies", "prompt": "Update and open a PR",
+	task := map[string]any{"title": "Update dependencies", "prompt": "Update and open a PR", "role": "worker",
 		"machine": "box", "cwd": cwd, "permission": "bypassPermissions", "why": "the repository is on box", "schedule": "other",
 		"schedule_title": "Forged", "schedule_basis": "forged"}
 	for _, e := range extra {

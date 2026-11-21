@@ -1,12 +1,12 @@
 {
   "name": "persona-opencode-runtime",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "Persona runtime for opencode: the sessions of an opencode server in the Persona apps (built on persona-runtime-sdk).",
+  "description": "Persona runtime for opencode: server plugin and standalone ACP companion for Agent and Assistant sessions (built on persona-runtime-sdk).",
   "license": "MIT",
   "type": "module",
   "main": "./index.js",
-  "files": ["index.js", "lib/*.js"],
+  "files": ["index.js", "companion.mjs", "lib/*.js"],
   "scripts": {
     "test": "node --test test/*.test.js"
   },

@@ -22,6 +22,8 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
     /// Set once started: the todo the task is, and why its agent did not start.
     var todoID: String?
     var error: String?
+    /// The existing to-do this plan carries on, if any. Read-only.
+    var continues: String?
     /// What the task will be held to, shown on the plan card before Start (docs/assistant/unified-entry.md "Briefs").
     /// Read-only: it is never sent back (`encode(to:)` leaves it out), and one that does not decode is as if there were none.
     var brief: TaskBrief?
@@ -34,7 +36,7 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case title, prompt, machine, cwd, launcher, model, permission, ultracode, readonly, why, error, brief, schedule
-        case todoID = "todo_id", scheduleTitle = "schedule_title", tier
+        case todoID = "todo_id", scheduleTitle = "schedule_title", tier, continues
     }
 
     init(title: String, prompt: String, machine: String, cwd: String, launcher: String? = nil, model: String? = nil,
@@ -72,6 +74,7 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
         why = try c.decodeIfPresent(String.self, forKey: .why)
         todoID = try c.decodeIfPresent(String.self, forKey: .todoID)
         error = try c.decodeIfPresent(String.self, forKey: .error)
+        continues = try c.decodeIfPresent(String.self, forKey: .continues)
         brief = (try? c.decodeIfPresent(TaskBrief.self, forKey: .brief)) ?? nil
         schedule = (try? c.decodeIfPresent(String.self, forKey: .schedule)).flatMap { $0?.isEmpty == false ? $0 : nil }
         scheduleTitle = (try? c.decodeIfPresent(String.self, forKey: .scheduleTitle)) ?? nil

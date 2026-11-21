@@ -1,4 +1,4 @@
-Submit a review on a GitHub pull request as the user: approve it, request changes, or comment. The user approves it on their phone first (an approval says so in bold), unless their rules allow it. Only approve when the user has said to.
+Submit a review on a GitHub pull request as the user: approve it, request changes, or comment. The user approves it on their phone first (an approval says so in bold), unless their rules allow it. Only approve when the user has said to.{{template "shared/mcp_language" .}}
 
 ```json
 {

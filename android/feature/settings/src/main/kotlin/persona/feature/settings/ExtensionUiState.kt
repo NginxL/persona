@@ -581,10 +581,11 @@ internal class ExtensionViewModel(
         val action = control.action
         val values = (if (action.submit) state.value.values else emptyMap()) + action.values.orEmpty() + (control.name to value)
         val result = api.uiAction(extension, ui, action.id, context, currentState(), values)
+        val nextView = result.view
         when {
-            result.view != null -> mutable.update { s ->
-                val fresh = ExtensionViewText.fields(result.view)
-                s.copy(view = result.view, values = fresh + s.values.filterKeys { it in fresh }, error = null, drawnAt = now())
+            nextView != null -> mutable.update { s ->
+                val fresh = ExtensionViewText.fields(nextView)
+                s.copy(view = ExtensionCodeReview.keepLoaded(s.view, nextView), values = fresh + s.values.filterKeys { it in fresh }, error = null, drawnAt = now())
             }
             result.items.isNotEmpty() -> mutable.update { s -> s.copy(view = s.view?.let { ExtensionCodeReview.patchView(it, result.items) }) }
             result.toast == null && result.openUrl == null && result.push == null && !result.pop -> redraw()
@@ -595,10 +596,12 @@ internal class ExtensionViewModel(
 
     /** Draws the view again without holding the page (a control's answer said nothing). */
     private suspend fun redraw() {
-        val view = runCatching { api.renderUi(extension, ui, context, currentState()) }.getOrNull() ?: return
+        val view = try { api.renderUi(extension, ui, context, currentState()) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { return }
         mutable.update { s ->
             val fresh = ExtensionViewText.fields(view)
-            s.copy(view = view, values = fresh + s.values.filterKeys { it in fresh }, drawnAt = now())
+            s.copy(view = ExtensionCodeReview.keepLoaded(s.view, view), values = fresh + s.values.filterKeys { it in fresh }, drawnAt = now())
         }
     }
 
@@ -629,7 +632,7 @@ internal class ExtensionViewModel(
                 mutable.update { s ->
                     // What was typed stays; the view's new fields come in with its values.
                     val fresh = ExtensionViewText.fields(view)
-                    s.copy(view = view, values = fresh + s.values.filterKeys { it in fresh }, error = null, drawnAt = now())
+                    s.copy(view = ExtensionCodeReview.keepLoaded(s.view, view), values = fresh + s.values.filterKeys { it in fresh }, error = null, drawnAt = now())
                 }
             }
             ExtensionActionOutcome(result.toast?.takeIf { it.isNotBlank() }, result.openUrl?.takeIf(opens), push = result.push, pop = result.pop)
@@ -670,8 +673,9 @@ internal class ExtensionViewModel(
             val current = state.value
             val result = api.uiAction(extension, ui, action.id, context, current.view?.state ?: initialState,
                 ExtensionViewText.sent(action, current.values, values))
+            val nextView = result.view
             when {
-                result.view != null -> mutable.update { it.copy(view = result.view, values = ExtensionViewText.fields(result.view), error = null, drawnAt = now()) }
+                nextView != null -> mutable.update { it.copy(view = ExtensionCodeReview.keepLoaded(it.view, nextView), values = ExtensionViewText.fields(nextView), error = null, drawnAt = now()) }
                 // UI version 5: components in place, or lines for a diff, say enough
                 result.items.isNotEmpty() -> mutable.update { s -> s.copy(view = s.view?.let { ExtensionCodeReview.patchView(it, result.items) }) }
                 result.lines != null -> Unit

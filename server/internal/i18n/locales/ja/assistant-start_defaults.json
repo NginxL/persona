@@ -1,0 +1,4 @@
+{
+  "alias_match_conflict": "when と applies_when が一致しません。一致条件は1つだけ指定してください。",
+  "alias_candidates_conflict": "presets と candidates が一致しません。候補リストは1つだけ指定してください。"
+}

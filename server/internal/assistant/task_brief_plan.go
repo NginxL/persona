@@ -124,6 +124,7 @@ func (s *Service) planBriefs(ctx context.Context, machine, conversation string, 
 			if t.EstimateSource == "" {
 				if brief.EstimateSourceNow != "" {
 					t.ExpectMinutes, t.EstimateSource = automaticEstimate(brief.ExpectNow, brief.EstimateSourceNow)
+					t.EstimateEvidence = brief.EstimateEvidenceNow
 				} else {
 					t.ExpectMinutes, t.EstimateSource = automaticEstimate(0, "")
 				}
@@ -131,7 +132,6 @@ func (s *Service) planBriefs(ctx context.Context, machine, conversation string, 
 				t.ExpectMinutes, t.EstimateSource = automaticEstimate(t.ExpectMinutes, t.EstimateSource)
 			}
 			t.DoneWhen = brief.Criteria
-			brief.ExpectNow, brief.EstimateSourceNow = t.ExpectMinutes, t.EstimateSource
 			t.Brief = &brief
 			continue
 		}
@@ -140,8 +140,13 @@ func (s *Service) planBriefs(ctx context.Context, machine, conversation string, 
 			origin = &o
 		}
 		rec := *origin
-		t.ExpectMinutes, t.EstimateSource = automaticEstimate(t.ExpectMinutes, t.EstimateSource)
+		if t.EstimateCalibration {
+			s.estimateNewPlanTask(ctx, conversation, t)
+		} else {
+			t.ExpectMinutes, t.EstimateSource = automaticEstimate(t.ExpectMinutes, t.EstimateSource)
+		}
 		rec.ID, rec.CreatedAt = "brief_"+randomHex(8), time.Now().UTC()
+		rec.EstimateEvidence = t.EstimateEvidence
 		rec.Goal, rec.DoneWhen, rec.ExpectMinutes, rec.EstimateSource, rec.OutOfBounds = firstNonEmpty(t.Goal, t.Title), t.DoneWhen, t.ExpectMinutes, t.EstimateSource, t.OutOfBounds
 		if rec.StartedBy != briefByOwner {
 			rec.Reason = t.StartedWhy
@@ -192,7 +197,8 @@ func (s *Service) briefStarted(ctx context.Context, p *TaskPlan, t *PlanTask, to
 	}
 	if briefID == "" {
 		rec := briefRecord{StartedBy: briefByUnknown, Conversation: p.Conversation, Goal: firstNonEmpty(t.Goal, t.Title),
-			DoneWhen: t.DoneWhen, ExpectMinutes: t.ExpectMinutes, EstimateSource: t.EstimateSource, OutOfBounds: t.OutOfBounds}
+			DoneWhen: t.DoneWhen, ExpectMinutes: t.ExpectMinutes, EstimateSource: t.EstimateSource,
+			EstimateEvidence: t.EstimateEvidence, OutOfBounds: t.OutOfBounds}
 		if t.Brief != nil && !t.Brief.Reconstructed && t.Continues == "" {
 			rec = t.Brief.briefRecord
 		}
@@ -205,17 +211,22 @@ func (s *Service) briefStarted(ctx context.Context, p *TaskPlan, t *PlanTask, to
 		briefID = v.ID
 	}
 	roundID := p.ID + "/" + todo.ID + "@" + startedAt.Format(time.RFC3339Nano)
-	_, _, err := s.changeBrief(ctx, briefID, func(tb *taskBrief) bool {
+	_, changed, err := s.changeBrief(ctx, briefID, func(tb *taskBrief) bool {
 		for _, e := range tb.st.Log {
 			if e.Kind == briefEventDispatch && e.RoundID == roundID {
 				return false
 			}
 		}
 		tb.st.Log = append(tb.st.Log, BriefEvent{At: startedAt, Kind: briefEventDispatch, Todo: todo.ID,
-			Source: "task_plan", PlanID: p.ID, RoundID: roundID, ExpectMinutes: t.ExpectMinutes, EstimateSource: t.EstimateSource})
+			Source: "task_plan", PlanID: p.ID, RoundID: roundID, ExpectMinutes: t.ExpectMinutes,
+			EstimateSource: t.EstimateSource, EstimateEvidence: t.EstimateEvidence})
 		return true
 	})
 	if err != nil {
 		s.logf("task %s: dispatch record: %v", todo.ID, err)
+		return
+	}
+	if changed && t.EstimateCalibration {
+		s.estimateDispatch(ctx, p, t, todo.ID, briefID, roundID, startedAt)
 	}
 }

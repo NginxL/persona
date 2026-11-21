@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -95,8 +96,9 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 		n.gates() // the proxy goes by this Node's config from now on (a resident node's next connection)
 	}
 	analysisCommand := normalizeLarkCommand(command, cwd, cfg.Gates)
-	v := classifyLark(command, cfg.Gates, cwd, n.larkCLIRisk(cfg))
-	if n.assistantOrigin(session) == originInbox && inboxLarkOutbound(cfg, v, analysisCommand) {
+	v := classifyLarkWith(command, cfg.Gates, cwd, n.larkCLIRisk(cfg), n.larkLoginPATH)
+	origin, launchCwd := n.assistantOriginCwd(session)
+	if origin == originInbox && inboxLarkOutbound(cfg, v, analysisCommand) {
 		return "deny", inboxLarkRefusal, nil
 	}
 	if v.deny != "" {
@@ -130,6 +132,16 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	}
 	safe := len(v.calls) > 0 && classified
 	boundary := slices.ContainsFunc(v.calls, func(c larkCall) bool { return !larkBypassSafe(c) })
+	// This exception is deliberately default-only. Check it before both the mixed-command and ordinary read paths:
+	// plan and bypass retain their normal permission flow even when every filter is already known to classifyLark.
+	if origin == originInbox && safe && len(v.calls) == 1 && launchCwd != "" &&
+		realPath(filepath.Clean(cwd)) == realPath(filepath.Clean(launchCwd)) &&
+		larkDecision(cfg, v.calls[0]) == "allow" && larkReadFormattingPipeline(command, cfg.Gates) {
+		if mode == proto.ModeDefault {
+			return "allow", "读操作", nil
+		}
+		return "", "", nil
+	}
 	if v.other {
 		// A write through a gate whose credentials are at the proxy goes there only as a call read off the command and
 		// let through here: in a command the gate cannot follow it would be refused after the phone said yes.

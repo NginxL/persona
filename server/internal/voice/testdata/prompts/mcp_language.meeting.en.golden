@@ -1,0 +1,19 @@
+[
+  {
+    "type": "function",
+    "name": "delegate_task",
+    "description": "Hand the user's question to this meeting's conversation, which is bound to this call. Calling sends it immediately, without repeating it or waiting for confirmation. The call does not return immediately: tell the user you are asking. When the meeting conversation answers, this call returns its answer, possibly after a while; then convey it briefly in your own words without adding content of your own. task is the user's question or requested work in complete sentences: the meeting conversation cannot see this voice context. Preserve the user's meaning and add nothing else.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "task"
+      ],
+      "properties": {
+        "task": {
+          "type": "string",
+          "description": "The question or work for the meeting conversation, in one or more complete sentences"
+        }
+      }
+    }
+  }
+]

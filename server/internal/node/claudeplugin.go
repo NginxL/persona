@@ -87,16 +87,31 @@ func findClaudeCLI(ctx context.Context) (claudeplugin.Claude, bool) {
 }
 
 // claudeDesktopCLIs are the Claude Code CLIs the desktop app keeps for its Code sessions, newest first:
-// <app data>/claude-code/<version>/<build>/claude.exe on Windows (measured 2026-11-16, Claude-3p); on macOS the same
-// layout without .exe, or the version directory holding it directly (not measured).
+// <app data>/claude-code/<version>/<build>/claude.exe on Windows (measured 2026-11-16, Claude-3p); on macOS either inside
+// <app data>/claude-code/<version>/<build>/claude.app/Contents/MacOS/claude (measured 2026-11-19, Claude-3p 2.1.326) or
+// directly under the build/version directory.
 func claudeDesktopCLIs(goos, home string) []string {
+	return claudeDesktopCLIsIn(goos, desktopDataDirs(goos, home))
+}
+
+func claudeDesktopCLIsIn(goos string, dirs []string) []string {
 	name := "claude"
 	if goos == "windows" {
 		name = "claude.exe"
 	}
 	var out []string
-	for _, dir := range desktopDataDirs(goos, home) {
-		for _, pattern := range []string{filepath.Join(dir, "claude-code", "*", "*", name), filepath.Join(dir, "claude-code", "*", name)} {
+	for _, dir := range dirs {
+		patterns := []string{
+			filepath.Join(dir, "claude-code", "*", "*", name),
+			filepath.Join(dir, "claude-code", "*", name),
+		}
+		if goos == "darwin" {
+			patterns = append([]string{
+				filepath.Join(dir, "claude-code", "*", "*", "claude.app", "Contents", "MacOS", name),
+				filepath.Join(dir, "claude-code", "*", "claude.app", "Contents", "MacOS", name),
+			}, patterns...)
+		}
+		for _, pattern := range patterns {
 			m, _ := filepath.Glob(pattern)
 			out = append(out, m...)
 		}

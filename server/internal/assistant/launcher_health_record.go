@@ -496,7 +496,7 @@ var startRequestErr = lazyre.New(`^directory .* does not exist$|^invalid launche
 // An engine with no provider of the launcher's kind (launcher_kind_missing, #8140) is the request's: the launcher is
 // not broken, and its check, which runs it on the command line, would pass and clear any record of it.
 var startRefusalCodes = []string{"codex_needs_prompt", "codex_resume", "codex_read_only", "orca_resume", "open_elsewhere", "runtime_session",
-	"identity_conflict", "ultracode_unsupported", "readonly_unsupported", proto.CodeDirectoryUntypable, proto.CodeNodeOutdated,
+	proto.CodeResumeUnknown, "identity_conflict", "ultracode_unsupported", "readonly_unsupported", proto.CodeDirectoryUntypable, proto.CodeNodeOutdated,
 	proto.CodeLauncherKindMissing}
 
 // startRefused: the start failed on the request, not the launcher: the node checked it and said no before running

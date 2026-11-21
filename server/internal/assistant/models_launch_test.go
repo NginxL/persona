@@ -59,7 +59,7 @@ func TestModelLaunchJSONIsDerivedAndReadOnly(t *testing.T) {
 			item["launch"] = launch
 		}
 		sample = append(sample, item)
-		want := map[string]string{"assistant": "headless", "agent.new": "engine", "inbox.agent": "headless", "lark.agent": "headless", purposeSupervise: "headless", purposeMeetingRoom: "headless"}[p["id"].(string)]
+		want := map[string]string{"assistant": "headless", "agent.new": "engine", "inbox.agent": "headless", "lark.agent": "headless", purposeMain: "headless", purposeSupervise: "headless", purposeMeetingRoom: "headless"}[p["id"].(string)]
 		if want == "" {
 			if _, ok := p["launch"]; ok {
 				t.Fatalf("non-launcher serialized launch: %v", p)

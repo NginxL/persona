@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -118,5 +119,32 @@ class SideSessionsShotsTest {
             save(rule.onNode(isDialog()).captureToImage().asAndroidBitmap(), "menu-$name")
         }
         assertEquals(List(AppStyle.entries.size * 2) { SessionKey("macbook", "work") }, opened)
+    }
+
+    @Test fun reorderingSidesMidPressDoesNotOpenTheNewlyPromotedFirstRow() {
+        val first = side("s1", "First branch session", "working", "working", "2026-11-15T10:00:00Z")
+        val second = side("s2", "Second branch session", "working", "working", "2026-11-15T09:59:00Z")
+        var currentSides by mutableStateOf(listOf(first, second))
+        val opened = mutableListOf<SessionKey>()
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                ChatSideSessionsSheet(
+                    sides = currentSides,
+                    rows = listOf(parent) + currentSides,
+                    rollup = sideRollup(parent, currentSides, listOf(parent) + currentSides),
+                    onDismiss = {},
+                    onOpen = { opened += it },
+                )
+            }
+        }
+        rule.waitForIdle()
+        // Touch down on Row #1 ("First branch session"), then reorder [s2, s1] before lifting the finger
+        val node = rule.onNodeWithText("First branch session")
+        node.performTouchInput { down(center) }
+        rule.runOnIdle { currentSides = listOf(second, first) }
+        rule.waitForIdle()
+        node.performTouchInput { up() }
+        rule.waitForIdle()
+        assertEquals("tapping #1 must never misroute to s2 when s2 jumps to #1", emptyList<SessionKey>(), opened.filter { it == second.key })
     }
 }

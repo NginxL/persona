@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -168,8 +169,21 @@ func TestNewAgentListOnPaseoIsItsProviders(t *testing.T) {
 	if got := names(""); !slices.Equal(got, []string{"claude-sub", "codex-cpa", "krcc"}) {
 		t.Fatalf("New Agent on pbox lists %v", got)
 	}
-	if got := names("?purpose=assistant"); slices.Contains(got, "claude-sub") || !slices.Contains(got, "krcc") {
-		t.Fatalf("the main chat's menu lists %v", got)
+	query := "?purpose=assistant&host=paseo"
+	live := names(query)
+	if slices.Contains(live, "claude-sub") || !slices.Contains(live, "krcc") ||
+		!slices.Contains(live, "claude") || !slices.Contains(live, "deepseek-gw") {
+		t.Fatalf("the main chat's machine-wide menu lists %v", live)
+	}
+	_ = s.zshrcLaunchers(ctx, true)
+	old := launcherSyncTimeout
+	launcherSyncTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { launcherSyncTimeout = old })
+	f.mu.Lock()
+	f.slowLaunchers = map[string]bool{"pbox": true}
+	f.mu.Unlock()
+	if got := names(query); !slices.Equal(got, live) {
+		t.Fatalf("the main chat's menu during a shell timeout lists %v, want %v", got, live)
 	}
 	if f.agents != 0 {
 		t.Fatal("listing started something")

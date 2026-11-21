@@ -95,22 +95,24 @@ func SetProxy(path, raw string) error {
 	return Update(path, func(c *Config) error { c.Proxy = raw; return nil })
 }
 
+// proxySettings selects the proxy and bypass list used for both dialing and route memory.
+func proxySettings(c *Config) (raw, noProxy string) {
+	env := httpproxy.FromEnvironment() // https_proxy and no_proxy, lower case first, as Go's net/http reads them
+	return cmp.Or(c.Proxy, env.HTTPSProxy, os.Getenv("all_proxy"), os.Getenv("ALL_PROXY")), env.NoProxy
+}
+
 // proxied is the proxy c's candidates go through and those candidates, each marked KindProxy: link.json's proxy,
 // else HTTPS_PROXY or ALL_PROXY (either case). None when there is no proxy, it is off, or NO_PROXY exempts every
 // candidate (as for Go's net/http, localhost and loopback addresses never use one). LAN addresses go last: a proxy
 // rarely reaches them. An environment proxy Persona cannot use (SOCKS, say) is left to the programs it is for; one in
 // link.json is the proxy route's error, and direct candidates are tried all the same.
 func proxied(c *Config) (*url.URL, []Endpoint, error) {
-	env := httpproxy.FromEnvironment() // https_proxy and no_proxy, lower case first, as Go's net/http reads them
-	raw, fromEnv := c.Proxy, c.Proxy == ""
-	if fromEnv {
-		raw = cmp.Or(env.HTTPSProxy, os.Getenv("all_proxy"), os.Getenv("ALL_PROXY"))
-	}
+	raw, noProxy := proxySettings(c)
 	if raw == "" || raw == ProxyOff {
 		return nil, nil, nil
 	}
 	// Only NO_PROXY's answer is wanted here: the stand-in keeps the real URL (and its credentials) out of httpproxy.
-	use := (&httpproxy.Config{HTTPSProxy: "http://proxy.invalid", NoProxy: env.NoProxy}).ProxyFunc()
+	use := (&httpproxy.Config{HTTPSProxy: "http://proxy.invalid", NoProxy: noProxy}).ProxyFunc()
 	var eps, lan []Endpoint
 	for _, ep := range ranked(c.Endpoints) {
 		u, err := url.Parse(ep.URL)
@@ -131,7 +133,7 @@ func proxied(c *Config) (*url.URL, []Endpoint, error) {
 	}
 	p, err := ParseProxy(raw)
 	switch {
-	case err != nil && fromEnv:
+	case err != nil && c.Proxy == "":
 		return nil, nil, nil
 	case err != nil:
 		return nil, nil, err

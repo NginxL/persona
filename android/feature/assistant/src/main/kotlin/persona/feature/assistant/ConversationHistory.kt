@@ -10,11 +10,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
+import persona.core.contracts.api.AssistantConfigUpdate
 import persona.core.contracts.api.AssistantManagement
 import persona.core.contracts.api.AssistantRepository
+import persona.core.contracts.api.ConversationTagFilters
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.domain.ConversationTitle
@@ -47,6 +53,11 @@ internal class ConversationHistory(private val management: AssistantManagement?,
     /** The conversation the rename dialog is open on. */
     var renaming: Session? by mutableStateOf(null)
     var archivedOpen: Boolean by mutableStateOf(false)
+    /** Whether the controlled filter bar shows its add/remove/reset/done controls. */
+    var editingTagFilters: Boolean by mutableStateOf(false)
+    var tagFiltersBusy: Boolean by mutableStateOf(false)
+        private set
+    private val tagFilterLock = Mutex()
 
     /** The archived conversations to show: the last read, less those being brought back and those [open] lists again. */
     fun shownArchived(open: Set<SessionKey>): List<Session> =
@@ -79,7 +90,54 @@ internal class ConversationHistory(private val management: AssistantManagement?,
                 .takeIf { it.isNotEmpty() }?.let { tagEdits = tagEdits - it }
         }
         val selected = activeTag
-        if (selected != null && tagged(sessions).none { it.tags?.contains(selected) == true }) activeTag = null
+        if (selected != null && !repository.assistant.value.conversationTagFilters.customized &&
+            tagged(sessions).none { it.tags?.contains(selected) == true }) activeTag = null
+    }
+
+    private fun clearRemovedSelection(entries: List<String>?) {
+        if (entries != null && activeTag != null && activeTag !in entries) activeTag = null
+    }
+
+    /** Optimistically saves the exact entries/order; null resets to automatic. Failure restores and reloads the snapshot. */
+    suspend fun saveConversationTagFilters(entries: List<String>?): Result<Unit> = tagFilterLock.withLock {
+        val api = management ?: return@withLock Result.failure(UnsupportedOperationException("Conversation tag filters unavailable"))
+        val before = repository.assistant.value.conversationTagFilters
+        if (!before.supported) return@withLock Result.failure(UnsupportedOperationException("Conversation tag filters unavailable"))
+        entries?.let(::conversationTagFiltersProblem)?.let { problem ->
+            return@withLock Result.failure(IllegalArgumentException("Conversation tag filters are invalid: $problem"))
+        }
+        val normalized = entries?.let(::normalizeConversationTags)
+        if (before.entries == normalized) return@withLock Result.success(Unit)
+        val selectedBefore = activeTag
+        val optimistic = ConversationTagFilters(normalized)
+        tagFiltersBusy = true
+        var update: suspend (ConversationTagFilters) -> Unit = {}
+        try {
+            update = repository.conversationTagFiltersUpdater()
+            update(optimistic)
+            clearRemovedSelection(normalized)
+            val answer = api.updateConfig(AssistantConfigUpdate(conversationTagFilters = optimistic))
+            if (!answer.conversationTagFilters.supported) {
+                throw UnsupportedOperationException("Hub does not support conversation tag filters")
+            }
+            update(answer.conversationTagFilters)
+            clearRemovedSelection(answer.conversationTagFilters.entries)
+            Result.success(Unit)
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable) {
+                update(before)
+                if (selectedBefore != null && activeTag == null) activeTag = selectedBefore
+                assistantAttempt { repository.refresh() }
+            }
+            throw cancelled
+        } catch (error: Exception) {
+            update(before)
+            if (selectedBefore != null && activeTag == null) activeTag = selectedBefore
+            assistantAttempt { repository.refresh() }
+            Result.failure(error)
+        } finally {
+            tagFiltersBusy = false
+        }
     }
 
     /** Replaces one conversation's tags optimistically; a refusal restores the edit it superseded. */
@@ -153,7 +211,7 @@ internal fun rememberConversationHistory(management: AssistantManagement?, repos
 @Composable
 internal fun ConversationHistoryDialogs(
     history: ConversationHistory, conversations: List<Session>, scope: CoroutineScope, onOpen: (SessionKey) -> Unit,
-    notice: (String) -> Unit, failure: (Exception) -> Unit,
+    notice: (String) -> Unit, failure: (Exception) -> Unit, customizedTagFilters: Boolean = false,
 ) {
     val resources = androidx.compose.ui.platform.LocalResources.current
     val haptics = rememberHaptics()
@@ -163,7 +221,7 @@ internal fun ConversationHistoryDialogs(
         (conversations + history.shownArchived(open)).distinctBy { it.key }
     }
     LaunchedEffect(history, open) { history.loadArchived() }
-    LaunchedEffect(history, known, history.tagEdits) { history.settle(known) }
+    LaunchedEffect(history, known, history.tagEdits, customizedTagFilters) { history.settle(known) }
     history.renaming?.let { session ->
         RenameConversationDialog(session, onDismiss = { history.renaming = null }) { title ->
             history.renaming = null

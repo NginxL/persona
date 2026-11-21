@@ -45,7 +45,7 @@ func (h *orcaHost) agentProcs(maxAge time.Duration) (map[string][]orcaProc, erro
 // orcaProc is an agent process in front in one of Orca's terminals.
 type orcaProc struct {
 	pid   int
-	agent string // claude | codex
+	agent string // claude | codex | traex
 	cwd   string
 	start time.Time // when it started (to the second; zero when unknown)
 }
@@ -78,7 +78,7 @@ func orcaPaneOf(env string) string {
 	return ""
 }
 
-// agentOfCmd: the command line runs Claude Code or Codex.
+// agentOfCmd identifies the agent from its command line.
 func agentOfCmd(argv []string) string {
 	if isClaudeCmd(argv) {
 		return "claude"
@@ -89,6 +89,8 @@ func agentOfCmd(argv []string) string {
 	switch progName(argv[0]) {
 	case "codex":
 		return "codex"
+	case traexAgent, "traecli":
+		return traexAgent
 	case "node", "bun":
 		if len(argv) > 1 && (progName(argv[1]) == "codex" || strings.Contains(filepath.ToSlash(argv[1]), "/codex/")) {
 			return "codex"
@@ -97,7 +99,7 @@ func agentOfCmd(argv []string) string {
 	return ""
 }
 
-// scanOrcaProcs lists this user's claude and codex processes in front in Orca's terminals, by pane key: not stopped,
+// scanOrcaProcs lists this user's supported agent processes in front in Orca's terminals, by pane key: not stopped,
 // in their terminal's foreground process group (a suspended or background agent is not what the terminal shows), not
 // inside a nested herdr / herdr-core. Claude first, lowest pid first within an agent (a wrapper before the program it
 // starts). Linux reads /proc; macOS asks ps twice: the command lines of all, then the environments of the agents only;
@@ -188,7 +190,7 @@ func ptyOwner(tree map[int]psNode, pid int) int {
 	return 0
 }
 
-// parseOrcaPSArgs reads `ps -o pid=,stat=,etime=,args=`: the claude / codex processes in front (stat holds "+", the
+// parseOrcaPSArgs reads `ps -o pid=,stat=,etime=,args=`: the supported agent processes in front (stat holds "+", the
 // foreground process group, and does not start with T, stopped), with their start times.
 func parseOrcaPSArgs(s string, now time.Time) map[int]orcaProc {
 	out := map[int]orcaProc{}

@@ -30,6 +30,8 @@ import persona.core.contracts.api.ExtensionDetail
 import persona.core.contracts.api.ExtensionField
 import persona.core.contracts.api.ExtensionManagement
 import persona.core.contracts.api.ExtensionSecret
+import persona.core.contracts.api.ExtensionSecretUser
+import persona.core.contracts.api.HandoffRule
 import persona.core.contracts.api.ExtensionUiPlace
 import persona.core.contracts.api.ManagerPins
 import persona.core.contracts.api.pinned
@@ -40,11 +42,14 @@ import persona.core.navigation.ExtensionMarketRoute
 import persona.core.navigation.ExtensionRoute
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import persona.core.domain.secrets.hasEnabledSecretProvider
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -176,6 +181,8 @@ fun ExtensionPage(
     }
     val api = rememberPinned(extensions, extensionPrefixes(extensionId) + listOf(listOf("extensions", "-", "catalog"),
         listOf("extensions", "-", "upgrades"), listOf("plugins", "-", "catalog"), listOf("plugins", "-", "upgrades")), owner)
+    // Provider discovery spans other extensions, but stays on this page's manager.
+    val providerApi = rememberPinned(extensions, listOf(listOf("extensions"), listOf("plugins")), owner)
     val res = LocalResources.current
     val uri = LocalUriHandler.current
     val model = remember(api, extensionId, res, owner) { ExtensionModel(api, extensionId, res, owner) }
@@ -186,6 +193,7 @@ fun ExtensionPage(
     var editingSecret by remember { mutableStateOf<ExtensionSecret?>(null) }
     var choosing by remember { mutableStateOf<Pair<ExtensionField, List<String>>?>(null) }
     var removing by remember { mutableStateOf(false) }
+    var removingRule by remember { mutableStateOf<HandoffRule?>(null) }
     // Only what a machine's row shows: live metrics would redraw the page every few seconds.
     val machineList by remember(machines) {
         (machines ?: flowOf(emptyList())).map { list -> list.map { ExtensionMachine(it.id, it.displayName, it.os, it.online, it.computer) } }.distinctUntilChanged()
@@ -229,6 +237,30 @@ fun ExtensionPage(
         ExtensionChanges.changed(extensions)
     }
     val detail = state.detail
+    var referencesAllowed by remember(providerApi) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(providerApi, detail, state.loading) {
+        referencesAllowed = null
+        providerApi.secretReferencesAvailable.distinctUntilChanged().collectLatest { supported ->
+            if (!supported) {
+                referencesAllowed = false
+                return@collectLatest
+            }
+            referencesAllowed = hasEnabledSecretProvider(providerApi)
+            // Local writes and completed hub operations invalidate the enabled-provider half of the gate too.
+            providerApi.changes.collect { referencesAllowed = hasEnabledSecretProvider(providerApi) }
+        }
+    }
+    suspend fun recheckReferences(): Boolean {
+        val allowed = try {
+            providerApi.secretReferencesAvailable.first() && hasEnabledSecretProvider(providerApi)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+        referencesAllowed = allowed
+        return allowed
+    }
     val auth = detail?.extension?.auth
     var autoStarted by androidx.compose.runtime.saveable.rememberSaveable(extensionId) { mutableStateOf(false) }
     LaunchedEffect(startSignIn, auth != null) {
@@ -281,7 +313,8 @@ fun ExtensionPage(
                     }
                 }
                 if (hasForm) form(detail, state, model, lists, onChoose = { field, path -> choosing = field to path })
-                if (!detail.readOnly && detail.secrets.isNotEmpty()) secrets(detail, state, onEdit = { editingSecret = it })
+                if (!detail.readOnly && detail.secrets.isNotEmpty()) secrets(detail, state, available = referencesAllowed != null,
+                    onEdit = { secret -> scope.launch { recheckReferences(); editingSecret = secret } })
                 if (!hasForm && detail.secrets.isEmpty() && auth == null && (onPage == null || pages.isEmpty()) && hubConnectors.isEmpty() &&
                     (onChannel == null || detail.extension.contributes.orEmpty()["channel"].isNullOrEmpty()))
                     item("configuration-empty") { Note(stringResource(R.string.settings_extension_empty)) }
@@ -292,6 +325,8 @@ fun ExtensionPage(
             }
         }, information = {
             if (detail != null) {
+                secretProviderDetails(detail, machineList, res, busy = state.busy || state.saving || state.loadFailed,
+                    onRemove = { removingRule = it })
                 contributions(detail, state.busy || state.saving || state.loadFailed, res) { item, on -> scope.launch { model.setContribution(item, on) } }
                 sandbox(detail.extension.sandbox, detail.extension.name.ifBlank { extensionId },
                     onAllow = api.adminNetworkUrl(extensionId)?.let { url -> { uri.openUri(url) } })
@@ -367,8 +402,20 @@ fun ExtensionPage(
             }, { choosing = null }, title = ExtensionText.fieldTitle(res, field))
     }
     editingSecret?.let { secret ->
-        ExtensionSecretSheet(secret, busy = state.busy, onDismiss = { editingSecret = null },
-            save = { value -> model.setSecret(secret.name, value) }, clear = { model.clearSecret(secret.name) })
+        ExtensionSecretSheet(secret, busy = state.busy, referencesAllowed = referencesAllowed == true, onDismiss = { editingSecret = null },
+            saveValue = { value -> model.setSecret(secret.name, value) },
+            saveReference = { reference -> if (recheckReferences()) model.setSecretReference(secret.name, reference) else false },
+            clear = { model.clearSecret(secret.name) })
+    }
+    removingRule?.let { rule ->
+        val launcher = rule.launcher
+        val machine = machineList.firstOrNull { it.id == rule.machine }?.name?.takeIf { it.isNotBlank() } ?: rule.machine
+        JDialog({ removingRule = null }, title = stringResource(R.string.settings_ext_rule_remove_title),
+            text = stringResource(R.string.settings_ext_rule_remove_body, launcher, machine), destructive = true,
+            confirm = stringResource(R.string.settings_ext_rule_remove) to {
+                removingRule = null
+                scope.launch { if (model.removeHandoffRule(rule)) feedback?.notice(res.getString(R.string.settings_ext_rule_removed)) }
+            })
     }
 }
 
@@ -634,15 +681,61 @@ private fun ExtensionListField(field: ExtensionField, title: String, path: List<
         trailing = { JIconButton(PhIcons.Plus, stringResource(R.string.settings_ext_add), ::add, enabled = enabled && adding.isNotBlank(), raised = false) })
 }
 
-private fun LazyListScope.secrets(detail: ExtensionDetail, state: ExtensionState, onEdit: (ExtensionSecret) -> Unit) {
+private fun LazyListScope.secrets(detail: ExtensionDetail, state: ExtensionState, available: Boolean, onEdit: (ExtensionSecret) -> Unit) {
     item("secrets-title") { JSectionHeader(stringResource(R.string.settings_ext_secrets)) }
     itemsIndexed(detail.secrets, key = { _, it -> "secret-${it.name}" }) { index, secret ->
         JGroupItem(GroupPosition.of(index, detail.secrets.size)) {
-            JRow(secret.label, leadingIcon = PhIcons.Key, value = ExtensionText.secretState(LocalResources.current, secret), enabled = !state.busy && !state.saving,
-                onClick = { onEdit(secret) })
+            val stateText = ExtensionText.secretState(LocalResources.current, secret)
+            val referenceDetail = ExtensionText.secretReferenceDetail(secret)
+            JRow(secret.label, leadingIcon = PhIcons.Key, value = stateText.takeIf { secret.reference == null },
+                // A reference is content to read, not a one-line trailing status. Its provider-described item follows it.
+                subtitle = if (secret.reference == null) null else listOfNotNull(stateText, referenceDetail).joinToString("\n"),
+                subtitleLines = Int.MAX_VALUE, titleLines = 2,
+                enabled = available && !state.busy && !state.saving, onClick = { onEdit(secret) })
         }
     }
     item("secrets-note") { Note(stringResource(R.string.settings_ext_secrets_note)) }
+}
+
+private fun LazyListScope.secretProviderDetails(
+    detail: ExtensionDetail,
+    machines: List<ExtensionMachine>,
+    res: Resources,
+    busy: Boolean,
+    onRemove: (HandoffRule) -> Unit,
+) {
+    fun machineName(id: String) = machines.firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() } ?: id
+    fun userLabel(user: ExtensionSecretUser): String = when (user.kind) {
+        "launcher" -> {
+            val name = user.launcherName.ifBlank { user.launcher }
+            if (user.machine.isBlank()) res.getString(R.string.settings_ext_user_launcher, name)
+            else res.getString(R.string.settings_ext_user_launcher_machine, name, machineName(user.machine))
+        }
+        else -> listOf(user.extensionName.ifBlank { user.extension }, user.secretTitle.ifBlank { user.secret })
+            .filter { it.isNotBlank() }.joinToString(" › ")
+    }
+    if (detail.secretUsers.isNotEmpty()) {
+        item("secret-users-title") { JSectionHeader(stringResource(R.string.settings_ext_users_title)) }
+        itemsIndexed(detail.secretUsers, key = { index, user -> "secret-user-$index-${user.kind}-${user.reference}" }) { index, user ->
+            JGroupItem(GroupPosition.of(index, detail.secretUsers.size)) {
+                JRow(userLabel(user), subtitle = user.reference, subtitleLines = Int.MAX_VALUE, titleLines = 2, chevron = false)
+            }
+        }
+        item("secret-users-note") { Note(stringResource(R.string.settings_ext_users_footer)) }
+    }
+    if (detail.handoffRules.isNotEmpty()) {
+        item("handoff-rules-title") { JSectionHeader(stringResource(R.string.settings_ext_rules_title)) }
+        itemsIndexed(detail.handoffRules, key = { _, rule -> "handoff-rule-${rule.id}" }) { index, rule ->
+            JGroupItem(GroupPosition.of(index, detail.handoffRules.size)) {
+                JRow(stringResource(R.string.settings_ext_rule_label, rule.launcher, machineName(rule.machine)),
+                    subtitle = rule.reference, subtitleLines = Int.MAX_VALUE, titleLines = 3, chevron = false,
+                    trailing = if (detail.readOnly) null else ({
+                        JTextButton(stringResource(R.string.settings_ext_rule_remove), { onRemove(rule) }, enabled = !busy, icon = PhIcons.Trash)
+                    }))
+            }
+        }
+        item("handoff-rules-note") { Note(stringResource(R.string.settings_ext_rules_footer)) }
+    }
 }
 
 private fun LazyListScope.contributions(
@@ -687,24 +780,53 @@ private fun LazyListScope.permissions(detail: ExtensionDetail) {
     item("permissions-note") { Note(stringResource(R.string.settings_ext_permissions_note)) }
 }
 
-/** Sets one of an extension's secrets: typed in hidden, saved to the hub, never shown again; one that is set can be cleared. */
+/** Sets a secret explicitly as a value or as a reference; text that looks like a reference never chooses the mode. */
 @Composable
 private fun ExtensionSecretSheet(
-    secret: ExtensionSecret, busy: Boolean, onDismiss: () -> Unit,
-    save: suspend (String) -> Boolean, clear: suspend () -> Boolean,
+    secret: ExtensionSecret, busy: Boolean, referencesAllowed: Boolean, onDismiss: () -> Unit,
+    saveValue: suspend (String) -> Boolean, saveReference: suspend (String) -> Boolean, clear: suspend () -> Boolean,
 ) {
-    var value by remember(secret.name) { mutableStateOf("") }
+    var byReference by remember(secret.name) { mutableStateOf(referencesAllowed && secret.reference != null) }
+    var value by remember(secret.name) {
+        mutableStateOf(if (referencesAllowed) secret.reference?.reference.orEmpty() else "")
+    }
+    LaunchedEffect(referencesAllowed) {
+        if (!referencesAllowed && byReference) {
+            byReference = false
+            value = ""
+        }
+    }
+    var saving by remember(secret.name) { mutableStateOf(false) }
+    val working = busy || saving
     val scope = rememberCoroutineScope()
-    JSheet(onDismiss, title = secret.label, dismissible = !busy) {
+    JSheet(onDismiss, title = secret.label, dismissible = !working) {
         Column(Modifier.padding(vertical = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
-            JTextField(value, { value = it }, Modifier.fillMaxWidth(), placeholder = stringResource(if (secret.set) R.string.settings_ext_secret_replace else R.string.settings_ext_secret_enter), singleLine = true,
-                enabled = !busy, visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
-            SettingsCaption(secret.description?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_ext_secret_note))
-            JButton(stringResource(R.string.settings_ext_save), { scope.launch { if (save(value)) onDismiss() } }, Modifier.fillMaxWidth(), loading = busy,
-                enabled = !busy && value.isNotBlank())
-            if (secret.set) JButton(stringResource(R.string.settings_ext_clear), { scope.launch { if (clear()) onDismiss() } }, Modifier.fillMaxWidth(),
-                kind = JButtonKind.Destructive, enabled = !busy)
+            if (referencesAllowed) JSwitchRow(stringResource(R.string.settings_ext_use_reference), byReference,
+                { on -> byReference = on; value = "" }, enabled = !working)
+            JTextField(value, { value = it }, Modifier.fillMaxWidth(),
+                placeholder = if (byReference) secret.reference?.reference ?: stringResource(R.string.settings_ext_reference_placeholder)
+                else stringResource(if (secret.set) R.string.settings_ext_secret_replace else R.string.settings_ext_secret_enter),
+                singleLine = true, enabled = !working,
+                visualTransformation = if (byReference) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = if (byReference) KeyboardType.Uri else KeyboardType.Password))
+            SettingsCaption(if (byReference) stringResource(R.string.settings_ext_reference_hint)
+            else secret.description?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_ext_secret_note))
+            JButton(stringResource(R.string.settings_ext_save), {
+                saving = true
+                val reference = byReference
+                val submitted = value
+                scope.launch {
+                    try { if (if (reference) saveReference(submitted) else saveValue(submitted)) onDismiss() }
+                    finally { saving = false }
+                }
+            }, Modifier.fillMaxWidth(), loading = working, enabled = !working && value.isNotBlank())
+            if (secret.set) JButton(stringResource(R.string.settings_ext_clear), {
+                saving = true
+                scope.launch {
+                    try { if (clear()) onDismiss() }
+                    finally { saving = false }
+                }
+            }, Modifier.fillMaxWidth(), kind = JButtonKind.Destructive, enabled = !working)
         }
     }
 }

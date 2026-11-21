@@ -1,0 +1,59 @@
+[
+  {
+    "type": "function",
+    "name": "search_knowledge",
+    "description": "Search the user's knowledge base: archived chats, people, groups, projects, documents, meeting summaries and minutes of recorded meetings. Returns matching lines, newest first. Separate keywords with spaces; every keyword must match. Use specific terms such as a person, project or group name. For past recorded meetings (decisions, responsibilities or unresolved points), set kind=recordings and search by meeting title or words spoken in it.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Keywords separated by spaces"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "projects",
+            "chats",
+            "people",
+            "docs",
+            "meetings",
+            "events",
+            "recordings",
+            "topics"
+          ],
+          "description": "Search only this kind: recordings = recorded meetings (minutes and retained transcripts), meetings = calendar meetings, projects = projects, chats = groups and chat history, people = people, docs = documents, events = events, topics = knowledge topics. Omit to search all kinds"
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "name": "list_agents",
+    "description": "List the coding Agents (Claude Code / Codex) on the user's computers: computer, title, status (needs you / working / finished unread / idle) and last words.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "type": "function",
+    "name": "delegate_task",
+    "description": "Hand work to the conversation bound to this call (identified in the instructions). Calling sends it immediately, without repeating it or waiting for confirmation, so ask first if you are unsure the user wants it done. The call does not return immediately: tell the user you handed it over, then keep talking normally. When that turn finishes, this call returns its answer, possibly minutes later; tell the user then. Put the work in task's first sentence as a complete instruction: the conversation cannot see this voice context. To ask what it is doing or how far it has got, start task with the exact prefix 状态： (not sent to it; returns its current status). When the user explicitly asks it to stop, use the exact prefix 停止：. When the user is answering its question, use the exact prefix 回答：.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "task"
+      ],
+      "properties": {
+        "task": {
+          "type": "string",
+          "description": "The work in complete sentences, or a sentence starting with the exact prefix 状态：, 停止： or 回答："
+        }
+      }
+    }
+  }
+]

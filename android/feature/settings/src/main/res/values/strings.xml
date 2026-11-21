@@ -8,4 +8,7 @@
     <!-- Each language in its own name, the same in every language. -->
     <string name="settings_language_caption">Match system uses your first preferred language when a translation is available; otherwise it uses English.</string>
     <string name="settings_model_assistant">Assistant</string>
+    <string name="settings_sidebar">Sidebar</string>
+    <string name="settings_sidebar_separate">Separate</string>
+    <string name="settings_sidebar_merged">Merged</string>
 </resources>

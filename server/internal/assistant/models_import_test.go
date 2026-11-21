@@ -316,7 +316,7 @@ func TestLauncherPickerDefault(t *testing.T) {
 		t.Fatalf("an API use has no launcher default: %+v", got)
 	}
 	r := httptest.NewRequest("GET", "/api/v1/machines/m1/launchers?purpose=assistant", nil)
-	if got := s.pickerDefault(ctx, r); got["provider"] != "claude" {
+	if got := s.pickerDefault(ctx, r, nil); got["provider"] != "claude" {
 		t.Fatalf("?purpose= ignored: %+v", got)
 	}
 }

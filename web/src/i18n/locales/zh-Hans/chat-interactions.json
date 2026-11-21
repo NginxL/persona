@@ -46,6 +46,8 @@
   "edited_pending": "已编辑；允许后发送你的版本。",
   "always_allow": "总是允许",
   "allow": "允许",
+  "owner_reply": "回复“{phrase}”",
+  "owner_reply_unavailable": "这条精确审批回复已不可用",
   "have_question": "有疑问",
   "field_command": "命令",
   "field_file": "文件",

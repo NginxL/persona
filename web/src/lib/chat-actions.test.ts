@@ -191,6 +191,16 @@ describe("@ mentions", () => {
     expect(q.title).toBe("修登录");
     expect(q.text).toBe("另一个会话：修登录（Claude）\n目录：/code/app\n它最近说：改好了");
   });
+
+  it("keeps a TRAE CLI session's custom label in the mention menu and quote", () => {
+    for (const agent of ["traex", "traecli", "trae-cli"]) {
+      const s = sess("a", { title: "Import", cwd: "/code/app", agent, agent_label: "Team relay" });
+      expect(sessionDetail(s)).toBe("Team relay · app");
+      expect(sessionQuote(s).text).toContain("Import（Team relay）");
+      expect(sessionDetail({ ...s, agent_label: "TRAEX" })).toBe("TRAE CLI · app");
+      expect(sessionDetail({ ...s, agent_label: undefined })).toBe("TRAE CLI · app");
+    }
+  });
 });
 
 describe("queue", () => {

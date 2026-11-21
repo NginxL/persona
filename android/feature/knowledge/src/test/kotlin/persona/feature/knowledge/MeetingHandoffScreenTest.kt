@@ -278,7 +278,8 @@ private class HandoffKnowledge(
         meta = buildJsonObject {
             put("title", "Weekly sync")
             put("started_at", "2026-11-19T10:00:00Z")
-            if (running) put("updated", "2026-11-19T12:00:00Z") else put("ended_at", "2026-11-19T11:00:00Z")
+            // A fixed timestamp eventually leaves the twelve-hour running window.
+            if (running) put("updated", java.time.Instant.now().toString()) else put("ended_at", "2026-11-19T11:00:00Z")
             chars?.let { put("chars", it) }
             if (trimmed) put("trimmed_at", "2026-11-19T11:30:00Z")
             history?.let { put("handoffs", Json.parseToJsonElement(it)) }

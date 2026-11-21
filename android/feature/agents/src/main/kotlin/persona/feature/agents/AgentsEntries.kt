@@ -1,6 +1,7 @@
 package persona.feature.agents
 
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -89,66 +90,12 @@ fun EntryProviderScope<NavKey>.agentsEntries(
     terminalPanes: kotlinx.coroutines.flow.Flow<Boolean> = flowOf(false),
     /** Only the list's picks may replace an overlaid root detail; shared destinations use [navigator]. */
     listNavigator: Navigator = navigator,
+    listOwner: androidx.lifecycle.ViewModelStoreOwner? = null,
+    listReplacement: (@Composable () -> Unit)? = null,
 ) {
     entry<AgentsRoute> {
-        val context = LocalContext.current.applicationContext
-        val dependencies = remember(context, dependenciesOverride) {
-            dependenciesOverride ?: EntryPointAccessors.fromApplication(context, AgentsDependencies::class.java)
-        }
-        val wiring by dependencies.wiring().state.collectAsStateWithLifecycle()
-        val renamer = remember(context) {
-            if (context is dagger.hilt.internal.GeneratedComponentManager<*>)
-                EntryPointAccessors.fromApplication(context, AgentsRenameDependencies::class.java).renamer()
-            else null
-        }
-        androidx.compose.runtime.CompositionLocalProvider(
-            LocalAgentsOperations provides (wiring.operations ?: LocalAgentsOperations.current),
-            LocalAgentCreationService provides (wiring.creation ?: LocalAgentCreationService.current),
-            LocalAgentsDraftSource provides (wiring.drafts ?: LocalAgentsDraftSource.current),
-        ) {
-            val operations = LocalAgentsOperations.current
-            val tasksStore = dependencies.tasks() ?: wiring.tasks
-            val assistant = persona.core.designsystem.currentAssistant()
-            val model = viewModel(key = "agents:${wiring.scope}:${operations?.operations?.scope.orEmpty()}") {
-                AgentsViewModel(dependencies.sessions(), dependencies.interactions(), dependencies.connection(), dependencies.sender(), dependencies.preferences(), operations, wiring.mainSender,
-                    wiring.scope.ifEmpty { operations?.operations?.scope.orEmpty() }, renamer, tasksStore, hubUpdates = dependencies.hubUpdates(), machineManagement = dependencies.machines(),
-                    hubGroups = dependencies.groups(), listContext = kotlinx.coroutines.Dispatchers.Default, archiveService = wiring.archives,
-                    listAdapter = dependencies.listAdapter(), visibleChat = dependencies.visibleChat(), heldChat = dependencies.heldChat(),
-                    finishedChat = dependencies.finishedChat())
-                    .also { it.machine(initialMachine); it.show(assistant) }
-            }
-            val source = LocalAgentsDraftSource.current
-            val draftsFlow = remember(dependencies, source) {
-                source?.let { observeAgentDrafts(dependencies.sessions().sessions, it) } ?: flowOf(emptyMap())
-            }
-            val drafts by draftsFlow.collectAsStateWithLifecycle(emptyMap())
-            val outbox by dependencies.sender().outbox.collectAsStateWithLifecycle()
-            val requests by dependencies.interactions().pending.collectAsStateWithLifecycle()
-            val suppliedMetadata = LocalAgentsMetadata.current
-            val metadata = suppliedMetadata.withOutbox(outbox).copy(requestSources = suppliedMetadata.requestSources +
-                requests.mapNotNull { request -> request.requestSourceLabel()?.let { request.id to it.shown } }.toMap())
-            val rows = metadata.rows.toMutableMap()
-            drafts.forEach { (key, draft) ->
-                val row = rows[key] ?: AgentRowMetadata()
-                rows[key] = row.copy(draft = draft.text, hasAttachments = row.hasAttachments || draft.hasAttachments)
-            }
-            val creationService = LocalAgentCreationService.current
-            val starPrompt = persona.core.designsystem.LocalStarPrompt.current
-            // New Agent's attachments go up through the chat's upload service of the machine's hub group (#2321).
-            val uploads = rememberNewAgentUploads()
-            val creationModel = creationService?.let { service ->
-                viewModel(key = "new-agent:${service.scope}:${System.identityHashCode(service)}") {
-                    NewAgentViewModel(service, wiring.creationPreferences?.let { AgentCreationPreferences(context, it) }
-                        ?: AgentCreationPreferences(context), dependencies.sessions().machines,
-                        sender = dependencies.sender(), adopt = dependencies.sessions()::adopt,
-                        usage = dependencies.machines()?.let { m -> { id: String -> m.usageWindows(id) } },
-                        launched = { starPrompt?.launched() }, uploads = uploads)
-                }
-            }
-            val groups by dependencies.groups().groups.collectAsStateWithLifecycle()
-            val panes by terminalPanes.collectAsStateWithLifecycle(false)
-            AgentsScreen(model, listNavigator, metadata.copy(rows = rows), creationModel, onMachineSelected, groups, panes)
-        }
+        if (listReplacement != null) listReplacement()
+        else AgentsListHost(listNavigator, dependenciesOverride, initialMachine, onMachineSelected, terminalPanes, listOwner)
     }
     entry<ConnectionSettingsRoute> { connectionSettingsContent() }
     entry<NewAgentRoute> { NewAgentDestination(it, navigator, dependenciesOverride) }
@@ -276,5 +223,80 @@ fun EntryProviderScope<NavKey>.agentsEntries(
                 }
             )
         }
+    }
+}
+
+
+/** The primary list and the merged sidebar use the same model, rows and activation callbacks. */
+@Composable
+fun AgentsListHost(
+    navigator: Navigator,
+    dependenciesOverride: AgentsDependencies?,
+    initialMachine: String,
+    onMachineSelected: (String) -> Unit,
+    terminalPanes: kotlinx.coroutines.flow.Flow<Boolean>,
+    listOwner: androidx.lifecycle.ViewModelStoreOwner? = null,
+    sidebar: AgentsSidebarLayout? = null,
+    providedListState: LazyListState? = null,
+) {
+    val owner = listOwner ?: checkNotNull(androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner.current)
+    val context = LocalContext.current.applicationContext
+    val dependencies = remember(context, dependenciesOverride) {
+        dependenciesOverride ?: EntryPointAccessors.fromApplication(context, AgentsDependencies::class.java)
+    }
+    val wiring by dependencies.wiring().state.collectAsStateWithLifecycle()
+    val renamer = remember(context) {
+        if (context is dagger.hilt.internal.GeneratedComponentManager<*>)
+            EntryPointAccessors.fromApplication(context, AgentsRenameDependencies::class.java).renamer()
+        else null
+    }
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalAgentsOperations provides (wiring.operations ?: LocalAgentsOperations.current),
+        LocalAgentCreationService provides (wiring.creation ?: LocalAgentCreationService.current),
+        LocalAgentsDraftSource provides (wiring.drafts ?: LocalAgentsDraftSource.current),
+    ) {
+        val operations = LocalAgentsOperations.current
+        val tasksStore = dependencies.tasks() ?: wiring.tasks
+        val assistant = persona.core.designsystem.currentAssistant()
+        val model = viewModel(viewModelStoreOwner = owner, key = "agents:${wiring.scope}:${operations?.operations?.scope.orEmpty()}") {
+            AgentsViewModel(dependencies.sessions(), dependencies.interactions(), dependencies.connection(), dependencies.sender(), dependencies.preferences(), operations, wiring.mainSender,
+                wiring.scope.ifEmpty { operations?.operations?.scope.orEmpty() }, renamer, tasksStore, hubUpdates = dependencies.hubUpdates(), machineManagement = dependencies.machines(),
+                hubGroups = dependencies.groups(), listContext = kotlinx.coroutines.Dispatchers.Default, archiveService = wiring.archives,
+                listAdapter = dependencies.listAdapter(), visibleChat = dependencies.visibleChat(), heldChat = dependencies.heldChat(),
+                finishedChat = dependencies.finishedChat())
+                .also { it.machine(initialMachine); it.show(assistant) }
+        }
+        val source = LocalAgentsDraftSource.current
+        val draftsFlow = remember(dependencies, source) {
+            source?.let { observeAgentDrafts(dependencies.sessions().sessions, it) } ?: flowOf(emptyMap())
+        }
+        val drafts by draftsFlow.collectAsStateWithLifecycle(emptyMap())
+        val outbox by dependencies.sender().outbox.collectAsStateWithLifecycle()
+        val requests by dependencies.interactions().pending.collectAsStateWithLifecycle()
+        val suppliedMetadata = LocalAgentsMetadata.current
+        val metadata = suppliedMetadata.withOutbox(outbox).copy(requestSources = suppliedMetadata.requestSources +
+            requests.mapNotNull { request -> request.requestSourceLabel()?.let { request.id to it.shown } }.toMap())
+        val rows = metadata.rows.toMutableMap()
+        drafts.forEach { (key, draft) ->
+            val row = rows[key] ?: AgentRowMetadata()
+            rows[key] = row.copy(draft = draft.text, hasAttachments = row.hasAttachments || draft.hasAttachments)
+        }
+        val creationService = LocalAgentCreationService.current
+        val starPrompt = persona.core.designsystem.LocalStarPrompt.current
+        // New Agent's attachments go up through the chat's upload service of the machine's hub group (#2321).
+        val uploads = rememberNewAgentUploads()
+        val creationModel = creationService?.let { service ->
+            viewModel(viewModelStoreOwner = owner, key = "new-agent:${service.scope}:${System.identityHashCode(service)}") {
+                NewAgentViewModel(service, wiring.creationPreferences?.let { AgentCreationPreferences(context, it) }
+                    ?: AgentCreationPreferences(context), dependencies.sessions().machines,
+                    sender = dependencies.sender(), adopt = dependencies.sessions()::adopt,
+                    usage = dependencies.machines()?.let { m -> { id: String -> m.usageWindows(id) } },
+                    launched = { starPrompt?.launched() }, uploads = uploads)
+            }
+        }
+        val groups by dependencies.groups().groups.collectAsStateWithLifecycle()
+        val panes by terminalPanes.collectAsStateWithLifecycle(false)
+        AgentsScreen(model, navigator, metadata.copy(rows = rows), creationModel, onMachineSelected, groups, panes,
+            sidebar = sidebar, providedListState = providedListState)
     }
 }

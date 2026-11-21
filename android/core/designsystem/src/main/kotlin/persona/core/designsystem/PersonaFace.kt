@@ -186,6 +186,13 @@ private fun DrawScope.mochi(state: PersonaState, dark: Boolean, t: Float, moving
     val s = this.size.minDimension
     val offline = state == PersonaState.Offline
     val ink = if (offline) Mochi.sleepInk else Mochi.ink
+    val darkOffline = dark && offline
+    val bodyColors = when {
+        darkOffline -> Mochi.sleepBodyDark
+        offline -> Mochi.sleepBody
+        else -> Mochi.bodyColors
+    }
+    val outline = if (dark) Mochi.outlineDark else ink
     drawCircle(Brush.verticalGradient(if (dark) Mochi.discDark else Mochi.discLight, startY = 0f, endY = s))
     val circle = Path().apply { addOval(androidx.compose.ui.geometry.Rect(0f, 0f, s, s)) }
     clipPath(circle) {
@@ -202,15 +209,19 @@ private fun DrawScope.mochi(state: PersonaState, dark: Boolean, t: Float, moving
                 // The soft shadow under the body.
                 paint.clearShadowLayer()
                 paint.style = Paint.Style.FILL
-                paint.color = Color.Black.copy(alpha = if (dark) 0.45f else 0.14f).toArgb()
+                paint.color = Color.Black.copy(alpha = when {
+                    darkOffline -> Mochi.SLEEP_SHADOW_DARK
+                    dark -> 0.45f
+                    else -> 0.14f
+                }).toArgb()
                 paint.maskFilter = android.graphics.BlurMaskFilter(s * 0.02f, android.graphics.BlurMaskFilter.Blur.NORMAL)
                 val c = Mochi.p(490f, 800f) * s
                 drawIntoCanvas { it.nativeCanvas.drawOval(c.x - 0.3f * s, c.y - 0.022f * s, c.x + 0.3f * s, c.y + 0.022f * s, paint) }
                 paint.maskFilter = null
                 val body = Mochi.body(s)
-                drawPath(body, Brush.linearGradient(if (offline) Mochi.sleepBody else Mochi.bodyColors,
+                drawPath(body, Brush.linearGradient(bodyColors,
                     start = Offset(0.4f * s, 0.3f * s), end = Offset(0.5f * s, 0.82f * s)))
-                drawPath(body, if (offline) Mochi.sleepInk else if (dark) Mochi.outlineDark else Mochi.ink,
+                drawPath(body, outline,
                     style = Stroke(lw, cap = StrokeCap.Round, join = StrokeJoin.Round))
                 val k = if (compact) Mochi.COMPACT_FEATURES else 1f
                 val cheek = Mochi.p(312f, 556f) * s
@@ -275,6 +286,8 @@ internal object Mochi {
     val discDark = listOf(Color(0xFF332A26), Color(0xFF1D1816))
     val bodyColors = listOf(Color.White, Color(0xFFE9E3DE))
     val sleepBody = listOf(Color(0xFFD9D4D0), Color(0xFFBDB6B1))
+    val sleepBodyDark = listOf(Tokens.Mochi.DarkOffline.bodyTop, Tokens.Mochi.DarkOffline.bodyBottom)
+    const val SLEEP_SHADOW_DARK = 0.3f
     val sleepInk = Color(0xFF6E6763)
     val sleepCheek = Color(0xFFA59D98)
 

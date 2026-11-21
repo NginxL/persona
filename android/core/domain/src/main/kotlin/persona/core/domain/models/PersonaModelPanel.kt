@@ -47,7 +47,7 @@ object PersonaModelPanel {
         if (s == null || chat.isMain) {
             val provider = def?.provider?.takeIf(String::isNotEmpty) ?: chat.config?.takeIf(String::isNotEmpty) ?: s?.launcher?.takeIf(String::isNotEmpty) ?: "claude"
             return Setup(provider, def?.model?.takeIf(String::isNotEmpty) ?: s?.model?.takeIf { s.launcher == provider },
-                s?.effort ?: def?.effort?.takeIf(String::isNotEmpty), Source.Default)
+                (if (chat.isMain) def?.effort?.takeIf(String::isNotEmpty) ?: s?.effort else s?.effort ?: def?.effort?.takeIf(String::isNotEmpty)), Source.Default)
         }
         // a launcher the list no longer offers is not what the next message runs on: the hub moves the chat to the assistant's
         val own = s.launcher?.takeIf { l -> l.isNotEmpty() && (info == null || info.launchers.any { it.name == l }) }
@@ -86,10 +86,15 @@ object PersonaModelPanel {
             }
             // the provider it runs on stays as it is, whatever its kind: it is what the panel says the chat runs
             val unavailable = if (running && kind != runs && l.name != setup.provider) PanelReason.OtherEngine(runs, kind) else null
-            PanelProvider(l.name, l.title, kind, models, loading = !e.read && e.error == null, error = e.error?.takeIf { !e.read },
+            PanelProvider(l.name, l.title, kind, models, loading = !e.read && (e.loading || e.error == null),
+                error = e.error?.takeIf { !e.read && !e.loading },
                 unavailable = unavailable, typable = unavailable == null && typed && AgentModelPanel.typedModelOffered(kind, e.list))
         }.toMutableList()
-        // what the chat runs on, when the list doesn't have it (yet): plain claude is always there; another one is gone
+        for (u in info?.unavailable.orEmpty()) {
+            if (providers.any { it.id == u.name }) continue
+            providers += PanelProvider(u.name, u.title, AgentModelPanel.engineId(u.agent), null, unavailable = PanelReason.Hub(u.reason))
+        }
+        // If neither hub list mentions the current provider, keep the legacy Claude fallback or show the missing pick.
         if (info != null && providers.none { it.id == setup.provider }) {
             val claude = setup.provider == "claude"
             val e = listFor(setup.provider)
@@ -98,12 +103,9 @@ object PersonaModelPanel {
                 claude -> null
                 else -> listOfNotNull(setup.model?.let { PanelModel(it, AgentModelPanel.modelLabel(it)) })
             }
-            providers.add(0, PanelProvider(setup.provider, setup.provider, runs, models, loading = claude && !e.read,
-                unavailable = if (claude) null else PanelReason.ProviderGone))
-        }
-        for (u in info?.unavailable.orEmpty()) {
-            if (providers.any { it.id == u.name }) continue
-            providers += PanelProvider(u.name, u.title, AgentModelPanel.engineId(u.agent), null, unavailable = PanelReason.Hub(u.reason))
+            providers.add(0, PanelProvider(setup.provider, setup.provider, runs, models,
+                loading = claude && !e.read && (e.loading || e.error == null),
+                error = e.error?.takeIf { claude && !e.read && !e.loading }, unavailable = if (claude) null else PanelReason.ProviderGone))
         }
         val own = providers.firstOrNull { it.id == setup.provider }
         val row = if (own?.models != null) AgentModelPanel.currentModelRow(listFor(setup.provider).list?.models.orEmpty(), setup.model) else null

@@ -468,8 +468,10 @@ fun JSwitchRow(
     enabled: Boolean = true,
     /** Lines the subtitle may take before it ends in an ellipsis; a line that must be read in full passes [Int.MAX_VALUE]. */
     subtitleLines: Int = 2,
+    /** Lines the title may take before it ends in an ellipsis; labels that must remain readable pass more than one. */
+    titleLines: Int = 1,
 ) = JRow(title, modifier, subtitle, leadingIcon, value = null, onClick = { onCheckedChange(!checked) }, chevron = false, enabled = enabled,
-    subtitleLines = subtitleLines, trailing = { JSwitch(checked, null, enabled = enabled) }, role = Role.Switch)
+    subtitleLines = subtitleLines, titleLines = titleLines, trailing = { JSwitch(checked, null, enabled = enabled) }, role = Role.Switch)
 
 /**
  * A card: a frosted panel, a wash card, or a bordered strip. [status] tints the glass edge and gives board

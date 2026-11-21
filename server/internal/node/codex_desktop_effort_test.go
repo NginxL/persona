@@ -159,10 +159,20 @@ func TestCodexAppChatEffortNotConfirmedIsNotShown(t *testing.T) {
 	}
 }
 
-// Only the effort changes from the phone: a model or a permission mode is refused without reaching the App.
-func TestCodexAppChatTakesOnlyTheEffort(t *testing.T) {
-	n, id, bus, _ := appEffortChat(t)
-	for _, p := range []map[string]any{{"model": "gpt-y"}, {"permission_mode": "plan"}, {"model": "gpt-y", "effort": "ultra"}} {
+// Model and effort change in the owning window (preserving provider-prefixed slugs and reconciling incompatible
+// efforts), while permission modes and invalid model IDs are refused without reaching the App.
+func TestCodexAppChatSwitchesModelAndEffort(t *testing.T) {
+	n, id, bus, rollout := appEffortChat(t)
+	src, _ := n.codexSource(id)
+	withCodexAppModels(t, src.home, map[string]codexModelEfforts{
+		"gpt-x":          {levels: []string{"low", "high", "ultra"}, def: "low"},
+		"acme/gpt-5-pro": {levels: []string{"low", "medium"}, def: "medium"},
+		"beta/gpt-5-pro": {levels: []string{"low", "high", "xhigh"}, def: "high"},
+	})
+	if s := appChatRow(t, n); s.Capabilities.Model == nil || !*s.Capabilities.Model {
+		t.Fatalf("row should advertise model capability: %+v", s.Capabilities)
+	}
+	for _, p := range []map[string]any{{"permission_mode": "plan"}, {"model": "-bad"}} {
 		if err := modesCall(t, n, id, p); err == nil {
 			t.Fatalf("%v taken", p)
 		}
@@ -171,6 +181,41 @@ func TestCodexAppChatTakesOnlyTheEffort(t *testing.T) {
 	case p := <-bus.settings:
 		t.Fatalf("sent %v", p)
 	default:
+	}
+
+	// Switching from gpt-x (effort=high) to acme/gpt-5-pro (levels=[low, medium], def=medium) reconciles effort.
+	if err := modesCall(t, n, id, map[string]any{"model": "acme/gpt-5-pro"}); err != nil {
+		t.Fatal(err)
+	}
+	p := <-bus.settings
+	if b, _ := json.Marshal(p); string(b) != `{"conversationId":"`+appChat+`","threadSettings":{"effort":"medium","model":"acme/gpt-5-pro"}}` {
+		t.Fatalf("reconciled update = %s", b)
+	}
+	if s := appChatRow(t, n); s.Model != "acme/gpt-5-pro" || s.Effort != "medium" || !slices.Equal(s.Efforts, []string{"low", "medium"}) {
+		t.Fatalf("after model switch: model=%q effort=%q efforts=%v", s.Model, s.Effort, s.Efforts)
+	}
+
+	// Sequential SessionModelPanel two-step pick: {model} then {effort} validates against the newly picked model.
+	if err := modesCall(t, n, id, map[string]any{"model": "beta/gpt-5-pro"}); err != nil {
+		t.Fatal(err)
+	}
+	<-bus.settings
+	if err := modesCall(t, n, id, map[string]any{"effort": "xhigh"}); err != nil {
+		t.Fatalf("second step effort against picked model failed: %v", err)
+	}
+	<-bus.settings
+	if s := appChatRow(t, n); s.Model != "beta/gpt-5-pro" || s.Effort != "xhigh" {
+		t.Fatalf("after two-step pick: model=%q effort=%q", s.Model, s.Effort)
+	}
+
+	// A subsequent turn_context in the rollout supersedes the picked model even when effort is omitted.
+	at := time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano)
+	appendLines(t, rollout, `{"timestamp":"`+at+`","type":"turn_context","payload":{"model":"gpt-x"}}`)
+	n.mu.Lock()
+	clear(n.metas)
+	n.mu.Unlock()
+	if s := appChatRow(t, n); s.Model != "gpt-x" {
+		t.Fatalf("after later turn_context model=%q, want gpt-x", s.Model)
 	}
 }
 

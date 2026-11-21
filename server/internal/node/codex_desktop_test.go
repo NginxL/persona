@@ -1,6 +1,7 @@
 package node
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -31,6 +32,7 @@ type fakeCodexBus struct {
 	// and how it answers an update (an error, not applied, applied but read back unchanged).
 	settings   chan map[string]any
 	mu         sync.Mutex
+	model      string
 	effort     *string
 	refuse     string
 	notApplied bool
@@ -123,8 +125,14 @@ func (b *fakeCodexBus) serve(conn net.Conn) {
 			b.settings <- params
 			b.mu.Lock()
 			refuse, applied := b.refuse, !b.notApplied
-			if e, _ := params["threadSettings"].(map[string]any)["effort"].(string); refuse == "" && applied && !b.unchanged {
-				b.effort = &e
+			ts, _ := params["threadSettings"].(map[string]any)
+			if refuse == "" && applied && !b.unchanged {
+				if mod, _ := ts["model"].(string); mod != "" {
+					b.model = mod
+				}
+				if e, _ := ts["effort"].(string); e != "" {
+					b.effort = &e
+				}
 			}
 			b.mu.Unlock()
 			if refuse != "" {
@@ -134,9 +142,9 @@ func (b *fakeCodexBus) serve(conn net.Conn) {
 			ok(map[string]any{"applied": applied})
 		case method == "thread-follower-read-model-settings" && version == 1 && m["targetClientId"] == "window" && b.holds(params):
 			b.mu.Lock()
-			e := b.effort
+			mod, e := cmp.Or(b.model, "gpt-x"), b.effort
 			b.mu.Unlock()
-			ok(map[string]any{"settings": map[string]any{"model": "gpt-x", "reasoningEffort": e, "modelProvider": "openai"}})
+			ok(map[string]any{"settings": map[string]any{"model": mod, "reasoningEffort": e, "modelProvider": "openai"}})
 		default:
 			fail()
 		}

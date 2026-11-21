@@ -18,11 +18,14 @@ const (
 	// StopCompactFailed: the Agent quit while the node compacted it before a message (an update it was steered into,
 	// a crash), as a step of Persona's own, not the user's (#11441).
 	StopCompactFailed StopCause = "compact_failed"
+	// Gateway failures are observed from the latest failed turn after its process exits. Explicit user stops win.
+	StopUsageLimit     StopCause = "usage_limit"
+	StopTransientError StopCause = "transient_error"
 )
 
 func (c StopCause) String() string {
 	switch c {
-	case StopUser, StopIdle, StopTaskCompleted, StopRestart, StopExit, StopResumeFailed, StopCompactFailed:
+	case StopUser, StopIdle, StopTaskCompleted, StopRestart, StopExit, StopResumeFailed, StopCompactFailed, StopUsageLimit, StopTransientError:
 		return string(c)
 	default:
 		return "unknown"
@@ -30,5 +33,5 @@ func (c StopCause) String() string {
 }
 
 func (c StopCause) AllowsSupervisorResume() bool {
-	return c == StopIdle || c == StopTaskCompleted || c == StopRestart || c == StopResumeFailed || c == StopCompactFailed
+	return c == StopIdle || c == StopTaskCompleted || c == StopRestart || c == StopResumeFailed || c == StopCompactFailed || c == StopUsageLimit || c == StopTransientError
 }

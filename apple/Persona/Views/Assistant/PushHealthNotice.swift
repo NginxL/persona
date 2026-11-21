@@ -1,15 +1,20 @@
 import SwiftUI
 
 /// Persona's main screen says when this device cannot receive notifications, in everyday words with one repair action.
-/// The detailed route, relay and APNs diagnostics stay in Settings › Notifications (#9612 item 4).
+/// The detailed route, relay and APNs diagnostics stay in Settings › Notifications (#9612 item 4). Its ✕ hides it on this
+/// device until the cause changes or pushes come back (#12319, `PushHealthStore.dismiss`): a developer build that can
+/// never get pushes would otherwise keep it above the composer for good.
 struct PushHealthNotice: View {
     @Environment(AppModel.self) private var model
     let group: String
+    var store: PushHealthStore = .shared
 
     var body: some View {
         Group {
-            if let notice = currentHealth.mainNotice(group: group, allowed: nil) {
-                NoticeBanner(text: notice.text, tone: .danger, lineLimit: nil) {
+            if let notice = store.notice(group: group) {
+                NoticeBanner(text: notice.text, tone: .danger, lineLimit: nil, dismiss: {
+                    withAnimation(Theme.Motion.standard) { store.dismiss(notice, group: group) }
+                }) {
                     Button {
                         Haptics.tap()
                         open(notice.repair)
@@ -23,16 +28,6 @@ struct PushHealthNotice: View {
                 .accessibilityIdentifier("pushHealth.notice")
             }
         }
-    }
-
-    private var currentHealth: PushHealth {
-        #if DEBUG
-        // `-showPushHealth <name>`: the same sample as Settings › Notifications, for screenshots and UI tests.
-        if let sample = UserDefaults.standard.string(forKey: "showPushHealth") {
-            return .sample(sample, group: group)
-        }
-        #endif
-        return PushHealthStore.shared.health
     }
 
     private func open(_ repair: PushNoticeContent.Repair) {

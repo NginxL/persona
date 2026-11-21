@@ -90,7 +90,7 @@ func TestMeetingCall(t *testing.T) {
 	if !slices.Equal(names, []string{"delegate_task"}) {
 		t.Fatalf("tools: %v", names)
 	}
-	if desc := start["tools"].([]any)[0].(map[string]any)["description"].(string); !strings.Contains(desc, "会议对话") || strings.Contains(desc, "状态") {
+	if desc := start["tools"].([]any)[0].(map[string]any)["description"].(string); !strings.Contains(desc, "this meeting's conversation") || strings.Contains(desc, "状态") {
 		t.Fatalf("delegate_task is not the meeting's: %s", desc)
 	}
 	instructions := start["instructions"].(string)

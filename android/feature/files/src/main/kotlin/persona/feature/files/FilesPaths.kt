@@ -24,12 +24,15 @@ internal object FilesPaths {
     /** "~" and "~/…" are the machine's home: only the hub knows where that is, so they travel as they are. */
     fun isHome(path: String) = path == "~" || path.startsWith("~/")
 
+    private val windowsRoot = Regex("^[A-Za-z]:[\\\\/]|^\\\\\\\\")
+
     /**
-     * Where a path written in a conversation points: absolute and "~" paths as they are, anything else in [cwd].
+     * Where a path written in a conversation points: absolute, "~" and Windows drive paths as they are, anything else in [cwd].
      * "." and ".." are folded in absolute paths, a trailing slash dropped (except the root's).
      */
     fun resolve(path: String, cwd: String): String {
         val trimmed = path.trim()
+        if (windowsRoot.containsMatchIn(trimmed)) return trimmed
         val joined = when {
             trimmed.isEmpty() -> cwd
             trimmed.startsWith("/") || isHome(trimmed) -> trimmed

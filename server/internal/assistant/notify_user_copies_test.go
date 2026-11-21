@@ -41,7 +41,7 @@ func notifyCopyService(t *testing.T, res NotifyResult) (*Service, *fakeHub) {
 // A notice the hub's low-distraction mode held for the briefing (a P1 one, or a repeat of a related key within 12
 // hours) gets no copy on the Feishu bot or the channels either, and marks none of them pushed: the scheduled task's
 // turn-end mirror then goes as it would without the notice (#8268).
-func TestNotifyUserHeldByLowDistractionSendsNoChannelCopy(t *testing.T) {
+func TestNotifyUserHeldByPushGradingSendsNoChannelCopy(t *testing.T) {
 	for _, reason := range []string{"ln_p1_held", "ln_dedup_12h"} {
 		t.Run(reason, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {

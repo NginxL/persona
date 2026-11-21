@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -166,10 +167,45 @@ func TestExtensionEnvBothNames(t *testing.T) {
 }
 
 func TestHubJSONExtensionsBothKeys(t *testing.T) {
-	c := &Config{Extensions: []ExtensionConfig{{ID: "voice", Name: "新"}}, LegacyExtensions: []ExtensionConfig{{ID: "voice", Name: "旧"}, {ID: "other"}}}
-	got := c.extensionConfigs(func(string, ...any) {})
-	if len(got) != 2 || got[0].Name != "新" || got[1].ID != "other" {
-		t.Fatalf("%+v", got)
+	tests := []struct {
+		name            string
+		config          Config
+		want            []ExtensionConfig
+		wantDeprecation bool
+	}{
+		{
+			name:            "legacy only",
+			config:          Config{LegacyExtensions: []ExtensionConfig{{ID: "voice", Name: "旧"}, {ID: "other"}}},
+			want:            []ExtensionConfig{{ID: "voice", Name: "旧"}, {ID: "other"}},
+			wantDeprecation: true,
+		},
+		{
+			name:            "both keys",
+			config:          Config{Extensions: []ExtensionConfig{{ID: "voice", Name: "新"}}, LegacyExtensions: []ExtensionConfig{{ID: "voice", Name: "旧"}, {ID: "other"}}},
+			want:            []ExtensionConfig{{ID: "voice", Name: "新"}, {ID: "other"}},
+			wantDeprecation: true,
+		},
+		{
+			name:   "extensions only",
+			config: Config{Extensions: []ExtensionConfig{{ID: "voice", Name: "新"}, {ID: "other"}}},
+			want:   []ExtensionConfig{{ID: "voice", Name: "新"}, {ID: "other"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs strings.Builder
+			got := tt.config.extensionConfigs(func(format string, args ...any) {
+				fmt.Fprintf(&logs, format+"\n", args...)
+			})
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("effective extensions = %+v, want %+v", got, tt.want)
+			}
+			output := logs.String()
+			hasDeprecation := strings.Contains(output, "plugins") && strings.Contains(output, "extensions") && strings.Contains(output, "deprecated")
+			if hasDeprecation != tt.wantDeprecation {
+				t.Errorf("legacy plugins deprecation warning = %v, want %v; logs:\n%s", hasDeprecation, tt.wantDeprecation, output)
+			}
+		})
 	}
 }
 

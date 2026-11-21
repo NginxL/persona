@@ -1,5 +1,6 @@
 {
   "handoff_from": "{title} から移動しました · クリックして戻る",
+  "handoff_previous": "前のページに戻る",
   "handoff_dismiss": "戻るヒントを閉じる",
   "inbox_back_title": "「{title}」に戻る",
   "inbox_back_generic": "受信トレイのこの項目に戻る"

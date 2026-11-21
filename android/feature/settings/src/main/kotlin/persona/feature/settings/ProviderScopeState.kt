@@ -2,7 +2,9 @@ package persona.feature.settings
 
 import persona.core.contracts.GroupKeys
 import persona.core.contracts.Machine
+import persona.core.contracts.TraeCliDisplayName
 import persona.core.contracts.api.HubLauncher
+import persona.core.contracts.isTraeCliId
 
 // A Persona-managed provider's device scope (docs/integrations/launchers.md "Device scope and on-demand delivery", the web's
 // lib/provider-scope.ts): which computers it runs on, when its key travels, whether it stands back where the harness has a
@@ -38,6 +40,8 @@ internal data class ScopeForm(
     val ownService: String? = null,
     val keys: Map<String, String> = emptyMap(),
     val remove: Set<String> = emptySet(),
+    /** Per-computer explicit reference modes, restored from machine_key_references. */
+    val keyRefs: Set<String> = emptySet(),
 ) {
     /** The ids `scope_machines` carries for the share chosen. */
     val scopeMachines: List<String> get() = when (share) {
@@ -59,6 +63,8 @@ internal data class ScopeForm(
     fun toggle(id: String): ScopeForm = copy(machines = if (id in machines) machines - id else machines + id)
     fun toggleWork(id: String): ScopeForm = copy(work = if (id in work) work - id else work + id)
     fun typeKey(id: String, key: String): ScopeForm = copy(keys = keys + (id to key))
+    fun referenceKey(id: String, byReference: Boolean): ScopeForm = copy(
+        keys = keys - id, keyRefs = if (byReference) keyRefs + id else keyRefs - id)
     fun removeKey(id: String): ScopeForm = copy(remove = remove + id, keys = keys - id)
     fun keepKey(id: String): ScopeForm = copy(remove = remove - id)
 }
@@ -72,6 +78,7 @@ internal fun scopeFrom(l: HubLauncher): ScopeForm? {
         work = if (share == Share.All) l.scopeMachines else emptyList(),
         delivery = l.delivery?.takeIf { it.isNotBlank() } ?: Delivery.OnDemand,
         ownService = l.ownService?.takeIf { it.isNotBlank() } ?: OwnService.Skip,
+        keyRefs = l.machineKeyReferences.keys,
     )
 }
 
@@ -110,6 +117,7 @@ internal data class ScopeFields(
     val delivery: String? = null,
     val ownService: String? = null,
     val machineKeys: Map<String, String>? = null,
+    val machineKeyReferences: Map<String, String>? = null,
 )
 
 /**
@@ -139,11 +147,17 @@ internal fun scopeFields(f: ScopeForm, old: HubLauncher?, machines: List<Machine
             ownService = own.takeIf { f.ownService != null && it != (if (defaultUse) OwnService.Use else OwnService.Skip) },
         )
     }
-    val allowed = keyMachines(f, machines) + old?.keyMachines.orEmpty()
+    val allowed = keyMachines(f, machines) + old?.keyMachines.orEmpty() + old?.machineKeyReferences.orEmpty().keys
     val keys = linkedMapOf<String, String>()
-    f.keys.forEach { (id, key) -> if (key.isNotBlank() && id in allowed) keys[id] = key.trim() }
-    f.remove.forEach { id -> if (id !in keys) keys[id] = "" }
+    val references = linkedMapOf<String, String>()
+    f.keys.forEach { (id, key) ->
+        if (key.isNotBlank() && id in allowed) {
+            if (id in f.keyRefs) references[id] = key.trim() else keys[id] = key.trim()
+        }
+    }
+    f.remove.forEach { id -> if (id !in keys && id !in references) keys[id] = "" }
     if (keys.isNotEmpty()) out = out.copy(machineKeys = keys)
+    if (references.isNotEmpty()) out = out.copy(machineKeyReferences = references)
     return out
 }
 
@@ -187,11 +201,12 @@ internal fun harnessGroups(list: List<HubLauncher>): List<Pair<String, List<HubL
 }
 
 /** A harness's header: the products' own names; null for a direct API, which the page words in its language. */
-internal fun harnessName(h: String): String? = when (h) {
-    "claude" -> "Claude Code"
-    "codex" -> "Codex"
-    "agy" -> "Antigravity"
-    "omp" -> "Oh My Pi"
-    "api" -> null
+internal fun harnessName(h: String): String? = when {
+    h == "claude" -> "Claude Code"
+    h == "codex" -> "Codex"
+    isTraeCliId(h) -> TraeCliDisplayName
+    h == "agy" -> "Antigravity"
+    h == "omp" -> "Oh My Pi"
+    h == "api" -> null
     else -> h
 }

@@ -58,6 +58,7 @@ class ChatComposerServiceTest {
             override suspend fun send(request: MessageRequest): MessageTransportResult = error("Unexpected delegate send")
         }
         var attempts = 0
+        val provenance = mutableListOf<String?>()
         val retryResults = mutableListOf<Pair<DeliveryState, MessageTransportResult?>>()
         val service = HttpChatComposerService(scope, transport, request = { path, body, headers ->
             val buffer = Buffer()
@@ -72,6 +73,7 @@ class ChatComposerServiceTest {
                 assertEquals(headers["X-Persona-Op-Id"], fields["client_msg_id"]!!.jsonPrimitive.content)
                 assertEquals("消息", (fields["text"]!!.jsonPrimitive.content).zhAny())
                 if (headers["X-Persona-Op-Id"] == "overrides") {
+                    assertNull(fields["via"])
                     assertEquals("runtime", fields["launcher"]?.jsonPrimitive?.content)
                     assertEquals("model-id", fields["model"]?.jsonPrimitive?.content)
                     return@HttpChatComposerService Response.Builder()
@@ -79,6 +81,7 @@ class ChatComposerServiceTest {
                         .protocol(Protocol.HTTP_1_1).code(200).message("test").body("{}".toResponseBody()).build()
                 }
                 attempts++
+                provenance += fields["via"]?.jsonPrimitive?.content
                 // The retry goes under a new operation id: the hub would answer "operation" from its first try.
                 assertEquals(attempts == 1, headers["X-Persona-Op-Id"] == "operation")
                 if (attempts == 1) {
@@ -97,7 +100,7 @@ class ChatComposerServiceTest {
             file.writeText("abc")
             assertEquals("/tmp/test.txt", (service.upload(session, "test.txt", file)).zhAny())
         } finally { file.delete() }
-        service.send(MessageRequest(scope, session, "消息", "operation"))
+        service.send(MessageRequest(scope, session, "消息", "operation", via = MessageVia.Share))
         assertEquals("电脑草稿", (service.deliveries.value["operation"]!!.refusal!!.draft).zhAny())
         assertEquals(DeliveryState.Sent, service.retryRefused("operation", true).state)
         assertEquals(listOf(
@@ -110,6 +113,7 @@ class ChatComposerServiceTest {
         } catch (_: ComposerOperationException) { }
         assertEquals(MessageTransportResult.Accepted,
             service.send(MessageRequest(scope, session, "消息", "overrides", launcher = "runtime", model = "model-id")))
+        assertEquals(listOf(MessageVia.Share, MessageVia.Share), provenance)
         assertEquals(2, attempts)
     }
 

@@ -138,6 +138,9 @@ struct PersonaApp: App {
                 // Closed, the hub knows the phone is away and wakes it with a silent push instead; and nothing opens it
                 // again until the app is back (the network returning, a refresh ending: LiveConnection.suspended).
                 model.suspendLinks()
+                // A refresh still running from the last return to the app stops before its next write to the App Group:
+                // iOS ends an app that is suspended holding that store's lock (0xdead10cc, #11360).
+                ExtensionSurfaceForegroundRefresh.shared.cancel()
                 // All-day recording: a run or request in progress finishes only inside a grant of background time, and a
                 // model download a run started in front stops.
                 RecordingDayTranscriber.shared.background()
@@ -166,6 +169,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         ErrorReports.installExceptionHandler(queue: .shared) // first: a crash while launching is reported too (#5621)
+        ExtensionSurfaceAppLease.install() // background time around the App Group store's lock, before anything writes it (#11360)
         // Developing Persona carries on recording when it was left on (#9460); reads two defaults otherwise.
         DevMode.shared.launch(tab: UserDefaults.standard.string(forKey: "app.tab").flatMap(AppTab.init(rawValue:)) ?? .assistant)
         _ = KeyboardState.shared // watches the keyboard from the start: a card may come while it is already up

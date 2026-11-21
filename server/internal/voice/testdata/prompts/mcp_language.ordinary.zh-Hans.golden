@@ -1,0 +1,84 @@
+[
+  {
+    "type": "function",
+    "name": "search_knowledge",
+    "description": "搜索用户的知识库（聊天记录归档、人、群、项目、文档、会议的摘要、录过的会的纪要）。返回匹配的行，按时间从新到旧。关键词用空格分开，每个词都要命中；用人名、项目名、群名这类具体的词。问以前开过的会（定了什么、谁做什么、还有什么没定）时给 kind=recordings，用会的标题或会上说过的词找。",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "关键词，空格分隔"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "projects",
+            "chats",
+            "people",
+            "docs",
+            "meetings",
+            "events",
+            "recordings",
+            "topics"
+          ],
+          "description": "只搜这一类：recordings 录过的会（纪要和还留着的转写），meetings 日历上的会，projects 项目，chats 群和聊天记录，people 人，docs 文档，events 事件，topics 知识点。不给就全搜"
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "name": "list_agents",
+    "description": "列出用户各台电脑上的编程 Agent（Claude Code / Codex）：在哪台机器、标题、状态（需要你处理 / 工作中 / 完成未看 / 空闲）、最后说的话。",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "type": "function",
+    "name": "send_to_agent",
+    "description": "给某个 Agent 发一条消息（相当于用户在它的输入框里打字并回车）。只在用户明确要求时用；说清楚了发给谁、发什么就直接发，不复述、不等确认，拿不准发给哪个 Agent 就先问一句。machine_id 和 session_id 来自 list_agents。",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "machine_id",
+        "session_id",
+        "text"
+      ],
+      "properties": {
+        "machine_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "description": "要发的内容"
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "name": "ask_persona",
+    "description": "把一件事交给 Persona 主对话去做：它是能用用户全部数据和工具的完整助手（日程、邮件、飞书、文档、各台电脑、定时任务、写东西……），比你能做的多得多，但要几十秒到几分钟。你自己的工具答不了、或者用户要办一件需要动手的事时用它。它不会马上返回：调用时告诉用户一声已经交给主对话了，然后照常聊；主对话这一轮做完，这次调用的结果就是它的回答（可能要几分钟），那时再告诉用户。task 要写清楚、自成一体，第一句就是要做的事（主对话看不到这次语音的上下文）。",
+    "parameters": {
+      "type": "object",
+      "required": [
+        "task"
+      ],
+      "properties": {
+        "task": {
+          "type": "string",
+          "description": "要主对话做的事，完整的一句或几句话"
+        }
+      }
+    }
+  }
+]

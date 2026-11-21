@@ -1,6 +1,7 @@
 package assistantwire
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -24,11 +25,27 @@ type AgentsConfig struct {
 	// Dispatch is manager.json agents.dispatch: an agent handing a subtask to another connected computer
 	// (docs/plans/plan-agent-dispatch.md).
 	Dispatch DispatchConfig `json:"dispatch,omitzero"`
+	A2A      A2AConfig      `json:"a2a,omitzero"`
 	// LauncherHealth is manager.json agents.launcher_health: checking each machine's launchers (docs/server/launcher-health.md).
 	LauncherHealth LauncherHealthConfig `json:"launcher_health,omitzero"`
 	// Review is manager.json agents.review: the independent reviewer of a supervised task's finished change (#2173,
 	// docs/assistant/unified-entry.md "Independent review").
 	Review ReviewConfig `json:"review,omitzero"`
+}
+
+// A2AConfig defaults to the manager's confirmed personal computers. A supplied
+// list narrows that scope. PublicURL enables the authenticated HTTP interface.
+type A2AConfig struct {
+	Machines  []string `json:"machines,omitzero"`
+	PublicURL string   `json:"public_url,omitempty"`
+}
+
+const ScopeA2A = "agents.a2a"
+
+var A2AToolNames = []string{"a2a_sessions", "a2a_send", "a2a_get", "a2a_report", "a2a_cancel"}
+
+func IsA2ATool(name string) bool {
+	return slices.Contains(A2AToolNames, name)
 }
 
 // DispatchConfig is manager.json agents.dispatch: the agents' dispatch_start / dispatch_read tools. Off unless Enabled

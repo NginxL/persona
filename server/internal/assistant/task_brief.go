@@ -94,15 +94,16 @@ type BriefRequest struct {
 // dispatch starts one automatic task_plan round; completion records that round's first active completion and actual
 // minutes; estimate_due and overdue record accepted supervisor delivery. Approval belongs only to a risky scope change.
 type BriefEvent struct {
-	At             time.Time `json:"at"`
-	Kind           string    `json:"kind"`
-	Todo           string    `json:"todo_id,omitempty"`
-	By             string    `json:"by,omitempty"` // the conversation that changed it
-	Change         string    `json:"change,omitempty"`
-	Why            string    `json:"why,omitempty"`
-	DoneWhen       []string  `json:"done_when,omitempty"`
-	ExpectMinutes  int       `json:"expect_minutes,omitempty"`
-	EstimateSource string    `json:"estimate_source,omitempty"`
+	At               time.Time             `json:"at"`
+	Kind             string                `json:"kind"`
+	Todo             string                `json:"todo_id,omitempty"`
+	By               string                `json:"by,omitempty"` // the conversation that changed it
+	Change           string                `json:"change,omitempty"`
+	Why              string                `json:"why,omitempty"`
+	DoneWhen         []string              `json:"done_when,omitempty"`
+	ExpectMinutes    int                   `json:"expect_minutes,omitempty"`
+	EstimateSource   string                `json:"estimate_source,omitempty"`
+	EstimateEvidence *TaskEstimateEvidence `json:"estimate_evidence,omitempty"`
 	// Dispatch records one task_plan round (source is task_plan; round_id names it); completion records its first
 	// active completion report (source is report_to_supervisor, task_review or judge) and wall-clock actual_minutes.
 	Source        string        `json:"source,omitempty"`
@@ -148,17 +149,18 @@ type briefRecord struct {
 	// Request: the owner's message, nil when the work was not started on one (StartedBy says by whom) or it could not
 	// be read. Trigger is what the turn that handed the work out followed instead (supervision, followup, routine,
 	// conversation, notice, meeting, wake), TriggerTitle its one line; Reason is why, as whoever started it said.
-	Request        *BriefRequest `json:"request,omitempty"`
-	StartedBy      string        `json:"started_by"`
-	Trigger        string        `json:"trigger,omitempty"`
-	TriggerTitle   string        `json:"trigger_title,omitempty"`
-	Reason         string        `json:"reason,omitempty"`
-	Conversation   string        `json:"conversation,omitempty"` // where it was handed out
-	Goal           string        `json:"goal"`
-	DoneWhen       []string      `json:"done_when"`
-	ExpectMinutes  int           `json:"expect_minutes,omitempty"`
-	EstimateSource string        `json:"estimate_source,omitempty"`
-	OutOfBounds    []string      `json:"out_of_bounds,omitempty"`
+	Request          *BriefRequest         `json:"request,omitempty"`
+	StartedBy        string                `json:"started_by"`
+	Trigger          string                `json:"trigger,omitempty"`
+	TriggerTitle     string                `json:"trigger_title,omitempty"`
+	Reason           string                `json:"reason,omitempty"`
+	Conversation     string                `json:"conversation,omitempty"` // where it was handed out
+	Goal             string                `json:"goal"`
+	DoneWhen         []string              `json:"done_when"`
+	ExpectMinutes    int                   `json:"expect_minutes,omitempty"`
+	EstimateSource   string                `json:"estimate_source,omitempty"`
+	EstimateEvidence *TaskEstimateEvidence `json:"estimate_evidence,omitempty"`
+	OutOfBounds      []string              `json:"out_of_bounds,omitempty"`
 	// Reconstructed: made later from what the to-do still had (a task from before briefs): Handover is the prompt its
 	// agent was handed, which is not the owner's words, and nothing else was invented.
 	Reconstructed bool   `json:"reconstructed,omitempty"`
@@ -184,15 +186,16 @@ type TaskBrief struct {
 	ExpectNow int      `json:"expect_minutes_now,omitempty"`
 	// EstimateSourceNow, EstimateClockAt and EstimateDueAt describe the automatic review clock, not the older
 	// overdue clock below. Empty for manual or pre-feature work until a task_plan dispatch makes it eligible.
-	EstimateSourceNow  string     `json:"estimate_source_now,omitempty"`
-	EstimateClockAt    time.Time  `json:"estimate_clock_at,omitzero"`
-	EstimateDueAt      time.Time  `json:"estimate_due_at,omitzero"`
-	EstimateDueToldAt  *time.Time `json:"estimate_due_told_at,omitempty"`
-	ActualMinutes      int        `json:"actual_minutes,omitempty"`
-	CompletionReported *time.Time `json:"completion_reported_at,omitempty"`
-	ClockAt            time.Time  `json:"clock_at"`
-	DueAt              time.Time  `json:"due_at"`
-	Overdue            *time.Time `json:"overdue_at,omitempty"`
+	EstimateSourceNow   string                `json:"estimate_source_now,omitempty"`
+	EstimateEvidenceNow *TaskEstimateEvidence `json:"estimate_evidence_now,omitempty"`
+	EstimateClockAt     time.Time             `json:"estimate_clock_at,omitzero"`
+	EstimateDueAt       time.Time             `json:"estimate_due_at,omitzero"`
+	EstimateDueToldAt   *time.Time            `json:"estimate_due_told_at,omitempty"`
+	ActualMinutes       int                   `json:"actual_minutes,omitempty"`
+	CompletionReported  *time.Time            `json:"completion_reported_at,omitempty"`
+	ClockAt             time.Time             `json:"clock_at"`
+	DueAt               time.Time             `json:"due_at"`
+	Overdue             *time.Time            `json:"overdue_at,omitempty"`
 }
 
 // LineageStep is one to-do of a brief's lineage: who worked on it, from when to when, and why it stopped ("" while it
@@ -327,6 +330,22 @@ func (tb *taskBrief) estimateState() (expect int, source string, clock time.Time
 	return tb.expect(), source, clock
 }
 
+// estimateEvidence is the evidence of the active dispatch estimate. A scope
+// change can replace the estimate without inheriting its old samples.
+func (tb *taskBrief) estimateEvidence() *TaskEstimateEvidence {
+	evidence := tb.rec.EstimateEvidence
+	for _, event := range tb.st.Log {
+		if event.Kind == briefEventDispatch || event.Kind == briefEventScope && event.ExpectMinutes > 0 {
+			evidence = event.EstimateEvidence
+		}
+	}
+	if evidence != nil {
+		copy := *evidence
+		return &copy
+	}
+	return nil
+}
+
 // estimateDueToldAt is when a supervision message carried the current estimate_due, nil before that or after a new
 // dispatch / estimate revision. The event is written only after delivery or durable queue admission.
 func (tb *taskBrief) estimateDueToldAt() *time.Time {
@@ -442,7 +461,7 @@ func (tb *taskBrief) dropped() []BriefCriterion {
 func (tb *taskBrief) view() TaskBrief {
 	_, source, clock := tb.estimateState()
 	v := TaskBrief{briefRecord: tb.rec, Log: slices.Clone(tb.st.Log), Criteria: tb.criteria(), ExpectNow: tb.expect(),
-		EstimateSourceNow: source, ClockAt: tb.clockAt(), DueAt: tb.dueAt(), Overdue: tb.overdueAt()}
+		EstimateSourceNow: source, EstimateEvidenceNow: tb.estimateEvidence(), ClockAt: tb.clockAt(), DueAt: tb.dueAt(), Overdue: tb.overdueAt()}
 	if source != "" && v.ExpectNow > 0 {
 		v.EstimateClockAt, v.EstimateDueAt = clock, clock.Add(time.Duration(v.ExpectNow)*time.Minute)
 		v.EstimateDueToldAt = tb.estimateDueToldAt()

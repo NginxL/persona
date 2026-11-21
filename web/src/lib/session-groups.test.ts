@@ -93,18 +93,26 @@ describe("groups from the hub's catalog", () => {
 });
 
 describe("groups from a counts read", () => {
-  it("lists computers the busiest first, each by its own filter", () => {
+  it("lists computers in a fixed name order, each by its own filter and current counts", () => {
     const groups = countGroups(counts({ machine: { mac: 4, pc: 7, nas: 4, "": 2, gone: 0 } }), "machine", { needs: counts({ machine: { pc: 2 } }) });
-    expect(groups.map((g) => [g.key, g.count, g.needs])).toEqual([["pc", 7, 2], ["mac", 4, 0], ["nas", 4, 0]]);
-    expect(groups[0].filters).toEqual({ machine_id: "pc" });
+    expect(groups.map((g) => [g.key, g.count, g.needs])).toEqual([["mac", 4, 0], ["nas", 4, 0], ["pc", 7, 2]]);
+    expect(groups[0].filters).toEqual({ machine_id: "mac" });
     expect(groups[0].members).toBeUndefined();
-    expect(holdsPlace(groups[0], "machine", { machine: "pc", project: "/x", group: "" })).toBe(true);
+    expect(holdsPlace(groups[0], "machine", { machine: "mac", project: "/x", group: "" })).toBe(true);
+  });
+
+  it("places computers in the hub's order, not their machine-ID order, as counts change", () => {
+    const before = countGroups(counts({ machine: { "z-id": 1, "a-id": 2 } }), "machine", { machineOrder: ["z-id", "a-id"] });
+    const after = countGroups(counts({ machine: { "z-id": 3, "a-id": 1 } }), "machine", { machineOrder: ["z-id", "a-id"], needs: counts({ machine: { "a-id": 1 } }) });
+    expect(before.map((g) => g.key)).toEqual(["z-id", "a-id"]);
+    expect(after.map((g) => g.key)).toEqual(["z-id", "a-id"]);
+    expect(after.map((g) => g.needs)).toEqual([0, 1]);
   });
 
   it("names a project by its folder and keeps its path, a Windows path by its own separator", () => {
     const groups = countGroups(counts({ project: { "/work/alpha": 2, "C:\\work\\Beta": 5, solo: 1 } }), "project");
     expect(groups.map((g) => [g.name, g.places.map((p) => p.path), g.filters])).toEqual([
-      ["Beta", ["C:\\work\\Beta"], { project: "C:\\work\\Beta" }], ["alpha", ["/work/alpha"], { project: "/work/alpha" }], ["solo", [], { project: "solo" }],
+      ["alpha", ["/work/alpha"], { project: "/work/alpha" }], ["Beta", ["C:\\work\\Beta"], { project: "C:\\work\\Beta" }], ["solo", [], { project: "solo" }],
     ]);
   });
 
@@ -118,7 +126,7 @@ describe("groups from a counts read", () => {
 describe("the sidebar's lists by to-do and by state (#6662)", () => {
   const todos = { order: ["todo_b", "todo_a"], title: (id: string) => ({ todo_a: "Ship 1.3", todo_b: "Review" } as Record<string, string>)[id] };
 
-  it("has a section per open to-do in the To-dos page's order, those needing the user first, then Not on a to-do", () => {
+  it("keeps open to-dos in the To-dos page's order as needs-you counts change, then Not on a to-do", () => {
     const by = counts({ todo: { todo_a: 2, todo_b: 1, todo_c: 4, "": 5, todo_gone: 0 } });
     const plain = countGroups(by, "todo", { todos });
     expect(plain.map((g) => [g.name, g.count, g.filters, Boolean(g.rest)])).toEqual([
@@ -129,7 +137,8 @@ describe("the sidebar's lists by to-do and by state (#6662)", () => {
       [t("lib-todos.unassigned"), 5, { todo: "none" }, true],
     ]);
     const needing = countGroups(by, "todo", { todos, needs: counts({ todo: { todo_a: 1 } }) });
-    expect(needing.map((g) => [g.filters.todo, g.needs])).toEqual([["todo_a", 1], ["todo_b", 0], ["todo_c", 0], ["none", 0]]);
+    expect(needing.map((g) => g.key)).toEqual(plain.map((g) => g.key));
+    expect(needing.map((g) => [g.filters.todo, g.needs])).toEqual([["todo_b", 0], ["todo_a", 1], ["todo_c", 0], ["none", 0]]);
     // an older hub counts no to-dos
     expect(countGroups(counts({}), "todo", { todos })).toEqual([]);
   });

@@ -31,12 +31,14 @@ import java.io.File
 import java.util.Locale
 import org.junit.Assert.assertTrue
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.android.R
 import persona.android.ShareTargetRow
+import persona.android.ui.ComponentActivityHostRule
 import persona.core.contracts.SessionKey
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
@@ -46,7 +48,8 @@ import persona.core.designsystem.PersonaTheme
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(application = Application::class, sdk = [35], qualifiers = "en-w400dp-h900dp-xhdpi")
 class DiagnosticsShareShotsTest {
-    @get:Rule val rule = createComposeRule()
+    private val rule = createComposeRule()
+    @get:Rule val host = RuleChain.outerRule(ComponentActivityHostRule()).around(rule)
     private fun out() = File(System.getProperty("persona.shots") ?: "build/diagnostics-share-shots").also { it.mkdirs() }
 
     private fun localized(tag: String, fontScale: Float): Context {

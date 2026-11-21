@@ -2,6 +2,7 @@ package persona.core.domain.tasks
 
 import org.junit.Test
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.Todo
@@ -32,6 +33,16 @@ class ReviewTest {
         ), sup.checklist())
         assertEquals(2 to 3, sup.checkCount())
         assertEquals("深色也补", sup.latestReview?.note)
+    }
+
+    @Test
+    fun personalVerificationIsNotAcceptanceUntilPass() {
+        val waiting = todo("""{"id":"t","supervision":{"supervisor":"m","state":"user_check","reviews":[{"at":"2026-11-05T09:00:00Z","verdict":"accepted"}]}}""")
+        assertEquals(ReviewStage.UserCheck, waiting.reviewStage)
+        assertEquals("user_check", waiting.reviewState)
+        assertFalse(waiting.acceptanceStands)
+        assertEquals(ReviewStage.Accepted, waiting.copy(doneAt = "2026-11-05T10:00:00Z").reviewStage)
+        assertEquals("accepted", waiting.copy(doneAt = "2026-11-05T10:00:00Z").reviewState)
     }
 
     @Test

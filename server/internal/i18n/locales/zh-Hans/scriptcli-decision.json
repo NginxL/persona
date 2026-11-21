@@ -1,0 +1,5 @@
+{
+  "invalid": "无法读取决定：{reason}",
+  "unavailable": "决定服务不可用：{reason}",
+  "too_old": "这台电脑上的 personad 太旧，不支持决定请求"
+}

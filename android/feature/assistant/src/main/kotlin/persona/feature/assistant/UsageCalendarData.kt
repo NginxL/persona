@@ -1,20 +1,22 @@
 package persona.feature.assistant
 
+import persona.core.contracts.TraeCliDisplayName
 import persona.core.contracts.api.UsageDay
 import persona.core.contracts.api.UsageDays
 import persona.core.contracts.api.UsageHours
+import persona.core.contracts.isTraeCliId
 import persona.core.designsystem.AgentMarkSpec
 import persona.core.designsystem.knownAgentMark
 import java.time.LocalDate
 
 /** Usage has only the runtime id. An empty id has its own historical label and no mark. */
 internal fun usageAgentMark(id: String): AgentMarkSpec? {
-    val name = when (id.lowercase()) {
+    val agent = id.lowercase()
+    val name = if (isTraeCliId(agent)) TraeCliDisplayName else when (agent) {
         "" -> return null
         "claude" -> "Claude Code"
         "codex" -> "Codex"
         "trae" -> "TRAE"
-        "traex" -> "TRAEX"
         "omp" -> "Oh My Pi"
         "gemini" -> "Gemini CLI"
         "cursor" -> "Cursor"

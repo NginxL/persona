@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -152,6 +153,44 @@ func stoppedOmpForStart(t *testing.T, id string) (*Node, *fakeHerdr, *fakeRuntim
 		}
 	})
 	return n, f, rt, cwd, rh
+}
+
+// The regression check of #10941's resume rule for omp: a session omp ran without Persona has no node record, but its
+// session file says where it ran, and that is where `omp --resume` opens it. An extension's resume of one outside the
+// health space (resume_outside_health, for one its computer does not list) goes on, as the owner's does; one whose
+// file says the space is refused resume_unknown before herdr is asked anything.
+func TestOmpAnExtensionsResumeReadsTheSessionFile(t *testing.T) {
+	const id, inSpace = "01b10000-0000-7000-8000-000000000031", "01b10000-0000-7000-8000-000000000032"
+	n, f, _, cwd, _ := stoppedOmpForStart(t, id)
+	charts := mkdir(t, filepath.Join(identity.HealthDir(n.home), "charts"))
+	writeOmpSession(t, ompSessionsDir(n.home), "-health-charts", inSpace, "charts", charts, time.Now())
+	d := n.omps()
+	d.mu.Lock()
+	d.at = time.Time{} // scan again: the file above is newer than the last scan
+	d.mu.Unlock()
+	if s, ok := n.ompResumeSession(inSpace); !ok || s.Cwd != charts {
+		t.Fatalf("the health space's omp session on disk: %+v, %v", s, ok)
+	}
+	if _, ok := n.state.get(id); ok {
+		t.Fatal("the omp session has a record: not one Persona did not start")
+	}
+	start := func(id string) (map[string]any, error) {
+		return request(t, n, "session.start", map[string]any{"cwd": cwd, "launcher": "omp", "agent_type": "omp",
+			"resume_session_id": id, "resume_outside_health": true})
+	}
+	if _, err := start(inSpace); rpcCode(err) != proto.CodeResumeUnknown {
+		t.Fatalf("the extension's resume of an omp session in the health space: %v (code %q)", err, rpcCode(err))
+	}
+	if tabs := f.trace("tab.create"); len(tabs) != 0 {
+		t.Fatalf("a refused resume opened a tab: %v", tabs)
+	}
+	res, err := start(id)
+	if err != nil {
+		t.Fatalf("the extension's resume of an omp session outside the space: %v", err)
+	}
+	if s, _ := res["session"].(map[string]any); s["session_id"] != id {
+		t.Fatalf("resumed %v", res)
+	}
 }
 
 // Two session.start calls resuming the same stopped omp start it once: the second waits on the session's recovery lock

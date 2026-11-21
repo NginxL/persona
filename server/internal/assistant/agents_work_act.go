@@ -48,7 +48,11 @@ func (s *Service) actOn(ctx context.Context, v *workView, machine string, c prot
 		return
 	case proto.WaitExternal, proto.WaitAgent:
 		if w.ResetsAt != nil {
-			if !actOnLimit(c, e, sw.AutoContinue, l, now) {
+			autoContinue := sw.AutoContinue
+			if !sw.Enabled && s.protectedQuotaWait(ctx, machine, c) {
+				autoContinue = sw.transientOn() // mechanical quota recovery is independent of semantic triage
+			}
+			if !actOnLimit(c, e, autoContinue, l, now) {
 				if sw.Enabled && !sw.AutoContinue && !c.TurnErrorResumes {
 					s.workWould(k, handAutoContinue) // only the switch kept it from being continued at the reset
 				}
@@ -431,13 +435,24 @@ func sessionNotFound(err error) bool {
 
 // sendToSession sends text to sid as the manager (the next working is its doing, not the user's).
 func (s *Service) sendToSession(ctx context.Context, machine, sid, text string) error {
+	return s.sendWorkText(ctx, machine, sid, text, false)
+}
+
+// sendWorkText resolves a model only for a quota continuation; ordinary manager messages retain their send path.
+func (s *Service) sendWorkText(ctx context.Context, machine, sid, text string, quotaContinuation bool) error {
 	s.work.mu.Lock()
 	s.work.init()
 	s.work.sent[[2]string{machine, sid}] = time.Now()
 	s.work.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	return s.call(ctx, machine, DeviceSessionSend, map[string]any{"session_id": sid, "text": text}, nil)
+	params := map[string]any{"session_id": sid, "text": text}
+	if quotaContinuation {
+		if err := s.protectedContinuationModel(ctx, machine, sid, params); err != nil {
+			return err
+		}
+	}
+	return s.call(ctx, machine, DeviceSessionSend, params, nil)
 }
 
 // sendModelRetry ties uncertain delivery retries to one message, rather than
@@ -452,5 +467,33 @@ func (s *Service) sendModelRetry(ctx context.Context, e db.SessionWork, text str
 	// PostgreSQL timestamps retain microseconds. Use that same precision before
 	// and after loading a due row so a crash cannot change its once-only send ID.
 	id := fmt.Sprintf("model-retry:%s:%d:%d", e.SessionID, e.TurnAt.Truncate(time.Microsecond).UnixNano(), e.Retries)
-	return s.call(ctx, e.MachineID, DeviceSessionSendOnce, map[string]any{"session_id": e.SessionID, "text": text, "client_msg_id": id}, nil)
+	params := map[string]any{"session_id": e.SessionID, "text": text, "client_msg_id": id}
+	if err := s.protectedContinuationModel(ctx, e.MachineID, e.SessionID, params); err != nil {
+		return err
+	}
+	return s.call(ctx, e.MachineID, DeviceSessionSendOnce, params, nil)
+}
+
+// protectedContinuationModel re-resolves owner-facing conversations on a continuation after a quota/service failure.
+// Worker sends keep their existing execution. A pre-upgrade observed fallback is never a configured choice.
+func (s *Service) protectedContinuationModel(ctx context.Context, machine, sid string, params map[string]any) error {
+	if s.protectedModelConversation(ctx, machine, sid) {
+		return s.sendModel(ctx, machine, sid, params, s.lang(ctx))
+	}
+	return nil
+}
+
+func (s *Service) protectedModelConversation(ctx context.Context, machine, sid string) bool {
+	cfg := s.settings(ctx)
+	return cfg.Main != "" && cfg.Main == sid && cfg.mainRouteMachine() == machine || s.isLeader(ctx, sid) || s.isBackground(ctx, sid)
+}
+
+// protectedQuotaWait admits only mechanical quota waits to assistant work tracking. Other assistant failures never
+// enter the worker's semantic triage or automatic actions. A runtime's own continuation must remain undisturbed.
+func (s *Service) protectedQuotaWait(ctx context.Context, machine string, c proto.Session) bool {
+	if !c.Assistant || c.TurnErrorKind != proto.TurnErrorUsageLimit || !s.protectedModelConversation(ctx, machine, c.SessionID) {
+		return false
+	}
+	_, reset := usageLimitReset(c)
+	return reset || c.TurnErrorResumes
 }

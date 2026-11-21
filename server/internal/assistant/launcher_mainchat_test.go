@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -13,7 +14,7 @@ import (
 )
 
 // The machine of these tests lists plain claude, a ~/.zshrc Codex alias, a Paseo provider, a runtime that runs the
-// assistant, TRAEX, and the managed launchers: one Claude, one Codex.
+// assistant, TRAE CLI, and the managed launchers: one Claude, one Codex.
 func mainChatFixture(t *testing.T) (*Service, *fakeHub) {
 	t.Helper()
 	f := newFakeHub().withMachine()
@@ -53,7 +54,7 @@ func pickerNames(t *testing.T, s *Service, purpose string) []string {
 // The main chat's menu offers only what a message can run on; New Agent's keeps every launcher the machine starts.
 func TestMainChatPickerListsOnlyWhatRunsTheAssistant(t *testing.T) {
 	s, _ := mainChatFixture(t)
-	if got := strings.Join(pickerNames(t, s, "assistant"), ","); got != "claude,cx,agy-rt,gw" {
+	if got := strings.Join(pickerNames(t, s, "assistant"), ","); got != "claude,cx,agy-rt,gw,codex-gw" {
 		t.Fatalf("assistant: %s", got)
 	}
 	if got := strings.Join(pickerNames(t, s, "agent.new"), ","); got != "claude,cx,cc-relay,agy-rt,traex,gw,codex-gw" {
@@ -61,8 +62,263 @@ func TestMainChatPickerListsOnlyWhatRunsTheAssistant(t *testing.T) {
 	}
 }
 
+func TestMainChatPickerForwardsAnExplicitRefresh(t *testing.T) {
+	s, f := mainChatFixture(t)
+	f.mu.Lock()
+	start := len(f.calls)
+	f.mu.Unlock()
+	for _, refresh := range []string{"", "&refresh=1"} {
+		r := request(s, "GET", "/api/v1/machines/server/launchers?purpose=assistant"+refresh, "")
+		if r.Code != 200 {
+			t.Fatalf("picker response: %d %s", r.Code, r.Body.String())
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var refreshes []bool
+	for _, call := range f.calls[start:] {
+		if call.Method != DeviceLaunchersList {
+			continue
+		}
+		var params struct{ Refresh bool }
+		if err := json.Unmarshal(call.Params, &params); err != nil {
+			t.Fatal(err)
+		}
+		refreshes = append(refreshes, params.Refresh)
+	}
+	if !slices.Equal(refreshes, []bool{false, true}) {
+		t.Fatalf("launcher_list refresh flags = %v, want [false true]", refreshes)
+	}
+}
+
+type failingLauncherRefreshHub struct {
+	Hub
+	err error
+}
+
+func (h failingLauncherRefreshHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
+	if p.Method == DeviceLaunchersList {
+		var params struct {
+			Refresh   bool
+			CacheOnly bool `json:"cache_only"`
+		}
+		if err := json.Unmarshal(p.Params, &params); err != nil {
+			return nil, err
+		}
+		if params.Refresh {
+			if h.err != nil {
+				return nil, h.err
+			}
+		}
+		// The original scan is still running. Only a cache-only read can bypass it.
+		if !params.CacheOnly {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+	}
+	return h.Hub.DeviceCall(ctx, p)
+}
+
+func TestMainChatPickerRetryUsesNodeSnapshot(t *testing.T) {
+	old := launcherSyncTimeout
+	launcherSyncTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { launcherSyncTimeout = old })
+	for _, tc := range []struct {
+		name    string
+		err     error
+		hasRows bool
+	}{
+		{name: "slow refresh with stale snapshot", hasRows: true},
+		{name: "failed refresh with stale snapshot", err: errors.New("incomplete shell output"), hasRows: true},
+		{name: "slow refresh without snapshot"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeHub().withMachine()
+			f.launcherList = []proto.Launcher{}
+			if tc.hasRows {
+				f.launcherList = []proto.Launcher{{Name: "recovered", Source: "zshrc"}}
+			}
+			st := &memStore{}
+			s := withSettings(t, f, New(Options{
+				Hub: failingLauncherRefreshHub{Hub: f, err: tc.err}, Store: func() Store { return st }, Logf: testLogf(t),
+			}))
+			if tc.hasRows {
+				if got := pickerNames(t, s, "assistant&refresh=1"); !slices.Equal(got, []string{"recovered"}) {
+					t.Fatalf("picker = %v, want the cached node scan", got)
+				}
+			} else {
+				r := request(s, "GET", "/api/v1/machines/server/launchers?purpose=assistant&refresh=1", "")
+				if r.Code != 502 || !strings.Contains(r.Body.String(), `"code":"timeout"`) {
+					t.Fatalf("empty cache should stay retryable: %d %s", r.Code, r.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestMainChatPickerUsesKnownProvidersDuringShellTimeout(t *testing.T) {
+	s, f := mainChatFixture(t)
+	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "gw", Model: "m1", OwnService: "skip"}})
+	old := launcherSyncTimeout
+	launcherSyncTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { launcherSyncTimeout = old })
+	f.mu.Lock()
+	f.slowLaunchers = map[string]bool{"server": true}
+	callStart := len(f.calls)
+	f.mu.Unlock()
+
+	if got := pickerNames(t, s, "assistant"); !slices.Equal(got, []string{"gw"}) {
+		t.Fatalf("managed launcher without a shell snapshot = %v", got)
+	}
+
+	f.mu.Lock()
+	calls := slices.Clone(f.calls[callStart:])
+	f.slowLaunchers = nil
+	f.sessions["other"] = nil
+	f.zshrc = map[string][]proto.Launcher{
+		"server": {
+			{Name: "cached-alias", Source: "zshrc"},
+			{Name: "connected-runtime", Source: "agy", Agent: "agy", Assistant: true},
+		},
+		"other": {{Name: "other-machine", Source: "zshrc"}},
+	}
+	f.mu.Unlock()
+	shellReads, ownServiceReads := 0, 0
+	for _, call := range calls {
+		if call.Method == DeviceLaunchersList {
+			shellReads++
+		}
+		if call.Method == DeviceLaunchersOwnService {
+			ownServiceReads++
+		}
+	}
+	if shellReads != 1 {
+		t.Fatalf("cold picker made %d shell reads, want 1", shellReads)
+	}
+	if ownServiceReads != 1 {
+		t.Fatalf("cold picker made %d own-service reads, want 1 even on an older node", ownServiceReads)
+	}
+	if got := pickerNames(t, s, "assistant"); !slices.Equal(got, []string{"cached-alias", "connected-runtime", "gw"}) {
+		t.Fatalf("picker with live runtime = %v", got)
+	}
+	_ = s.zshrcLaunchers(t.Context(), true)
+	f.mu.Lock()
+	f.slowLaunchers = map[string]bool{"server": true}
+	f.mu.Unlock()
+	if got := pickerNames(t, s, "assistant"); !slices.Equal(got, []string{"cached-alias", "gw"}) {
+		t.Fatalf("picker during shell timeout = %v", got)
+	}
+
+	f.mu.Lock()
+	f.slowLaunchers = nil
+	f.zshrc["server"] = []proto.Launcher{{Name: "live-alias", Source: "zshrc"}}
+	f.mu.Unlock()
+	if got := pickerNames(t, s, "assistant"); !slices.Equal(got, []string{"live-alias", "gw"}) {
+		t.Fatalf("picker after shell recovery = %v", got)
+	}
+}
+
+func TestMainChatPickerChecksOwnServiceAfterShellTimeout(t *testing.T) {
+	s, f := mainChatFixture(t)
+	gw := storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "gw", Model: "m1", OwnService: proto.OwnServiceSkip}}
+	putLaunchers(t, s,
+		gw,
+		storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "fallback", Model: "m1", OwnService: proto.OwnServiceUse}},
+	)
+	old := launcherSyncTimeout
+	launcherSyncTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { launcherSyncTimeout = old })
+	f.mu.Lock()
+	f.slowLaunchers = map[string]bool{"server": true}
+	f.ownServices = map[string]proto.OwnServiceState{
+		"server/claude": {Agent: "claude", Known: true, Own: true, Via: "login"},
+	}
+	f.mu.Unlock()
+
+	p := pickerOf(t, s, "server", "assistant")
+	if got := p.names(); !slices.Equal(got, []string{"fallback"}) {
+		t.Fatalf("picker during shell timeout = %v, want [fallback]", got)
+	}
+	if len(p.Unavailable) != 1 || p.Unavailable[0].Name != "gw" || p.Unavailable[0].Code != proto.CodeLauncherOwnService {
+		t.Fatalf("picker unavailable = %+v, want gw with %s", p.Unavailable, proto.CodeLauncherOwnService)
+	}
+
+	putLaunchers(t, s, gw)
+	p = pickerOf(t, s, "server", "assistant")
+	if len(p.Launchers) != 0 || len(p.Unavailable) != 1 ||
+		p.Unavailable[0].Name != "gw" || p.Unavailable[0].Code != proto.CodeLauncherOwnService {
+		t.Fatalf("picker with only a skipped provider = %+v, want an unavailable gw with %s", p, proto.CodeLauncherOwnService)
+	}
+}
+
+func TestMainChatPickerDefaultUsesFreshAlias(t *testing.T) {
+	s, f := mainChatFixture(t)
+	if err := s.saveModelRecord(t.Context(), "assistant", 0, ModelBinding{Provider: "launcher.live-alias"}); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.launcherList = []proto.Launcher{{Name: "live-alias", Source: "zshrc", Model: "example-model"}}
+	f.mu.Unlock()
+	r := request(s, "GET", "/api/v1/machines/server/launchers?purpose=assistant", "")
+	var res struct {
+		Default struct {
+			Provider string
+			Model    string
+		}
+	}
+	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &res) != nil ||
+		res.Default.Provider != "live-alias" || res.Default.Model != "example-model" {
+		t.Fatalf("picker lost the configured alias default: %d %s", r.Code, r.Body.String())
+	}
+}
+
+func TestMainChatPickerDefaultRequiresLauncherBinding(t *testing.T) {
+	s, _ := mainChatFixture(t)
+	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{
+		Name: "messages", Kind: "api", API: "messages", Model: "configured-model",
+	}})
+	ctx := t.Context()
+	read := func() map[string]string {
+		t.Helper()
+		r := request(s, "GET", "/api/v1/machines/server/launchers?purpose=assistant", "")
+		var out struct{ Default map[string]string }
+		if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &out) != nil {
+			t.Fatalf("picker response: %d %s", r.Code, r.Body.String())
+		}
+		return out.Default
+	}
+	if err := s.saveModelRecord(ctx, "assistant", 0, ModelBinding{Provider: "legacy.ai"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got != nil {
+		t.Fatalf("API binding without a launcher supplied a picker default: %v", got)
+	}
+	if err := s.saveModelRecord(ctx, "assistant", 1, ModelBinding{Provider: "launcher.messages"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got["provider"] != "messages" || got["model"] != "configured-model" {
+		t.Fatalf("Messages provider's launcher default = %v", got)
+	}
+}
+
+func TestMainChatPickerShellTimeoutWithoutChoicesStaysRetryable(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.slowLaunchers = map[string]bool{"server": true}
+	s := newTestService(t, f)
+	old := launcherSyncTimeout
+	launcherSyncTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { launcherSyncTimeout = old })
+
+	for _, refresh := range []string{"", "&refresh=1"} {
+		r := request(s, "GET", "/api/v1/machines/server/launchers?purpose=assistant"+refresh, "")
+		if r.Code != 502 || !strings.Contains(r.Body.String(), `"code":"timeout"`) {
+			t.Fatalf("picker without choices (%q) = %d %s", refresh, r.Code, r.Body.String())
+		}
+	}
+}
+
 // Every client replays these candidates: an assistant-purpose read adds the eligible Messages API provider and keeps
-// the declared runtime, but not managed Codex. New Agent keeps its generic launcher answer (Direct APIs are not Agents).
+// the declared runtime and managed Codex. New Agent keeps its generic launcher answer (Direct APIs are not Agents).
 func TestMainChatPickerReplaysSharedLauncherFixture(t *testing.T) {
 	var fixture struct {
 		Version int `json:"version"`
@@ -132,7 +388,7 @@ func TestSendRefusesOrReplacesALauncherThatCannotRunTheAssistant(t *testing.T) {
 	f.setSessions("server", proto.Session{SessionID: "side", Launcher: "cc-relay", Model: "kimi", Assistant: true},
 		proto.Session{SessionID: "side-codex", Launcher: "codex-gw", Assistant: true},
 		proto.Session{SessionID: "ok", Launcher: "cx", Assistant: true})
-	for _, name := range []string{"cc-relay", "codex-gw", "traex"} {
+	for _, name := range []string{"cc-relay", "traex"} {
 		_, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "ok", Lang: "zh-Hans", Params: map[string]any{"text": "hi", "launcher": name}})
 		if err == nil || !strings.Contains(err.Error(), "「"+name+"」") || !strings.Contains(err.Error(), "跑不了助手对话") {
 			t.Fatalf("picked %s: %v", name, err)
@@ -144,7 +400,7 @@ func TestSendRefusesOrReplacesALauncherThatCannotRunTheAssistant(t *testing.T) {
 		if sid == "side" {
 			wantModel = "kimi" // an approved substitute keeps a model its unreadable list cannot rule out
 		} else {
-			wantLauncher = "cx"
+			wantLauncher = "codex-gw"
 		}
 		if err != nil || p["launcher"] != wantLauncher || p["model"] != wantModel {
 			t.Fatalf("%s left on a launcher that can't run it: %v %v", sid, p, err)
@@ -158,8 +414,8 @@ func TestSendRefusesOrReplacesALauncherThatCannotRunTheAssistant(t *testing.T) {
 	if p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "ok", Params: map[string]any{"text": "hi", "launcher": "cc-relay"}}); err != nil || p["launcher"] != "cc-relay" {
 		t.Fatalf("unknown list: %v %v", p, err)
 	}
-	if _, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "ok", Params: map[string]any{"text": "hi", "launcher": "codex-gw"}}); err == nil {
-		t.Fatal("a managed Codex launcher is the same everywhere: refused without the list")
+	if _, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "ok", Params: map[string]any{"text": "hi", "launcher": "codex-gw"}}); err != nil {
+		t.Fatalf("managed Codex should run without shell discovery: %v", err)
 	}
 }
 
@@ -172,8 +428,8 @@ func TestSendValidatesTheResolvedAssistantLauncher(t *testing.T) {
 		setSettings(t, s, func(v *Settings) { v.Main = "main" })
 		f.setSessions("server", proto.Session{SessionID: "main", Assistant: true})
 		p, err := s.SendParams(ctx, SendParams{MachineID: "server", SessionID: "main", Params: map[string]any{"text": "hi"}})
-		if err != nil || p["launcher"] != "cx" || p["model"] != "old-model" { // cx's list can't be read: kept (launcherHasModel)
-			t.Fatalf("resolved default was not replaced with a verified compatible launcher of its kind: %v %v", p, err)
+		if err != nil || p["launcher"] != "codex-gw" || p["model"] != "old-model" { // cx's list can't be read: kept (launcherHasModel)
+			t.Fatalf("managed Codex default was replaced: %v %v", p, err)
 		}
 	})
 	t.Run("legacy side falls back to the same incompatible default", func(t *testing.T) {
@@ -189,7 +445,7 @@ func TestSendValidatesTheResolvedAssistantLauncher(t *testing.T) {
 }
 
 func TestStartOnRefusesALauncherThatCannotRunTheAssistant(t *testing.T) {
-	for _, name := range []string{"codex-gw", "cc-relay"} {
+	for _, name := range []string{"cc-relay"} {
 		t.Run(name, func(t *testing.T) {
 			s, f := mainChatFixture(t)
 			_, err := s.startOn(context.Background(), "server", StartParams{Text: "hi", Launcher: name}, false)
@@ -392,9 +648,9 @@ func TestMainChatOnAMissingRuntimeIsIncompatible(t *testing.T) {
 }
 
 // A Persona-managed provider in the computer's scope takes the place of the computer's own launcher by its name, in the
-// picker and in mainChatFit, so the status goes by the provider too: a managed Codex provider cx, which can't run the
-// main chat, stays "Provider missing or incompatible" while the computer's ~/.zshrc has a Claude alias cx that could.
-func TestMainChatOnAManagedProviderOverItsOwnLauncherIsIncompatible(t *testing.T) {
+// picker and in mainChatFit. Managed Codex is a supported native assistant path;
+// its shadowed shell alias cannot change the effective provider or model.
+func TestMainChatOnAManagedCodexProviderOverItsOwnLauncher(t *testing.T) {
 	s, f, _ := modelService(t)
 	ctx := context.Background()
 	f.mu.Lock()
@@ -405,13 +661,13 @@ func TestMainChatOnAManagedProviderOverItsOwnLauncherIsIncompatible(t *testing.T
 		t.Fatalf("on the computer's own Claude alias: %+v; want status %q, or this proves nothing", p, modelUnverified)
 	}
 	putLaunchers(t, s, storedLauncher{ManagedLauncher: proto.ManagedLauncher{Name: "cx", Agent: "codex", BaseURL: "https://gw.example/v1", Model: "gpt"}})
-	if names := pickerNames(t, s, "assistant"); slices.Contains(names, "cx") {
-		t.Fatalf("the main chat's picker offers cx over the managed Codex provider: %v", names)
+	if names := pickerNames(t, s, "assistant"); !slices.Contains(names, "cx") {
+		t.Fatalf("the main chat's picker omitted the managed Codex provider: %v", names)
 	}
-	if fit, _ := s.mainChatFit(ctx, "server", "cx"); fit != mainChatRefused {
-		t.Fatalf("mainChatFit on the managed Codex provider: %v; want refused", fit)
+	if fit, _ := s.mainChatFit(ctx, "server", "cx"); fit != mainChatFits {
+		t.Fatalf("mainChatFit on the managed Codex provider: %v; want fits", fit)
 	}
-	want := mc(s.requestCtxLang(ctx), "status_provider_incompatible")
+	want := modelUnverified
 	for _, id := range []string{"assistant", "schedule", purposeSupervise} {
 		if p := purposeOf(t, s, id); p.Effective.Provider != "launcher.cx" || p.Status != want {
 			t.Fatalf("%s on the managed Codex provider cx: %+v; want status %q", id, p, want)

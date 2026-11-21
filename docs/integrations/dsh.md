@@ -113,6 +113,8 @@ plugin management inside phone-driven sessions also reports `HMR transactions ca
 | Phone tools | Hub tools (`mcp.tools` forwarded by node) register in DSH as `mcp__persona__<name>`; calls go through node `mcp.call` to the hub with the calling session attached. Result text becomes tool output; error results become tool failures |
 | Agent supervision | Regular Agent sessions get their own Persona tools (such as `report_to_supervisor`) even when assistant support is enabled. At step preparation, DSH checks the calling session with the node and offers `task_plan` and `task_review` only to an active task leader. |
 
+Markdown in assistant text uses the session computer's existing file machinery for local destinations: absolute paths and paths relative to the session cwd open in the file viewer, and valid local images render in the reply. Missing, denied, and unreadable files show the file API's reason; image retries happen only when requested. HTTP(S) destinations keep their existing behavior. These reads use the machine-file API and its normal path guards, not a DSH-specific file-read RPC.
+
 ## Authorization, questions, and plan approval
 
 The plugin goes first (`prepend`) on DSH's two response chains, `approval/request` and `user-questions/request`. When its turn comes:

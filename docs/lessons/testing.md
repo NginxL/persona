@@ -82,6 +82,18 @@
   the same derived data and suite selection; preserve failure propagation, integration exclusions and result-bundle
   inspection rather than increasing the execution timeout or dropping suites.
 
+- App-hosted simulator launch failures are not necessarily boot or product-test failures (#1738). A completed boot,
+  testmanagerd control connection and app installation can all precede a Mach -308 launch timeout without a test-bundle
+  proxy connection. Capture the host process and launchd/runtime-mount evidence before Xcode timeout cleanup, and keep
+  the app host distinct from the test bundle. Requiring both UDID and bundle ID misses launchd errors; filtering a large
+  raw log only after buffering it also discards the evidence. Neither an absent log nor a process presence proves a cause.
+  When an iPhone readiness probe passes but the later iPad launch fails, the iPad needs its own live scope and observer:
+  the iPhone's successful result, host samples and scoped log do not explain the other device's launch. An outer test
+  deadline can kill a background observer before its `finally` block writes status: preseed bounded unavailable records,
+  replace them atomically on completion, and use a separate process group plus a bounded drain/reaper. Test both probe
+  and result-inspection deadlines for deterministic status/evidence and no surviving watcher; success and strict-result
+  failure must still complete normally.
+
 - Sync replay must wait for its initial session, built transcript and pending-card snapshot before issuing user actions
   (#1112). Fixed startup sleeps can turn a tap on an unloaded card into a silent no-op; accepting a reply with no held
   request then falsely labels the later card snapshot as a resurrection. Require an actual request before delivering
@@ -415,6 +427,45 @@ Gradle then called the tests up to date and skipped them. A deliberately broken 
   also passes its path to the test JVM.
 
 **To check the setup**, break one rule on purpose and confirm the binding tests fail before trusting them.
+
+## Go's test cache can repeat a pass the change broke (2026-11-22, #12724)
+
+Every Go test command the repository's scripts run passes `-count=1`
+(`docs/operations/testing.md`, "Why tests stay uncached"), and dropping it to save time keeps coming up (#10613).
+The reason: Go reuses a test result while the test binary and what the test process itself recorded opening are
+unchanged, and it rechecks a recorded file only inside the module root (`computeTestInputsID` in `cmd/go`: "Do not
+recheck files outside the module, GOPATH, or GOROOT root"), so for `server/` the rest of the repository is
+invisible. Those inputs are exactly what check-fast sends to the packages that read them (the `spec/fixtures/*` rule in
+`scripts/ci/check_fast_map.py`, and `server_readers` in `scripts/test/check-fast.sh`), and what a child process reads,
+like the `go list` that `internal/archguard` runs, is never recorded at all.
+
+Reproduced on 2026-11-22 with Go 1.27.3 at `origin/main` a133f8cce9, from `server/` (`-run` keeps other tests out of
+it; a package with any failing test is never cached):
+
+```sh
+go test -run '^TestScriptOrStreamGoesByTheBytes$' ./internal/proto/           # ok 0.101s
+cp ../spec/fixtures/file-types/typescript.ts ../spec/fixtures/file-types/segment.ts
+go test -run '^TestScriptOrStreamGoesByTheBytes$' ./internal/proto/           # ok (cached)
+go test -count=1 -run '^TestScriptOrStreamGoesByTheBytes$' ./internal/proto/  # FAIL: segment fixture is 1018 bytes, not whole packets
+git checkout -- ../spec/fixtures/file-types/segment.ts
+```
+
+Inside the module the guards go stale the same way: after `go test -run '^TestContractsArePure$' ./internal/archguard/`
+passed, a new one-line package under `server/internal/` whose name ends in `wire` (which makes it a contract package
+the guard's list must name) still got `ok (cached)`, while `-count=1` failed with "… looks like a contract package but
+testdata/contracts.txt does not list it".
+
+What a hit would save, measured the same day with the build already cached (110 s to warm it on a loaded machine): the
+guard packages check-fast runs on every server change took 12 s uncached and 1 s cached, and its guard tests 10 to
+14 s uncached. Only packages the change did not reach can hit at all: the edited package and every package that imports
+it get a new test binary and run again. Caching also changes the run itself: `go test` passes `-test.testlogfile` only
+when the result may be cached, and `internal/office` failed only in that mode, because a test that lowered the file size
+limit also cut off that log (#8962, fixed by #8968).
+
+- Keep `-count=1` in every command whose result is reported as verification, and in any new entry point. A plain
+  `go test` while editing is fine, but its `ok (cached)` says nothing about the change.
+- A test cannot tell Go's cache about a file outside `server/` or about what a child process read, so a reader of
+  `spec/`, `schema/`, `sdk/go/`, `docs/` or client sources stays correct only while it runs uncached.
 
 ## Running the hosted CI lanes on a Mac (2026-11-09)
 
@@ -1325,3 +1376,18 @@ next file or pipe the script opens takes the free fd 2, and stderr writes land i
 substitution's pipe there (`lsof` shows fd 2 as a PIPE after `done < <(…)`), which hid the failure in a run whose plan
 had used one. A script that copies stderr checks it at the start (`: 9>&2 || exec 2>/dev/null`) and goes on without
 what it would have shown there.
+
+## A delayed response test has to order the refreshes, not only their reads (2026-11-21, #10289)
+
+`PushInterceptsTests.lateResponseCannotOverwriteNewerRead()` held the first `intercepts` *call* and let the second one
+answer immediately, while the model keeps the answer of the refresh that *started* last (`revision` / `ticket`). Two
+refreshes started with `async let` and a direct `await` on the main actor are not ordered against each other: the
+second-started refresh can be the one that calls `intercepts` first, take the held answer, and then correctly win, so
+the test failed as "Old" on the hosted runner and passed 30/30 elsewhere. Gate the refreshes themselves: start the
+second one only after the first is holding its answer (yield from inside the fake, wait on an `AsyncStream`), then
+release it. No sleep is needed, and the refresh meant to be stale always is.
+
+- `xcodebuild -test-iterations N` repeats XCTest cases, not Swift Testing tests: with `-test-iterations 20`, Xcode 27.2
+  ran this Swift Testing suite once ("Test run with 9 tests in 1 suite"). Repeat a Swift Testing suite by looping
+  `xcodebuild … test-without-building` (about 20 s a run once built), and accept its `TEST EXECUTE SUCCEEDED`, not
+  `TEST SUCCEEDED`.

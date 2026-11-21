@@ -25,5 +25,6 @@
   "confirm": "确认：{option}",
   "dialog_open": "Agent 终端有对话框挡着：「{dialog}」。先处理它再点。",
   "dialog_open_unnamed": "Agent 终端有对话框挡着。先处理它再点。",
-  "open_terminal": "打开终端"
+  "open_terminal": "打开终端",
+  "answer_recorded": "已记录回答。"
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { othersWaiting, stateCounts } from "./sessions";
-import type { AgentState, Session } from "./types";
+import type { AgentState, Interaction, Session } from "./types";
 
 const session = (id: string, state: AgentState, patch: Partial<Session> = {}): Session => ({
   machine_id: "m", session_id: id, title: id, cwd: "/tmp/p", status: state, state, updated_at: "2026-01-01T10:00:00Z", ...patch,
@@ -38,4 +38,24 @@ it("excludes directory-hidden sessions from every attention count", () => {
   expect(stateCounts([session("n", "needs_you", hidden), session("u", "unread", hidden), session("w", "working", hidden), session("v", "needs_you")]))
     .toEqual({ needs: 1, working: 0, waiting: 0, unread: 0, badge: 1 });
   expect(othersWaiting(1, session("n", "needs_you", hidden))).toBe(1);
+});
+
+it("excludes P1-only needs_you sessions from badge when push grading is on while keeping list needs intact (#11771)", () => {
+  const p1Session = session("p1", "needs_you");
+  const p0Session = session("p0", "needs_you");
+  const mixedSession = session("mix", "needs_you");
+  const bareSession = session("bare", "needs_you");
+  const cards: Interaction[] = [
+    { id: "c1", machine_id: "m", session_id: "p1", kind: "permission", push_level: "P1" },
+    { id: "c2", machine_id: "m", session_id: "p0", kind: "question", push_level: "P0" },
+    { id: "c3", machine_id: "m", session_id: "mix", kind: "permission", push_level: "P1" },
+    { id: "c4", machine_id: "m", session_id: "mix", kind: "permission" },
+  ];
+  expect(stateCounts([p1Session, p0Session, mixedSession, bareSession], cards, false)).toEqual({
+    needs: 4, working: 0, waiting: 0, unread: 0, badge: 4,
+  });
+  expect(stateCounts([p1Session, p0Session, mixedSession, bareSession], cards, true)).toEqual({
+    needs: 4, working: 0, waiting: 0, unread: 0, badge: 3,
+  });
+  expect(othersWaiting(1, p1Session, false, true)).toBe(1);
 });

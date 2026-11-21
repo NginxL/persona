@@ -69,6 +69,8 @@ export interface PanelOptions {
   engineSwitch?: boolean;
   /** The engine each launcher runs, as the panel's providers say (a pick from a list not read yet still knows it). */
   engineOf?: (launcher: string) => string | undefined;
+  /** Display-only advertised model for a newly launched session before `s.model` arrives; never used by `pickPlan`. */
+  displayModel?: string;
 }
 
 /** Whether `s` may move to another launcher of its engine: on a hub that does it, a Claude Code Agent whose model the
@@ -93,7 +95,8 @@ export function sessionPanel(s: Session, launchers: Launcher[] | undefined, list
   const all = launchers ?? [];
   const names = all.some((l) => l.name === own) ? all.map((l) => l.name) : [own, ...all.map((l) => l.name)];
   const ownList = listOf(own).list;
-  const row = currentModelRow(ownList?.models ?? [], s.model);
+  const shownModel = s.model || o.displayModel;
+  const row = currentModelRow(ownList?.models ?? [], shownModel);
 
   const providers = names.map((name): PanelProvider => {
     const e = listOf(name);
@@ -113,13 +116,13 @@ export function sessionPanel(s: Session, launchers: Launcher[] | undefined, list
       else p.loading = true;
       // the model it runs stays there while its list is read or couldn't be: its flyout (effort, Fast, ultracode) works
       // as the old popover's tabs did with no list
-      if (mine && s.model) p.models = [panelModel({ id: s.model, name: modelLabel(s.model) }, kind, true, s, false)];
+      if (mine && shownModel) p.models = [panelModel({ id: shownModel, name: modelLabel(shownModel) }, kind, true, s, false)];
     } else {
       let models = (e.list?.models ?? []).map((m) => panelModel(m, kind, mine && m === row, s));
       // a launcher that fixes its own --model takes no model with a switch: its default entry, only
       if (other && e.list?.locked) models = models.filter((m) => m.id === defaultModel(e.list?.models ?? [])?.id);
       // the model it runs, when the list doesn't name it (a list that couldn't be read, an older hub, a model it lacks)
-      if (mine && !row && s.model) models.push(panelModel({ id: s.model, name: modelLabel(s.model) }, kind, true, s, false));
+      if (mine && !row && shownModel) models.push(panelModel({ id: shownModel, name: modelLabel(shownModel) }, kind, true, s, false));
       p.models = models;
     }
     if (other) {
@@ -135,7 +138,7 @@ export function sessionPanel(s: Session, launchers: Launcher[] | undefined, list
     return p;
   });
 
-  const model = row?.id ?? s.model;
+  const model = row?.id ?? shownModel;
   const state: PanelState = {
     current: model ? cleanSetup({ provider: own, model, effort: s.effort, fast: s.service_tier === "priority" }) : null,
     // the models that switch at once: the session's own launcher's

@@ -491,6 +491,7 @@
     <string name="chat_review_pending">検収待ち</string>
     <string name="chat_review_rework">差し戻し %1$d 回目</string>
     <string name="chat_review_needs_user">判断待ち</string>
+    <string name="chat_review_user_check">あなたの確認待ち</string>
     <string name="chat_review_accepted">検収済み</string>
     <string name="chat_review_cancelled">取り消し</string>
     <string name="chat_review_line">検収</string>

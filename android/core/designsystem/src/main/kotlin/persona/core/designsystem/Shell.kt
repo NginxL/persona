@@ -137,6 +137,8 @@ fun MessageItem(
     dimmed: Boolean = false,
     /** The event row's third content line; absent, every line keeps its existing meaning and placement. */
     meta: MessageItemMeta? = null,
+    /** A chat list keeps its name readable at accessibility sizes by moving time below it; other rows keep their layout. */
+    stackTitleTimeAtLargeText: Boolean = false,
     extra: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
@@ -161,13 +163,14 @@ fun MessageItem(
                 val followed = meta != null
                 val prioritizeTitle = followed || heading != null
                 val titleText = if (followed) heading ?: title else heading ?: group ?: sender
-                val stackTitleTime = prioritizeTitle && time != null && LocalDensity.current.fontScale >= STACK_TITLE_TIME_AT_FONT_SCALE
+                val stackTitleTime = (prioritizeTitle || stackTitleTimeAtLargeText) && time != null &&
+                    LocalDensity.current.fontScale >= STACK_TITLE_TIME_AT_FONT_SCALE
                 if (stackTitleTime) {
                     Column {
                         Row(verticalAlignment = Alignment.Top) {
                             Text(titleText, style = type.headline, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f))
-                            if (titleIcon != null) {
+                            if (prioritizeTitle && titleIcon != null) {
                                 Spacer(Modifier.width(Tokens.Space.xs))
                                 JIcon(titleIcon, titleIconLabel, size = Tokens.Space.l, tint = palette.ink3, decorative = titleIconLabel == null)
                             }

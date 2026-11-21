@@ -491,6 +491,7 @@
     <string name="chat_review_pending">待验收</string>
     <string name="chat_review_rework">返工第 %1$d 轮</string>
     <string name="chat_review_needs_user">等你决定</string>
+    <string name="chat_review_user_check">待你验收</string>
     <string name="chat_review_accepted">已验收</string>
     <string name="chat_review_cancelled">已取消</string>
     <string name="chat_review_line">验收</string>

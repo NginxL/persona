@@ -27,6 +27,18 @@ struct AssistantSwitcherTests {
         ManagerRoster(try JSON.decoder.decode(APIClient.ManagerList.self, from: Data(roster.utf8)))
     }
 
+    /// With several hubs the list starts with them, the current one marked (#12594); with one hub there is no hub group.
+    @Test func theHubsComeFirstOnlyWithSeveral() {
+        let names = ["": "Home", "g1": "Work"]
+        let rows = AssistantSwitcherText.hubs(["", "g1"], current: "g1") { names[$0] ?? $0 }
+        #expect(rows.map(\.name) == ["Home", "Work"], "every group in order, the default group first")
+        #expect(rows.map(\.current) == [false, true])
+        #expect(AssistantSwitcherText.hubs([""], current: "") { names[$0] ?? $0 }.isEmpty, "one hub: the assistants alone")
+        #expect(AssistantSwitcherText.hubs([], current: nil) { $0 }.isEmpty)
+        #expect(AssistantSwitcherText.spokenHub(rows[1]).hasPrefix("Work, "))
+        #expect(AssistantSwitcherText.spokenHub(rows[0]) == "Home")
+    }
+
     @Test func theListIsTheInstalledOnesThenThoseInstalling() throws {
         let roster = try Self.list()
         #expect(AssistantSwitcherText.rows(roster).map(\.id) == ["m-1", "assistant", "m-2", "m-3", "m-4"],

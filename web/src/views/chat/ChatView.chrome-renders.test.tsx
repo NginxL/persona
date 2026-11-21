@@ -78,6 +78,7 @@ const zero = () => Object.assign(renders, { info: 0, chips: 0, modes: 0 });
 
 let host: HTMLDivElement;
 let root: Root;
+let opened = "";
 let fetcher: ReturnType<typeof vi.fn>;
 // An agent's header loads its compare menu lazily (ChatView: import("../../lib/compare-runs")) and draws again when it
 // is in. Loaded here first, it is in before a test counts renders: cold, under a full parallel run, it came in during the
@@ -87,6 +88,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  opened = "";
   localStorage.clear();
   // the first page has one reply already, so the assistant's face starts from what the pushes keep showing
   fetcher = vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(String(url).includes("/items") ? { items: [item(0)], to_seq: 0 } : {}), { status: 200, headers: { "Content-Type": "application/json" } })));
@@ -105,10 +107,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function open(view: React.ReactElement, session = row()) {
+async function open(view: React.ReactElement<{ assistant?: boolean }>, session = row()) {
   act(() => applyCompleteSessions([session]));
+  if (opened && opened !== session.session_id) {
+    // A different conversation is a fresh mount: its predecessor's transcript cleanup must not count in this measurement.
+    act(() => root.unmount());
+    root = createRoot(host);
+  }
+  opened = session.session_id;
   act(() => root.render(view));
   for (let i = 0; i < 6; i++) await settle();
+  const title = view.props.assistant && getState().assistant?.main === session.session_id ? "Persona" : "Checks";
+  await vi.waitFor(() => expect(host.querySelector("h1")?.textContent).toBe(title)); // session-derived props are stable
   expect(live.listeners.size).toBeGreaterThan(0);
   expect(renders.info).toBeGreaterThan(0);
   expect(renders.chips).toBeGreaterThan(0);
@@ -181,16 +191,19 @@ it("a turn starting or ending renders the message actions of its own exchange on
   const flip = async (sid: string, exchanges: number) => {
     serve(exchanges);
     await open(<ChatView mid="mac" sid={sid} inPage />, row({ session_id: sid }));
-    asks.n = 0;
+    const counts: number[] = [];
     for (const state of ["idle", "working"] as const) {
+      asks.n = 0;
       act(() => applyCompleteSessions([row({ session_id: sid, status: state, state })]));
       await settle();
+      counts.push(asks.n);
     }
-    return asks.n;
+    return counts;
   };
   const one = await flip("s1", 1);
-  expect(one).toBeGreaterThan(0); // the exchange that ended, and started again
-  expect(await flip("s2", 6)).toBe(one);
+  // Both ending and starting still update the current exchange; neither scales with finished history.
+  for (const count of one) expect(count).toBeGreaterThan(0);
+  expect(await flip("s2", 6)).toEqual(one);
 });
 
 it("finished exchanges before the last two skip drawing while off screen, from a guessed height", async () => {

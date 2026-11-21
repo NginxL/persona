@@ -8,7 +8,7 @@ import { t } from "../../i18n";
 import { api, ApiError, enc, errorText } from "../../lib/api";
 import { sessionTitle, stateOf } from "../../lib/format";
 import { machineWithHub } from "../../lib/mesh";
-import { navigate } from "../../lib/router";
+import { openFromPage } from "../../lib/handoff";
 import { BYPASS_MODE } from "../../lib/session-actions";
 import { useStore } from "../../lib/store";
 import type { Machine, Session } from "../../lib/types";
@@ -211,7 +211,7 @@ export function RecordingHandoffRow({ handoff, onRetry }: { handoff: MeetingHand
           {failed ? (
             onRetry && <Button tone="secondary" onClick={onRetry}>{t("knowledge-handoff.retry")}</Button>
           ) : (
-            <Button tone="secondary" onClick={() => navigate({ name: "session", mid: handoff.machine_id, sid: handoff.session_id })}>
+            <Button tone="secondary" onClick={() => openFromPage({ name: "session", mid: handoff.machine_id, sid: handoff.session_id })}>
               {t("knowledge-handoff.open")}
             </Button>
           )}

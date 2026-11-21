@@ -255,8 +255,10 @@
     <string name="designsystem_core_engine_herdr_app">Terminals opened in the desktop app</string>
     <string name="designsystem_core_engine_orca">Terminals in Orca</string>
     <string name="designsystem_core_engine_tern">Terminals in Tern</string>
+    <string name="designsystem_core_engine_rex">Terminals in Rex</string>
     <string name="designsystem_core_engine_paseo">Agents in Paseo</string>
     <string name="designsystem_core_engine_cindy">Agents in Cindy</string>
+    <string name="designsystem_core_engine_t3code">Agents in T3 Code</string>
     <string name="designsystem_core_engine_none">No terminal engine</string>
     <string name="designsystem_core_engine_none_detail">Sessions of the desktop apps only</string>
     <string name="designsystem_core_engine_offline">Offline, no detection info yet</string>
@@ -441,6 +443,7 @@
     <string name="designsystem_core_headline_agent_permission">%1$s wants to use %2$s</string>
     <string name="designsystem_core_headline_agent_permission_detail">%1$s wants to use %2$s: %3$s</string>
     <string name="designsystem_core_headline_secret_run">Run on %1$s with your password</string>
+    <string name="designsystem_core_headline_secret_handoff">Hand secrets to an Agent?</string>
     <string name="designsystem_core_headline_screen">Terminal needs you</string>
     <string name="designsystem_core_headline_needs_you">Needs you</string>
     <string name="designsystem_core_ask_question">Has a question</string>

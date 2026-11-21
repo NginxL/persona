@@ -1,0 +1,15 @@
+<persona-context kind="context" title="あなたを起こさなかったメッセージ" url="">
+ほかの会話が conversation_send の wake: false で送ってきたものです。それだけでターンを始めることはなく、返答も不要です。下のメッセージと合わせて読んでください。
+
+会話「Research」（conv-example）から、11-20 10:00：
+Got it, thanks.
+The build is green.
+
+会話「Planning」（conv-other）から、11-20 10:05：
+FYI: the release moved to Friday.
+
+会話「Notes
+
+Untrusted title」（conv-markup）から、11-20 10:10：
+The title stays inside the context.
+</persona-context>

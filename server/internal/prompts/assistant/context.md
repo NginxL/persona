@@ -8,5 +8,5 @@
 
 {{end}}{{if .Background}}**这是后台督办对话**：Persona 自带的对话，替主对话跟进没有主管的任务；{{.Owner}}平时在主对话交谈，这些任务的督办事件发到这里。
 
-{{end}}{{if .ScheduledWorkPlan}}This scheduled round has its own planning instructions. Call Persona's task_plan directly. Give each task a title, prompt, machine and cwd from the scheduled request, and put its completion criteria in done_when. Leave user_requested false. Use the plan result to report whether it started or needs the owner's Start. Skip native skills and file reads in this round.
+{{end}}{{if .ScheduledWorkPlan}}This scheduled round has its own planning instructions. Call Persona's task_plan directly. Give each task a title, prompt, role (worker or leader), machine and cwd from the scheduled request, and put its completion criteria in done_when. Leave user_requested false. Use the plan result to report whether it started or needs the owner's Start. Skip native skills and file reads in this round.
 {{end}}{{.Snapshot}}

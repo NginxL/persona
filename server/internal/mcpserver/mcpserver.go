@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantskills"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/nodeclient"
 
@@ -351,6 +352,12 @@ func handle(ctx context.Context, version string, req request) (any, *rpcError) {
 		// (report_to_supervisor and the todo tools need to know whose call it is: node callerTools).
 		call := map[string]any{"kind": "mcp.call", "away_ok": true, "name": p.Name, "args": p.Arguments,
 			"session_id": sessionID(), "assistant": isAssistant(), "guest": isGuest(), "pane": nodeclient.HookPane(os.Getenv)}
+		if token := os.Getenv("PERSONA_A2A_TOKEN"); token != "" {
+			call["a2a_token"] = token
+		}
+		if set := toolSet(); set != "" {
+			call["tool_set"] = set // the node runs no tool outside the narrower set here (node/hooks.go)
+		}
 		if mcpWaitFrom(ctx) != nil {
 			call["wait_updates"] = true // an older node ignores this and returns only its final line
 		}
@@ -447,6 +454,9 @@ func listTools(ctx context.Context) (toolSnapshot, error) {
 func listToolsOnce(ctx context.Context, previous toolSnapshot) (toolSnapshot, error) {
 	req := map[string]any{"kind": "mcp.tools", "away_ok": true, "assistant": isAssistant(), "session_id": sessionID(), "guest": isGuest(),
 		"pane": nodeclient.HookPane(os.Getenv), "input": map[string]string{"revision": previous.Revision, "session": previous.Session}}
+	if token := os.Getenv("PERSONA_A2A_TOKEN"); token != "" {
+		req["a2a_token"] = token
+	}
 	if set := toolSet(); set != "" {
 		req["tool_set"] = set // a supervision round's narrower set (node/assistant_round.go)
 	}
@@ -474,6 +484,9 @@ func listToolsOnce(ctx context.Context, previous toolSnapshot) (toolSnapshot, er
 	tools := []map[string]any{}
 	var work map[string]bool
 	for _, t := range res.Tools {
+		if os.Getenv("PERSONA_MCP_EXCLUDE_A2A") == "1" && assistantwire.IsA2ATool(t.Name) {
+			continue
+		}
 		if t.WorkGuideTool && isAssistant() && !isGuest() && toolSet() == "" {
 			if work == nil {
 				work = make(map[string]bool)

@@ -291,6 +291,53 @@ func TestProviderSkipsComputersWithTheirOwnService(t *testing.T) {
 	}
 }
 
+type blockedOwnServiceHub struct{ Hub }
+
+func (h blockedOwnServiceHub) DeviceCall(ctx context.Context, p DeviceCall) (json.RawMessage, error) {
+	if p.Method == DeviceLaunchersOwnService {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return h.Hub.DeviceCall(ctx, p)
+}
+
+func TestPickerOwnServiceKeepsTheLastAnswerWhenTimeRunsOut(t *testing.T) {
+	s, f := scopeService(t)
+	s.hub = blockedOwnServiceHub{Hub: f}
+	previous := proto.OwnServiceState{Agent: "claude", Known: true, Own: true, Via: "login"}
+	s.models.ownMu.Lock()
+	s.models.own = map[string]ownSeen{"mac/claude": {st: previous, at: time.Now().Add(-2 * ownServiceFresh)}}
+	s.models.ownMu.Unlock()
+	for _, tc := range []struct {
+		name   string
+		budget time.Duration
+	}{
+		{name: "deadline already expired", budget: -time.Second},
+		{name: "shortened probe times out", budget: 50 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.WithValue(t.Context(), pickerDiscoveryDeadline{}, time.Now().Add(tc.budget))
+			if got := s.ownService(ctx, "mac", "claude"); got != previous {
+				t.Fatalf("own service = %+v, want last answer %+v", got, previous)
+			}
+			if got, fresh := s.ownServiceCached("mac", "claude"); got != previous || fresh {
+				t.Fatalf("cached own service = %+v, fresh=%v, want the original stale answer", got, fresh)
+			}
+		})
+	}
+	current := proto.OwnServiceState{Agent: "claude", Known: true}
+	f.mu.Lock()
+	f.ownServices = map[string]proto.OwnServiceState{"mac/claude": current}
+	f.mu.Unlock()
+	s.hub = f
+	if got := s.ownService(t.Context(), "mac", "claude"); got != current {
+		t.Fatalf("own service after a successful probe = %+v, want %+v", got, current)
+	}
+	if got, fresh := s.ownServiceCached("mac", "claude"); got != current || !fresh {
+		t.Fatalf("updated own service = %+v, fresh=%v, want the new answer", got, fresh)
+	}
+}
+
 // pickerOf is GET /api/v1/machines/{machine}/launchers?purpose=purpose: what New Agent's picker lists, and what it
 // shows off with why.
 func pickerOf(t *testing.T, s *Service, machine, purpose string) picker {

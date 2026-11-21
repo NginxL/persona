@@ -23,10 +23,17 @@
   "window_model_label": "{name} {window} ({model}): {percent} used",
   "not_connected": "No quota data connected",
   "connect_action": "Set up with assistant",
-  "connect_hint_claude": "No usage data yet; ask the assistant to wire up statusLine or a gateway source",
-  "connect_hint_agy": "The CLI reports no quota percentage locally; ask the assistant to connect a pool gateway if used",
-  "connect_hint_other": "No usage data yet; ask the assistant to connect its gateway or a local usage script",
+  "connect_hint_claude": "Persona hasn't read Claude Code's usage yet; the assistant can set it up",
+  "connect_hint_pending": "Persona hasn't read {name}'s usage yet; the assistant can check why",
+  "connect_hint_other": "Persona can't read this provider's usage by itself; if your relay reports usage, the assistant can connect it",
   "connect_prompt_claude": "Please help me connect Claude Code ({id}) usage to Persona's sidebar usage strip: check my current Claude setup, wire up a statusLine wrapper writing to usage/claude.json in Persona's data directory if it's a direct subscription (preserving any existing statusLine), or help connect its gateway usage source / quota extension.",
-  "connect_prompt_agy": "Please check whether Antigravity ({id}) usage on this computer can be connected to Persona's sidebar usage strip (for example through Persona's generic usage source or a local script) and help me set it up.",
-  "connect_prompt_other": "Please help me connect usage for provider \"{name}\" (launcher {id}) to Persona's sidebar usage strip by checking whether its gateway supports a usage source or quota extension."
+  "connect_prompt_agy": "Antigravity ({id}) usage on this computer is missing from Persona's sidebar usage strip. Persona reads it from Antigravity's local service: please find out why it wasn't read (for example whether Antigravity is signed in, whether Persona's Antigravity companion is running, or whether Persona on this computer is too old) and help me fix it.",
+  "connect_prompt_other": "Please help me connect usage for provider \"{name}\" (launcher {id}) to Persona's sidebar usage strip by checking whether its gateway supports a usage source or quota extension.",
+  "balance_label": "Prepaid balance",
+  "balance_unavailable": "Balance unavailable",
+  "balance_rejected": "DeepSeek turned the key away; update it in Settings › Model providers",
+  "balance_unreachable": "Couldn't reach DeepSeek",
+  "balance_unreachable_kept": "Couldn't reach DeepSeek; this is the last known balance",
+  "balance_failed": "Couldn't read the balance",
+  "balance_failed_kept": "Couldn't read the balance; this is the last known amount"
 }

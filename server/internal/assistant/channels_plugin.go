@@ -20,6 +20,7 @@ import (
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/remoteimage"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -28,7 +29,8 @@ import (
 // channels.send — and everything else is here: commands, where a message goes, the turn (channels_runs.go), what is
 // asked answered in text, pushes and the sync mirror.
 
-// channelSend sends text to channel id's owner: in pieces its messages hold, each once by its ref.
+// channelSend sends text to channel id's owner: in pieces its messages hold, each once by its ref. To a channel that
+// sends pictures, an answer's or a push's pictures on lines of their own go with the last piece (channels_images.go).
 func (s *Service) channelSend(ctx context.Context, id, ref, text, kind, replyTo string) error {
 	v, ok, err := s.pluginChannelNow(ctx, id)
 	if err != nil {
@@ -38,7 +40,11 @@ func (s *Service) channelSend(ctx context.Context, id, ref, text, kind, replyTo 
 		return fmt.Errorf("%w %s", errNoChannel, id)
 	}
 	text = strings.TrimSpace(text)
-	if text == "" {
+	var images []channel.Blob
+	if v.Capabilities.ImagesOut && (kind == channel.OutAnswer || kind == channel.OutPush) {
+		text, images = s.channelImages(ctx, id, text)
+	}
+	if text == "" && len(images) == 0 {
 		return nil
 	}
 	pieces := channel.Split(text, v.Capabilities.MaxText)
@@ -47,8 +53,11 @@ func (s *Service) channelSend(ctx context.Context, id, ref, text, kind, replyTo 
 		if len(pieces) > 1 {
 			p.Ref = fmt.Sprintf("%s#%d", ref, i)
 		}
-		err := s.appCall(ctx, AppChannels, ChannelsSend, map[string]any{"channel": id, "ref": p.Ref, "text": p.Text, "kind": p.Kind,
-			"reply_to": p.ReplyTo}, nil)
+		params := map[string]any{"channel": id, "ref": p.Ref, "text": p.Text, "kind": p.Kind, "reply_to": p.ReplyTo}
+		if i == len(pieces)-1 && len(images) > 0 {
+			params["images"] = images
+		}
+		err := s.appCall(ctx, AppChannels, ChannelsSend, params, nil)
 		var re *rpc.Error
 		if errors.As(err, &re) && re.Code == CodeCannotSend {
 			return errCannotSend
@@ -147,14 +156,24 @@ func (s *Service) channelCommand(ctx context.Context, id string, m channel.Messa
 		setTarget(channel.Target{Kind: channel.TargetMain})
 		reply(i18n.T(l, "assistant-channels_plugin.now_to_main"))
 	case "/new", "/新对话":
-		setTarget(channel.Target{Kind: channel.TargetNew})
+		// In a thread it starts the thread over; the channel's target stays where it is.
+		thread := s.channelThreadKey(ctx, id, m)
+		if thread != "" {
+			s.unbindChannelThread(id, thread)
+		} else {
+			setTarget(channel.Target{Kind: channel.TargetNew})
+		}
 		if rest == "" {
-			reply(i18n.T(l, "assistant-channels_plugin.next_is_new"))
+			if thread != "" {
+				reply(i18n.T(l, "assistant-channels_plugin.thread_next_is_new"))
+			} else {
+				reply(i18n.T(l, "assistant-channels_plugin.next_is_new"))
+			}
 			return true, ""
 		}
 		return false, rest // "/new help me…": the rest starts it
 	case "/stop", "/停":
-		rt, err := s.channelTarget(ctx, id)
+		rt, _, err := s.channelRoute(ctx, id, m)
 		switch {
 		case err != nil:
 			reply(i18n.T(l, "assistant-channels_plugin.not_stopped", i18n.Args{"error": err.Error()}))
@@ -175,17 +194,17 @@ func (s *Service) channelCommand(ctx context.Context, id string, m channel.Messa
 			reply(i18n.T(l, "assistant-channels_plugin.stopped"))
 		}
 	case "/status", "/状态":
-		reply(s.channelStatusText(ctx, id))
+		reply(s.channelStatusText(ctx, id, m))
 	default:
 		return false, text
 	}
 	return true, ""
 }
 
-func (s *Service) channelStatusText(ctx context.Context, id string) string {
+func (s *Service) channelStatusText(ctx context.Context, id string, m channel.Message) string {
 	l := s.botLang(ctx)
 	where := i18n.T(l, "assistant-channels_plugin.main_chat")
-	if rt, err := s.channelTarget(ctx, id); err == nil {
+	if rt, _, err := s.channelRoute(ctx, id, m); err == nil {
 		switch {
 		case rt.isNew && !rt.main:
 			where = i18n.T(l, "assistant-channels_plugin.next_new_chat")
@@ -237,6 +256,47 @@ func (s *Service) channelTarget(ctx context.Context, id string) (resolvedTarget,
 	return s.resolveBotTarget(ctx, botTarget{Kind: targetMain})
 }
 
+// channelThreadKey is the thread m is in when channel id keeps a conversation per thread (capabilities.threads), ""
+// when m goes to the channel's target.
+func (s *Service) channelThreadKey(ctx context.Context, id string, m channel.Message) string {
+	if v, ok := s.pluginChannel(ctx, id); !ok || !v.Capabilities.Threads {
+		return ""
+	}
+	return strings.TrimSpace(m.Thread)
+}
+
+// channelRoute is where channel id's message m goes: its thread's conversation when the channel keeps one per thread
+// (a new one for the thread's first message, or when the thread's is gone), else the channel's target. thread is the
+// thread's key, "" for the target.
+func (s *Service) channelRoute(ctx context.Context, id string, m channel.Message) (rt resolvedTarget, thread string, err error) {
+	thread = s.channelThreadKey(ctx, id, m)
+	if thread == "" {
+		rt, err = s.channelTarget(ctx, id)
+		return rt, "", err
+	}
+	if t := s.channelThreadOf(ctx, id, thread); t != nil {
+		if d, ok := s.device(ctx, t.MachineID); ok {
+			// Only a conversation its computer says is gone starts the thread over: one that can't be asked now is an
+			// error the owner is told, not a reason to lose the thread's history.
+			var res struct {
+				Session proto.Session `json:"session"`
+				OK      bool          `json:"ok"`
+			}
+			if err := s.call(ctx, d.ID, DeviceSessionGet, map[string]any{"session_id": t.SessionID}, &res); err != nil {
+				return resolvedTarget{}, thread, err
+			}
+			if res.OK {
+				sess := res.Session
+				sess.SessionID, sess.MachineID = t.SessionID, d.ID
+				main := s.settings(ctx).Main
+				return resolvedTarget{machine: d.ID, machineName: d.Name, session: sess, label: conversationName(sess, main), main: t.SessionID == main}, thread, nil
+			}
+		}
+	}
+	rt, err = s.resolveBotTarget(ctx, botTarget{Kind: targetPersona})
+	return rt, thread, err
+}
+
 // channelForward sends the owner's message to the conversation the channel talks to (starting it when there is none
 // yet) and follows its turn.
 func (s *Service) channelForward(ctx context.Context, id string, m channel.Message) error {
@@ -252,27 +312,35 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 		return errors.New(i18n.T(s.botLang(ctx), "assistant-channels_plugin.mention_owner_required"))
 	}
 	caps := v.Capabilities.Normalized()
-	rt, err := s.channelTarget(ctx, id)
+	rt, thread, err := s.channelRoute(ctx, id, m)
 	if err != nil {
 		return err
 	}
 	hello := s.hello(ctx)
 	lang := i18n.Lang(hello.Locale)
 	in := prompts.ChannelMessage{Persona: true, Name: v.Name, Owner: strings.TrimSpace(hello.Owner), Plain: caps.Format == channel.FormatPlain,
-		Asks: caps.Asks != channel.AsksNone, Public: v.Kind == channel.KindMention, Language: answerLanguage(hello.Locale),
+		Asks: caps.Asks != channel.AsksNone, ImagesOut: caps.ImagesOut, Public: v.Kind == channel.KindMention, Language: answerLanguage(hello.Locale),
 		Chat: m.Chat, Topic: m.Topic, Context: m.Context, Text: strings.TrimSpace(m.Text), Quote: m.Quote, Forward: m.Forward,
 		Unsupported: slices.Clone(m.Unsupported)}
 	var images []proto.Image
 	for _, img := range m.Images {
-		if len(images) < channel.ImagesMost && len(img.Data) <= channel.ImageMost {
-			mime := img.MIME
-			if !strings.HasPrefix(mime, "image/") {
-				mime = http.DetectContentType(img.Data)
-			}
-			images = append(images, proto.Image{Mime: mime, Data: base64.StdEncoding.EncodeToString(img.Data)})
+		if len(images) >= channel.ImagesMost {
+			in.Unsupported = append(in.Unsupported, i18n.T(lang, "assistant-channels_plugin.extra_images"))
 			continue
 		}
-		in.Unsupported = append(in.Unsupported, i18n.T(lang, "assistant-channels_plugin.extra_images"))
+		data, mime := img.Data, img.MIME
+		if len(data) > channel.ImageMost { // a photo sent as the original: scaled down to fit, not dropped (#11985)
+			fit, err := remoteimage.Fit(data, channel.ImageMost)
+			if err != nil {
+				in.Unsupported = append(in.Unsupported, i18n.T(lang, "assistant-channels_plugin.image_too_large"))
+				continue
+			}
+			data, mime = fit.Data, fit.Type
+		}
+		if !strings.HasPrefix(mime, "image/") {
+			mime = http.DetectContentType(data)
+		}
+		images = append(images, proto.Image{Mime: mime, Data: base64.StdEncoding.EncodeToString(data)})
 	}
 	for _, f := range m.Files {
 		if !caps.FilesIn || len(f.Data) > channel.FileMost || rt.machine == "" {
@@ -302,7 +370,9 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 		if err != nil {
 			return fmt.Errorf("%s%w", i18n.T(s.botLang(ctx), "assistant-channels_plugin.not_started"), err)
 		}
-		if !rt.main { // /new: the chat goes on in it
+		if thread != "" { // the thread's first message: the thread goes on in it, the channel's target stays
+			s.bindChannelThread(id, thread, sess.MachineID, sess.SessionID)
+		} else if !rt.main { // /new: the chat goes on in it
 			c := &s.chans
 			c.mu.Lock()
 			s.loadChannelsLocked(ctx)
@@ -331,6 +401,9 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 		}
 		if err := s.sendOnce(ctx, rt.machine, params); err != nil {
 			return err
+		}
+		if thread != "" {
+			s.bindChannelThread(id, thread, rt.machine, sid) // the thread is still alive
 		}
 	}
 	s.startChannelRunForBinding(run, &generation)

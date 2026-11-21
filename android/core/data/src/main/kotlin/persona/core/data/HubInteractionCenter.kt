@@ -66,10 +66,11 @@ class HubInteractionCenter(
             connection.events.collect { event -> restored.await(); lock.withLock {
                 when (event) {
                     is InteractionEvent -> if (event.interaction.id !in discarded && event.interaction.id !in endedHere) {
-                        // A card that changed (its prompt moved on) is no arrival; only one not showing yet is.
-                        val arrived = mutablePending.value.none { it.id == event.interaction.id }
+                        val previous = mutablePending.value.firstOrNull { it.id == event.interaction.id }
+                        // Looking is quiet. Its first handover is an arrival; any later edit of that copy is not.
+                        val announces = !event.interaction.isDelegating && (previous == null || previous.isDelegating)
                         ended.remove(event.interaction.id); change(event.interaction.id, event.interaction)
-                        if (arrived) mutableArrivals.tryEmit(event.interaction)
+                        if (announces) mutableArrivals.tryEmit(event.interaction)
                     }
                     is InteractionResolvedEvent -> {
                         // The assistant's answer to a question whose card this device had: it stays in its chat.
@@ -115,14 +116,21 @@ class HubInteractionCenter(
         }
     }
 
-    override suspend fun resolveOutcome(id: String, resolution: Resolution): ResolveOutcome {
+    override suspend fun resolveOutcome(id: String, resolution: Resolution): ResolveOutcome =
+        resolveOutcome(id, resolution, handoffCard = false)
+
+    override suspend fun resolveOutcome(id: String, resolution: Resolution, handoffCard: Boolean): ResolveOutcome {
         restored.await()
         // Whose card it is and the hub's state for them now, before an interaction_resolved can take the card away.
         val card = pending.value.firstOrNull { it.id == id }
         val asked = card?.sessionKey
         val since = asked?.let { key -> sessions?.value?.firstOrNull { it.key == key }?.stateSince }
-        val outcome = try { transport.resolveOutcome(id, resolution) }
-        catch (gone: InteractionGoneException) {
+        val marked = handoffCard && resolution.allow == true && card?.isSecretHandoff == true
+        val outcome = try {
+            // Every ordinary answer keeps the old overload: delegated transports must not bypass their existing path.
+            if (marked) transport.resolveOutcome(id, resolution, handoffCard = true)
+            else transport.resolveOutcome(id, resolution)
+        } catch (gone: InteractionGoneException) {
             lock.withLock { end(id, here = true) }
             throw gone
         }
@@ -141,6 +149,12 @@ class HubInteractionCenter(
         val handedBack = if (outcome.already) outcome.status == "dismissed" else resolution.dismiss == true
         if (!handedBack) asked?.let { answered(it, AnsweredMark(since, id, pending = !outcome.already && !seen, at = clock())) }
         return outcome
+    }
+
+    override suspend fun replyOwnerApproval(interaction: Interaction, phrase: String) {
+        restored.await()
+        transport.replyOwnerApproval(interaction, phrase)
+        lock.withLock { end(interaction.id, here = true) }
     }
 
     override fun dropDelegated(id: String) = mutableDelegated.update { list -> list.filterNot { it.id == id } }

@@ -166,8 +166,41 @@ func WithoutImageData(items []Item) []Item {
 	return out
 }
 
+// PositionalItemID identifies the fallback IDs assigned to JSONL records that lack a runtime ID.
+func PositionalItemID(id string) bool {
+	if _, source, ok := ParseSegmentItemID(id); ok {
+		id = source
+	}
+	suffix, ok := strings.CutPrefix(id, "line")
+	if !ok {
+		return false
+	}
+	line, block, ok := strings.Cut(suffix, "#")
+	return ok && decimalItemPart(line) && decimalItemPart(block)
+}
+
+// SegmentItemID namespaces only later segments. The first segment retains its
+// existing identifiers, including positional IDs used by client caches.
+func SegmentItemID(segment, source string) string { return "segment:" + segment + ":" + source }
+
+func ParseSegmentItemID(id string) (segment, source string, ok bool) {
+	rest, ok := strings.CutPrefix(id, "segment:")
+	if !ok {
+		return "", "", false
+	}
+	segment, source, ok = strings.Cut(rest, ":")
+	return segment, source, ok && segment != "" && source != ""
+}
+
+func decimalItemPart(s string) bool {
+	return s != "" && !strings.ContainsFunc(s, func(r rune) bool { return r < '0' || r > '9' })
+}
+
 // Item is one content block of a Claude Code transcript.
 type Item struct {
+	// Stored identifies an incomplete durable copy. Its source can be requested from
+	// the existing full-item/image routes; availability still depends on the runtime.
+	Stored    *StoredItem     `json:"stored,omitempty"`
 	ID        string          `json:"id"`
 	Seq       int             `json:"seq"`
 	TS        time.Time       `json:"ts"`
@@ -190,6 +223,9 @@ type Item struct {
 	// FullSize: Text was cut for pages and pushes (it ends in a "truncated, open for the full text" line, in Chinese); the whole of it, this many
 	// bytes, comes from GET /api/v1/sessions/{mid}/{sid}/items/{item id}/full.
 	FullSize int `json:"full_size,omitempty"`
+	// SourceFingerprint identifies the original text record behind a positional item ID. Unlike the line
+	// number, it does not match different content that reuses that position after a rewrite.
+	SourceFingerprint string `json:"source_fingerprint,omitempty"`
 	// Wake marks a background task's notice that started new work after the agent had finished its turn
 	// (not one absorbed mid-turn): the exchange before it is over and its last words are an answer.
 	Wake bool `json:"wake,omitempty"`
@@ -234,6 +270,15 @@ type Item struct {
 	// Visualization is set on KindVisualization items: a Codex visualize marker's reference to an HTML fragment on
 	// the node. The bytes are not carried here; the session visualization route serves them after path checks.
 	Visualization *Visualization `json:"visualization,omitempty"`
+}
+
+type StoredItem struct {
+	Complete    bool   `json:"complete"`
+	SourceBytes int    `json:"source_bytes"`
+	MachineID   string `json:"machine_id"`
+	SessionID   string `json:"session_id"`
+	History     string `json:"history"`
+	ItemID      string `json:"item_id"`
 }
 
 // Visualization is one Codex visualize reference (the visualize plugin's in-conversation HTML contract): the
@@ -368,6 +413,7 @@ type MessageSource struct {
 }
 
 const (
+	A2ADeliveryPrefix   = "persona-a2a-" // Manager-assigned client message IDs for A2A deliveries.
 	SourceConversation  = "conversation"
 	SourcePatrol        = "patrol"
 	SourceFollowup      = "followup"

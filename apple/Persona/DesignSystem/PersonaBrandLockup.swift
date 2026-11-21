@@ -12,11 +12,12 @@ struct PersonaBrandLockup: View {
 
     @Environment(AppModel.self) private var model
     var size: Size = .mark
-    /// The name shown: the assistant's (`AppModel.assistantShownName`) unless given.
+    /// The name shown unless given: the banner's is whose page it is, as the top bar says it (`AppModel.assistantTitleName`,
+    /// #12243: with one assistant the current one's, not the persona's); the mark's the assistant's (`assistantShownName`).
     var name: String?
 
     var body: some View {
-        let shown = name ?? model.assistantShownName
+        let shown = name ?? (size == .banner ? model.assistantTitleName : model.assistantShownName)
         switch size {
         case .mark:
             HStack(spacing: Theme.Space.xs) {

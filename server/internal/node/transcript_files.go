@@ -348,6 +348,29 @@ func validID(id string) bool { return nodeclient.ValidSessionID(id) }
 
 func (n *Node) file(id string) (*transcript.File, error) {
 	n.refreshCodexAppHistory(id) // a Codex App chat with no rollout: its history written out of the App's database (codex_apphistory.go)
+	return n.transcriptFile(id)
+}
+
+func (n *Node) exportFile(id string) (*transcript.File, error) {
+	unsupported := func() error {
+		return refusal(proto.CodeNodeOutdated, "The transcript is a database history projection.", nil)
+	}
+	if _, _, projected := n.codexAppHistoryChat(id); projected {
+		return nil, unsupported()
+	}
+	f, err := n.transcriptFile(id)
+	if err != nil {
+		return nil, err
+	}
+	// Refuse a cached projection even when its database can no longer name
+	// the session. The readable JSONL would still be stale.
+	if dir := n.codexAppHistoryDir(); dir != "" && filepath.Dir(f.Where()) == filepath.Clean(dir) {
+		return nil, unsupported()
+	}
+	return f, nil
+}
+
+func (n *Node) transcriptFile(id string) (*transcript.File, error) {
 	n.mu.Lock()
 	f := n.files[id]
 	if f != nil {

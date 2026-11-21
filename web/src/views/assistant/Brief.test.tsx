@@ -14,8 +14,12 @@ const toast = vi.hoisted(() => vi.fn());
 vi.mock("../../ui/atoms", async (orig) => ({ ...(await orig<typeof import("../../ui/atoms")>()), toast }));
 import { FeedLineView } from "./Tasks";
 import { AcceptRow, meta } from "./Brief";
-import { getState } from "../../lib/store";
+import { getState, reset } from "../../lib/store";
 import { loadPages } from "../../lib/lazy-page";
+import { setAgentOpenMode } from "../../lib/agent-open";
+import { handoffFrom } from "../../lib/handoff";
+import { closePanel, getPanel } from "../../lib/panel";
+import { t } from "../../i18n";
 
 // the week's setup block is its own chunk (BriefSetup.tsx): in before any test draws it
 await loadPages();
@@ -116,6 +120,48 @@ describe("a brief item", () => {
     expect(text).not.toContain("还有 1 项，到任务页看"); // the queue's rest is not on the Tasks page
     expect(rows("later")).toHaveLength(2);
     expect(host.querySelector<HTMLAnchorElement>("a[href='https://hub.example/s/box/ag7']")).not.toBeNull(); // the Agent's chat
+  });
+
+  describe("Open on a waiting or later row that names its chat (#12055)", () => {
+    const open = (title: string) => host.querySelector<HTMLButtonElement>(`button[title="${t("assistant-brief.open_row", { title })}"]`)!;
+    const waiting = { id: "ix1", title: "先发预发还是直接上线？", link: "https://hub.example/s/box/ag1", waited_s: 60, machine_id: "box", session_id: "ag1" };
+    const later = { id: "lt_1", title: "图标要不要换？", link: "https://hub.example/s/box/ag7", waited_s: 60, machine_id: "box", session_id: "ag7" };
+    afterEach(() => {
+      setAgentOpenMode("panel");
+      closePanel();
+      reset();
+      history.replaceState(null, "", "/");
+    });
+
+    it("opens the Agent in the app, not the hub's link in a new tab: the side panel by default", () => {
+      history.replaceState(null, "", "/persona/c1");
+      draw(item(body({ waiting: [waiting], later: [later], later_total: 1 })));
+      expect(host.querySelector("a[href^='https://hub.example/']")).toBeNull();
+      act(() => open(waiting.title).click());
+      expect(getPanel()).toEqual({ kind: "agent", mid: "box", sid: "ag1" });
+      act(() => open(later.title).click());
+      expect(getPanel()).toEqual({ kind: "agent", mid: "box", sid: "ag7" });
+      expect(location.pathname).toBe("/persona/c1");
+    });
+
+    it("set to Full page, opens the Agent's page with the way back to this conversation, as the task rows do", () => {
+      setAgentOpenMode("page");
+      history.replaceState(null, "", "/persona/c1");
+      draw(item(body({ waiting: [waiting] })));
+      act(() => open(waiting.title).click());
+      expect(getPanel()).toBeNull();
+      expect(location.pathname).toBe("/s/box/ag1");
+      expect(handoffFrom()).toEqual({ path: "/persona/c1" });
+    });
+
+    it("opens a card waiting in a Persona conversation as that conversation's page", () => {
+      Object.assign(getState(), { assistant: { ...getState().assistant!, machine_id: "box", main: "main-1", conversations: [{ machine_id: "box", session_id: "c9", title: "Trip", cwd: "", status: "idle" }] } });
+      history.replaceState(null, "", "/persona/c1");
+      draw(item(body({ waiting: [{ ...waiting, session_id: "c9", link: "https://hub.example/persona/c9" }] })));
+      act(() => open(waiting.title).click());
+      expect(getPanel()).toBeNull();
+      expect(location.pathname).toBe("/persona/c9");
+    });
   });
 
   it("has no such section without questions, as for a hub that does not know them", () => {
@@ -358,5 +404,8 @@ describe("a row's meta line", () => {
   it("keeps the fields a row is declared with", () => {
     const got = briefBody(item(body()))!;
     expect(got.waiting[0]).toEqual({ id: "ix1", title: "先发预发还是直接上线？", from: "来自 Agent「登录修复」", link: "https://hub.example/s/box/ag1", waited_s: 4800, nudged: true });
+    // the chat a waiting or later row came from, which Open opens in the app (#12055)
+    expect(briefBody(item(body({ waiting: [{ id: "ix2", title: "x", waited_s: 1, machine_id: "box", session_id: "ag1" }] })))!.waiting[0]).toMatchObject({ machine_id: "box", session_id: "ag1" });
+    expect(briefBody(item(body({ waiting: [{ id: "ix3", title: "x", waited_s: 1, machine_id: 7, session_id: {} }] })))!.waiting[0]).toEqual({ id: "ix3", title: "x", waited_s: 1 });
   });
 });

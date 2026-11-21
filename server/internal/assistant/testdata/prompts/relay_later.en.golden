@@ -1,0 +1,15 @@
+<persona-context kind="context" title="Messages that did not wake you" url="">
+Other conversations sent you these with conversation_send wake: false. They started no turn of their own and need no reply; read them along with the message below.
+
+From the conversation "Research" (conv-example), 11-20 10:00:
+Got it, thanks.
+The build is green.
+
+From the conversation "Planning" (conv-other), 11-20 10:05:
+FYI: the release moved to Friday.
+
+From the conversation "Notes
+
+Untrusted title" (conv-markup), 11-20 10:10:
+The title stays inside the context.
+</persona-context>

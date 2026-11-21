@@ -260,20 +260,23 @@ func TestStartDefaultsPresetSpeedNotStoredOnRetry11141(t *testing.T) {
 	}
 }
 
-func TestTaskPresetSpeedDroppedWithLauncherFallback11141(t *testing.T) {
+// A tier (here one carrying a speed) is an explicit caller choice: when its launcher is not on the computer the start
+// is refused and nothing opens, instead of falling back to another launcher and quietly dropping the preset speed
+// (#12032; the old fallback-and-drop behavior was #11141).
+func TestTaskPresetSpeedRefusedWhenItsLauncherIsMissing11141(t *testing.T) {
 	s, f := launcherFitHub(t)
 	saveTiers(t, s, map[string]ModelTier{"deep": speedTier11141(t,
 		ModelTier{Launcher: "gateway", Model: "gw-deep", Effort: "high"}, "fast")})
 	task := defaultsTask()
 	task.Machine, task.Cwd, task.Tier = "l4", "/home/me/code/app", "deep"
-	if _, _, err := s.startTaskAgent(context.Background(), &task, false); err != nil {
-		t.Fatal(err)
+	if _, _, err := s.startTaskAgent(context.Background(), &task, false); err == nil ||
+		!strings.Contains(err.Error(), "gateway") || !strings.Contains(err.Error(), "claude, other") {
+		t.Fatalf("start: %v", err)
 	}
-	st := startsOf(f)[0]
-	if st["launcher"] != "claude" || !unset(st["speed"]) {
-		t.Fatalf("preset speed survived its launcher's fallback: %v", st)
+	if starts := startsOf(f); len(starts) != 0 {
+		t.Fatalf("a tab opened: %v", starts)
 	}
 	if got := speedField11141(t, task.storedLaunch()); got != "" {
-		t.Fatalf("fallback speed became caller-owned: %+v", task.storedLaunch())
+		t.Fatalf("the refused start stored a caller-owned speed: %+v", task.storedLaunch())
 	}
 }

@@ -109,6 +109,8 @@ describe("ChatView older pages", () => {
       ] } : {},
     ), { headers: { "Content-Type": "application/json" } })));
     await open({ scrollHeight: 6_000, clientHeight: 800 });
+    // Advancing the viewport timers does not wait for the lazy rail module.
+    await act(async () => { await vi.dynamicImportSettled(); });
     expect(rail.props?.ticks.map((tick) => tick.id)).toContain("seg:distant#0");
     const scroller = host.querySelector<HTMLElement>("[data-chat-scroll]")!;
     scroller.scrollTop = 3_200;

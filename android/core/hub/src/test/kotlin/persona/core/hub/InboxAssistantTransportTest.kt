@@ -302,6 +302,22 @@ class InboxAssistantTransportTest {
         }
     }
 
+    @Test fun conversationProvenanceIsExplicitAndTypedCreationOmitsIt() = runBlocking {
+        MockWebServer().use { server ->
+            val transport = HttpInboxAssistantTransport("scope", server.url("/").toString(), "test-token", OkHttpClient())
+            for (via in listOf("share", "intent", "card")) {
+                server.enqueue(MockResponse().setBody("""{"session":{"machine_id":"mac","session_id":"c"}}"""))
+                transport.createConversationOf(null, true, null, via)
+                val request = server.takeRequest()
+                assertEquals("/api/v1/assistant/conversations", request.requestUrl?.encodedPath)
+                assertEquals("""{"prompt":"","main":true,"via":"$via"}""", request.body.readUtf8())
+            }
+            server.enqueue(MockResponse().setBody("""{"session":{"machine_id":"mac","session_id":"c"}}"""))
+            transport.createConversationOf(null, true, null, null)
+            assertEquals("""{"prompt":"","main":true}""", server.takeRequest().body.readUtf8())
+        }
+    }
+
     @Test fun aConversationOnALauncherNamesItInThePost() = runBlocking {
         MockWebServer().use { server ->
             val transport = HttpInboxAssistantTransport("scope", server.url("/").toString(), "test-token", OkHttpClient())

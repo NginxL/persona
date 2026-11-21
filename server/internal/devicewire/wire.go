@@ -268,6 +268,10 @@ type RecMachine struct {
 
 // State is one machine as the manager has it.
 type State struct {
+	// TransportFor is an owning manager's retained transport identity. The hub
+	// validates the referenced computer belongs to that manager; it never resolves
+	// sessions or stores business mappings itself.
+	TransportFor string `json:"transport_for,omitempty"`
 	// Machine is what the apps get, but for what the hub adds (system, computer, browser).
 	Machine proto.Machine `json:"machine"`
 	// Config is the machine's entry: hub.json's, or a member's (a derived machine), as the hub gave it.

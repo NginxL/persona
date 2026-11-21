@@ -23,5 +23,6 @@
   "make_leader_confirm": "Confirm Pin",
   "make_leader_confirm_detail": "The chat moves to Pinned and no longer appears in Recent.",
   "end_leader_confirm": "Confirm Unpin",
-  "end_leader_confirm_detail": "The chat returns to Recent. Its open tasks go back to the main chat's supervision; nothing is closed or deleted."
+  "end_leader_confirm_detail": "The chat returns to Recent. Its open tasks go back to the main chat's supervision; nothing is closed or deleted.",
+  "arrange_chats": "Arrange chats"
 }

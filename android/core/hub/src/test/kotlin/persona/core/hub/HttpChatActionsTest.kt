@@ -101,6 +101,10 @@ class HttpChatActionsTest {
             "pending_switch":{"launcher":"work","model":"glm-5.3","effort":"high","at":"2026-11-12T10:00:00Z"}}""")
         assertTrue("the switch waits: its model and effort are the switch's", modesApplied(waiting, ChatAction.Modes(launcher = "work", from = "example", model = "glm-5.3", effort = "high")))
         assertFalse(modesApplied(waiting, ChatAction.Modes(launcher = "other", from = "example")))
+        assertFalse("a newer pick on the same launcher is not our pick",
+            modesApplied(waiting, ChatAction.Modes(launcher = "work", from = "example", model = "different", effort = "high")))
+        assertFalse("a canceled Codex handoff still waits",
+            modesApplied(waiting.copy(agent = "codex", launcher = null), ChatAction.Modes(launcher = "codex", from = "codex")))
         assertTrue("carried out by now", modesApplied(waiting.copy(launcher = "work", pendingSwitch = null), ChatAction.Modes(launcher = "work", from = "example")))
         assertFalse("its own launcher drops it", modesApplied(waiting, ChatAction.Modes(launcher = "example", from = "example")))
         assertTrue(modesApplied(waiting.copy(pendingSwitch = null), ChatAction.Modes(launcher = "example", from = "example")))

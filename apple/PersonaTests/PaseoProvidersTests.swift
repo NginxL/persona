@@ -24,13 +24,13 @@ import Testing
 
     // MARK: New Agent
 
-    @Test func onlyPaseosOtherProvidersAreLimited() {
+    @Test func paseoProvidersAreLimitedButTerminalTraexHasNoStartModes() {
         #expect(StartModes.limited(Self.grok))
         #expect(!StartModes.limited(Self.paseoClaude))
         #expect(!StartModes.limited(Self.paseoCodex))
         #expect(!StartModes.limited(Self.shellClaude))
-        // Not a Paseo launcher: this change leaves its modes as they were.
-        #expect(!StartModes.limited(Launcher(name: "traex", agent: "traex", source: "zshrc")))
+        // #1842: a discovered terminal Traex takes no start modes, rather than Paseo's Allow Everything-only set.
+        #expect(StartModes.modes(for: Launcher(name: "traex", agent: "traex", source: "zshrc")).isEmpty)
         #expect(!StartModes.limited(nil))
     }
 
@@ -90,6 +90,8 @@ import Testing
         #expect(!labelled.namesOnlyEngine)
         #expect(labelled.agentName(session: nil) == "Grok")
         #expect(labelled.agentName(session: other) == "Grok")
+        let legacyCLI = try Self.card(#","agent":"paseo","agent_label":"TRAEX""#)
+        #expect(legacyCLI.agentName(session: nil) == "TRAE CLI")
         // Claude Code's card stays Claude's, Codex's Codex's, another runtime's its own.
         let claude = try Self.card("")
         let codex = try Self.card(#","agent":"codex""#)

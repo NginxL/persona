@@ -73,19 +73,21 @@ func managedRetryHub(t *testing.T) (*Hub, *db.DB, time.Time) {
 
 func requireModelRetryRetired(t *testing.T, store *db.DB, since time.Time, action string) {
 	t.Helper()
-	rows, err := store.SessionWorks(context.Background(), since.Add(-time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range rows {
-		if row.MachineID == "server" && row.SessionID == "agent-0005" {
-			if row.WakeAt != nil || row.Work.RetiredAt == nil {
-				t.Fatalf("%s left retry pending: %+v", action, row)
-			}
-			return
+	// EventUserStopped launches UserStopped outside the bus event worker so a
+	// slow node cannot hold that worker. Settle only drains the worker itself;
+	// wait for the authoritative durable retirement, as an app observes it.
+	eventually(t, 5*time.Second, action+" persisted the retry retirement", func() bool {
+		rows, err := store.SessionWorks(context.Background(), since.Add(-time.Hour))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	t.Fatalf("%s did not persist a retirement", action)
+		for _, row := range rows {
+			if row.MachineID == "server" && row.SessionID == "agent-0005" {
+				return row.WakeAt == nil && row.Work.RetiredAt != nil
+			}
+		}
+		return false
+	})
 }
 
 func TestInterruptingManagedAgentRetiresModelRetry(t *testing.T) {

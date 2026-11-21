@@ -396,6 +396,58 @@ internal class AssistantSettingsState(
         if (!ok) set { copy(config = this.config?.copy(closeEndedTerminals = !on)) }
     }
 
+    /** Exact owner replies: default off, reversible, and accepted only after both the write and a fresh read agree. */
+    suspend fun setOwnerReplyApproval(on: Boolean) = setOwnerApprovalSwitch(reply = true, on = on)
+
+    /** Persistent proposals: default off; existing durable grants remain the server's responsibility when turned off. */
+    suspend fun setPersistentOwnerActionCards(on: Boolean) = setOwnerApprovalSwitch(reply = false, on = on)
+
+    private suspend fun setOwnerApprovalSwitch(reply: Boolean, on: Boolean) {
+        val config = state.value.config ?: return
+        val was = if (reply) config.ownerReplyApproval else config.persistentOwnerActionCards
+        if (state.value.busy || was == null || was == on) return
+        set {
+            copy(config = if (reply) config.copy(ownerReplyApproval = on) else config.copy(persistentOwnerActionCards = on))
+        }
+        val ok = perform(SettingsText(R.string.assistant_settings_save_failed)) {
+            val update = if (reply) AssistantConfigUpdate(ownerReplyApproval = on)
+            else AssistantConfigUpdate(persistentOwnerActionCards = on)
+            val updated = api.updateConfig(update)
+            check(updated.manager == config.manager) { "Assistant identity changed" }
+            check((if (reply) updated.ownerReplyApproval else updated.persistentOwnerActionCards) == on) {
+                "The hub did not save the owner-approval setting"
+            }
+            val persisted = api.config()
+            check(persisted.manager == config.manager) { "Assistant identity changed" }
+            check((if (reply) persisted.ownerReplyApproval else persisted.persistentOwnerActionCards) == on) {
+                "The owner-approval setting did not persist"
+            }
+            set { copy(config = persisted) }
+        }
+        if (!ok) set {
+            copy(config = config?.let {
+                if (reply) it.copy(ownerReplyApproval = was) else it.copy(persistentOwnerActionCards = was)
+            })
+        }
+    }
+
+    /** Saves the exact full-reply phrases; an empty list disables phrase approval without touching ordinary cards. */
+    suspend fun setOwnerApprovalPhrases(phrases: List<String>) {
+        val config = state.value.config ?: return
+        if (state.value.busy || config.ownerReplyApprovalPhrases == null || config.ownerReplyApprovalPhrases == phrases) return
+        perform(SettingsText(R.string.assistant_settings_save_failed)) {
+            val updated = api.updateConfig(AssistantConfigUpdate(ownerReplyApprovalPhrases = phrases))
+            check(updated.manager == config.manager && updated.ownerReplyApprovalPhrases == phrases) {
+                "The hub did not save the exact approval phrases"
+            }
+            val persisted = api.config()
+            check(persisted.manager == config.manager && persisted.ownerReplyApprovalPhrases == phrases) {
+                "The exact approval phrases did not persist"
+            }
+            set { copy(config = persisted) }
+        }
+    }
+
     suspend fun saveNotes(text: String): Boolean = perform(SettingsText(R.string.assistant_settings_save_failed)) {
         val updated = api.updateConfig(AssistantConfigUpdate(notes = text))
         set { copy(config = updated) }

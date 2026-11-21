@@ -62,7 +62,7 @@ class AgentMarkShotsTest {
         Session("mac", "s2", title = "修复订单列表的 N+1 查询", cwd = "/code/app", state = "unread", spaceId = "w1", spaceName = "app",
             slotName = "2", lastText = "改成一次 JOIN 了", updatedAt = ago(4), paneId = "w1:p2", agent = "codex", agentSurface = "desktop"),
         Session("mac", "s3", title = "TRAE CLI 的一个会话", cwd = "/code/app", state = "needs_you", spaceId = "w1", spaceName = "app",
-            slotName = "3", lastText = "要跑测试吗？", updatedAt = ago(6), paneId = "w1:p3", agent = "trae", agentSurface = "cli"),
+            slotName = "3", lastText = "要跑测试吗？", updatedAt = ago(6), paneId = "w1:p3", agent = "traex", agentSurface = "cli"),
         Session("mac", "s4", title = "amp 的一个会话", cwd = "/code/app", state = "unread", spaceId = "w1", spaceName = "app",
             slotName = "4", lastText = "好的", updatedAt = ago(30), paneId = "w1:p4", agent = "amp"),
     ) + listOf("Grok" to "grok", "Antigravity CLI" to "agy", "OpenCode" to "opencode").mapIndexed { index, (name, agent) ->
@@ -133,7 +133,7 @@ class AgentMarkShotsTest {
                 val list = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
                 val name = "marks-${if (compact) "compact" else "list"}-${s.name.lowercase()}-${if (d) "dark" else "light"}.png"
                 File(out(), name).outputStream().use { assertTrue(list.compress(Bitmap.CompressFormat.PNG, 100, it)) }
-                for (said in listOf("Claude Code（命令行版）", "Codex（桌面版）", "TRAE（命令行版）", "amp", "Grok", "Antigravity CLI", "OpenCode")) {
+                for (said in listOf("Claude Code（命令行版）", "Codex（桌面版）", "TRAE CLI（命令行版）", "amp", "Grok", "Antigravity CLI", "OpenCode")) {
                     assertEquals("$said in $s ${if (d) "dark" else "light"} ${if (compact) "compact" else "list"}", 1,
                         rule.onAllNodesWithContentDescription(said, useUnmergedTree = true).fetchSemanticsNodes().size)
                 }

@@ -55,6 +55,11 @@ class ShortcutTextTest {
         assertNull(ShortcutText.resolution(permission, locked = true))
         assertNull(ShortcutText.resolution(Interaction("q", kind = "question", questions = listOf(Question("哪个？")))))
         assertNull(ShortcutText.resolution(Interaction("s", kind = "screen")))
+        val handoff = persona.core.contracts.JsonCodec.decodeFromString<Interaction>(
+            """{"id":"secret","kind":"permission","tool_name":"secret_handoff","tool_input":{"variables":[{"name":"TOKEN"}]},"always_label":"this launcher on this computer"}""")
+        assertTrue(handoff.isSecretHandoff)
+        assertNull(ShortcutText.resolution(handoff))
+        assertNull(ShortcutText.resolution(handoff, locked = false))
         assertEquals("允许 Bash: swift test？", ShortcutText.ask(res, permission))
         assertEquals("允许 Bash？", ShortcutText.ask(res, permission.copy(summary = " ")))
         assertEquals("批准这个计划？\n「计划 先改 模型」", ShortcutText.ask(res, plan))
@@ -200,5 +205,16 @@ class ApproveFirstModelTest {
         ApproveFirstModel(res, { true }, center, { emptyList() }).apply {
             load(); assertNull(approve(locked = false)); assertEquals(ApproveState.Failed("这个已经处理过了。"), state.value)
         }
+    }
+
+    @Test fun aSecretHandoffOpensTheFullAppInsteadOfApproving() = runTest {
+        val handoff = persona.core.contracts.JsonCodec.decodeFromString<Interaction>(
+            """{"id":"secret","kind":"permission","tool_name":"secret_handoff","tool_input":{"variables":[{"name":"TOKEN"}]},"always_label":"this launcher on this computer"}""")
+        val center = Center(listOf(handoff))
+        val model = ApproveFirstModel(res, { true }, center, { emptyList() })
+        model.load()
+        assertEquals(ApproveState.NeedsApp(handoff, null), model.state.value)
+        assertNull(model.approve(locked = false))
+        assertTrue(center.resolved.isEmpty())
     }
 }

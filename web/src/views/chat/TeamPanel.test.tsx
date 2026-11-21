@@ -8,11 +8,12 @@ vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
 });
-const shown = vi.hoisted(() => ({ sid: "", embedded: false }));
+const shown = vi.hoisted(() => ({ sid: "", embedded: false, at: undefined as string | undefined }));
 vi.mock("./ChatView", () => ({
-  ChatView: ({ sid, embedded }: { sid: string; embedded?: boolean }) => {
+  ChatView: ({ sid, embedded, landAt }: { sid: string; embedded?: boolean; landAt?: string }) => {
     shown.sid = sid;
     shown.embedded = Boolean(embedded);
+    shown.at = landAt;
     return <div data-worker-chat={sid} />;
   },
 }));
@@ -68,8 +69,12 @@ describe("TeamPanel", () => {
 
   it("shows the worker it was asked for, and waits for a worker when none runs", () => {
     act(() => applyCompleteSessions([lead(2), worker("a", 1), worker("b", 2)]));
-    act(() => root.render(<TeamPanel mid="mac" sid="lead" worker="b" onClose={() => {}} />));
+    act(() => root.render(<TeamPanel mid="mac" sid="lead" worker="b" at="item-b" onClose={() => {}} />));
     expect(shown.sid).toBe("b");
+    expect(shown.at).toBe("item-b");
+    act(() => root.render(<TeamPanel mid="mac" sid="lead" worker="missing" at="missing-item" onClose={() => {}} />));
+    expect(shown.sid).not.toBe("missing");
+    expect(shown.at).toBeUndefined();
     // the team ended: the store holds the lead alone
     act(() => {
       reset();

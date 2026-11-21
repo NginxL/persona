@@ -124,7 +124,7 @@ func TestSupervisedTaskOverTheBus(t *testing.T) {
 	}
 
 	// Handed out with what done means: the agent is told it.
-	res := mcp("task_plan", map[string]any{"tasks": []map[string]any{{"title": "部署 hub", "prompt": "把 hub 部署到测试环境并验证",
+	res := mcp("task_plan", map[string]any{"tasks": []map[string]any{{"title": "部署 hub", "prompt": "把 hub 部署到测试环境并验证", "role": "worker",
 		"machine": "box", "cwd": "/code/app", "readonly": false, "permission": "bypassPermissions", "user_requested": true, "why": "部署脚本在 box 上",
 		"done_when": []string{"测试 hub 已部署并验证"}, "expect_minutes": 20}}})
 	if !strings.Contains(res, "You supervise them") {

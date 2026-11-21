@@ -200,6 +200,13 @@ func (m *Manifest) Quotas() []QuotaItem {
 	return out
 }
 
+// Usages are the manifest's contributions to usage.
+func (m *Manifest) Usages() []UsageItem {
+	var out []UsageItem
+	_ = json.Unmarshal(m.Contributes["usage"], &out)
+	return out
+}
+
 // AgentSources are the manifest's contributions to agent_sources.
 func (m *Manifest) AgentSources() []AgentSourceItem {
 	var out []AgentSourceItem
@@ -235,7 +242,7 @@ func (m *Manifest) Contributions() map[string][]string {
 // Kind is the first extension point the plugin contributes to, by a fixed order: what GET /api/v1/plugins has always
 // said as "kind" (voice for a voice plugin).
 func (m *Manifest) Kind() string {
-	for _, name := range []string{"voice", "connectors", "channel", "api", "quota", "providers", "agent_sources", "assistant", "ui", "events"} {
+	for _, name := range []string{"voice", "connectors", "channel", "api", "quota", "usage", "providers", "agent_sources", "assistant", "ui", "events"} {
 		if len(m.Items(name)) > 0 {
 			return name
 		}

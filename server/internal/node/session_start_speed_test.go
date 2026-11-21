@@ -3,10 +3,12 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -194,10 +196,8 @@ func TestClaudeFastSpeedIsEffectiveStartOnlySettings(t *testing.T) {
 
 func startSpeedFunction(t *testing.T, name, invocation string) {
 	t.Helper()
-	// The launcher is a function in .zshrc, which the probe reads through zsh: without zsh it sees no launcher at all
-	// and every check would pass or fail for that reason instead (fakeClaudeHome skips the same way).
-	if _, err := exec.LookPath("zsh"); err != nil {
-		t.Skip("no zsh")
+	if loginShellProgram() == "" {
+		t.Skip("no login shell")
 	}
 	shellLaunchers(t, name)
 	launcherCache.Lock()
@@ -209,8 +209,16 @@ func startSpeedFunction(t *testing.T, name, invocation string) {
 		launcherCache.settings, launcherCache.scripts = oldSettings, oldScripts
 		launcherCache.Unlock()
 	})
-	home := os.Getenv("ZDOTDIR")
-	writeFile(t, filepath.Join(home, ".zshrc"), "function "+name+" { "+invocation+"; }\n")
+	home := os.Getenv("HOME")
+	zdotdir := os.Getenv("ZDOTDIR")
+	if zdotdir == "" {
+		zdotdir = home
+	}
+	// loginShellProgram runs zsh where available ($ZDOTDIR/.zshrc) and falls back to bash ($HOME/.bashrc) where zsh is
+	// absent, so define the launcher in both rc files.
+	def := "function " + name + " { " + invocation + "; }\n"
+	writeFile(t, filepath.Join(zdotdir, ".zshrc"), def)
+	writeFile(t, filepath.Join(home, ".bashrc"), def)
 }
 
 // A shell function can append its own --settings after Persona's. With plugins
@@ -254,4 +262,66 @@ func TestClaudeFastSpeedAllowsFunctionWithoutSettings(t *testing.T) {
 	if got := readSettings(t, path)["fastMode"]; got != true {
 		t.Fatalf("fastMode = %v, want true", got)
 	}
+}
+
+// Machines without zsh run the launcher probe through bash (loginShellProgram). Keep the bash fallback covered even on
+// hosts with zsh installed, while preserving the refusal for genuinely unseen launchers.
+func TestClaudeFastSpeedFunctionWithoutZsh(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix PATH fallback only")
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatalf("no bash on PATH: %v", err)
+	}
+	bin := t.TempDir()
+	if err := os.Symlink(bash, filepath.Join(bin, "bash")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	if got := loginShellProgram(); got != "bash" {
+		t.Fatalf("loginShellProgram() = %q, want bash", got)
+	}
+
+	t.Run("allows function without settings", func(t *testing.T) {
+		n, _, home := herdrNode(t)
+		t.Setenv("HOME", home)
+		t.Setenv("ZDOTDIR", home)
+		startSpeedFunction(t, "speedplain", `claude "$@"`)
+		path, err := n.claudeFastModeSettings(context.Background(), "speedplain", "", home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := readSettings(t, path)["fastMode"]; got != true {
+			t.Fatalf("fastMode = %v, want true", got)
+		}
+	})
+
+	t.Run("refuses hidden function settings", func(t *testing.T) {
+		n, _, home := herdrNode(t)
+		t.Setenv("HOME", home)
+		t.Setenv("ZDOTDIR", home)
+		startSpeedFunction(t, "speedwork", `claude --settings "$HOME/work-settings.json" "$@"`)
+		_, err := n.claudeFastModeSettings(context.Background(), "speedwork", "", home)
+		if err == nil {
+			t.Fatal("expected refusal for hidden --settings")
+		}
+		if errors.Is(err, errProbeUnseen) {
+			t.Fatalf("probe did not see bash function: %v", err)
+		}
+		if !strings.Contains(err.Error(), "--settings") {
+			t.Fatalf("error = %v, want hidden --settings refusal", err)
+		}
+	})
+
+	t.Run("still refuses unseen launcher", func(t *testing.T) {
+		n, _, home := herdrNode(t)
+		t.Setenv("HOME", home)
+		t.Setenv("ZDOTDIR", home)
+		shellLaunchers(t, "speedmissing")
+		_, err := n.claudeFastModeSettings(context.Background(), "speedmissing", "", home)
+		if !errors.Is(err, errProbeUnseen) {
+			t.Fatalf("error = %v, want errProbeUnseen", err)
+		}
+	})
 }

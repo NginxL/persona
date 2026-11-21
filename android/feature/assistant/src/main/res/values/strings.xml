@@ -129,6 +129,14 @@
     <string name="assistant_direction_todos_of">To-dos of %1$s</string>
     <string name="assistant_direction_agents_of">Agents of %1$s</string>
     <string name="assistant_conversation_actions">Chat actions</string>
+    <string name="assistant_arrange_chats">Arrange chats</string>
+    <string name="assistant_arrange_move_up">Move up</string>
+    <string name="assistant_arrange_move_down">Move down</string>
+    <string name="assistant_arrange_drag">Drag to reorder chat</string>
+    <string name="assistant_arrange_reset">Reset to activity time</string>
+    <string name="assistant_arrange_reset_done">Chat order reset to activity time</string>
+    <string name="assistant_arrange_undo">Undo</string>
+    <string name="assistant_arrange_save_failed">Couldn’t save chat order. Try again.</string>
     <string name="assistant_demo_title">Demo mode</string>
     <string name="assistant_demo_notice">Content is only kept for this demo.</string>
     <string name="assistant_demo_reply">This is a sample chat. Once the assistant is connected, replies show up here.</string>
@@ -200,6 +208,12 @@
     <string name="assistant_tags_hint">Press Enter to add. Up to %1$d tags, each at most %2$d characters.</string>
     <string name="assistant_tag_too_long">Each tag can be at most %1$d characters.</string>
     <string name="assistant_tag_count_limit">A chat can have at most %1$d tags.</string>
+    <string name="assistant_tag_filters_customize">Customize tag filters</string>
+    <string name="assistant_tag_filters_empty">No tag filters</string>
+    <string name="assistant_tag_filters_placeholder">Add a tag filter</string>
+    <string name="assistant_tag_filters_reset">Reset to automatic</string>
+    <string name="assistant_tag_filters_done">Done</string>
+    <string name="assistant_tag_filters_count_limit">You can add up to %1$d tag filters.</string>
     <string name="assistant_tags_saved">Tags saved for %1$s</string>
     <string name="assistant_copy_diagnostics">Copy diagnostics</string>
     <string name="assistant_diagnostics_copied">Diagnostics copied</string>
@@ -237,4 +251,12 @@
     <string name="assistant_usage_unavailable">Token usage isn\'t available</string>
     <string name="assistant_usage_unavailable_detail">This hub does not provide token usage history.</string>
     <string name="assistant_usage_unknown_machine">Earlier computer</string>
+    <string name="assistant_sidebar_pages">Pages</string>
+    <string name="assistant_sidebar_chats">Persona Chats</string>
+    <string name="assistant_sidebar_search">Search</string>
+    <string name="assistant_sidebar_search_chats">Chats</string>
+    <string name="assistant_sidebar_search_agents">Agents</string>
+    <string name="assistant_sidebar_search_no_agents">No matching Agents</string>
+    <string name="assistant_sidebar_search_no_agents_detail">Try another search.</string>
+    <string name="assistant_sidebar_search_agent_field">Search Agents</string>
 </resources>

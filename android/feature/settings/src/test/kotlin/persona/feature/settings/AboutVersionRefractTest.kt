@@ -63,7 +63,9 @@ class AboutVersionRefractTest {
     @get:Rule val rule = createComposeRule()
 
     private val context: Context get() = ApplicationProvider.getApplicationContext()
-    private fun out(): File = File(System.getProperty("persona.shots") ?: "build/about-version-refract-shots").also { it.mkdirs() }
+    private val outputDirectory by lazy {
+        newAboutCaptureRun("build/about-version-refract-shots", System.getProperty("persona.shots"))
+    }
 
     private fun language(tag: String): Context = context.createConfigurationContext(
         Configuration(context.resources.configuration).apply { setLocale(Locale.forLanguageTag(tag)) })
@@ -121,8 +123,8 @@ class AboutVersionRefractTest {
                 assertTrue("${selectedStyle.name} $tag dark=$selectedDark large=$selectedLarge pixels differ",
                     native.sameAs(generated))
                 val suffix = "$tag-${selectedStyle.name.lowercase()}-${if (selectedDark) "dark" else "light"}-${if (selectedLarge) "large" else "standard"}"
-                File(out(), "native-$suffix.png").writePng(native)
-                File(out(), "generated-$suffix.png").writePng(generated)
+                File(outputDirectory, "native-$suffix.png").writePng(native)
+                File(outputDirectory, "generated-$suffix.png").writePng(generated)
             }
     }
 

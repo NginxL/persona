@@ -6,7 +6,9 @@ import PersonaWire
 /// row per session that waits for the user (its cards under it), the section and the filter list those rows, and the
 /// badge counts the rows `expected.badge_rows` names, which leave out the muted agents, quiet tasks' agents and
 /// directory-hidden sessions. A case marked as iOS's known difference (`known_differences.ios`) is asserted at today's
-/// value; a mark on any client must name a decision and change what that client is asserted at.
+/// value; a mark on any client must name a decision and change what that client is asserted at. With the counts report
+/// switch on (spec/fixtures/counts/README.md, "Lane reports"), each case's rows and badge also go to the iOS lane's
+/// report.
 @MainActor
 final class AgentsNeedsYouFixtureTests: XCTestCase {
     private static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -67,9 +69,37 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
         }
     }
 
-    private struct Row: Decodable, Equatable {
+    private struct Row: Codable, Equatable {
         var id: String
         var cards: [String]
+    }
+
+    /// One line of the iOS lane's report: what a surface shows for a case, and its rows.
+    private struct ReportLine: Encodable {
+        var lane = "ios"
+        var fixture = "needs-you"
+        var name: String
+        var surface: String
+        var value: Int
+        var keys: [Row]
+
+        enum CodingKeys: String, CodingKey {
+            case lane, fixture, surface, value, keys
+            case name = "case"
+        }
+    }
+
+    /// Writes the iOS lane's report, `<directory>/ios.jsonl`, when the counts report switch is on: `PERSONA_COUNTS_REPORT`
+    /// in the test's environment (`TEST_RUNNER_PERSONA_COUNTS_REPORT` for xcodebuild), a directory relative to the
+    /// repository root or absolute.
+    private static func report(_ lines: [ReportLine]) throws {
+        guard let path = ProcessInfo.processInfo.environment["PERSONA_COUNTS_REPORT"], !path.isEmpty else { return }
+        let directory = path.hasPrefix("/") ? URL(fileURLWithPath: path) : repo.appending(path: path)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let text = try lines.map { String(decoding: try encoder.encode($0), as: UTF8.self) + "\n" }.joined()
+        try Data(text.utf8).write(to: directory.appending(path: "ios.jsonl"), options: .atomic)
     }
 
     /// What iOS is asserted at for `c`: its `expected`, with iOS's known difference applied. Fails a mark that names no
@@ -97,6 +127,7 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
         let fixture = try JSON.decoder.decode(Fixture.self, from: data)
         XCTAssertEqual(fixture.version, 1)
         XCTAssertGreaterThanOrEqual(fixture.cases.count, 14)
+        var lines: [ReportLine] = []
         for c in fixture.cases {
             let i = c.input
             let want = Self.wanted(c)
@@ -112,7 +143,8 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
             XCTAssertEqual(waiting.map(\.key), shown.filter { !$0.assistant && AgentFilter.needsYou.matches($0) }.map(\.key),
                            "\(c.name): the Needs You filter's sessions")
             let rows = AgentsNeedsYou.rows(cards: AgentsNeedsYou.cards(pending, session: { byKey[$0] }), waiting: waiting)
-            XCTAssertEqual(rows.map { Row(id: $0.id, cards: $0.cards.map(\.id)) }, want.rows, c.name)
+            let sectionRows = rows.map { Row(id: $0.id, cards: $0.cards.map(\.id)) }
+            XCTAssertEqual(sectionRows, want.rows, c.name)
             // As countBadges counts it: every pending card but a directory-hidden session's (`directoryVisibleInteractions`;
             // the Persona tab's cards are its own place), every waiting session.
             func place(_ key: SessionKey) -> TabBadges.Place {
@@ -121,9 +153,13 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
             let visible = pending.filter { byKey[$0.sessionKey]?.hiddenByDirectory != true }
             let counted = AgentsNeedsYou.rows(cards: visible, waiting: waiting)
             // The rows `AgentsNeedsYou.badge` counts.
-            XCTAssertEqual(counted.filter { place($0.key) == .agents }.map { Row(id: $0.id, cards: $0.cards.map(\.id)) }, want.badgeRows,
-                           "\(c.name): badge rows")
-            XCTAssertEqual(AgentsNeedsYou.badge(counted, place: place), want.badge, "\(c.name): badge")
+            let badgeRows = counted.filter { place($0.key) == .agents }.map { Row(id: $0.id, cards: $0.cards.map(\.id)) }
+            let badge = AgentsNeedsYou.badge(counted, place: place)
+            XCTAssertEqual(badgeRows, want.badgeRows, "\(c.name): badge rows")
+            XCTAssertEqual(badge, want.badge, "\(c.name): badge")
+            lines.append(ReportLine(name: c.name, surface: "agents_tab", value: badge, keys: badgeRows))
+            lines.append(ReportLine(name: c.name, surface: "agents_section", value: sectionRows.count, keys: sectionRows))
         }
+        try Self.report(lines)
     }
 }

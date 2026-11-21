@@ -154,7 +154,7 @@ class SettingsGroupsShotsTest {
         first.zipWithNext().forEach { (a, b) -> assertTrue("$a before $b", top(a) < top(b)) }
         // 2. This device's, then 3. the hub's, with the footnote that says neither is an assistant's.
         assertTrue(top("Agent") < top("这台设备"))
-        val device = listOf("这台设备", "界面风格", "通知与后台", "翻译", "存储空间", "关于与更新")
+        val device = listOf("这台设备", "外观", "通知与后台", "翻译", "存储空间", "关于与更新")
         device.zipWithNext().forEach { (a, b) -> assertTrue("$a before $b", top(a) < top(b)) }
         assertTrue(top("存储空间") < top("Hub"))
         val hub = listOf("Hub", "连接", "Hub 连接", "Hub 版本", "助手", "形象", "设备")

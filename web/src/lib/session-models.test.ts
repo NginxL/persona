@@ -102,6 +102,27 @@ describe("the providers of an Agent's chat", () => {
     expect(own.models![1].fast).toBeUndefined();
     expect(providers.find((p) => p.id === "gateway")!.unavailable).toBe(t("chat-modelpanel.other_engine", { from: "Codex", to: "Claude Code" }));
   });
+
+  it("switches models and efforts in-place on a Codex thread whose node advertises model capability", () => {
+    const multiCodex: LauncherModels = {
+      agent: "codex",
+      models: [
+        { id: "acme/gpt-5-pro", name: "Acme gpt-5-pro", efforts: ["low", "medium"], default_effort: "medium" },
+        { id: "beta/gpt-5-pro", name: "Beta gpt-5-pro", efforts: ["low", "high", "xhigh"], default_effort: "high" },
+      ],
+    };
+    const s = codex({ status: "working", state: "working", capabilities: { send: true, model: true }, model: "acme/gpt-5-pro", effort: "medium", efforts: ["low", "medium"] });
+    const { providers, state } = sessionPanel(s, launchers, lists({ cx: { list: multiCodex } }));
+    const own = providers.find((p) => p.id === "cx")!;
+    expect(own.unavailable).toBeUndefined();
+    expect(own.typable).toBe(true);
+    expect(state.recommended).toEqual(["cx"]);
+    expect(state.busy).toBeUndefined();
+    expect(pickPlan(s, { provider: "cx", model: "beta/gpt-5-pro", effort: "xhigh" }, () => multiCodex)).toEqual([
+      { model: "beta/gpt-5-pro" },
+      { effort: "xhigh" },
+    ]);
+  });
 });
 
 describe("what a pick sends", () => {
@@ -182,6 +203,7 @@ describe("what the pill says", () => {
     expect(modelLabel("gpt-5.5-codex")).toBe("5.5 Codex");
     expect(modelLabel("vendor/model-x")).toBe("vendor/model-x");
     expect(modelLabel("route-a/gemini-4-carbon")).toBe("route-a/gemini-4-carbon");
+    expect(modelLabel("acme/gpt-5-pro")).toBe("acme/gpt-5-pro");
     expect(currentModelRow(claudeList.models, "CLAUDE-HAIKU-5-5")?.id).toBe("haiku");
     expect(currentModelRow(claudeList.models, "nothing")).toBeUndefined();
   });

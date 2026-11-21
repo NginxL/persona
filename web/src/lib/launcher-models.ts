@@ -48,6 +48,8 @@ export interface LauncherModels {
   models: AgentModel[];
   /** Why a pick would not reach the agent (the launcher fixes its own --model); the start sends no model then. */
   locked?: string;
+  /** The node accepts a model when starting the native omp launcher on the queried host (#11964). */
+  supports_start_model?: boolean;
 }
 
 /** What "Model configuration" runs when a launcher picker is left alone (GET /machines/{mid}/launchers's `default`, #2455):
@@ -56,18 +58,20 @@ export interface LauncherDefault {
   provider?: string;
   model?: string;
   effort?: string;
+  permission_mode?: string;
   /** Main chat only: cli or agentsdk. */
   runtime?: string;
 }
 
 /** One of "New agent"'s presets (#2225, docs/assistant/model-profiles.md "Agent presets"): a tier of the model profile in use
- *  whose launcher this computer starts. Picking it fills launcher, model and effort as picking them by hand would. */
+ *  whose launcher this computer starts. Picking it fills launcher, model, effort and permission mode as picking them by hand would. */
 export interface PickerTier {
   name: string;
   launcher: string;
   /** "" or absent: the launcher's default (the model settings' when the launcher is theirs). */
   model?: string;
   effort?: string;
+  permission_mode?: string;
   /** When to use it. */
   description?: string;
 }
@@ -162,13 +166,26 @@ export function listedModel<M extends Pick<AgentModel, "id" | "aliases">>(models
   return models.find((m) => m.id === id) ?? models.find((m) => m.aliases?.includes(id));
 }
 
-/** The agent takes a model ID typed by hand (#1644): Claude Code's `--model` / `/model` and Codex's `--model` take any
- *  string; the hub remembers typed IDs for these two only. Other agents' lists are empty (no model row). */
+/** Engines whose pickers accept a manually entered model ID (#1644). */
 export const takesTypedModel = (agent: string) =>
   agent === "claude" || agent === "codex" || agent === "pi" || agent === "cursor" || agent === "agy";
 
-/** A typed ID can reach the agent: Claude Code or Codex, and the launcher doesn't pass its own --model. */
-export const typedModelOffered = (agent: string, list: LauncherModels | null | undefined) => takesTypedModel(agent) && !list?.locked;
+/** A runtime announces its own source and may provide a model catalog for its omp sessions. */
+export const terminalOmp = (agent: string, launcher?: Pick<Launcher, "source">) =>
+  agent === "omp" && (!launcher?.source || launcher.source === "zshrc" || launcher.source === "path" || launcher.source === "builtin");
+
+/** Only the plain omp command on herdr can advertise a typed model for a new terminal session (#11964). */
+export function nativeOmpStart(agent: string, launcher: Pick<Launcher, "name" | "source"> | undefined, host: string | undefined): boolean {
+  return terminalOmp(agent, launcher) && launcher?.name === "omp" && host === "herdr";
+}
+
+/** omp's start capability belongs to the terminal host, including when another launcher's destination is a desktop app. */
+export const startCatalogHost = (launcher: Pick<Launcher, "name" | "source"> | undefined, host: string | undefined, terminalHost: string) =>
+  launcher?.name === "omp" && terminalOmp("omp", launcher) ? terminalHost || undefined : host;
+
+/** A fixed launcher keeps its model. Live pickers do not opt into the native omp start capability. */
+export const typedModelOffered = (agent: string, list: LauncherModels | null | undefined, nativeOmp = false) =>
+  !list?.locked && (takesTypedModel(agent) || (nativeOmp && list?.supports_start_model === true));
 
 /** Forgets one model ID typed for `launcher` on `mid` (#1644, the list's "Forget"): the hub stops listing it. */
 export function forgetCustomModel(mid: string, launcher: string, model: string, opts: { manager?: string } = {}): Promise<unknown> {
@@ -300,11 +317,21 @@ export function fitEffort(effort: string, choices: string[]): string {
   return choices.includes(effort) ? effort : "";
 }
 
+interface StartModelOptions {
+  agent: string;
+  list: LauncherModels | null | undefined;
+  followed?: ModelBinding;
+  launcher?: Pick<Launcher, "permission_modes" | "source">;
+  nativeOmp?: boolean;
+}
+
 /** What a start sends: the model only when it is not the default and the launcher lets it through, the effort only where
- *  the start takes one (`effortRule`, by the agent and the launcher that runs) and only one the model takes. An ID the
- *  list lacks (typed, #1644) goes as it is to Claude Code and Codex, also when the list couldn't be read (`undefined`); an
- *  older hub's `null` (no picker) sends none. */
-export function startPicks(o: { agent: string; list: LauncherModels | null | undefined; model: string; effort: string; followed?: ModelBinding; launcher?: Pick<Launcher, "permission_modes"> }): { model?: string; effort?: string } {
+ *  the start takes one (`effortRule`, by the agent and the launcher that runs) and only one the model takes. A launcher
+ *  that takes typed IDs can accept one when its list couldn't be read (`undefined`); an older hub's `null` sends none. */
+export function startPicks(o: StartModelOptions & { model: string; effort: string }): { model?: string; effort?: string } {
+  if (terminalOmp(o.agent, o.launcher)) {
+    return typedModelOffered(o.agent, o.list, o.nativeOmp) && validModelId(o.model) ? { model: o.model } : {};
+  }
   const out: { model?: string; effort?: string } = {};
   const m = o.list?.models.find((x) => x.id === o.model);
   if (m) {
@@ -321,11 +348,12 @@ export function startPicks(o: { agent: string; list: LauncherModels | null | und
 
 /** What of a preset a start with this launcher's list would not pass on: its model when the launcher fixes its own --model
  *  or takes no typed ID, its effort when the model doesn't take it. Empty: all of it (or the list is not in yet). */
-export function tierLeftOut(tier: PickerTier, o: { agent: string; list: LauncherModels | null | undefined; followed?: ModelBinding; launcher?: Pick<Launcher, "permission_modes"> }): string[] {
-  const picks = startPicks({ agent: o.agent, list: o.list, model: tier.model ?? "", effort: tier.effort ?? "", followed: o.followed, launcher: o.launcher });
+export function tierLeftOut(tier: PickerTier, o: StartModelOptions): string[] {
+  const picks = startPicks({ ...o, model: tier.model ?? "", effort: tier.effort ?? "" });
   const out: string[] = [];
   // the list's default is what runs with no model sent (startPicks sends it when the model settings would run another)
-  if (tier.model && picks.model !== tier.model && !(o.list?.models.some((m) => m.id === tier.model && m.default) && !o.list?.locked)) out.push(tier.model);
+  const implicitDefault = !terminalOmp(o.agent, o.launcher) && !o.list?.locked && o.list?.models.some((m) => m.id === tier.model && m.default);
+  if (tier.model && picks.model !== tier.model && !implicitDefault) out.push(tier.model);
   if (tier.effort && picks.effort !== tier.effort) out.push(tier.effort);
   return out;
 }

@@ -2,10 +2,22 @@ package persona.feature.assistant
 
 import android.content.res.Resources
 import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import persona.core.contracts.Machine
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AssistantConfig
+import persona.core.contracts.api.AssistantSnapshot
+import persona.core.contracts.api.ChatComposerService
+import persona.core.contracts.api.ConnectionState
+import persona.core.designsystem.AppStyle
+import persona.core.designsystem.JAction
+import persona.core.designsystem.JActionSheet
+import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcon
 import persona.core.domain.modelShortName
@@ -126,4 +138,96 @@ internal fun assistantCopyInfo(res: Resources, title: String?, main: Boolean, se
             ?: res.getString(R.string.assistant_copy_info_launcher, launcher),
         sessionId?.let { res.getString(R.string.assistant_copy_info_resume, cwd, it) },
     ).joinToString("\n")
+}
+
+/** The existing title-menu actions at a real composable boundary, with the page retaining every state holder. */
+@Composable
+internal fun AssistantTitleMenu(
+    assistantName: String,
+    hubGroup: String?,
+    active: SessionKey?,
+    onMain: Boolean,
+    snapshot: AssistantSnapshot,
+    assistantMachine: String,
+    machines: List<Machine>,
+    menuConfig: AssistantConfig?,
+    composerService: ChatComposerService?,
+    demo: Boolean,
+    connection: ConnectionState?,
+    mainActions: MainActions,
+    onVoice: (() -> Unit)?,
+    mainConversation: MainConversationController,
+    copy: (String, String?) -> Boolean,
+    scope: CoroutineScope,
+    onDismiss: () -> Unit,
+    onKnowledge: () -> Unit,
+    onDetails: () -> Unit,
+    onInfo: (AssistantInfo) -> Unit,
+    onOpenConversation: (SessionKey) -> Unit,
+    onCopyId: (SessionKey) -> Unit,
+    onCopyDiagnostics: (Session) -> Unit,
+    onCompact: () -> Unit,
+    onClear: () -> Unit,
+    onNotice: (String) -> Unit,
+    onConnectionDetails: () -> Unit,
+) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val shown = active?.let { key -> snapshot.conversations.firstOrNull { it.key == key } }
+    val compacting = mainConversation.compacting
+    val compaction = mainConversation.compaction
+    val clearBusy = mainConversation.clearBusy
+    val newMainBusy = mainConversation.newMainBusy
+    val copyText = AssistantCopyText(shown, active, onMain, menuConfig, assistantMachine, machines)
+    val interrupt = composerService.takeIf { !demo }
+    val sections = assistantMenu(offline = connection != null && connection != ConnectionState.Online,
+        voice = onVoice != null, main = snapshot.mainSession, active = active, compact = active != null && mainActions.compact,
+        newMain = onMain && mainActions.newMain, working = interrupt != null && persona.core.domain.lines.isLiveStatus(shown?.status),
+        clear = onMain && mainActions.clear)
+        fun rawAction(item: AssistantMenuItem, separator: Boolean): JAction = when (item) {
+            AssistantMenuItem.ConnectionDetails -> JAction(resources.getString(item.label), separatorBefore = separator,
+                onClick = onConnectionDetails)
+            AssistantMenuItem.Knowledge -> JAction(resources.getString(item.label), separatorBefore = separator, onClick = {
+                onKnowledge()
+            })
+            // iOS's Details opens Persona's profile: here the assistant's own page, its settings.
+            AssistantMenuItem.Details -> JAction(resources.getString(item.label), separatorBefore = separator, onClick = {
+                onDetails()
+            })
+            AssistantMenuItem.Voice -> JAction(resources.getString(item.label), separatorBefore = separator,
+                onClick = { onVoice?.invoke() })
+            // In place of the home page's Home (#4339 C11), as iOS's menu has it: off the main conversation only.
+            AssistantMenuItem.BackToMain -> JAction(resources.getString(item.label), PersonaIcons.home,
+                separatorBefore = separator, onClick = { snapshot.mainSession?.let(onOpenConversation) })
+            AssistantMenuItem.CopyDirectory -> JAction(resources.getString(item.label), separatorBefore = separator,
+                onClick = { copy(copyText.cwd, resources.getString(R.string.assistant_directory_copied)) })
+            AssistantMenuItem.CopyInfo -> JAction(resources.getString(item.label), separatorBefore = separator,
+                onClick = { copy(copyText.info(resources), resources.getString(R.string.assistant_info_copied)) })
+            AssistantMenuItem.CopySessionId -> JAction(resources.getString(item.label), separatorBefore = separator,
+                onClick = { active?.let(onCopyId) })
+            AssistantMenuItem.CopyDiagnostics -> JAction(resources.getString(item.label), separatorBefore = separator,
+                onClick = { active?.let { key -> onCopyDiagnostics(shown ?: Session(machineId = key.machineId, sessionId = key.sessionId)) } })
+            AssistantMenuItem.Compact -> JAction(resources.getString(item.label), separatorBefore = separator,
+                enabled = !compacting && compaction.line != CompactionLine.Running, onClick = onCompact)
+            AssistantMenuItem.ClearContext -> JAction(resources.getString(item.label), separatorBefore = separator,
+                enabled = !clearBusy, onClick = onClear)
+            AssistantMenuItem.NewMain -> JAction(resources.getString(item.label), separatorBefore = separator,
+                enabled = !newMainBusy, onClick = { mainConversation.newMainOpen = true })
+            AssistantMenuItem.SessionInfo -> JAction(resources.getString(item.label), separatorBefore = separator,
+                onClick = { onInfo(AssistantInfo.Session) })
+            AssistantMenuItem.Interrupt -> JAction(resources.getString(item.label), separatorBefore = separator, onClick = {
+                val key = active
+                if (interrupt != null && key != null) scope.launch {
+                    try { interrupt.interrupt(key); onNotice(resources.getString(persona.feature.chat.R.string.chat_composer_interrupt_requested)) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { onNotice(resources.getString(persona.feature.chat.R.string.chat_composer_interrupt_unknown)) }
+                }
+            })
+        }
+        // iOS's icon on every item: Glass draws them; Brief and Board keep their words (Back to main chat has had its house all along).
+        val glassIcons = PersonaTheme.style == AppStyle.Glass
+        fun action(item: AssistantMenuItem, separator: Boolean): JAction = rawAction(item, separator)
+            .copy(icon = item.icon.takeIf { glassIcons || item == AssistantMenuItem.BackToMain })
+        // iOS's heading: which conversation and what it runs on ("Main chat · claude · Opus 4.5").
+        JActionSheet(title = copyText.menuTitle(resources, assistantName, hubGroup), onDismiss = onDismiss,
+            actions = sections.flatMapIndexed { index, items -> items.mapIndexed { i, item -> action(item, separator = index > 0 && i == 0) } })
 }

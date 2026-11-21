@@ -48,6 +48,9 @@ export interface LineProps {
   offscreen?: (section: HTMLElement) => () => void;
   /** The chat's last exchange while the chat is still at work (SegmentView `busy`). */
   busy?: boolean;
+  /** Only the live line: the dock owns its foreground elapsed clock (#12380). Kept out of ChatContext so a turn
+   *  starting or ending does not invalidate finished exchanges (#12446). */
+  dockTurnClock?: boolean;
 }
 
 export const ChatLineView = memo(function ChatLineView(props: LineProps) {
@@ -59,10 +62,10 @@ export const ChatLineView = memo(function ChatLineView(props: LineProps) {
   );
 });
 
-function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, fix, limit, exhausted, trace, offscreen, busy }: LineProps) {
+function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, fix, limit, exhausted, trace, offscreen, busy, dockTurnClock }: LineProps) {
   switch (line.kind) {
     case "supervision":
-      return <SupervisionLine line={line} mid={mid} sid={sid} streaming={streaming} expandFold={expandFold} assistant={assistant} />;
+      return <SupervisionLine line={line} mid={mid} sid={sid} streaming={streaming} expandFold={expandFold} assistant={assistant} dockTurnClock={dockTurnClock} />;
     case "segment":
       return (
         <SegmentView
@@ -76,6 +79,7 @@ function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, 
           expandFold={expandFold}
           offscreen={offscreen}
           busy={busy}
+          dockTurnClock={dockTurnClock}
         />
       );
     case "notice":
@@ -119,7 +123,7 @@ function SupervisionLine({ line, ...props }: LineProps & { line: Extract<ChatLin
         <Icon name="chevronRight" size={14} className="shrink-0" style={{ transform: open ? "rotate(90deg)" : undefined }} />
       </button>
       {open && <div className="flex min-w-0 flex-col gap-3 border-l-2 border-tool-rail pl-3" data-supervision-trace>
-        {line.lines.map((child) => <LineBody key={child.id} {...props} line={child} streaming={child === line.lines.at(-1) || (child.kind === "segment" && child.live) ? props.streaming : undefined} trace />)}
+        {line.lines.map((child) => <LineBody key={child.id} {...props} line={child} dockTurnClock={("live" in child && child.live && props.dockTurnClock) || undefined} streaming={child === line.lines.at(-1) || (child.kind === "segment" && child.live) ? props.streaming : undefined} trace />)}
       </div>}
     </section>
   );

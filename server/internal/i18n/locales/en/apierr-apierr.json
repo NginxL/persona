@@ -21,5 +21,6 @@
   "start_line_rejected": "The new terminal tab on {machine} didn't take the start command, twice (it printed “{line}”). Nothing ran; check what that shell does when it starts, then try again.",
   "start_line_rejected_here": "The new terminal tab on this computer didn't take the start command, twice (it printed “{line}”). Nothing ran; check what that shell does when it starts, then try again.",
   "session_no_transcript": "This computer has a record of this conversation, but Persona can't find its history there.",
-  "session_unknown": "Persona can't find this conversation on this computer."
+  "session_unknown": "Persona can't find this conversation on this computer.",
+  "health_start_forbidden": "This credential can't start sessions in the health space."
 }

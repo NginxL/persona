@@ -28,6 +28,7 @@ import persona.core.domain.sort.canRename
 import persona.core.domain.sort.canTerminal
 import persona.core.domain.sort.closeConfirmation
 import persona.core.domain.sort.deleteConfirmation
+import persona.core.domain.sort.isRex
 import persona.core.domain.sort.isTern
 import persona.core.domain.sort.resumeCommand
 import persona.core.domain.sort.slotLabel
@@ -47,6 +48,7 @@ internal fun ChatHeader(
     onFiles: (() -> Unit)? = null, onGit: (() -> Unit)? = null, gitLabel: String = "Git",
     onSearch: (() -> Unit)? = null,
     statusState: StatusLineState = StatusLineState(), onDetails: () -> Unit = {},
+    onBackgroundTasks: (() -> Unit)? = null,
     onOpenTodo: ((String) -> Unit)? = null,
     agentShares: (() -> AgentShares)? = null,
     worktrees: (() -> persona.core.contracts.api.AgentCreationService?)? = null,
@@ -187,6 +189,7 @@ internal fun ChatHeader(
         onSearch?.let { add(JAction(stringResource(R.string.chat_chrome_search), PhIcons.MagnifyingGlass, onClick = it)) }
         onFiles?.let { add(JAction(stringResource(R.string.chat_chrome_files), PhIcons.FolderSimple, onClick = it)) }
         onGit?.let { add(JAction(gitLabel, onClick = it)) }
+        onBackgroundTasks?.let { add(JAction(stringResource(R.string.chat_background_title), PersonaIcons.backgroundTasks, onClick = it)) }
         add(JAction(stringResource(R.string.chat_chrome_details), onClick = onDetails))
         add(JAction(stringResource(R.string.chat_chrome_info), PhIcons.Info, enabled = session != null) { dialog = "info" })
         if (session?.assistant == false) {
@@ -250,7 +253,11 @@ internal fun ChatHeader(
             content = {
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
                     if (!session?.paneId.isNullOrBlank()) JTextField(tabName, { tabName = it }, singleLine = true,
-                        label = stringResource(if (session?.isTern == true) R.string.chat_chrome_tab_name_tern else R.string.chat_chrome_tab_name))
+                        label = stringResource(when {
+                            session?.isTern == true -> R.string.chat_chrome_tab_name_tern
+                            session?.isRex == true -> R.string.chat_chrome_tab_name_rex
+                            else -> R.string.chat_chrome_tab_name
+                        }))
                     JTextField(title, { title = it }, label = stringResource(R.string.chat_chrome_session_name), singleLine = true)
                 }
             })
@@ -308,6 +315,7 @@ internal fun ChatHeader(
 internal fun chatRenameNote(session: Session?): Int? = when {
     session?.canTerminal == false -> null
     session?.isTern == true -> R.string.chat_chrome_rename_text_tern
+    session?.isRex == true -> R.string.chat_chrome_rename_text_rex
     else -> R.string.chat_chrome_rename_text
 }
 

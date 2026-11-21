@@ -73,8 +73,9 @@ class HubSessionsRepository(
 
     private suspend fun persist() {
         snapshots.save("machines", mutableMachines.value)
-        // A cache is a first-paint hint, not a row checkpoint or a complete verified baseline.
-        snapshots.save("sessions", if (mode.holdsAll) mutableSessions.value else mutableSessions.value.take(WINDOW_SIZE))
+        // A cache is a first-paint hint, not a row checkpoint or a complete verified baseline. Keep folded rows' parents
+        // inside the bounded window so first paint never draws a side/child session as an orphan root (#12101).
+        snapshots.save("sessions", firstPaintSnapshot(mutableSessions.value, WINDOW_SIZE))
     }
 
     /**
@@ -666,6 +667,27 @@ internal suspend inline fun quietly(block: () -> Unit) {
     try { block() }
     catch (cancelled: CancellationException) { throw cancelled }
     catch (_: Exception) { /* A later refresh or reconnect reconciles state. */ }
+}
+
+/**
+ * Picks up to [limit] rows for the first-paint cache, pulling in the listed parent of any folded side/child row it keeps
+ * so cold open never briefly renders a folded side/child row as Row #1 before the full baseline loads (#12101).
+ */
+internal fun firstPaintSnapshot(rows: List<Session>, limit: Int): List<Session> {
+    if (rows.size <= limit) return rows
+    val byKey = rows.associateBy { it.key }
+    val picked = LinkedHashMap<SessionKey, Session>(limit)
+    for (row in rows) {
+        if (picked.size >= limit) break
+        if (row.key in picked) continue
+        val parent = row.foldedUnder?.takeIf(String::isNotBlank)?.let { byKey[SessionKey(row.machineId, it)] }
+        if (parent != null && parent.key !in picked) {
+            if (picked.size + 2 > limit) continue
+            picked[parent.key] = parent
+        }
+        picked[row.key] = row
+    }
+    return picked.values.toList()
 }
 
 /** How often pushed session events write the first-paint snapshot at most. */

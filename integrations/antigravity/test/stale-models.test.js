@@ -28,7 +28,7 @@ async function fixture(t, models, configured = 'Gemini Carbon (High)') {
   chmodSync(bin, 0o755)
   const n = await startFakeNode(t)
   const logs = []
-  const runtime = createAgyRuntime({ home, agyDir, agyBin: bin, personadBin: '/missing', socketPath: n.path, log: (m) => logs.push(m) })
+  const runtime = createAgyRuntime({ home, agyDir, agyBin: bin, personadBin: join(home, 'no-personad'), jarvisdBin: join(home, 'no-personad'), stateHome: join(home, '.persona'), socketPath: n.path, log: (m) => logs.push(m) })
   t.after(() => runtime.stop())
   runtime.start()
   await n.ready

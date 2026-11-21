@@ -27,25 +27,44 @@ describe("which sessions can switch model", () => {
     expect(canSwitchModel(session({ status: "offline" }))).toBe(false);
   });
 
-  it("honors explicit runtime model capability and its launcher", () => {
+  it("honors explicit runtime and Codex model capability and its launcher", () => {
     const agy = session({ agent: "agy", source_kind: "runtime", launcher: "agy", capabilities: { send: true, model: true } as Session["capabilities"] });
     expect(canSwitchModel(agy)).toBe(true);
     expect(sessionLauncher(agy)).toBe("agy");
     expect(canSwitchModel({ ...agy, capabilities: { ...agy.capabilities!, model: false } })).toBe(false);
     expect(canSwitchModel({ ...agy, status: "offline" })).toBe(false);
     expect(canSwitchModel({ ...agy, assistant: true })).toBe(false);
+
+    const cx = session({ agent: "codex", source_kind: "codex_app_server", capabilities: { send: true, model: true } as Session["capabilities"] });
+    expect(canSwitchModel(cx)).toBe(true);
+    expect(canSwitchModel(session({ agent: "codex", space_kind: "codex_app", capabilities: { send: true, model: true } as Session["capabilities"] }))).toBe(true);
   });
 
-  it("is busy while the agent works or waits on you", () => {
+  it("is busy while Claude works or waits on you, but Codex and plugin-backed Claude Desktop queue for the next step", () => {
     expect(modelBusy(session())).toBe("");
     expect(modelBusy(session({ status: "working" }))).toContain("正在工作");
     expect(modelBusy(session({ state: "needs_you" }))).toContain("正在工作");
+    expect(modelBusy(session({ agent: "codex", status: "working" }))).toBe("");
+    expect(modelBusy(session({ agent: "codex", state: "needs_you" }))).toBe("");
+    expect(
+      modelBusy(
+        session({
+          source_kind: "claude_desktop",
+          status: "working",
+          capabilities: { send: true, model: true, plugin_input: true } as Session["capabilities"],
+        }),
+      ),
+    ).toBe("");
   });
 
-  it("asks the launcher the session runs with, plain claude without one", () => {
+  it("asks the launcher the session runs with, claude-desktop on desktop, plain claude without one", () => {
     expect(sessionLauncher({ launcher: "gateway" })).toBe("gateway");
     expect(sessionLauncher({})).toBe("claude");
     expect(sessionLauncher({ agent: "claude" })).toBe("claude");
+    expect(sessionLauncher({ agent: "claude", agent_surface: "desktop" })).toBe("claude-desktop");
+    expect(sessionLauncher({ agent: "claude", source_kind: "claude_desktop" })).toBe("claude-desktop");
+    expect(sessionLauncher({ agent: "claude", space_kind: "claude_desktop" })).toBe("claude-desktop");
+    expect(sessionLauncher({ agent: "claude", agent_surface: "desktop", launcher: "gateway" })).toBe("gateway");
   });
 
   it("asks a Codex session without a launcher its engine's, never Claude Code's (#6501)", () => {

@@ -62,12 +62,24 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("release_merge_check.py", plan_script)
         self.assertIn('test "$COMMIT" = "${{ github.event.pull_request.merge_commit_sha || github.sha }}"', plan_script)
         verify_script = str(jobs["verify"]["steps"])
-        self.assertEqual(jobs["verify"]["steps"][0]["env"], {
+        self.assertEqual(jobs["verify"]["steps"][0]["uses"], "actions/checkout@v4")
+        gate = next(step for step in jobs["verify"]["steps"]
+                    if step.get("name") == "Require every platform job to succeed before verification")
+        self.assertEqual(gate["env"], {
             "CLI_WEB": "${{ needs.cli-web.result }}",
             "ANDROID": "${{ needs.android.result }}",
             "APPLE": "${{ needs.apple.result }}",
             "WINDOWS": "${{ needs.windows.result }}",
         })
+        for failed in ("failure", "skipped", "cancelled"):
+            with self.subTest(platform_result=failed):
+                result = subprocess.run(["bash", "-c", gate["run"]],
+                                        env=dict(os.environ, CLI_WEB=failed, ANDROID="success", APPLE="success", WINDOWS="success"),
+                                        capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(subprocess.run(["bash", "-c", gate["run"]],
+                                        env=dict(os.environ, CLI_WEB="success", ANDROID="success", APPLE="success", WINDOWS="success"),
+                                        capture_output=True, text=True, timeout=10).returncode, 0)
         self.assertIn('test "$result" = success', verify_script)
         self.assertIn("--conclusion success", verify_script)
         # GitHub skips the whole aggregate after a failed or skipped dependency by default. That would also skip
@@ -200,6 +212,18 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("RELEASE_PR_TOKEN", text)
         self.assertIn("missing RELEASE_PR_TOKEN", text)
         self.assertIn("git diff --cached --quiet", text)
+        schedule = yaml.load(text, Loader=yaml.BaseLoader)
+        self.assertEqual(schedule["jobs"]["plan"]["needs"], "channel")
+        for step in schedule["jobs"]["plan"]["steps"]:
+            if "env" in step and "CHANNEL" in step["env"]:
+                self.assertEqual(step["env"]["CHANNEL"], "${{ needs.channel.outputs.name }}")
+        channel_script = schedule["jobs"]["channel"]["steps"][0]["run"]
+        self.assertIn('channel="$REQUESTED"', channel_script)
+        self.assertIn('[[ "$EVENT" = schedule ]]', channel_script)
+        self.assertNotIn("inputs.channel || (github.event.schedule", text)
+        self.assertIn("git config user.email", text)
+        self.assertIn('git switch -C "$BRANCH"', text)
+        self.assertIn('candidate="$branch-r$suffix"', text)
         select = next(step for step in yaml.load(text, Loader=yaml.BaseLoader)["jobs"]["plan"]["steps"]
                       if step.get("id") == "select")["run"]
         self.assertLess(select.index("git fetch --no-tags origin main"), select.index('commit="$(git rev-parse HEAD)"'))
@@ -216,47 +240,55 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn('refs/tags/$TAG', text)
         self.assertNotIn("gh release create", text)
 
+    def test_schedule_replacement_candidates_keep_the_old_source_and_allocate_a_fresh_branch(self):
+        schedule = yaml.load(SCHEDULE.read_text(), Loader=yaml.BaseLoader)
+        lines = schedule["jobs"]["plan"]["steps"][1]["run"].splitlines()
+        start = next(index for index, line in enumerate(lines) if line.strip() == "suffix=0")
+        end = next(index for index in range(start, len(lines)) if lines[index].strip() == 'branch="$candidate"')
+        fragment = "\n".join(lines[start:end + 1]) + '\nprintf \'%s\\n\' "$branch"\n'
+        for refs, expected in (("", "release/0.10.0"),
+                               ("a" * 40 + "\trefs/heads/release/0.10.0\n", "release/0.10.0-r1"),
+                               ("a" * 40 + "\trefs/heads/release/0.10.0\n"
+                                + "b" * 40 + "\trefs/heads/release/0.10.0-r1\n", "release/0.10.0-r2")):
+            with self.subTest(branch=expected), tempfile.TemporaryDirectory() as directory:
+                fixture = Path(directory)
+                fake = fixture / "git"
+                fake.write_text("#!/bin/sh\n"
+                                "[ \"$1\" = ls-remote ] || exit 2\n"
+                                "case \"$REFS\" in *\"$4\"*) exit 0 ;; *) exit 1 ;; esac\n")
+                fake.chmod(0o755)
+                result = subprocess.run(["bash", "-c", fragment], cwd=fixture,
+                                        env=dict(os.environ, PATH=str(fixture) + os.pathsep + os.environ["PATH"],
+                                                 branch="release/0.10.0", REFS=refs, REPOSITORY="nwverse/persona"), capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+                # A failed candidate's old ref is never overwritten: -rN advances until no remote branch owns it.
+
     def test_schedule_reserved_versions_are_safe_and_remain_separate_arguments(self):
         text = SCHEDULE.read_text()
         schedule = yaml.load(text, Loader=yaml.BaseLoader)
-        script = schedule["jobs"]["plan"]["steps"][1]["run"]
-        lines = script.splitlines()
-        start = next(index for index, line in enumerate(lines)
-                     if "if git ls-remote --exit-code" in line and "refs/heads/$branch" in line)
-        end = next(index for index in range(start, len(lines)) if lines[index].strip() == "fi")
-        fragment = "\n".join(lines[start:end + 1])
+        lines = schedule["jobs"]["plan"]["steps"][1]["run"].splitlines()
+        first = next(index for index, line in enumerate(lines) if "version_command=(python3" in line)
+        end = next(index for index in range(first, len(lines)) if lines[index].strip() == 'version="$("${version_command[@]}")"')
+        fragment = "\n".join(lines[first:end + 1])
         prefix = ["scripts/operations/release_pr.py", "--repository", "nwverse/persona", "--channel", "beta",
-                  "next-version", "--stable-tag", "v0.9.1", "--reserved"]
-        reserved_refs = ("a" * 40 + "\trefs/heads/release/0.9.1-beta.9\n"
-                         + "b" * 40 + "\trefs/heads/release/0.9.1-beta.10\n")
-        for name, refs, expected in (("multiple", reserved_refs, ["0.9.1-beta.9", "0.9.1-beta.10"]),
-                                     ("unterminated", reserved_refs.removesuffix("\n"), ["0.9.1-beta.9", "0.9.1-beta.10"]),
+                  "schedule-version", "--stable-tag", "v0.9.1", "--commit", "c" * 40, "--previous-commit",
+                  "d" * 40, "--subjects", "release-subjects.txt", "--reserved"]
+        for name, refs, expected in (("multiple", "0.9.1-beta.9\n0.9.1-beta.10\n", ["0.9.1-beta.9", "0.9.1-beta.10"]),
+                                     ("unterminated", "0.9.1-beta.9\n0.9.1-beta.10", ["0.9.1-beta.9", "0.9.1-beta.10"]),
                                      ("empty", "", [])):
             with self.subTest(case=name), tempfile.TemporaryDirectory() as directory:
                 fixture = Path(directory)
-                fake_bin = fixture / "bin"
-                fake_bin.mkdir()
-                git = fake_bin / "git"
-                git.write_text("#!/bin/sh\n"
-                               "if [ \"$1\" = ls-remote ] && [ \"$2\" = --heads ]; then\n"
-                               "  printf '%s' \"$RESERVED_REFS\"\n"
-                               "fi\n")
-                git.chmod(0o755)
-                python = fake_bin / "python3"
-                python.write_text("#!/bin/sh\n"
-                                  "printf '%s\\n' \"$@\" > \"$PYTHON_ARGV_LOG\"\n"
-                                  "printf '0.9.1-beta.11\\n'\n")
+                (fixture / "release-reserved.txt").write_text(refs)
+                (fixture / "release-subjects.txt").write_text("fix: example\n")
+                python = fixture / "python3"
+                python.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$PYTHON_ARGV_LOG\"\nprintf '0.9.1-beta.11\\n'\n")
                 python.chmod(0o755)
                 argv_log = fixture / "python-argv.txt"
-                env = {"PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-                       "RESERVED_REFS": refs, "PYTHON_ARGV_LOG": str(argv_log),
-                       "REPOSITORY": "nwverse/persona", "stable": "v0.9.1", "branch": "release/0.9.1-beta.2"}
-                case_fragment = fragment
-                if name == "unterminated":
-                    case_fragment = "\n".join(line for line in fragment.splitlines()
-                                              if "git ls-remote --heads" not in line)
-                    (fixture / "release-reserved.txt").write_text("0.9.1-beta.9\n0.9.1-beta.10")
-                result = subprocess.run(["bash", "-c", "set -euo pipefail\n" + case_fragment], cwd=fixture, env=env,
+                env = {"PATH": str(fixture) + os.pathsep + os.environ["PATH"], "PYTHON_ARGV_LOG": str(argv_log),
+                       "REPOSITORY": "nwverse/persona", "CHANNEL": "beta", "stable": "v0.9.1",
+                       "commit": "c" * 40, "previous": "d" * 40}
+                result = subprocess.run(["bash", "-c", "set -euo pipefail\n" + fragment], cwd=fixture, env=env,
                                         capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(argv_log.read_text().splitlines(), prefix + expected)

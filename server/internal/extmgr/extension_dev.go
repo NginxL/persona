@@ -126,7 +126,7 @@ func (h *Manager) extensionDevRoutes(api *http.ServeMux) {
 			writeErrCode(w, http.StatusBadRequest, "invalid_plugin", err)
 			return
 		}
-		writeJSON(w, ps().detail(r.Context(), p))
+		writeJSON(w, detailOut(r, ps().detail(r.Context(), p)))
 	}))
 	api.HandleFunc("POST /api/v1/extensions/{id}/-/dev/restart", owner(func(w http.ResponseWriter, r *http.Request) {
 		if err := ps().reg.RestartDev(r.PathValue("id")); err != nil {

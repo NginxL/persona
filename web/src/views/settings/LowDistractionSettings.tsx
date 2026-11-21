@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, errorText, isAbort, onCredentialChange } from "../../lib/api";
 import { lnModeEnabled } from "../../lib/push-intercepts";
+import { setPushGrading } from "../../lib/store";
 import { Spinner, toast } from "../../ui/atoms";
 import { Group, Row, RowFailed, Switch } from "./SettingsParts";
 
@@ -34,7 +35,12 @@ export function LowDistractionSettings() {
     setBusy(false);
     setState("loading");
     api<unknown>("/push/ln-mode", { signal: controller.signal }).then(
-      (r) => { if (id === latest.current) setState({ on: lnModeEnabled(r) }); },
+      (r) => {
+        if (id !== latest.current) return;
+        const on = lnModeEnabled(r);
+        setState({ on });
+        setPushGrading(on);
+      },
       (e) => {
         if (id !== latest.current || isAbort(e)) return;
         setState(missingRoute(e) ? "unsupported" : { error: errorText(e) });
@@ -57,12 +63,18 @@ export function LowDistractionSettings() {
     abort.current?.abort();
     setBusy(true);
     setState({ on });
+    setPushGrading(on);
     try {
       const r = await api<unknown>("/push/ln-mode", { method: "PUT", json: { enabled: on } });
-      if (id === latest.current) setState({ on: lnModeEnabled(r) });
+      if (id === latest.current) {
+        const next = lnModeEnabled(r);
+        setState({ on: next });
+        setPushGrading(next);
+      }
     } catch (e) {
       if (id !== latest.current) return;
       setState({ on: !on });
+      setPushGrading(!on);
       if (!isAbort(e)) toast(t("settings-notifications.save_failed", { error: errorText(e) }), "error");
     } finally {
       if (id === latest.current) setBusy(false);

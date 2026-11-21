@@ -69,9 +69,11 @@
     <string name="chat_chrome_notice_dismiss">閉じる</string>
     <string name="chat_chrome_rename_text">タブ名はherdrに同期されます。セッション名はClaudeの/renameを使うので、Macのclaude --resumeでも表示されます。</string>
     <string name="chat_chrome_rename_text_tern">タブ名はTernに同期されます。セッション名はClaudeの/renameを使うので、Macのclaude --resumeでも表示されます。</string>
+    <string name="chat_chrome_rename_text_rex">タブ名はRexに同期されます。セッション名はClaudeの/renameを使うので、Macのclaude --resumeでも表示されます。</string>
     <string name="chat_chrome_save">保存</string>
     <string name="chat_chrome_tab_name">タブ名（herdr tab）</string>
     <string name="chat_chrome_tab_name_tern">タブ名（Tern tab）</string>
+    <string name="chat_chrome_tab_name_rex">タブ名（Rex tab）</string>
     <string name="chat_chrome_session_name">セッション名</string>
     <string name="chat_chrome_delete">削除</string>
     <string name="chat_chrome_peers_title">同じスペースのエージェント</string>
@@ -145,6 +147,7 @@
     <string name="chat_request_collapse_full">折りたたむ</string>
     <string name="chat_request_allow">許可</string>
     <string name="chat_request_deny">拒否</string>
+    <string name="chat_request_owner_reply">「%1$s」と1回だけ返信</string>
     <string name="chat_request_always_allows">常に許可すると次を通します：%1$s</string>
     <string name="chat_request_fill_in_allow">入力して許可</string>
     <string name="chat_request_secret_run_commands">順に実行するコマンド</string>
@@ -152,6 +155,12 @@
     <string name="chat_request_secret_run_note">1回だけ使い、保存しません。アシスタントにも見えません。</string>
     <string name="chat_request_secret_run_run">実行</string>
     <string name="chat_request_secret_run_decline">拒否</string>
+    <string name="chat_secret_handoff_always">常に許可</string>
+    <string name="chat_secret_handoff_lead">%2$s の「%1$s」が今回の実行だけ受け取ります：</string>
+    <string name="chat_secret_handoff_lead_unnamed">%1$s の Agent が今回の実行だけ受け取ります：</string>
+    <string name="chat_secret_handoff_lead_bare">Agent が今回の実行だけ受け取ります：</string>
+    <string name="chat_secret_handoff_note">Persona とアシスタントは値を見ません。</string>
+    <string name="chat_secret_handoff_always_scope">常に許可：%1$s。</string>
     <string name="chat_plan_approve_edits">編集を承認</string>
     <string name="chat_plan_reject">差し戻し</string>
     <string name="chat_plan_approve_all">承認して自動実行</string>
@@ -227,6 +236,7 @@
     <string name="chat_link_unsupported_text">このリンクはPersonaで開けません。</string>
     <string name="chat_link_ok">OK</string>
     <string name="chat_link_open">開く</string>
+    <string name="chat_link_open_in_app">Persona で開く</string>
     <string name="chat_link_no_app">このリンクを開けるアプリがありません</string>
     <string name="chat_links_mail_title">メールを作成しますか？</string>
     <string name="chat_links_mail_text">メールアプリを開いてメールを作成します。</string>

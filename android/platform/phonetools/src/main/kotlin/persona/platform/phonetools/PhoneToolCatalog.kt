@@ -15,6 +15,7 @@ enum class PhoneSource(@StringRes val title: Int, @StringRes val detail: Int, in
     Clipboard(R.string.phonetools_source_clipboard, R.string.phonetools_source_clipboard_detail, "clipboard", "剪贴板"),  // i18n-ignore: named so in tool results for the model
     Device(R.string.phonetools_source_device, R.string.phonetools_source_device_detail, "device", "设备信息"),  // i18n-ignore: named so in tool results for the model
     Notifications(R.string.phonetools_source_notifications, R.string.phonetools_source_notifications_detail, "notifications", "通知"),  // i18n-ignore: named so in tool results for the model
+    Calls(R.string.phonetools_source_calls, R.string.phonetools_source_calls_detail, "calls", "电话"),  // i18n-ignore: named so in tool results for the model
 }
 
 /** A confirmation's text, written out with the resources of the language the phone shows. */
@@ -40,7 +41,7 @@ internal data class ToolDefinition(
 internal object PhoneToolCatalog {
     val confirmedWriteNames = setOf(
         "phone_calendar_create_event", "phone_calendar_update_event", "phone_calendar_delete_event",
-        "phone_contacts_create", "phone_contacts_update",
+        "phone_contacts_create", "phone_contacts_update", "phone_call_start",
     )
     private fun string(description: String, values: List<String> = emptyList()) = buildJsonObject {
         put("type", "string"); put("description", description)
@@ -228,6 +229,17 @@ internal object PhoneToolCatalog {
             "Replace the phone's clipboard with the given text, for example a link or a draft the user asked for. " +
                 "Overwrites whatever was there.",
             PhoneSource.Clipboard, mapOf("text" to string("Text to place on the clipboard.")), listOf("text"), foreground = true),
+        tool("phone_call_start",
+            "Start a phone call, a FaceTime video call or a FaceTime audio call on the iPhone. Pass one number (or, for " +
+                "FaceTime, an email address) that the user chose: when a contact has several numbers, ask which first and " +
+                "never pick one yourself. The user approves on the phone, then iOS asks again before dialling. The result " +
+                "only says the call was handed to iOS; it cannot tell whether it connected. Persona must be open on the " +
+                "iPhone. There is no access to call history.",
+            PhoneSource.Calls, mapOf(
+                "number" to string("Phone number to call (digits, +, spaces and dashes allowed); for FaceTime also an email address."),
+                "kind" to string("phone (default), facetime or facetime_audio.", listOf("phone", "facetime", "facetime_audio")),
+                "name" to string("Who is being called, shown on the approval card."),
+            ), listOf("number"), foreground = true, confirmation = { args -> CallTool.confirmation(args) }),
         tool("phone_notify",
             "Post a notification on the phone. Use it to tell the user about something that happened while they were not " +
                 "looking (a long task finished, a build failed). delay_seconds schedules it a few seconds or minutes later; " +

@@ -5,6 +5,7 @@
 // state belongs to the module.
 import { act, Suspense } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import type { Segment } from "../../lib/turns";
@@ -81,6 +82,12 @@ afterEach(() => {
 });
 
 describe("CloseoutCard and its evidence chunk", () => {
+  it("does not statically import the loader that imports the card", () => {
+    // Vite may recover a cycle by evaluating the card before its imports finish. The shared evidence loader is a
+    // separate module so its store preload cannot expose this partially initialized component (#10408).
+    const source = readFileSync("src/views/chat/CloseoutCard.tsx", "utf8");
+    expect(source).not.toMatch(/^import[^;]*from\s+["']\.\/closeout-chunks["']/m);
+  });
 
   it("loads the report reader with the card and keeps surrounding replies visible", async () => {
     let calls = 0;

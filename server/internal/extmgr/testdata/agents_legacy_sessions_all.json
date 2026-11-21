@@ -1,0 +1,1 @@
+{"sessions":[{"id":"demo:b","source":"demo","sessionKey":"b","accountId":"account-b","provider":"provider-b","title":"Beta","kind":"main","canSend":true,"unreadCount":0,"rankTimeMs":20},{"id":"demo:a","source":"demo","sessionKey":"a","accountId":"account-a","provider":"provider-a","title":"Alpha","kind":"main","canSend":false,"unreadCount":2,"rankTimeMs":10}]}

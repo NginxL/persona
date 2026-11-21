@@ -22,14 +22,17 @@ import (
 // lists never call a program, every call is bounded, and every answer is re-checked before it is returned. An
 // address is sent only to the provider that claims its host, and never with credentials in it.
 
-// repoCallTimeout bounds one repo.parse, repo.check, repo.link or repo.describe.
+// repoCallTimeout bounds one repo.parse, repo.check, repo.link, repo.describe or repo.pr_status.
 var repoCallTimeout = 5 * time.Second
 
 // repoWordsMost is the most characters of a provider's words kept, the "…" of a longer one left out: an error's
 // why stays within 200.
 const repoWordsMost = 199
 
-var _ repository.Extensions = (*Manager)(nil)
+var (
+	_ repository.Extensions   = (*Manager)(nil)
+	_ repository.ReviewReader = (*Manager)(nil)
+)
 
 // startedNow says whether Run has started everything, without waiting for it.
 func (h *Manager) startedNow() bool {
@@ -168,6 +171,33 @@ func (h *Manager) RepositoryDescribe(ctx context.Context, provider, canonicalURL
 	return repository.CheckDescribeAnswer(res.Title, res.State), nil
 }
 
+// RepositoryPRStatus is a stored pull request's state, as provider says (repo.pr_status, for a provider whose
+// contribution declares pr_status: failed otherwise, without asking). The answer is re-checked
+// (repository.CheckPRStatusAnswer).
+func (h *Manager) RepositoryPRStatus(ctx context.Context, provider, canonicalURL string) (repository.ReviewStatus, error) {
+	info, cid, hp, err := h.repositoryTarget(ctx, provider)
+	if err != nil {
+		return repository.ReviewStatus{}, err
+	}
+	if !slices.Contains(info.Capabilities, wire.RepositoryCapabilityPrStatus) {
+		return repository.ReviewStatus{}, &repository.ProviderError{Code: "failed", Provider: info.Name, Why: "it does not read pull request states"}
+	}
+	if !linkOnHosts(info, canonicalURL) {
+		return repository.ReviewStatus{}, &repository.ProviderError{Code: "failed", Provider: info.Name, Why: "the link is not on its hosts"}
+	}
+	var res wire.RepoPRStatusResult
+	if err := repositoryCall(ctx, info, hp, "repo.pr_status", wire.RepoPRStatusParams{Contribution: cid, CanonicalURL: canonicalURL}, &res); err != nil {
+		return repository.ReviewStatus{}, err
+	}
+	status, err := repository.CheckPRStatusAnswer(repository.PRStatusAnswer{State: res.State, MergeCommit: res.MergeCommit,
+		HeadSHA: res.HeadSha, HeadRef: res.HeadRef, BaseRef: res.BaseRef, Author: res.Author, ViewerIsAuthor: res.ViewerIsAuthor})
+	if err != nil {
+		hostName, _ := repository.RemoteHost(canonicalURL)
+		return repository.ReviewStatus{}, h.extensions.refusedAnswer(info, hp, "repo.pr_status", hostName, err)
+	}
+	return status, nil
+}
+
 // repositoryProvider is p as the assistant lists it, and its program when it is switched on (extension, no problem,
 // contribution) and has one: a call goes to that program, which answers provider_off itself when it does not run
 // (host.ErrNotRunning). It is listed available only when its program takes a call now (programAnswers), off otherwise.
@@ -177,6 +207,7 @@ func (ps *extensions) repositoryProvider(p extension.RepositoryProvider) (reposi
 	for _, k := range p.LinkKinds {
 		info.LinkKinds = append(info.LinkKinds, repository.LinkLabel{Kind: k.Kind, Label: k.Label})
 	}
+	info.Capabilities = slices.Clone(p.Capabilities)
 	if !p.On {
 		return info, nil
 	}

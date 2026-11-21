@@ -26,6 +26,12 @@ interface ChatTransport {
         resolve(id, resolution)
         return ResolveOutcome()
     }
+    /** The transport adds the hand-off feature header only for this explicit full-card approval. */
+    suspend fun resolveOutcome(id: String, resolution: Resolution, handoffCard: Boolean): ResolveOutcome =
+        resolveOutcome(id, resolution)
+    /** An authenticated exact reply to a server-owned proposal; never an ordinary model message or card resolution. */
+    suspend fun replyOwnerApproval(interaction: Interaction, phrase: String): Unit =
+        throw UnsupportedOperationException("Exact owner replies unavailable")
     suspend fun image(session: SessionKey, itemId: String): ByteArray
     suspend fun fullItem(session: SessionKey, itemId: String): Item
     /**

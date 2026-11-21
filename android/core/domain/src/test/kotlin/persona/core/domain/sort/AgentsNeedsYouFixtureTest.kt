@@ -1,15 +1,21 @@
 package persona.core.domain.sort
 
+import java.io.File
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
@@ -22,7 +28,8 @@ import persona.core.domain.FixtureReader
  * The Agents tab's Needs you, one row per waiting session, and its badge (#3580) against spec/fixtures/needs-you, which
  * iOS reads too: the rows, the rows the badge counts (`badge_rows`, as ShellCounts.agentRows reads them) and the number.
  * A case marked as Android's known difference (`known_differences.android`) is asserted at today's value; a mark on any
- * client must name a decision and change what that client is asserted at.
+ * client must name a decision and change what that client is asserted at. With the counts report switch on
+ * (spec/fixtures/counts/README.md, "Lane reports"), each case's rows and badge also go to the Android lane's report.
  */
 @RunWith(Parameterized::class)
 class AgentsNeedsYouFixtureTest(private val name: String, private val fixture: FixtureReader.Case) {
@@ -37,9 +44,35 @@ class AgentsNeedsYouFixtureTest(private val name: String, private val fixture: F
             AgentPreferences(spaces = it.strings("spaces"), sessions = it.strings("sessions"), allowed = it.strings("allowed").toSet())
         }
         val rows = needsYouRows(needsYouCards(input.list<Interaction>("interactions"), byKey), needsYouWaiting(sessions))
+        val badgeRows = needsYouBadgeRows(rows, byKey, mutes)
+        val badge = needsYouBadge(rows, byKey, mutes)
+        // Reported before the assertions, so a case that fails is in the report with what Android counted.
+        report("agents_tab", badge, badgeRows)
+        report("agents_section", rows.size, rows)
         assertEquals(name, want.getValue("rows").rows(), rows.ids())
-        assertEquals("$name: badge rows", want.getValue("badge_rows").rows(), needsYouBadgeRows(rows, byKey, mutes).ids())
-        assertEquals("$name: badge", want.getValue("badge").jsonPrimitive.int, needsYouBadge(rows, byKey, mutes))
+        assertEquals("$name: badge rows", want.getValue("badge_rows").rows(), badgeRows.ids())
+        assertEquals("$name: badge", want.getValue("badge").jsonPrimitive.int, badge)
+    }
+
+    /** One line of the Android lane's report, when the switch is on: what [surface] shows for this case, and its rows. */
+    private fun report(surface: String, value: Int, rows: List<NeedsYouRow>) {
+        val file = reportFile() ?: return
+        val line = buildJsonObject {
+            put("lane", "android")
+            put("fixture", "needs-you")
+            put("case", name)
+            put("surface", surface)
+            put("value", value)
+            put("keys", buildJsonArray {
+                rows.forEach { row ->
+                    add(buildJsonObject {
+                        put("id", row.id)
+                        put("cards", buildJsonArray { row.cards.forEach { add(it.id) } })
+                    })
+                }
+            })
+        }
+        file.appendText("$line\n")
     }
 
     /** What Android is asserted at: the case's `expected`, with Android's known difference applied. */
@@ -75,6 +108,20 @@ class AgentsNeedsYouFixtureTest(private val name: String, private val fixture: F
     companion object {
         /** The clients that replay the fixture, the only names a known difference may carry (the fixture's README). */
         private val LANES = setOf("android", "ios")
+
+        /**
+         * The Android lane's report, `<directory>/android.jsonl`, when the counts report switch is on: the build passes
+         * the directory as `persona.counts.report` while `PERSONA_COUNTS_REPORT` is set (core/domain's build script).
+         */
+        private fun reportFile(): File? = System.getProperty("persona.counts.report")?.takeIf { it.isNotBlank() }
+            ?.let { File(it, "android.jsonl") }
+
+        /** Each run's report starts empty: a run writes every case once. */
+        @JvmStatic @BeforeClass fun startReport() {
+            val file = reportFile() ?: return
+            file.parentFile.mkdirs()
+            file.writeText("")
+        }
 
         @JvmStatic @Parameterized.Parameters(name = "{0}")
         fun cases(): List<Array<Any>> = FixtureReader.read("needs-you").map {

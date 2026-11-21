@@ -26,7 +26,13 @@ type dispatchPolicyHarness struct {
 
 func newDispatchPolicyHarness(t *testing.T) *dispatchPolicyHarness {
 	t.Helper()
-	h := newSpawnHarness(t)
+	return newDispatchPolicyHarnessOn(t, &memStore{})
+}
+
+// newDispatchPolicyHarnessOn is newDispatchPolicyHarness with st as its database.
+func newDispatchPolicyHarnessOn(t *testing.T, st Store) *dispatchPolicyHarness {
+	t.Helper()
+	h := newSpawnHarnessOn(t, st)
 	h.f.hello.Locale = string(i18n.En) // assertions below match the English refusal catalog
 	d := &dispatchPolicyHarness{
 		spawnHarness: h,

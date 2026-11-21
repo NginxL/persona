@@ -24,6 +24,8 @@ data class MessageRequest(
     val model: String? = null,
     /** The user's message that carries out the session's waiting launcher switch first (`apply_switch`, #5035). */
     val applySwitch: Boolean = false,
+    /** External provenance ([MessageVia]); null for the user's typed words. Restored and retried per message. */
+    val via: String? = null,
 ) {
     val headers: Map<String, String> get() = ProtocolCompatibility.operationHeaders(opId) + ("X-Persona-Features" to AgentMessageHoldFeature)
 }

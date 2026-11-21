@@ -22,8 +22,9 @@ import (
 //     is found to have gone in (AnswerAt);
 //   - not_delivered: it will not be tried again (Code: the refusal's code, or handoverGone).
 //
-// The entries are a lazy settings record shaped like the verified quotes, kept as long and as many. Nothing reads them
-// yet but the log.
+// The entries are a lazy settings record shaped like the verified quotes, kept as long and as many. Besides the log,
+// only the start rule of a lead a hand-over was sent into reads them (relay_lead_hold.go: one past its 14 days marks no
+// lead).
 const (
 	handoversKey   = "assistant.handovers" // settings key of the hand-overs
 	handoverMemory = quoteMemory           // an entry is kept this long …

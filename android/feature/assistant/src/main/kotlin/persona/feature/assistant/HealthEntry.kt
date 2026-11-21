@@ -32,4 +32,10 @@ internal object HealthEntry {
      */
     fun newChat(from: SessionKey?, health: Boolean): NewChatStart =
         NewChatStart(from, space = AssistantSpace.HEALTH.takeIf { health })
+
+    /** Start a blank health or assistant chat, keeping the page it was opened from. */
+    fun start(from: SessionKey?, health: Boolean, clear: () -> Unit, show: (NewChatStart) -> Unit) {
+        clear()
+        show(newChat(from, health))
+    }
 }

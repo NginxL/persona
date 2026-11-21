@@ -30,11 +30,14 @@ var HubOwn = []string{"cmd/persona-hub", "internal/hub", "internal/hubcli", "int
 // it owns no store, route, process, model call or transcript reader. tokenuse is the parsers of token usage that
 // transcript uses: pure functions of a record's lines. sessionhistory is the window, order, cursor and merge of
 // sessions.history pages (docs/protocol/protocol.md "Session history"): pure functions over wire rows, no store or route.
+// conversationlog bounds normalized item DTOs and merges source-position ranges;
+// it owns no store, route, process or model call. The shared database uses these types. The hub's backup quiesce and
+// path validation use the same shared backup infrastructure as the manager; it pulls in no manager business package.
 var Shared = []string{"internal/acceptloop", "internal/aiwire", "internal/apierr", "internal/approval", "internal/assistantwire",
-	"internal/bus", "internal/channel", "internal/clitext", "internal/compat", "internal/connectorwire", "internal/db",
+	"internal/bus", "internal/channel", "internal/clitext", "internal/compat", "internal/connectorwire", "internal/conversationlog", "internal/db",
 	"internal/devicewire", "internal/dialogwire", "internal/errreport", "internal/extwire", "internal/i18n",
 	"internal/identity", "internal/kbwire", "internal/lazyre", "internal/link", "internal/managerconf", "internal/memtrim", "internal/netaddr",
-	"internal/netproxy", "internal/nodeproto", "internal/osproc", "internal/pgdocker", "internal/preview", "internal/procinfo", "internal/procs", "internal/prompts",
+	"internal/netproxy", "internal/nodeproto", "internal/operations/backup", "internal/osproc", "internal/pgdocker", "internal/preview", "internal/procinfo", "internal/procs", "internal/prompts",
 	"internal/proto", "internal/rpc", "internal/screen", "internal/secretkey", "internal/sessionhistory", "internal/sessionlist", "internal/sessionorigin", "internal/sessionsearch", "internal/streams",
 	"internal/textfmt", "internal/tokenuse", "internal/transcript", "internal/update", "internal/workspaceboard"}
 

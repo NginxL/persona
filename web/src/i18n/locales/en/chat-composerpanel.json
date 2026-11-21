@@ -18,5 +18,10 @@
   "files": "Files and folders",
   "sessions": "Sessions",
   "workspaces": "Workspaces",
+  "repositories": "Repositories",
+  "repo_context_title": "Repository: {title}",
+  "repo_context_path": "Path: {path}",
+  "repo_context_url": "URL: {url}",
+  "repo_context_purpose": "Purpose: {purpose}",
   "search_skills": "Search skills, files and sessions"
 }

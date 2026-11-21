@@ -8,7 +8,7 @@ import { t } from "../../i18n";
 // What a message carries besides what the user wrote (picked page excerpts, everything a Feishu /agent request hands
 // its agent): one folded row under the bubble; open, a list of titles; each title opens to its text.
 
-export const CONTEXT_ICONS: Record<string, IconName> = { instructions: "info", doc: "book", edit: "pencil", skill: "spark" };
+export const CONTEXT_ICONS: Record<string, IconName> = { instructions: "info", doc: "book", edit: "pencil", skill: "spark", repository: "git" };
 const ContextDetails = lazyPage(() => import("./ContextDetails").then((m) => m.ContextDetails));
 
 export function contextLabel(c: Context): string {

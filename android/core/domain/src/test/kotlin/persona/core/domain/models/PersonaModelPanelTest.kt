@@ -75,6 +75,18 @@ class PersonaModelPanelTest {
         assertEquals(PersonaModelPanel.Setup("claude", null, "high", PersonaModelPanel.Source.Own), PersonaModelPanel.setup(of(gone), info))
     }
 
+    @Test fun mainDefaultEffortAndModelApplyWithoutChangingOtherChatsOrPicks() {
+        val own = info.copy(default = LauncherDefault("claude", "main-model", "low"))
+        val main = PersonaModelPanel.setup(of(chat, main = true), own)
+        assertEquals("main-model", main.model)
+        assertEquals("low", main.effort)
+        assertEquals("high", PersonaModelPanel.setup(of(chat), own).effort)
+        assertEquals("opus", PersonaModelPanel.setup(of(null), info).model)
+        val picked = chat.copy(modelPick = ModelPick("team", "picked", "medium"))
+        assertEquals(PersonaModelPanel.Setup("team", "picked", "medium", PersonaModelPanel.Source.Pick),
+            PersonaModelPanel.setup(of(picked, main = true), own))
+    }
+
     @Test fun theProvidersEndWithWhatCantRunThere() {
         val setup = PersonaModelPanel.setup(of(chat), info)
         val panel = PersonaModelPanel.panel(setup, info, ::read, typed = true, running = true)
@@ -99,6 +111,29 @@ class PersonaModelPanelTest {
         val first = PersonaModelPanel.panel(setup, info, ::read, typed = false).providers.first()
         assertEquals("old", first.id)
         assertEquals(PanelReason.ProviderGone, first.unavailable)
+    }
+
+    @Test fun anUnavailableDefaultKeepsItsNameAndReasonFromTheHub() {
+        for (id in listOf("team", "claude")) {
+            val unavailableOnly = AssistantLaunchers(
+                default = LauncherDefault(id, "sonnet", "high"),
+                unavailable = listOf(UnavailableLauncher(id, displayName = "Team API", kind = "api",
+                    code = "api_protocol", reason = "Speaks Responses")),
+            )
+            val setup = PersonaModelPanel.setup(of(chat, main = true), unavailableOnly)
+            val panel = PersonaModelPanel.panel(setup, unavailableOnly, ::read, typed = true, running = true)
+            val provider = panel.providers.single()
+            assertEquals(id, provider.id)
+            assertEquals("Team API", provider.name)
+            assertEquals(PanelReason.Hub("Speaks Responses"), provider.unavailable)
+            assertEquals(PanelConfig(id, "sonnet", "high"), panel.state.current)
+            assertTrue(panel.state.recommended.isEmpty())
+
+            val section = ModelPanel.sections(panel.providers, panel.state, PanelView.All, "", PanelPrefs()).single()
+            assertEquals(provider, section.provider)
+            assertFalse(section.loading)
+            assertTrue(section.rows.isEmpty())
+        }
     }
 
     @Test fun whatAPickKeeps() {

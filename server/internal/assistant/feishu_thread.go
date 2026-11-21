@@ -36,8 +36,12 @@ func (t *feishuTopic) target() feishuTarget {
 	return feishuTarget{ChatID: t.Chat, InThread: true}
 }
 
-// runTo is where a run's messages go, from its channel values (Ext): the topic it was asked in, else the private chat.
+// runTo is where a run's messages go, from its channel values (Ext): under the owner's "/read" in its group
+// (feishu_read.go), the topic it was asked in, else the private chat.
 func runTo(ext map[string]string) feishuTarget {
+	if readRun(ext) {
+		return feishuTarget{ChatID: ext[readChatKey], InThread: ext[readThreadKey] != "", NoDetour: true, Read: true}
+	}
 	if ext["chat"] == "" || ext["thread"] == "" {
 		return feishuTarget{}
 	}

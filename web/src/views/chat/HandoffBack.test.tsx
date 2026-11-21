@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-// The way back from an Agent's page to the conversation that handed it work (#5096, cindy's HandoffSourcePill).
+// The way back from an Agent's page to the conversation that handed it work (#5096, cindy's HandoffSourcePill), or to
+// the page it was opened from inside (#12055).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +33,30 @@ describe("the way back", () => {
     expect(fromTitle(s, "/persona")).toBe("Persona");
     expect(fromTitle(s, "/persona/main-1")).toBe("Persona");
     expect(fromTitle(s, "/persona/c2?machine=m1")).toBe("Trip to Kyoto");
+  });
+
+  it("names a page an Agent was opened from inside: a to-do or an Agent by its title, else the page's name (#12055)", () => {
+    const todo = { id: "t1", title: "Tidy the release checklist", created_at: "", updated_at: "" };
+    const s = { assistant: getState().assistant, todos: [todo, { ...todo, id: "blank", title: "  " }], sessions: { m1: [conv("a1", "Fix the login page")] } };
+    expect(fromTitle(s, "/todos?id=t1")).toBe("Tidy the release checklist");
+    expect(fromTitle(s, "/todos?view=calendar&id=t1")).toBe("Tidy the release checklist");
+    expect(fromTitle(s, "/todos?id=blank")).toBe(t("sidebar.nav_todos"));
+    expect(fromTitle(s, "/todos?id=gone")).toBe(t("sidebar.nav_todos"));
+    expect(fromTitle(s, "/s/m1/a1")).toBe("Fix the login page");
+    expect(fromTitle(s, "/kb/projects/p1")).toBe(t("sidebar.nav_kb"));
+    expect(fromTitle(s, "/kb/recordings/r1")).toBe(t("sidebar.nav_kb"));
+    expect(fromTitle(s, "/workspace-board")).toBe(t("sidebar.nav_board"));
+    expect(fromTitle(s, "/machines/m1")).toBe(t("sidebar.nav_machines"));
+    // nothing to call it: the strip says where Back goes instead
+    expect(fromTitle(s, "/s/m1/gone")).toBeUndefined();
+    expect(fromTitle(s, "/compare/r1")).toBeUndefined();
+  });
+
+  it("says Back to the previous page for a page it has no name for", () => {
+    act(() => root.render(<HandoffBack from={{ path: "/compare/r1" }} onDismiss={() => {}} />));
+    expect(host.querySelector("button")!.textContent).toBe(t("chat-backstrip.handoff_previous"));
+    act(() => root.render(<HandoffBack from={{ path: "/kb/projects/p1" }} onDismiss={() => {}} />));
+    expect(host.querySelector("button")!.textContent).toBe(t("chat-backstrip.handoff_from", { title: t("sidebar.nav_kb") }));
   });
 
   it("goes back in the history, and is put away by its ✕", () => {

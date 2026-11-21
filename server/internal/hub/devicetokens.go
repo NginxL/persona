@@ -490,8 +490,10 @@ func (h *Hub) tokenRoutes(api *http.ServeMux) {
 				return
 			}
 		}
-		// push: per token, the way pushes reach the device it registered (Settings › Devices, #5998)
-		writeJSON(w, map[string]any{"tokens": list, "current": principalOf(r.Context()).ID, "push": h.push.routesByCredential()})
+		// push: per token, the way pushes reach the device it registered (Settings › Devices, #5998); phone: the primary
+		// device for phone calls and the devices that can be it (phone_primary.go)
+		writeJSON(w, map[string]any{"tokens": list, "current": principalOf(r.Context()).ID, "push": h.push.routesByCredential(),
+			"phone": h.phonePrimaryView(list)})
 	})
 	api.HandleFunc("DELETE /api/v1/auth/tokens/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if h.store == nil {
@@ -569,6 +571,7 @@ func (h *Hub) revoked(id string) {
 		}
 	}
 	h.mu.Unlock()
+	h.wakePhoneWrites() // writes queued for a primary device that was this one may go to another now (phone_primary.go)
 	for _, c := range gone {
 		c.conn.CloseNow()
 	}

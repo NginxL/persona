@@ -12,6 +12,12 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
 import org.junit.Assert.*
 import org.junit.After
 import org.junit.Rule
@@ -25,7 +31,9 @@ import persona.core.contracts.Session
 import persona.core.contracts.api.*
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
+import persona.core.hub.HttpAgentCreationService
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * New Agent's Agent presets (#2225), through the real view model and page. Responses are decoded from their wire shape so
@@ -36,6 +44,101 @@ import java.io.File
 @Config(sdk = [35], qualifiers = "en-w400dp-h1600dp-xhdpi")
 class NewAgentTiersTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w400dp-h840dp-xhdpi")
+    fun ompPresetAndTypedModelUseTheOrdinaryNewAgentPageWithoutACatalogue() = checkOmpPicker(largeText = false)
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w400dp-h840dp-xhdpi", fontScale = 2f)
+    fun ompTypedModelIsAvailableAtTheLargestFontSize() = checkOmpPicker(largeText = true)
+
+    private fun checkOmpPicker(largeText: Boolean) {
+        assertEquals(if (largeText) 2f else 1f, rule.activity.resources.configuration.fontScale, 0.001f)
+        val answer = """{
+            "launchers":[{"name":"claude","agent":"claude"},{"name":"omp","agent":"omp","source":"zshrc"}],
+            "tiers":[{"name":"Review setup","launcher":"omp","model":"studio/review","effort":"high"}]
+        }"""
+        val service = Service(answer, mapOf("omp" to JsonCodec.decodeFromString<LauncherModels>(
+            """{"agent":"omp","models":[],"supports_start_model":true}""")))
+        val model = show(service)
+        try {
+            pick(model, "Review setup", "omp")
+            assertEquals("studio/review", model.state.value.sentModel)
+            assertNull(model.state.value.sentEffort)
+            rule.onNode(hasScrollToNodeAction()).performScrollToKey("model")
+            rule.onNode(hasText("studio/review") and hasClickAction() and !hasText("Review setup")).performClick()
+            val dialogInput = hasSetTextAction() and hasAnyAncestor(isDialog())
+            rule.waitUntil(10_000) { rule.onAllNodes(dialogInput).fetchSemanticsNodes().size == 1 }
+            val search = rule.onNode(dialogInput)
+            search.performTextInput("-option")
+            rule.onNodeWithText("Use “-option”").assertDoesNotExist()
+            search.performTextReplacement("openai/gpt-5.2")
+            val choose = rule.onNodeWithText("Use “openai/gpt-5.2”")
+            rule.onNode(hasScrollToNodeAction() and hasAnyAncestor(isDialog())).performScrollToNode(hasText("Use “openai/gpt-5.2”"))
+            choose.assertIsDisplayed()
+            val out = File(System.getProperty("persona.shots") ?: "build/new-agent-omp-shots").also { it.mkdirs() }
+            for (night in listOf(false, true)) {
+                rule.runOnIdle { dark.value = night }
+                rule.waitForIdle()
+                val size = if (largeText) "-large" else ""
+                val file = out.resolve("omp-model$size-${if (night) "dark" else "light"}.png")
+                val bitmap = rule.onNode(isDialog()).captureToImage().asAndroidBitmap()
+                file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            }
+            choose.performClick()
+            rule.onNodeWithText("openai/gpt-5.2").assertIsDisplayed()
+            assertNull(model.state.value.pickedTier)
+            rule.onNodeWithText("Start chat").performClick()
+            rule.waitUntil(10_000) { service.requests.isNotEmpty() }
+            val request = service.requests.single()
+            assertEquals("omp", request.launcher)
+            assertEquals("omp", request.agentType)
+            assertEquals("openai/gpt-5.2", request.model)
+            assertNull(request.permissionMode)
+            assertNull(request.effort)
+            assertNull(request.ultracode)
+        } finally { model.viewModelScope.cancel() }
+    }
+
+    @Test fun ompExplicitLauncherShowsAndSendsTheComputerDefault() = checkOmpDefault(follow = false)
+    @Test fun ompFollowingModelSettingsShowsTheBoundModelAndLeavesTheLauncherToTheHub() = checkOmpDefault(follow = true)
+
+    private fun checkOmpDefault(follow: Boolean) {
+        val posts = CopyOnWriteArrayList<String>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val path = request.url.encodedPath
+            val body = when (path) {
+                "/api/v1/model-config/purposes/agent.new" ->
+                    """{"purpose":{"id":"agent.new","effective":{"provider":"launcher.omp","model":"studio/bound"}},"providers":[{"id":"launcher.omp","name":"omp"}]}"""
+                "/api/v1/machines/computer/launchers" -> """{"launchers":[{"name":"omp","agent":"omp","source":"path","display_name":"Native omp launcher"}]}"""
+                "/api/v1/machines/computer/launchers/omp/models" -> """{"agent":"omp","models":[],"supports_start_model":true}"""
+                "/api/v1/machines/computer/dirs" -> """{"path":"/example/project"}"""
+                "/api/v1/sessions" -> {
+                    if (request.method == "POST") posts += Buffer().also { request.body!!.writeTo(it) }.readUtf8()
+                    """{"session":{"machine_id":"computer","session_id":"new"}}"""
+                }
+                else -> null
+            }
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(if (body == null) 404 else 200)
+                .message(if (body == null) "Not Found" else "OK").body((body ?: "{}").toResponseBody()).build()
+        }.build()
+        val model = show(HttpAgentCreationService("test/paired", "http://127.0.0.1/", "fixture", client))
+        try {
+            pick(model, "Native omp launcher", "omp")
+            if (follow) pick(model, "Follow model settings", "omp")
+            val detail = if (follow) "Model settings: studio/bound" else "omp’s default on this computer"
+            scrollTo(detail)
+            rule.onNodeWithText(detail).assertIsDisplayed()
+            rule.onNodeWithText("Start chat").performClick()
+            rule.waitUntil(10_000) { posts.isNotEmpty() }
+            val body = JsonCodec.parseToJsonElement(posts.single()).jsonObject
+            assertEquals(if (follow) "" else "omp", body.getValue("launcher").jsonPrimitive.content)
+            assertEquals("omp", body.getValue("agent_type").jsonPrimitive.content)
+            assertTrue(listOf("model", "effort", "permission_mode", "ultracode", "work_session").none(body::containsKey))
+        } finally { model.viewModelScope.cancel() }
+    }
 
     @After fun resetAppearance() {
         style.value = AppStyle.Glass
@@ -103,7 +206,7 @@ class NewAgentTiersTest {
         fastGate: CompletableDeferred<Unit>? = null,
     ) = Service(answer, mapOf("claude" to claudeModels, "fast" to fast), fastGate)
 
-    private fun show(service: Service, store: Store = Store()): NewAgentViewModel {
+    private fun show(service: AgentCreationService, store: Store = Store()): NewAgentViewModel {
         val model = NewAgentViewModel(service, store, MutableStateFlow(computers))
         rule.setContent {
             PersonaTheme(style = style.value, darkTheme = dark.value, reduceMotion = true) {

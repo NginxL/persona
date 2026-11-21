@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -290,6 +291,8 @@ var rpcFailureKeys = map[string]string{
 	"agent_speed_model":                  "rpc-errors.agent_speed_model",
 	"agent_speed_invalid":                "rpc-errors.agent_speed_invalid",
 	"readonly_unsupported":               "rpc-errors.readonly_unsupported",
+	"assistant_supervision_runtime":      "rpc-errors.assistant_supervision_runtime",
+	"assistant_supervision_account":      "rpc-errors.assistant_supervision_account",
 	// a start whose engine runs only its own launchers and has none of the launcher's kind (#8140); the engine's own
 	// words, naming the launcher, stay in detail
 	proto.CodeLauncherKindMissing: "rpc-errors.launcher_kind_missing",
@@ -331,13 +334,17 @@ var rpcFailureKeys = map[string]string{
 	// session.modes (node/modes.go, #1843)
 	proto.CodeModesOnComputer:     "rpc-errors.modes_on_computer",
 	proto.CodeModesNotRunning:     "rpc-errors.modes_not_running",
+	proto.CodeModesUnsupported:    "rpc-errors.modes_unsupported",
 	proto.CodeEffortChangePending: "rpc-errors.effort_change_pending",
 	// a message to a stopped agent: read-only, its terminal page's Resume brings it back (node stopped.go, #4754)
 	"agent_stopped":      "rpc-errors.agent_stopped",
 	"resume_not_allowed": "rpc-errors.resume_not_allowed",
 	"stop_not_saved":     "rpc-errors.stop_not_saved",
+	"omp_options":        "rpc-errors.omp_options",
 	// a message to an omp session the node cannot resume: no usable session file (node/ompresume.go)
 	"omp_resume_unknown": "rpc-errors.omp_resume_unknown",
+	// a resume of a conversation the computer has nothing of (node/control.go resumeKnown, #10941)
+	proto.CodeResumeUnknown: "rpc-errors.resume_unknown",
 	// a call a stopped omp has nothing to answer with: rename, interrupt, modes, queue, close (node/ompcalls.go)
 	"omp_stopped": "rpc-errors.omp_stopped",
 	// a start in a directory whose name can't be typed into a terminal (node/hostorca_launch.go)
@@ -388,6 +395,36 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 	}
 	code, _ := body["code"].(string)
 	key := rpcFailureKeys[code]
+	args := i18n.Args{"reason": original}
+	if code == "assistant_supervision_runtime" {
+		var names []string
+		if values, ok := body["launchers"].([]any); ok {
+			for _, v := range values {
+				if name, ok := v.(string); ok && name != "" {
+					names = append(names, name)
+				}
+			}
+		}
+		label := strings.Join(names, ", ")
+		if label == "" {
+			label = i18n.T(l, "rpc-errors.assistant_supervision_none")
+		}
+		args["launchers"] = label
+	}
+	if code == "codex_no_box" || code == "codex_no_box_here" {
+		var re *rpc.Error
+		var detail struct {
+			Seconds float64 `json:"seconds"`
+		}
+		if errors.As(err, &re) && json.Unmarshal(re.Data, &detail) == nil && detail.Seconds > 0 {
+			args["seconds"] = detail.Seconds
+			if code == "codex_no_box_here" {
+				key = "node-codex-start.no_box_here"
+			} else {
+				key = "node-codex-start.no_box"
+			}
+		}
+	}
 	if code == "open_elsewhere" {
 		where, _ := body["where"].(string)
 		key = openElsewhereKeys[where]
@@ -404,7 +441,7 @@ func localizeFailure(body map[string]any, status int, err error, l i18n.Lang) {
 		return
 	}
 	// a summary that names {reason} carries the original words (git's, for a failed pull or push)
-	body["error"] = i18n.T(l, key, i18n.Args{"reason": original})
+	body["error"] = i18n.T(l, key, args)
 	switch code {
 	case "assistant_launcher_profile_switch", "assistant_service_tier_start_only", "assistant_service_tier_unsupported", "assistant_service_tier_refused":
 		// The native diagnostic is not a person-facing instruction; the stable, translated refusal says what to do.
@@ -521,13 +558,13 @@ func Summary(l i18n.Lang, code string, data map[string]any) string {
 }
 
 // Sentence is the plain words in l of code, one of the refusals the hub words itself ("" for any other): a start refused
-// on its request with nothing to name (readonly_unsupported, directory_untypable) as it is, and codeActions' by their
+// on its request with nothing to name as it is, and codeActions' by their
 // data: machine_name (else "this computer"), launcher, and of a start the new tab's shell could not run (where
 // "terminal", node/shellmiss.go) what it could not run (missing, kind), that shell (pane_shell) and the shell and rc
 // file the launchers are listed in (launcher_shell, rc_file). What a 409 says, and a session's start_error.
 func Sentence(l i18n.Lang, code string, data map[string]any) string {
 	switch code {
-	case "readonly_unsupported", proto.CodeDirectoryUntypable: // the request refused, with nothing to name
+	case "readonly_unsupported", proto.CodeDirectoryUntypable, "omp_options": // refusal needs no request parameters
 		return i18n.T(l, rpcFailureKeys[code])
 	}
 	if code == proto.CodeShellWaiting || code == proto.CodeStartLineRejected { // a start's new tab (node/shellsettle.go, #2570)

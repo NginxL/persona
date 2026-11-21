@@ -25,6 +25,13 @@ type todoRepositoryStore interface {
 
 var _ todoRepositoryStore = (*repositorystore.Store)(nil)
 
+// todoRepositoryRoleStore persists a full repository set whose link roles were rewritten, bumping the revision.
+type todoRepositoryRoleStore interface {
+	SetTodoRepositoryLinkRoles(ctx context.Context, id string, rows []repository.TaskRepository) (repository.TaskSet, error)
+}
+
+var _ todoRepositoryRoleStore = (*repositorystore.Store)(nil)
+
 func decodeTaskRepositoryInput(raw []byte, out any) error {
 	if len(raw) > 256<<10 {
 		return repository.Problem("limit")

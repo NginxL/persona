@@ -4,7 +4,7 @@
 PORT=18925 python3 apple/PersonaUITests/Fixtures/model_profiles_hub.py
 Use PERSONA_PRESETS_HUB=http://127.0.0.1:18925 for AgentPresetUITests.
 GET /mock/presets?mode=normal selects normal, older, locked-model, unsupported-effort,
-blocked-launcher, default-model, start-race, or plan and clears recorded session starts.
+blocked-launcher, default-model, start-race, omp, omp-workspace, or plan and clears recorded session starts.
 In start-race the unlocked slowcc model list waits for GET /mock/presets?release=1.
 """
 import copy
@@ -28,7 +28,10 @@ mode = "normal"
 slow_requests = 0
 release_models = threading.Event()
 release_models.set()
-modes = {"normal", "older", "locked-model", "unsupported-effort", "blocked-launcher", "default-model", "start-race", "plan"}
+modes = {"normal", "older", "locked-model", "unsupported-effort", "blocked-launcher", "default-model", "start-race", "omp", "omp-workspace", "plan"}
+macbook = next(machine for machine in hub.MACHINES if machine["id"] == "macbook")
+engine_keys = ("engine", "engine_hosts", "engine_default")
+original_engines = {key: macbook[key] for key in engine_keys if key in macbook}
 
 # The ordinary mock plan has no tier yet. This test-only copy covers every display precedence without changing it.
 plan = hub.TASK_PLANS["plan_mock_3"]
@@ -75,6 +78,8 @@ def launchers(handler, path, query):
         if mode == "start-race":
             # A second, unlocked Claude launcher: unlike sonnetcc it can take the preset's model and effort.
             out["launchers"].append({"name": "slowcc", "model": "sonnet", "agent": "claude"})
+        if mode in ("omp", "omp-workspace"):
+            out["launchers"].append({"name": "omp", "agent": "omp", "source": "path"})
         if mode != "older":
             out["tiers_profile"] = {"id": "performance", "name": "Performance"}
             out["tiers"] = (special_tiers[mode] if mode in special_tiers else
@@ -101,12 +106,22 @@ def get(self):
         if requested not in modes:
             return self.send_json({"error": "unknown mode"}, 400)
         release_models.set()  # unblock a request left by a failed test before changing fixtures
+        if mode == "omp-workspace":
+            for key in engine_keys:
+                macbook.pop(key, None)
+            macbook.update(original_engines)
         mode = requested
+        if mode == "omp-workspace":
+            macbook.update(engine="herdr-both", engine_hosts=["herdr", "herdr-core"], engine_default="herdr-core")
         slow_requests = 0
         if mode == "start-race":
             release_models.clear()
         del hub.STARTED[:]
         return self.send_json({"mode": mode, "slow_pending": False})
+    if mode in ("omp", "omp-workspace") and url.path == "/api/v1/machines/macbook/launchers/omp/models":
+        if mode == "omp-workspace" and query.get("host") != ["herdr"]:
+            return self.send_json({"agent": "omp", "models": [], "locked": "The default host is herdr-core."})
+        return self.send_json({"agent": "omp", "models": [], "supports_start_model": True})
     if mode == "start-race" and url.path == "/api/v1/machines/macbook/launchers/slowcc/models":
         # A gate, not a timing guess: Start must retain the preset while this unlocked list is still unavailable.
         slow_requests += 1

@@ -256,11 +256,14 @@
     <string name="agents_dialog_rename_space">スペース名を変更</string>
     <string name="agents_dialog_rename_space_text">herdrのワークスペース名も変更されます。</string>
     <string name="agents_dialog_rename_space_text_tern">Ternのこのセッション名も変更します。</string>
+    <string name="agents_dialog_rename_space_text_rex">Rexのこのセッション名も変更します。</string>
     <string name="agents_dialog_rename_text">タブ名はherdrに同期されます。セッション名はClaudeの/renameで変更され、Macのclaude --resumeにも表示されます。</string>
     <string name="agents_dialog_rename_text_tern">タブ名はTernに同期されます。セッション名はClaudeの/renameで変更され、Macのclaude --resumeにも表示されます。</string>
+    <string name="agents_dialog_rename_text_rex">タブ名はRexに同期されます。セッション名はClaudeの/renameで変更され、Macのclaude --resumeにも表示されます。</string>
     <string name="agents_dialog_save">保存</string>
     <string name="agents_dialog_tab_name">タブ名（herdrのタブ）</string>
     <string name="agents_dialog_tab_name_tern">タブ名（Ternのタブ）</string>
+    <string name="agents_dialog_tab_name_rex">タブ名（Rexのタブ）</string>
     <string name="agents_dialog_space_name">スペース名</string>
     <string name="agents_dialog_session_name">セッション名</string>
     <string name="agents_space_actions">スペースの操作</string>
@@ -349,6 +352,8 @@
     <string name="agents_model_retry">再試行</string>
     <string name="agents_model_sheet_note">「%1$s」の%2$sのモデルです。ターミナルで/modelと入力したときと同じです。今回の起動だけに使います。</string>
     <string name="agents_model_sheet_note_provider">「%1$s」で使えるモデルです。今回の起動だけに使います。</string>
+    <string name="agents_model_sheet_note_omp">「%1$s」の今回の起動に使うモデルを選択するか、モデル ID を入力してください。</string>
+    <string name="agents_model_omp_machine_default">このコンピュータの omp のデフォルトモデル</string>
     <string name="agents_model_configured">モデル設定：%1$s</string>
     <string name="agents_new_error_pending">前回の起動結果はまだ確認されていません。結果を確認してください</string>
     <string name="agents_new_error_record">起動記録を読み込めません。閉じてからもう一度お試しください</string>
@@ -619,4 +624,5 @@
     <plurals name="agents_todo_calendar_undated">
         <item quantity="other">期限なし %1$d 件</item>
     </plurals>
+    <string name="agents_sidebar_heading">エージェント</string>
 </resources>

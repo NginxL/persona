@@ -1,4 +1,4 @@
-// Package saved holds the assistant's saved prompts (the user's own "/" prompts) and the saved Agent searches: their
+// Package saved holds the assistant's saved prompts (the user's own "/" prompts) saved Agent searches, and starred messages: their
 // rules, storage and HTTP routes. The assistant Service lends it what it needs through Host.
 package saved
 
@@ -23,10 +23,11 @@ type Host struct {
 	BodyErr func(w http.ResponseWriter, err, bad error)
 }
 
-// Register adds the saved prompts' and saved searches' routes to the host.
+// Register adds the saved content routes to the host.
 func Register(h Host) {
 	(&promptBook{h: h}).routes()
 	(&searchBook{h: h}).routes()
+	(&starBook{h: h}).routes()
 }
 
 func randomHex(n int) string {

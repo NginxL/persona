@@ -6,9 +6,9 @@
 // the poisoned file and never came up. scripts/test/test-server.sh already runs with a throw-away HOME; a plain
 // `go test` did not.
 //
-// A package whose tests start Persona processes calls Main from its TestMain: the tests run with HOME set to an empty
-// directory and PERSONA_HOME unset, and the run fails if anything created <HOME>/.persona. A test that needs state
-// sets PERSONA_HOME (t.Setenv) to a directory of its own.
+// A package whose tests start Persona processes, or reach the node's socket, calls Main from its TestMain: the tests
+// run with HOME set to an empty directory and PERSONA_HOME (and its former name) unset, and the run fails if anything
+// created <HOME>/.persona. A test that needs state sets PERSONA_HOME (t.Setenv) to a directory of its own.
 //
 // Go tools a test starts (`go list` in the hub's architecture guard) still find the developer's Go env file, module
 // cache and build cache: Main pins GOENV, GOPATH, GOMODCACHE and GOCACHE to what they were under the real HOME.
@@ -28,6 +28,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/compat"
 )
 
 // isolated names the throw-away home once Main made it: a test binary a test starts again inherits the variable and
@@ -59,7 +61,9 @@ func runIn(run func() int, stderr io.Writer) int {
 		home = resolved
 	}
 	defer os.RemoveAll(home)
-	vars := map[string]string{"HOME": home, "USERPROFILE": home, "PERSONA_HOME": "", isolated: home}
+	// PERSONA_HOME's former name too: with PERSONA_HOME unset, identity reads that one (compat.EnvNames).
+	_, legacyHome := compat.EnvNames("PERSONA_HOME")
+	vars := map[string]string{"HOME": home, "USERPROFILE": home, "PERSONA_HOME": "", legacyHome: "", isolated: home}
 	for k, v := range goEnv() { // read under the real HOME, before it changes
 		vars[k] = v
 	}

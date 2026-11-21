@@ -60,7 +60,7 @@ func (h *Hub) selfSettings() []selfSetting {
 		out = append(out, h.blockedClaudeDirsSetting())
 	}
 	if h.push != nil && h.push.store != nil { // the switch lives in hub_settings
-		out = append(out, h.lowDistractionSetting())
+		out = append(out, h.pushGradingSelfSetting())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].key < out[j].key })
 	return out

@@ -2,9 +2,11 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { credentialOwner, errorText } from "./api";
 import { CompleteSessions } from "./complete-sessions";
+import { heldOnlyNeeds } from "./attention";
 import { backgroundWaiting, stateOf } from "./format";
 import { foldedState } from "./child-sessions";
 import { foldRows } from "./folded-rows";
+import { heldLaunchRows, observeLaunchRows } from "./launch-handoff";
 import { cardSessionRow, getState, onHubEvent, subscribe, useStore } from "./store";
 import { SESSIONS_LIST_FEATURE } from "./session-list";
 import { runtimeAgents, runtimeSessions, supportsPagedAgents } from "./runtime-list";
@@ -27,8 +29,9 @@ export function useAgentSessions(): Session[] {
   const by = useStore((s) => s.sessions);
   const summaries = useStore((s) => s.sessionSummaries);
   const bounded = useStore((s) => s.features.includes(SESSIONS_LIST_FEATURE));
+  const launches = useStore((s) => s.launches);
   // folded before the assistant's conversations go: a child folded under one of them is no Agent of its own either
-  return useMemo(() => foldRows(directoryVisible(bounded ? summaries : Object.values(by).flat())).filter((s) => !s.assistant), [by, summaries, bounded]);
+  return useMemo(() => heldLaunchRows(foldRows(directoryVisible(bounded ? summaries : Object.values(by).flat())).filter((s) => !s.assistant), launches, Date.now()), [by, summaries, bounded, launches]);
 }
 
 /** The complete list as its readers get it: `error` says why it has not loaded (its read failed; it is read again in a
@@ -61,8 +64,7 @@ function createFullCache(owner: string) {
   let retry: ReturnType<typeof setTimeout> | undefined;
   let trailing: ReturnType<typeof setTimeout> | undefined;
   let expiry: ReturnType<typeof setTimeout> | undefined;
-  const valid = () => !stopped && getState().loaded && credentialOwner() === owner
-    && getState().features.includes(SESSIONS_LIST_FEATURE);
+  const valid = () => !stopped && credentialOwner() === owner && getState().features.includes(SESSIONS_LIST_FEATURE);
   const read = async (immediate = false) => {
     if (!valid()) return;
     if (!consumers || pending) { dirty = true; urgent ||= immediate; return; }
@@ -82,6 +84,7 @@ function createFullCache(owner: string) {
     const base = getState().sessions;
     try {
       const result = await complete.read(controller.signal);
+      if (valid()) observeLaunchRows(result.sessions);
       // An unchanged delta leaves the published snapshot (and its older base, which only widens the overlay) as it is.
       if (valid() && (result.changed || !fullSnapshot.loaded)) {
         fullSnapshot = { sessions: foldRows(directoryVisible(result.sessions)).filter((s) => !s.assistant), loaded: true, error: "", base, epoch: fullSnapshot.epoch };
@@ -176,48 +179,54 @@ export function useFullAgentSessions(on = true): FullAgentSessions {
 
 function useCompleteAgentSessions(on: boolean): FullAgentSessions {
   const by = useStore((s) => s.sessions);
+  const launches = useStore((s) => s.launches);
   const bounded = useStore((s) => s.features.includes(SESSIONS_LIST_FEATURE));
   const loaded = useStore((s) => s.loaded);
   const snapshot = useSyncExternalStore(subscribeFull, getFullSnapshot, getFullSnapshot);
   const owner = on ? credentialOwner() : "";
   const full = fullCache?.owner === owner ? snapshot : EMPTY_FULL_LIST;
   useEffect(() => {
-    if (!on || !bounded || !loaded) return;
+    // Hello confirms paging support. Fetch the complete list while the rest of the first refresh is in flight.
+    if (!on || !bounded) return;
     if (fullCache && fullCache.owner !== owner) fullCache.dispose();
     fullCache ??= createFullCache(owner);
     return fullCache.retain();
-  }, [on, bounded, loaded, owner, snapshot.epoch]);
+  }, [on, bounded, owner, snapshot.epoch]);
   return useMemo(() => {
     // `on` false: the caller has no use for the list now and asks the hub for nothing
     if (!on) return EMPTY_FULL_LIST;
-    if (!bounded) return { sessions: foldRows(directoryVisible(Object.values(by).flat())).filter((s) => !s.assistant), loaded, error: "" };
+    if (!bounded) return { sessions: heldLaunchRows(foldRows(directoryVisible(Object.values(by).flat())).filter((s) => !s.assistant), launches, Date.now()), loaded, error: "" };
+    // Wait for the first refresh's pins and grouping inputs before showing the complete snapshot.
     if (!loaded) return EMPTY_FULL_LIST;
-    if (by === full.base) return full;
+    if (by === full.base) {
+      const held = heldLaunchRows(full.sessions, launches, Date.now());
+      return held === full.sessions ? full : { sessions: held, loaded: full.loaded, error: full.error };
+    }
     // Reflect actions on retained details (rename, mark seen) without copying the complete list into the store.
     // Unchanged cached details may predate this HTTP snapshot, so only apply rows changed since its request.
     const key = (s: Session) => JSON.stringify([s.machine_id, s.session_id]);
     const before = new Map(Object.values(full.base).flat().map((s) => [key(s), s]));
     const current = new Map(Object.values(by).flat().map((s) => [key(s), s]));
-    const sessions = full.sessions.filter((s) => !before.has(key(s)) || current.has(key(s))).map((s) => {
+    const sessions = heldLaunchRows(full.sessions.filter((s) => !before.has(key(s)) || current.has(key(s))).map((s) => {
       const next = current.get(key(s));
       return next && next !== before.get(key(s)) ? next : s;
-    });
+    }), launches, Date.now());
     return { sessions, loaded: full.loaded, error: full.error };
-  }, [on, bounded, loaded, full, by]);
+  }, [on, bounded, loaded, full, by, launches]);
 }
 
 /** The agents by state. `badge` is the sidebar's "Needs you" count: without quiet tasks' agents, which the main conversation
  * tells about (#1731). */
 /** `waiting`: working, but only waiting on background commands (#6045, backgroundWaiting): not in `working`, as the
  *  sidebar's quick filters count them (#10938). */
-export function stateCounts(all: Session[]) {
+export function stateCounts(all: Session[], interactions: readonly Interaction[] = [], grading = false) {
   const c = { needs: 0, working: 0, waiting: 0, unread: 0, badge: 0 };
   for (const s of all) {
     if (s.hidden_by_directory) continue;
     const st = stateOf(s);
     if (st === "needs_you") {
       c.needs++;
-      if (!s.quiet) c.badge++;
+      if (!s.quiet && (!grading || !heldOnlyNeeds(s, interactions))) c.badge++;
     } else if (st === "working") {
       if (backgroundWaiting(s)) c.waiting++;
       else c.working++;
@@ -227,16 +236,18 @@ export function stateCounts(all: Session[]) {
 }
 
 /** `badge` without `open`, the agent on screen: it says it is waiting itself, so a count of only it would tell nothing.
- *  `quietCounted`: `badge` is the hub's own count, which has quiet agents in it. */
-export function othersWaiting(badge: number, open: Session | undefined, quietCounted = false): number {
-  return Math.max(0, badge - (open && !open.assistant && !open.hidden_by_directory && (quietCounted || !open.quiet) && foldedState(open) === "needs_you" ? 1 : 0));
+ *  `quietCounted`: `badge` is the hub's own count, which has quiet agents in it. `held`: open agent was excluded for grading. */
+export function othersWaiting(badge: number, open: Session | undefined, quietCounted = false, held = false): number {
+  return Math.max(0, badge - (open && !open.assistant && !open.hidden_by_directory && (quietCounted || !open.quiet) && !held && foldedState(open) === "needs_you" ? 1 : 0));
 }
 
 const scopedAgentCounts = () => runtimeAgents.getSnapshot().counts;
 
 export function useCounts() {
   const all = useAgentSessions();
-  const interactions = useStore((s) => directoryVisibleCards(s.interactions).length);
+  const allInteractions = useStore((s) => s.interactions);
+  const grading = useStore((s) => s.pushGrading);
+  const interactions = useMemo(() => directoryVisibleCards(allInteractions).length, [allInteractions]);
   const { bounded, pagedAgents, aggregate } = useStore((s) => ({
     bounded: s.features.includes(SESSIONS_LIST_FEATURE),
     pagedAgents: supportsPagedAgents(s.features),
@@ -245,12 +256,13 @@ export function useCounts() {
   const scoped = useSyncExternalStore(runtimeAgents.subscribe, scopedAgentCounts, scopedAgentCounts);
   const counts = pagedAgents ? scoped : aggregate;
   return useMemo(() => {
-    if (!bounded || !counts) return { ...stateCounts(all), interactions, quietCounted: false };
+    if (!bounded || !counts) return { ...stateCounts(all, allInteractions, grading), interactions, quietCounted: false };
     const needs = counts.state.needs_you ?? 0;
     // the hub leaves the ones that only wait in the background in state.working for older apps (protocol.md "Counts")
     const waiting = Math.min(counts.background_waiting ?? 0, counts.state.working ?? 0);
-    return { needs, working: (counts.state.working ?? 0) - waiting, waiting, unread: counts.state.unread ?? 0, badge: needs, interactions, quietCounted: true };
-  }, [all, interactions, counts, bounded]);
+    const badge = grading ? Math.max(0, needs - (counts.held_needs ?? 0)) : needs;
+    return { needs, working: (counts.state.working ?? 0) - waiting, waiting, unread: counts.state.unread ?? 0, badge, interactions, quietCounted: true };
+  }, [all, allInteractions, grading, interactions, counts, bounded]);
 }
 
 // A read that follows a failed one counts as failed until one comes back: each attempt clears the list's error while it

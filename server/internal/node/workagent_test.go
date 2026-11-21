@@ -15,13 +15,19 @@ import (
 // herdr is told which agent it is. The first message is not an argument of the command. pi also gets --approve: nobody is
 // at the pane to answer its project Trust prompt (#9462).
 func TestWorkAgentStartTypesTheModel(t *testing.T) {
-	for _, tc := range []struct{ kind, program, model, want string }{
-		{piAgent, "pi", "ag-chat/cursor/grok-4.7", "HERDR_AGENT=pi pi --model ag-chat/cursor/grok-4.7 --approve"},
-		{cursorAgent, "cursor-agent", "cursor/grok-4.7", "HERDR_AGENT=cursor cursor-agent --model cursor/grok-4.7"},
-		{agyAgent, "agy", "", "HERDR_AGENT=agy agy"},
-		{piAgent, "pi", "", "HERDR_AGENT=pi pi --approve"},
+	for _, tc := range []struct{ kind, program, model, mode, want string }{
+		{piAgent, "pi", "ag-chat/cursor/grok-4.7", "", "HERDR_AGENT=pi pi --model ag-chat/cursor/grok-4.7 --approve"},
+		{cursorAgent, "cursor-agent", "cursor/grok-4.7", "", "HERDR_AGENT=cursor cursor-agent --model cursor/grok-4.7"},
+		{cursorAgent, "cursor-agent", "", proto.ModeBypass, "HERDR_AGENT=cursor cursor-agent"}, // cursor takes no mode
+		// agy runs in Allow all unless the start names another mode, in agy's own flags.
+		{agyAgent, "agy", "", "", "HERDR_AGENT=agy agy --dangerously-skip-permissions"},
+		{agyAgent, "agy", "", proto.ModeBypass, "HERDR_AGENT=agy agy --dangerously-skip-permissions"},
+		{agyAgent, "agy", "", "acceptEdits", "HERDR_AGENT=agy agy --mode accept-edits"},
+		{agyAgent, "agy", "", "auto", "HERDR_AGENT=agy agy --mode auto"},
+		{agyAgent, "agy", "", "default", "HERDR_AGENT=agy agy"},
+		{piAgent, "pi", "", "", "HERDR_AGENT=pi pi --approve"},
 	} {
-		t.Run(tc.kind+" "+tc.model, func(t *testing.T) {
+		t.Run(tc.kind+" "+tc.model+" "+tc.mode, func(t *testing.T) {
 			n, f, home := herdrNode(t)
 			f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 			f.reply("tab.create", map[string]any{"tab": map[string]any{"tab_id": "w1:t2"}, "root_pane": map[string]any{"pane_id": "w1:p2"}})
@@ -33,7 +39,7 @@ func TestWorkAgentStartTypesTheModel(t *testing.T) {
 					cancel()
 				}
 			})
-			_, _ = n.startWorkAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, tc.kind, tc.kind, tc.model, "", "do the thing", "w1", "")
+			_, _ = n.startWorkAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, tc.kind, tc.kind, tc.model, "", tc.mode, "do the thing", "w1", "")
 			want := call("pane.send_input", map[string]any{"pane_id": "w1:p2", "keys": []string{"Enter"}, "text": inAgentEnv(n.dir, tc.want, shellQuote)})
 			var got []string
 			for _, c := range f.trace("pane.send_input") {
@@ -58,11 +64,11 @@ func TestWorkAgentCommandApprovesPiProjectFiles(t *testing.T) {
 		{"cursor", "cursor-agent", "cursor/grok-4.7", "cursor-agent --model cursor/grok-4.7"},
 		{"agy", "agy", "", "agy"},
 	} {
-		if got := workAgentCommand(tc.launcher, tc.program, tc.model, ""); got != tc.want {
+		if got := workAgentCommand(tc.launcher, tc.program, tc.model, "", ""); got != tc.want {
 			t.Errorf("workAgentCommand(%q, %q, %q) = %q, want %q", tc.launcher, tc.program, tc.model, got, tc.want)
 		}
 	}
-	if got, want := workAgentResume(piAgent, workAgentCommand("pi", "pi", "", ""), "/s/a.jsonl"), `pi --approve --session /s/a.jsonl`; got != want {
+	if got, want := workAgentResume(piAgent, workAgentCommand("pi", "pi", "", "", ""), "/s/a.jsonl"), `pi --approve --session /s/a.jsonl`; got != want {
 		t.Errorf("resume = %q, want %q", got, want)
 	}
 }
@@ -204,7 +210,7 @@ func TestWorkAgentStartHoldsPaneLockThroughCleanup(t *testing.T) {
 	})
 	startDone := make(chan error, 1)
 	go func() {
-		_, err := n.startWorkAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "do the thing", "w1", "")
+		_, err := n.startWorkAgent(ctx, n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "", "do the thing", "w1", "")
 		startDone <- err
 	}()
 	select {
@@ -319,7 +325,7 @@ func TestWorkAgentLaunchRunErrorKeepsTabAndQuitsAgent(t *testing.T) {
 	})
 	quitsOn(f, "w1:p2", id, nil, shellPane("w1:p2", "w1:t2", "w1", home, id))
 	withStop(t, 1, time.Millisecond)
-	_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "do the thing", "w1", "")
+	_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "", "do the thing", "w1", "")
 	if err == nil || !strings.Contains(err.Error(), "run launcher") {
 		t.Fatalf("start: %v", err)
 	}
@@ -341,7 +347,7 @@ func TestWorkAgentStartRefusesWhenPaneHostRefreshFails(t *testing.T) {
 	f.handle("agent.list", func(map[string]any) any {
 		return herdrFail{Code: "unavailable", Message: "snapshot failed"}
 	})
-	_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "", "w1", "")
+	_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, cursorAgent, cursorAgent, "", "", "", "", "w1", "")
 	if err == nil || !strings.Contains(err.Error(), "snapshot failed") {
 		t.Fatalf("start: %v", err)
 	}
@@ -402,7 +408,7 @@ func TestWorkAgentStartPromptsThroughHerdr(t *testing.T) {
 		}
 	})
 	s, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, "cursor", cursorAgent,
-		"cursor/grok-4.7", "", "do the thing", "w1", "")
+		"cursor/grok-4.7", "", "", "do the thing", "w1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +447,7 @@ func TestPiStartWithoutExtensionQuitsAgentAndKeepsTheTab(t *testing.T) {
 		})
 		// A short message such as "hi" can also occur in the launch command's temporary path.
 		const message = "the first message must stay unsent"
-		_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, piAgent, piAgent, "", "", message, "w1", "")
+		_, err := n.startWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), home, piAgent, piAgent, "", "", "", message, "w1", "")
 		if err == nil || !strings.Contains(err.Error(), "pi_no_extension") && !strings.Contains(err.Error(), "没有 Persona 扩展") {
 			t.Fatalf("start: %v", err)
 		}

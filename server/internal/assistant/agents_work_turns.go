@@ -238,7 +238,8 @@ func (s *Service) workTurnSettled(ctx context.Context, machine, sid string) {
 
 // triageTurn works out where c stands after its turn and acts on it. Once per turn.
 func (s *Service) triageTurn(ctx context.Context, v *workView, machine string, c proto.Session) {
-	if c.HiddenByDirectory() || c.Assistant && !turnErrorTransient(c) || c.Status == proto.StatusOffline || c.Status == proto.StatusWorking || c.Starting {
+	quotaWait := s.protectedQuotaWait(ctx, machine, c)
+	if c.HiddenByDirectory() || c.Assistant && !turnErrorTransient(c) && !quotaWait || c.Status == proto.StatusOffline || c.Status == proto.StatusWorking || c.Starting {
 		return
 	}
 	if s.isReviewer(machine, c.SessionID) {
@@ -298,7 +299,7 @@ func (s *Service) triageTurn(ctx context.Context, v *workView, machine string, c
 	if skip {
 		return // the agent asks itself (or its terminal does): the list shows that
 	}
-	if !s.workOn(ctx) && (w == nil || w.On != proto.WaitTransient) {
+	if !s.workOn(ctx) && (w == nil || w.On != proto.WaitTransient && !(quotaWait && w.On == proto.WaitExternal)) {
 		// The triage is off and only transient errors are continued (transient_retry): no model call, nothing else
 		// decided. A turn that ended otherwise ends the run of transient errors: the next one counts from 1 again.
 		if had && last.Retries > 0 {
@@ -307,8 +308,8 @@ func (s *Service) triageTurn(ctx context.Context, v *workView, machine string, c
 		}
 		return
 	}
-	if c.Assistant && (w == nil || w.On != proto.WaitTransient) {
-		return // Assistant participates only in mechanical model recovery.
+	if c.Assistant && (w == nil || w.On != proto.WaitTransient && !(quotaWait && w.On == proto.WaitExternal)) {
+		return // Assistant participates only in mechanical model recovery and quota waits.
 	}
 	if w == nil {
 		mctx, cancel := context.WithTimeout(ctx, 90*time.Second)

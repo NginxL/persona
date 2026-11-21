@@ -28,6 +28,7 @@ import pr_watch_common
 import pr_watch_repair
 import pr_watch_recovery
 from pr_watch_review import review as semantic_review
+import pr_watch_human
 from pr_watch_verify import verify
 
 FORMAT_VERSION = 1
@@ -75,9 +76,12 @@ def load_config(path):
             raise WatchError("merge must be a boolean")
         if item.get("close_stale", False) is not True and item.get("close_stale", False) is not False:
             raise WatchError("close_stale must be a boolean")
+        if item.get("respect_human_reviews", False) is not True and item.get("respect_human_reviews", False) is not False:
+            raise WatchError("respect_human_reviews must be a boolean")
         repos.append({"name": repo, "checkout": str(Path(root).expanduser()), "base": base,
                       "verify": item["verify"], "merge": item.get("merge", False),
                       "close_stale": item.get("close_stale", False),
+                      "respect_human_reviews": item.get("respect_human_reviews", False),
                       "privacy": item.get("privacy"), "notify_command": item.get("notify_command")})
     reviewer = raw.get("reviewer", {})
     if not isinstance(reviewer, dict):
@@ -89,7 +93,11 @@ def load_config(path):
     webhook = raw.get("webhook", {})
     if not isinstance(webhook, dict):
         raise WatchError("webhook config must be an object")
-    repository_policy = [{key: value for key, value in item.items() if key != "reviewer"}
+    # The human-review opt-in only adds an alternative semantic-evidence source
+    # behind an off-by-default switch; it never weakens a verification or merge
+    # gate, so toggling it must not invalidate existing exact-head evidence.
+    repository_policy = [{key: value for key, value in item.items()
+                          if key not in ("reviewer", "respect_human_reviews")}
                          for item in raw["repositories"]]
     return {"repositories": repos, "reviewer": reviewer, "reviewer_concurrency": concurrency, "webhook": webhook,
             "repository_policy": repository_policy,
@@ -190,6 +198,8 @@ class Watcher:
         self.workers = []
         self.review_executor = None
         self.review_executor_lock = threading.Lock()
+        self.gh_login = None
+        self.gh_login_lock = threading.Lock()
 
     def log(self, message):
         if not self.verbose:
@@ -546,11 +556,15 @@ class Watcher:
         if not isinstance(head, str) or not pr_watch_common.SHA.fullmatch(head):
             raise WatchError("findings publication requires an exact head")
         if inline:
-            # A re-review on a moved base words the same findings differently;
-            # publish again only when it anchors something new on this head.
-            published = {finding_anchor(f) for f in self.head_publication(repo, number, head).get("published_findings") or []}
-            if findings and all(finding_anchor(f) in published for f in findings):
-                return
+            # A head's findings are published once (#12302). Re-reviews after
+            # main moves word notes differently and find new P1/P2 nits; only a
+            # P0 at a new anchor blocks and is worth another review, alone.
+            published_findings = self.head_publication(repo, number, head).get("published_findings") or []
+            if published_findings:
+                published = {finding_anchor(f) for f in published_findings}
+                findings = [f for f in blocking_findings(findings) if finding_anchor(f) not in published]
+                if not findings:
+                    return
         blocking = bool(blocking_findings(findings))
         if not self.repositories[repo]["merge"]:
             action = "Review-only mode: no automatic repair or merge will be attempted. P1/P2 findings are notes; only P0 blocks."
@@ -1059,6 +1073,61 @@ query($owner: String!, $name: String!, $number: Int!, $pageSize: Int!,
         self.notify(config, number, pr["headRefOid"], "stale_closed")
         return True
 
+    def human_review_decision(self, repo, number, head):
+        """Fetch and classify real-user reviews bound to this exact head."""
+        if self.gh_login is None:
+            with self.gh_login_lock:
+                if self.gh_login is None:
+                    self.gh_login = pr_watch_human.authenticated_login()
+        reviews = pr_watch_human.fetch_reviews(repo, number)
+        return pr_watch_human.classify_human_reviews(reviews, head, self.gh_login)
+
+    def apply_human_review_policy(self, repo, number, pr, evidence_key):
+        """Apply the opt-in human-review policy before any reviewer call.
+
+        Returns True when the head is parked on a human decision (change
+        request or comment-only); an approval records human-sourced semantic
+        evidence and returns False so the normal verification and merge gates
+        continue. A head without a qualifying human review returns False and
+        gets the watcher's own semantic review unchanged.
+        """
+        head = pr["headRefOid"]
+        current = self.state.get(repo, number)
+        if (current.get("head") == head and current.get("evidence_key") == evidence_key
+                and current.get("format") == FORMAT_VERSION
+                and current.get("semantic") in ("passed", "findings")):
+            # Valid exact-head watcher evidence already exists; never override it.
+            return False
+        decision = self.human_review_decision(repo, number, head)
+        kind = decision["decision"]
+        if kind == pr_watch_human.DECISION_NONE:
+            return False
+        record = decision["review"]
+        if kind == pr_watch_human.DECISION_APPROVED:
+            # No reviewer call and no watcher review/comment for this head: the
+            # human review is the semantic credential; every later gate still runs.
+            self.state.put(repo, number, head, evidence_key=evidence_key,
+                           base=pr["baseRefOid"], format=FORMAT_VERSION, outcome="reviewed",
+                           semantic="passed", findings=[], semantic_source="human",
+                           human_review=record, review_attempts=0, retry_reason=None,
+                           review_posted=not self.dry_run, success_posted=not self.dry_run)
+            self.log("%s#%s uses human %s review %s on %s; skipping the watcher semantic review" %
+                     (repo, number, record["state"], record["id"], head[:9]))
+            return False
+        outcome = ("human_changes_requested" if kind == pr_watch_human.DECISION_CHANGES_REQUESTED
+                   else "human_commented")
+        if (current.get("head") == head and current.get("evidence_key") == evidence_key
+                and current.get("outcome") == outcome
+                and (current.get("human_review") or {}).get("id") == record["id"]):
+            # Already parked on this exact decision; do not churn state each poll.
+            return True
+        self.state.put(repo, number, head, evidence_key=evidence_key,
+                       base=pr["baseRefOid"], format=FORMAT_VERSION, outcome=outcome,
+                       semantic_source="human", human_review=record)
+        self.log("%s#%s parked on human %s review %s on %s; no watcher semantic review or merge" %
+                 (repo, number, record["state"], record["id"], head[:9]))
+        return True
+
     def semantic_review(self, repo, pr, worktree):
         """Only actual model calls consume the dedicated reviewer pool.
 
@@ -1148,7 +1217,8 @@ query($owner: String!, $name: String!, $number: Int!, $pageSize: Int!,
                 and old.get("verification_policy") != VERIFICATION_POLICY_VERSION
                 and old.get("verification") not in ("passed", "base_failure")
                 and not old.get("repair_exhausted")
-                and old.get("outcome") not in ("merged", "continuation", "findings", "repair_comment_pending", "reviewed")):
+                and old.get("outcome") not in ("merged", "continuation", "findings", "repair_comment_pending", "reviewed",
+                                               "human_changes_requested", "human_commented")):
             # A prerequisite failure is not evidence against this exact head.
             # Retry only its verification under the new policy. Completed gates,
             # published findings and exhausted repair budgets keep their meaning.
@@ -1454,6 +1524,15 @@ query($owner: String!, $name: String!, $number: Int!, $pageSize: Int!,
         phase = "preparing"
         evidence_key = repo + "#" + str(number) + "@" + pr["baseRefOid"] + ".." + head
         try:
+            if config.get("respect_human_reviews"):
+                # A real user's review on this exact head can replace the
+                # watcher's semantic review. Failures use the semantic-gate
+                # retry path below; no worktree is needed for parked heads.
+                phase = "semantic"
+                self.phase(key, "checking human review state")
+                if self.apply_human_review_policy(repo, number, pr, evidence_key):
+                    return False
+                phase = "preparing"
             self.phase(key, "preparing isolated checkout")
             worktree = self.worktree(repo, number, pr)
             phase = "semantic"

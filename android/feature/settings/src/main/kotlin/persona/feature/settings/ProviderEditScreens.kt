@@ -257,6 +257,7 @@ internal fun ProviderComputersPage(
     scope: ScopeForm, onChange: (ScopeForm) -> Unit, machines: List<Machine>, old: HubLauncher?, kind: String, agent: String?,
     defaultUse: Boolean, onBack: () -> Unit, editable: Boolean = true,
     save: (() -> Unit)? = null, saving: Boolean = false, canSave: Boolean = false, error: String? = null,
+    referencesAvailable: Boolean = false,
 ) {
     val name = machineName(machines)
     var keysOpen by rememberSaveable { mutableStateOf(false) }
@@ -321,7 +322,7 @@ internal fun ProviderComputersPage(
                 }
             }
         }
-        val stored = old?.keyMachines.orEmpty()
+        val stored = (old?.keyMachines.orEmpty() + old?.machineKeyReferences.orEmpty().keys).distinct()
         val keyed = (keyMachines(scope, machines) + stored).distinct()
         if (keyed.isNotEmpty()) {
             val count = scope.keyCount(stored)
@@ -337,7 +338,8 @@ internal fun ProviderComputersPage(
             if (keysOpen) {
                 item("keys-hint") { SettingsCaption(stringResource(R.string.settings_pscope_machine_keys_hint), Modifier.padding(horizontal = rowPadding, vertical = Tokens.Space.s)) }
                 keyed.forEach { id ->
-                    item("key-$id") { MachineKeyField(id, name(id), scope, id in stored, editable, onChange) }
+                    item("key-$id") { MachineKeyField(id, name(id), scope, id in stored, editable, onChange,
+                        old?.machineKeyReferences?.get(id), referencesAvailable) }
                 }
             }
         }
@@ -356,17 +358,25 @@ private fun LazyListScope.checkRows(key: String, ids: List<String>, checked: Lis
     }
 }
 
-/** One computer's own key: never prefilled; a stored one says so, with "Remove" (and "Undo" once removed). */
+/** One computer's own key or reference; stored metadata is visible, its resolved value never is. */
 @Composable
-private fun MachineKeyField(id: String, machine: String, scope: ScopeForm, has: Boolean, editable: Boolean, onChange: (ScopeForm) -> Unit) {
+private fun MachineKeyField(
+    id: String, machine: String, scope: ScopeForm, has: Boolean, editable: Boolean, onChange: (ScopeForm) -> Unit,
+    storedReference: persona.core.contracts.api.SecretReference?, referencesAvailable: Boolean,
+) {
     val removed = id in scope.remove
     val typed = scope.keys[id].orEmpty()
+    val byReference = id in scope.keyRefs
     Column(Modifier.padding(top = Tokens.Space.s), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-        JTextField(typed, { onChange(scope.typeKey(id, it).let { s -> if (it.isNotBlank()) s.keepKey(id) else s }) }, Modifier.fillMaxWidth(),
-            label = stringResource(R.string.settings_pscope_key_for, machine),
+        ProviderKeyField(typed,
+            { onChange(scope.typeKey(id, it).let { s -> if (it.isNotBlank()) s.keepKey(id) else s }) },
+            byReference,
+            onByReferenceChange = if (referencesAvailable) ({ on -> onChange(scope.referenceKey(id, on)) }) else null,
+            stored = storedReference,
+            label = stringResource(R.string.settings_pscope_key_for, machine), modifier = Modifier.fillMaxWidth(),
+            enabled = editable && (referencesAvailable || !byReference),
             placeholder = stringResource(if (has && !removed) R.string.settings_pscope_replace_key else R.string.settings_pscope_uses_provider_key),
-            singleLine = true, enabled = editable, visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+            supportingText = if (byReference && typed.isNotBlank()) stringResource(R.string.settings_provider_reference_saved) else null)
         if (has && typed.isBlank()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             Text(stringResource(if (removed) R.string.settings_pscope_key_removed else R.string.settings_pscope_has_own_key), Modifier.weight(1f),
                 style = PersonaTheme.type.caption, color = if (removed) PersonaTheme.palette.cautionText else PersonaTheme.palette.ink2,

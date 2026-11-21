@@ -189,6 +189,9 @@ func TestTaskStartAnswerIsFullRoleOnly(t *testing.T) {
 	s, f := launcherRetryHub(t)
 	asked := answeredNode(f, nil)
 	todo, _ := failOnWork(t, s, f, shellWaitingRefusal(omzLine, "y,n,enter", time.Now().Add(5*time.Minute), nil))
+	// The conversation that handed it out, listed outside the health space: an extension is shown the to-do and is
+	// refused by the route itself (todo_scope.go).
+	f.setSessions("server", proto.Session{SessionID: "conv1", Title: "Persona", Assistant: true})
 	for _, role := range []string{"read", roleExtension} {
 		if status, body := postAnswer(t, s, todo.ID, role, `{"choice":"n"}`); status != http.StatusForbidden || body["code"] != proto.CodeReadOnly ||
 			body["error"] != "This device can’t answer a question in a computer’s terminal." {

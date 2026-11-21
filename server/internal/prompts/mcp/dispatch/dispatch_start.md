@@ -1,6 +1,6 @@
-Hand a subtask to a new agent on another of the user's connected computers, through Persona, and get its session id back at once. Use it when the work needs that computer (the repository or data is there, it needs that system or hardware, or this computer is busy); work this computer can do belongs to your own in-session subagents. Call dispatch_read with no arguments first to see the computers and their home directories. The new agent starts with only your prompt, not your conversation: write everything it needs (the goal, the repository and paths on that computer, what to return, what not to touch). It runs as an ordinary agent session the user can watch and answer in the apps. Read its result with dispatch_read. An agent that is itself a dispatched task cannot dispatch, and only a few dispatched tasks may be working at a time; the answer says so when it refuses.
+Hand a subtask to a new agent on another of the user's connected computers and get its session ID. Call dispatch_read without arguments to see the computers and their home directories. Give the new agent a self-contained prompt with the goal, paths on that computer, expected result and boundaries. You and the user can follow the session in Persona. Questions and results come back through A2A, so you can finish your turn while it works. Use dispatch_read for a status check, or a2a_get for the task's messages. A dispatched agent cannot dispatch another task. The manager limits how many tasks you can run at once.
 
-Give `worktree.branch` when the work needs a branch and checkout of its own on that computer: Persona makes the worktree through that computer's engine and starts the agent in it. Do not tell the agent to run `git worktree add` itself.
+Give `worktree.branch` when the work needs a branch and checkout of its own on that computer: Persona makes the worktree through that computer's engine and starts the agent in it. Do not tell the agent to run `git worktree add` itself.{{template "shared/mcp_language" .}}
 
 ```json
 {
@@ -22,6 +22,10 @@ Give `worktree.branch` when the work needs a branch and checkout of its own on t
     "launcher": {
       "type": "string",
       "description": "a launcher that computer has; empty: the user's default for new agents"
+    },
+    "message_id": {
+      "type": "string",
+      "description": "A unique ID for this launch. Reuse it if you retry the same launch."
     },
     "worktree": {
       "type": "object",

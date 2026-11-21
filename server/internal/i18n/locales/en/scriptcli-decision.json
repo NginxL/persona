@@ -1,0 +1,5 @@
+{
+  "invalid": "Cannot read the decision: {reason}",
+  "unavailable": "The decision service is unavailable: {reason}",
+  "too_old": "The personad on this computer is too old to support decisions"
+}

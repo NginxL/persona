@@ -63,7 +63,7 @@ beforeEach(() => {
       if (roster === null) return reply(ROSTER);
       return new Promise((done) => (roster = () => done(reply(ROSTER))));
     }
-    if (/\/(plugins|extensions)\/example-wechat\/-\/$/.test(url)) return reply(DETAIL);
+    if (/\/(plugins|extensions)\/example-wechat\/-\/\?entry_lists=1$/.test(url)) return reply(DETAIL);
     if (url.endsWith("/connectors")) {
       // the merged list: each manager's copy of the connector, stamped
       return reply({ connectors: [
@@ -100,7 +100,7 @@ describe("another manager's extension page", () => {
     const onConnector = vi.fn();
     act(() => root.render(<Extensions open="example-wechat@m-1" onOpen={() => {}} onChannel={onChannel} onConnector={onConnector} />));
     await flush();
-    expect(calls.find((c) => /example-wechat\/-\/$/.test(c.url))?.header).toBe("m-1");
+    expect(calls.find((c) => /example-wechat\/-\/\?entry_lists=1$/.test(c.url))?.header).toBe("m-1");
     // m-1's copy (inbox on), not the default's (off)
     const sw = host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="进收件箱"]')!;
     expect(sw.getAttribute("aria-checked")).toBe("true");
@@ -146,7 +146,7 @@ describe("another manager's extension page", () => {
     act(() => chooseManager("m-1"));
     act(() => root.render(<Extensions open="example-wechat" onOpen={() => {}} />));
     await flush();
-    const reads = calls.filter((c) => /example-wechat\/-\/$/.test(c.url));
+    const reads = calls.filter((c) => /example-wechat\/-\/\?entry_lists=1$/.test(c.url));
     expect(reads.length).toBeGreaterThan(0);
     expect(reads.every((c) => c.header === "m-1")).toBe(true);
     expect(host.textContent).toContain("示例微信");

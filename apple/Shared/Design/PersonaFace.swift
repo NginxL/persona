@@ -227,7 +227,9 @@ struct PersonaFace: View {
 }
 
 /// Mochi's colors in one appearance: the icon's paper (or its dark) behind, a white body outlined in ink. Offline
-/// fades the body to gray.
+/// fades the body to gray. On the dark disc the offline face keeps the dark icon's ink outline (#11283): a mid-gray one
+/// sat halfway between the disc and the gray body, so the body's edge came in two small steps and the face looked
+/// blurred at a glance; with the ink the edge is one step, as the online face's, and only the gray says it is asleep.
 nonisolated struct MochiInk {
     var disc: [Color]
     var body: [Color]
@@ -244,14 +246,23 @@ nonisolated struct MochiInk {
     init(dark: Bool, offline: Bool) {
         self.offline = offline
         disc = dark ? [Color(hex: 0x332A26), Color(hex: 0x1D1816)] : [Color(hex: 0xF4EADF), Color(hex: 0xE7D7C4)]
-        body = offline ? [Color(hex: 0xD9D4D0), Color(hex: 0xBDB6B1)] : [.white, Color(hex: 0xE9E3DE)]
+        // Asleep on the dark disc: a lighter gray body, further from the disc.
+        let asleepOnDark = offline && dark
+        if asleepOnDark {
+            body = [Color(hex: 0xE2DDD9), Color(hex: 0xC8C1BC)]
+        } else if offline {
+            body = [Color(hex: 0xD9D4D0), Color(hex: 0xBDB6B1)]
+        } else {
+            body = [.white, Color(hex: 0xE9E3DE)]
+        }
         line = offline ? Color(hex: 0x6E6763) : Color(hex: 0x1D1816)
         motion = dark ? Color(hex: 0xD6D1CD) : line
-        // The dark icon keeps the ink outline: on the dark disc it reads as the body's shadow edge.
-        outline = offline ? Color(hex: 0x6E6763) : Color(hex: dark ? 0x0E0B0A : 0x1D1816)
+        // The dark icon keeps the ink outline: on the dark disc it reads as the body's shadow edge. Asleep too there.
+        outline = offline && !dark ? Color(hex: 0x6E6763) : Color(hex: dark ? 0x0E0B0A : 0x1D1816)
         gloss = .white
         cheek = offline ? Color(hex: 0xA59D98) : Mochi.cheekColor
-        shadow = .black.opacity(dark ? 0.45 : 0.14)
+        // A lighter shadow under the asleep body on the dark disc: the dark one blurred into its edge.
+        shadow = .black.opacity(asleepOnDark ? 0.3 : dark ? 0.45 : 0.14)
     }
 }
 

@@ -55,8 +55,9 @@ type askTodo struct {
 	MachineID   string `json:"machine_id"`
 	SessionID   string `json:"session_id"`
 	// Questions are the questions as asked.
-	Questions []string  `json:"questions"`
-	AskedAt   time.Time `json:"asked_at"`
+	Questions       []string         `json:"questions"`
+	QuestionDetails []proto.Question `json:"question_details,omitempty"`
+	AskedAt         time.Time        `json:"asked_at"`
 	// ClaimedAt is when the owner's call was claimed for the conversation and is being sent; AnsweredAt when it went,
 	// DroppedAt when closing the to-do without one was told: each is told once. Zero until then. A claim that did not
 	// end in AnsweredAt within askClaimHold (the assistant restarted in between) no longer holds.
@@ -64,13 +65,15 @@ type askTodo struct {
 	AnsweredAt time.Time `json:"answered_at,omitzero"`
 	DroppedAt  time.Time `json:"dropped_at,omitzero"`
 	// Deadline, Reversible and Recommends are the question's deadline, whether it can be undone, and each question's
-	// recommended option (#3127, decision_deadline.go); DueAt is when the deadline was handled (taken by default:
-	// ByDefault, or the owner reminded). Zero: no deadline.
+	// recommended option (#3127, decision_deadline.go). DueAt only records deadline processing: an irreversible
+	// question is reminded, not answered, and still needs the owner's decision.
 	Deadline   time.Time `json:"deadline,omitzero"`
 	Reversible bool      `json:"reversible,omitempty"`
 	Recommends []string  `json:"recommends,omitempty"`
 	DueAt      time.Time `json:"due_at,omitzero"`
-	ByDefault  bool      `json:"by_default,omitempty"`
+	// ByDefault reserves recommendation delivery, including recovery after a lost claim. A failed default clears it
+	// (askDefaultFailed), returning the question to the owner even though DueAt stays set.
+	ByDefault bool `json:"by_default,omitempty"`
 }
 
 // held: an answer of a's is being sent.
@@ -141,7 +144,8 @@ func (s *Service) askExpired(ctx context.Context, ix proto.Interaction) (Todo, e
 	for _, q := range ix.Questions {
 		questions = append(questions, strings.TrimSpace(q.Question))
 	}
-	rec := askTodo{TodoID: id, Interaction: ix.ID, MachineID: ix.MachineID, SessionID: ix.SessionID, Questions: questions, AskedAt: ix.CreatedAt}
+	rec := askTodo{TodoID: id, Interaction: ix.ID, MachineID: ix.MachineID, SessionID: ix.SessionID,
+		Questions: questions, QuestionDetails: ix.Questions, AskedAt: ix.CreatedAt}
 	if d, ok := askDeadlineOf(ix); ok {
 		rec.Deadline, rec.Reversible, rec.Recommends = d.At, d.Reversible, d.Recommends
 	}
@@ -288,19 +292,27 @@ func (s *Service) askTodoOf(ctx context.Context, id string) (askTodo, bool) {
 // before it is told; false when it is no such to-do, it was answered (or an answer is being sent), or, for a drop, that
 // was told already.
 func (s *Service) claimAskTodo(ctx context.Context, id string, answered bool) (askTodo, bool) {
+	a, claimed, _ := s.claimAskTodoChecked(ctx, id, answered, false)
+	return a, claimed
+}
+
+// An inline answer must distinguish an unwritten claim (retry) from a question already answered or dropped.
+// The manual decision and topic paths allow an answer after the owner explicitly reopens a dropped to-do.
+func (s *Service) claimAskTodoChecked(ctx context.Context, id string, answered, inline bool) (askTodo, bool, error) {
 	if !isAskTodo(id) {
-		return askTodo{}, false
+		return askTodo{}, false, nil
 	}
 	b := &s.askTodos
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !s.loadAskTodosLocked(ctx) {
-		return askTodo{}, false
+		return askTodo{}, false, errAcceptStore
 	}
 	i := slices.IndexFunc(b.list, func(a askTodo) bool { return a.TodoID == id })
 	now := time.Now()
-	if i < 0 || !b.list[i].AnsweredAt.IsZero() || b.list[i].held(now) || !answered && !b.list[i].DroppedAt.IsZero() {
-		return askTodo{}, false
+	if i < 0 || !b.list[i].AnsweredAt.IsZero() || b.list[i].held(now) ||
+		answered && b.list[i].ByDefault || (!answered || inline) && !b.list[i].DroppedAt.IsZero() {
+		return askTodo{}, false, nil
 	}
 	prev := b.list[i]
 	if answered {
@@ -313,10 +325,10 @@ func (s *Service) claimAskTodo(ctx context.Context, id string, answered bool) (a
 		if j := slices.IndexFunc(b.list, func(a askTodo) bool { return a.TodoID == id }); j >= 0 {
 			b.list[j] = prev
 		}
-		return askTodo{}, false
+		return askTodo{}, false, err
 	}
 	s.snapshotStale() // the turn the answer starts must not read "still waiting for the user's call"
-	return prev, true
+	return prev, true, nil
 }
 
 // settleAskClaim ends an answer's claim on to-do id: sent (it was answered), or given back (it could not go anywhere).
@@ -438,16 +450,23 @@ func (s *Service) askTodoDecided(ctx context.Context, row db.TodoDecisionRow) {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 		choice := askChoice{Question: row.Question, Choice: row.Choice, Reason: row.Reason}
-		text := renderAskAnswer(a, s.location(ctx), []askChoice{choice}, false, false)
-		if err := s.tellAsker(ctx, a, t.Title, text); err != nil {
+		if err := s.returnAskTodoAnswer(ctx, a, t.Title, []askChoice{choice}); err != nil {
 			s.logf("ask_user to-do %s: the decision goes nowhere: %v", row.TodoID, err)
 			s.settleAskClaim(ctx, row.TodoID, false)
-			return
 		}
-		s.recordLateAnswer(a, []askChoice{choice}, "", "") // the user's own, on the to-do: the card's history says so
-		s.settleAskClaim(ctx, row.TodoID, true)
-		s.closeAskTodo(ctx, row.TodoID)
 	}()
+}
+
+// returnAskTodoAnswer is the manual decision form's background delivery. Inline choices instead commit their entire
+// answer, completion and relay together (commitExpiredQuestionAnswer), before starting delivery.
+func (s *Service) returnAskTodoAnswer(ctx context.Context, a askTodo, title string, choices []askChoice) error {
+	if err := s.tellAsker(ctx, a, title, renderAskAnswer(a, s.location(ctx), choices, false, false)); err != nil {
+		return err
+	}
+	s.recordLateAnswer(a, choices, "", "")
+	s.settleAskClaim(ctx, a.TodoID, true)
+	s.closeAskTodo(ctx, a.TodoID)
+	return nil
 }
 
 // askTodoTopicAnswer is the message a reply in the topic of to-do t hands its conversation when t came from a question

@@ -1,0 +1,12 @@
+{
+  "customize": "Customize tag filters…",
+  "placeholder": "Exact tag",
+  "add": "Add filter",
+  "remove": "Remove filter {tag}",
+  "reset": "All in-use tags",
+  "done": "Done",
+  "empty": "No tag filters",
+  "too_long": "A tag can be at most {max} characters.",
+  "count_limit": "You can keep at most {max} tag filters.",
+  "save_failed": "Couldn't save tag filters: {error}"
+}

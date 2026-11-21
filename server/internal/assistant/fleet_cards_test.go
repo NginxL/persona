@@ -1292,14 +1292,179 @@ func TestPermissionCallIsNeverGuessed(t *testing.T) {
 	if planCallFinished(proto.Interaction{Kind: proto.IxPermission, ToolName: "Bash", CreatedAt: at}, planItems(at)) {
 		t.Fatal("a permission card without its tool call's id was ended by another call's result")
 	}
+	withExactInput := &pending{ix: proto.Interaction{Kind: proto.IxPermission, ToolName: "Bash",
+		ToolInput: json.RawMessage(`{"command":"synthetic"}`), Resumable: true}}
+	if !terminalReconciled(withExactInput) {
+		t.Fatal("a Claude Code permission with exact input was not eligible for reconciliation")
+	}
 	for _, p := range []*pending{
 		{ix: proto.Interaction{Kind: proto.IxPermission, ToolUseID: "c", Resumable: true, Agent: "codex"}},
 		{ix: proto.Interaction{Kind: proto.IxPermission, ToolUseID: "c"}},
 		{ix: proto.Interaction{Kind: proto.IxPermission, Resumable: true}},
 	} {
 		if terminalReconciled(p) {
-			t.Fatalf("only a Claude Code hook's permission naming its call is reconciled: %+v", p.ix)
+			t.Fatalf("a permission without a safe Claude Code call identity was reconciled: %+v", p.ix)
 		}
+	}
+}
+
+func terminalPermissionItems(at time.Time, input json.RawMessage) []proto.Item {
+	return []proto.Item{
+		{ID: "call#0", Seq: 10, TS: at.Add(-time.Millisecond), Role: "assistant", Kind: proto.KindToolUse,
+			ToolName: "Bash", ToolUseID: "bash-call", ToolInput: input},
+		{ID: "result#0", Seq: 11, TS: at.Add(2 * time.Minute), Role: "user", Kind: proto.KindToolResult,
+			ToolUseID: "bash-call", IsError: true, Text: "Permission for this command was denied by a built-in Claude Code safety check, not by the user."},
+	}
+}
+
+func TestTerminalPermissionWithoutIDMatchesExactCall(t *testing.T) {
+	at := time.Now()
+	input := json.RawMessage(`{"command":"rm -f /tmp/persona-stale-permission-test/*","description":"Remove synthetic test output"}`)
+	ix := proto.Interaction{Kind: proto.IxPermission, ToolName: "Bash", ToolInput: input, CreatedAt: at}
+	for _, tc := range []struct {
+		name  string
+		input json.RawMessage
+		items func() []proto.Item
+		want  bool
+	}{
+		{"built-in denial", input, func() []proto.Item { return terminalPermissionItems(at, input) }, true},
+		{"equivalent JSON", json.RawMessage(`{ "description": "Remove synthetic test output", "command": "rm -f /tmp/persona-stale-permission-test/*" }`),
+			func() []proto.Item { return terminalPermissionItems(at, input) }, true},
+		{"still waiting", input, func() []proto.Item { return terminalPermissionItems(at, input)[:1] }, false},
+		{"different input", input, func() []proto.Item {
+			return terminalPermissionItems(at, json.RawMessage(`{"command":"rm -f /tmp/another-test-directory/*"}`))
+		}, false},
+		{"two candidate calls", input, func() []proto.Item {
+			items := terminalPermissionItems(at, input)
+			return append(items, proto.Item{ID: "call#1", Seq: 9, TS: at.Add(-2 * time.Millisecond), Role: "assistant", Kind: proto.KindToolUse,
+				ToolName: "Bash", ToolUseID: "other-bash-call", ToolInput: input})
+		}, false},
+		{"old call", input, func() []proto.Item {
+			return terminalPermissionItems(at.Add(-time.Minute), input)
+		}, false},
+		{"different tool", input, func() []proto.Item {
+			items := terminalPermissionItems(at, input)
+			items[0].ToolName = "Write"
+			return items
+		}, false},
+		{"unrelated activity without the call", input, func() []proto.Item {
+			return []proto.Item{{ID: "text#0", Seq: 12, TS: at.Add(time.Second), Role: "assistant", Kind: proto.KindText, Text: "Continuing."}}
+		}, false},
+		{"unrelated parallel result", input, func() []proto.Item {
+			items := terminalPermissionItems(at, input)[:1]
+			return append(items, proto.Item{ID: "result#1", Seq: 11, TS: at.Add(time.Minute), Role: "user", Kind: proto.KindToolResult, ToolUseID: "other-call"})
+		}, false},
+		{"activity in the calling message", input, func() []proto.Item {
+			items := terminalPermissionItems(at, input)[:1]
+			return append(items, proto.Item{ID: "text#0", Seq: 11, TS: at.Add(-time.Millisecond), Role: "assistant", Kind: proto.KindText, Text: "Same message."})
+		}, false},
+		{"missing call timestamp", input, func() []proto.Item {
+			items := terminalPermissionItems(at, input)
+			items[0].TS = time.Time{}
+			return items
+		}, false},
+		{"missing input", nil, func() []proto.Item { return terminalPermissionItems(at, input) }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ix.ToolInput = tc.input
+			if got := planCallFinished(ix, tc.items()); got != tc.want {
+				t.Fatalf("finished = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTerminalPermissionWithoutIDClearsBuiltInDenial(t *testing.T) {
+	at := time.Now()
+	input := json.RawMessage(`{"command":"rm -f /tmp/persona-stale-permission-test/*"}`)
+	items := terminalPermissionItems(at, input)
+	ft := planFleet(t, false, func(int) ([]proto.Item, bool, error) { return items, false, nil })
+	s := ft.s
+	ix := proto.Interaction{ID: "builtin-denial", MachineID: "mac", SessionID: "session", Kind: proto.IxPermission,
+		ToolName: "Bash", ToolInput: input, CreatedAt: at, ExpiresAt: at.Add(time.Hour), Resumable: true}
+	p := &pending{ix: ix, done: make(chan proto.Resolution, 1), route: &askRoute{routedAt: at}}
+	putPending(s, p)
+	ft.d.setSessions("mac", []proto.Session{{MachineID: "mac", SessionID: "session", Status: proto.StatusWorking}})
+	s.checkPlanInteraction("mac", p)
+	if got := s.pendingInteractions(); len(got) != 0 {
+		t.Fatalf("built-in denial left the permission card pending: %+v", got)
+	}
+	select {
+	case r := <-p.done:
+		if !r.Dismiss || r.Allow != nil || r.Always {
+			t.Fatalf("runtime denial must only dismiss the obsolete card: %+v", r)
+		}
+	default:
+		t.Fatal("the permission hook stayed blocked")
+	}
+	rows := s.decorated("mac")
+	if len(rows) != 1 || rows[0].PendingInteractions != 0 || rows[0].State == proto.StateNeedsYou {
+		t.Fatalf("the completed session still needs the owner: %+v", rows)
+	}
+	before := len(ft.toldOf(assistantwire.EventFleetInteraction))
+	s.askTick(at.Add(askOwnerOnlyDeadline))
+	if got := len(ft.toldOf(assistantwire.EventFleetInteraction)); got != before {
+		t.Fatal("the obsolete card escalated after the runtime denied it")
+	}
+}
+
+func TestPermissionContinuedPastCallClearsCard(t *testing.T) {
+	for _, later := range []proto.Item{
+		{ID: "text#0", Seq: 11, Role: "assistant", Kind: proto.KindText, Text: "Continuing without that removal."},
+		{ID: "thinking#0", Seq: 11, Role: "assistant", Kind: proto.KindThinking, Text: "Trying another read-only approach."},
+		{ID: "call#1", Seq: 11, Role: "assistant", Kind: proto.KindToolUse, ToolName: "Read", ToolUseID: "read-call"},
+	} {
+		t.Run(later.Kind, func(t *testing.T) {
+			at := time.Now()
+			input := json.RawMessage(`{"command":"rm -f /tmp/persona-stale-permission-test/*"}`)
+			later.TS = at.Add(2 * time.Minute)
+			items := append(terminalPermissionItems(at, input)[:1], later)
+			if !planCallFinished(proto.Interaction{Kind: proto.IxPermission, ToolName: "Bash", ToolInput: input, CreatedAt: at}, items) {
+				t.Fatal("later session activity did not finish the obsolete permission call")
+			}
+			ft := planFleet(t, false, func(int) ([]proto.Item, bool, error) { return items, false, nil })
+			ix := proto.Interaction{ID: "continued-" + later.Kind, MachineID: "mac", SessionID: "session", Kind: proto.IxPermission,
+				ToolName: "Bash", ToolInput: input, CreatedAt: at, ExpiresAt: at.Add(time.Hour), Resumable: true}
+			p := &pending{ix: ix, done: make(chan proto.Resolution, 1)}
+			putPending(ft.s, p)
+			ft.s.checkPlanInteraction("mac", p)
+			if got := ft.s.pendingInteractions(); len(got) != 0 {
+				t.Fatalf("continued session left the permission card pending: %+v", got)
+			}
+			select {
+			case r := <-p.done:
+				if !r.Dismiss || r.Allow != nil || r.Always {
+					t.Fatalf("continued activity must not invent an approval: %+v", r)
+				}
+			default:
+				t.Fatal("the permission hook stayed blocked")
+			}
+		})
+	}
+}
+
+func TestTerminalPermissionWithoutIDKeepsWaitingCard(t *testing.T) {
+	at := time.Now()
+	input := json.RawMessage(`{"command":"rm -f /tmp/persona-stale-permission-test/*"}`)
+	items := terminalPermissionItems(at, input)[:1]
+	ft := planFleet(t, false, func(int) ([]proto.Item, bool, error) { return items, false, nil })
+	ix := proto.Interaction{ID: "really-waiting", MachineID: "mac", SessionID: "session", Kind: proto.IxPermission,
+		ToolName: "Bash", ToolInput: input, CreatedAt: at, ExpiresAt: at.Add(time.Hour), Resumable: true}
+	p := &pending{ix: ix, done: make(chan proto.Resolution, 1), route: &askRoute{routedAt: at}}
+	putPending(ft.s, p)
+	ft.s.checkPlanInteraction("mac", p)
+	if _, ok := ft.s.pendingIx(ix.ID); !ok {
+		t.Fatal("a permission call with no result or later activity was dismissed")
+	}
+	select {
+	case r := <-p.done:
+		t.Fatalf("a genuinely pending hook was released: %+v", r)
+	default:
+	}
+	before := len(ft.toldOf(assistantwire.EventFleetInteraction))
+	ft.s.askTick(at.Add(askOwnerOnlyDeadline))
+	if got := len(ft.toldOf(assistantwire.EventFleetInteraction)); got <= before {
+		t.Fatal("a genuinely waiting permission card did not escalate at its deadline")
 	}
 }
 

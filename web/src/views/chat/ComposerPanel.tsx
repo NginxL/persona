@@ -12,11 +12,11 @@ import { useSkillCatalog, type CatalogMemory } from "./useSkillCatalog";
 import { SkillDetail, SkillRow } from "./SkillRow";
 import { SkillCatalogStatus } from "./SkillCatalogStatus";
 import type { FsListing } from "../../lib/files";
-import { browseTarget, byPrefix, displayTitle, nameMatches, otherSessions, relPath, sessionDetail, workspaceDetail, workspaceMatches, workspaceTitle } from "../../lib/mentions";
-import { machineWithHub } from "../../lib/mesh";
+import { browseTarget, byPrefix, displayTitle, nameMatches, otherSessions, relPath, sessionDetail } from "../../lib/mentions";
+import type { RepositoryMentionRow } from "../../lib/mentions-repositories";
 import { modeTitle } from "../../lib/session-actions";
-import type { Machine, Session } from "../../lib/types";
-import type { Workspace, WorkspaceList } from "../../lib/workspace-board";
+import type { Session } from "../../lib/types";
+import type { Workspace } from "../../lib/workspace-board";
 import { useStore } from "../../lib/store";
 import { useCloseOnBack } from "../../lib/back-close";
 import { hasFinePointer, NARROW, useMedia } from "../../lib/viewport";
@@ -34,6 +34,8 @@ export interface MentionSource {
   files: () => string[];
   /** Offer the hub's workspaces (GET /workspaces): the Persona assistant, which works on any computer. */
   workspaces?: boolean;
+  /** Offer the assistant's bound repositories (GET /assistant/repositories); string names the manager for X-Persona-Manager. */
+  repositories?: string | boolean;
   /** Execution catalog. Ordinary Agents use session-owned facts; environment changes invalidate visible rows. */
   skills?: SkillSource;
 }
@@ -42,6 +44,7 @@ export type MentionRow =
   | { kind: "skill"; id: string; skill: MentionSkill }
   | { kind: "file"; id: string; name: string; detail: string; insert: string; dir: boolean }
   | { kind: "workspace"; id: string; name: string; detail: string; workspace: Workspace }
+  | RepositoryMentionRow
   | { kind: "session"; id: string; name: string; detail: string; session: Session };
 
 /** The panel's own rows: the box's file picker and the session's Plan mode. */
@@ -57,17 +60,20 @@ export interface ComposerPanelHandle {
 type Entry = { kind: "action"; action: PanelAction; label: string; icon: IconName; hint?: string; checked?: boolean } | { kind: "row"; row: MentionRow };
 
 const NO_SESSIONS: Record<string, Session[]> = {};
-const NO_MACHINES: Machine[] = [];
 const MAX_ROWS = 40;
 /** An empty query shows this many of each resource (cindy's EMPTY_QUERY_CONTEXT_SECTION_LIMIT); typing finds the rest. */
 const EMPTY_PER_GROUP = 3;
 
+export interface AssistantMentions {
+  rows: (query: string) => MentionRow[];
+  browsingRows?: (query: string) => MentionRow[];
+  loading: boolean;
+}
+
 /** The rows for what is typed; the folder listings come from the session's computer (`/fs`), read once per folder while
  *  the panel is open. */
-export function useMentionRows(query: string, source: MentionSource | undefined, machineId: string | undefined, skills?: MentionSkill[]): { rows: MentionRow[]; loading: boolean } {
+export function useMentionRows(query: string, source: MentionSource | undefined, machineId: string | undefined, skills?: MentionSkill[], assistant?: AssistantMentions): { rows: MentionRow[]; loading: boolean } {
   const sessions = useStore((s) => (source ? s.sessions : NO_SESSIONS));
-  const machines = useStore((s) => (source ? s.machines : NO_MACHINES));
-  const workspaces = useWorkspaces(Boolean(source?.workspaces));
   const cache = useRef(new Map<string, FsListing | null>());
   const [, setTick] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -106,7 +112,7 @@ export function useMentionRows(query: string, source: MentionSource | undefined,
     if (target) {
       const entries = (listing?.entries ?? []).filter((e) => nameMatches(e.name, target.filter));
       const ordered = [...byPrefix(entries.filter((e) => e.dir), (e) => e.name, target.filter), ...byPrefix(entries.filter((e) => !e.dir), (e) => e.name, target.filter)];
-      return ordered.slice(0, MAX_ROWS).map((e) => ({
+      const fileRows: MentionRow[] = ordered.slice(0, MAX_ROWS).map((e) => ({
         kind: "file",
         id: `fs:${target.typed}${e.name}`,
         name: e.dir ? `${e.name}/` : e.name,
@@ -114,6 +120,8 @@ export function useMentionRows(query: string, source: MentionSource | undefined,
         insert: `@${target.typed}${e.name}${e.dir ? "/" : " "}`,
         dir: e.dir,
       }));
+      const repoRows = assistant?.browsingRows ? assistant.browsingRows(query) : [];
+      return [...fileRows, ...repoRows].slice(0, MAX_ROWS);
     }
     const q = query.toLowerCase();
     const out: MentionRow[] = [];
@@ -129,11 +137,8 @@ export function useMentionRows(query: string, source: MentionSource | undefined,
     for (const e of [...byPrefix(top.filter((x) => x.dir), (x) => x.name, q), ...byPrefix(top.filter((x) => !x.dir), (x) => x.name, q)].slice(0, 12)) {
       out.push({ kind: "file", id: `top:${e.name}`, name: e.dir ? `${e.name}/` : e.name, detail: e.dir ? t("chat-composerpanel.folder") : t("chat-composerpanel.session_dir"), insert: `@${e.name}${e.dir ? "/" : " "}`, dir: e.dir });
     }
-    if (source.workspaces) {
-      const name = (id: string) => machineWithHub(id, machines);
-      for (const w of workspaceMatches(workspaces ?? [], q, name)) {
-        out.push({ kind: "workspace", id: `workspace:${w.id}`, name: workspaceTitle(w), detail: workspaceDetail(w, name), workspace: w });
-      }
+    if (assistant) {
+      out.push(...assistant.rows(query));
     }
     for (const s of otherSessions(Object.values(sessions).flat(), source.self, q)) {
       out.push({ kind: "session", id: `session:${s.machine_id}/${s.session_id}`, name: displayTitle(s), detail: sessionDetail(s), session: s });
@@ -142,25 +147,9 @@ export function useMentionRows(query: string, source: MentionSource | undefined,
     const matches: MentionRow[] = matchingSkills(skills ?? [], q).map(skill => ({ kind: "skill", id: `skill:${skill.id}`, skill }));
     return [...matches, ...(q.trim() ? out : firstOfEach(out)).slice(0, MAX_ROWS)];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, source, listing, sessions, cwd, files, workspaces, machines, skills]);
+  }, [query, source, listing, sessions, cwd, files, assistant, skills]);
 
-  return { rows, loading: Boolean((loading && !listing) || (source?.workspaces && workspaces === null)) };
-}
-
-/** The hub's workspaces, read once each time the panel opens (null while reading; empty when the hub can't say). */
-function useWorkspaces(on: boolean): Workspace[] | null {
-  const [list, setList] = useState<Workspace[] | null>(null);
-  useEffect(() => {
-    if (!on) return;
-    const ac = new AbortController();
-    api<WorkspaceList>("/workspaces", { signal: ac.signal })
-      .then((l) => setList(l.workspaces ?? []))
-      .catch(() => {
-        if (!ac.signal.aborted) setList((cur) => cur ?? []); // an old hub (404) or the manager away (503): no workspace rows
-      });
-    return () => ac.abort();
-  }, [on]);
-  return list;
+  return { rows, loading: Boolean((loading && !listing) || assistant?.loading) };
 }
 
 /** With an empty query, a few of each resource: the files used here, the folder's first entries, workspaces, sessions. */
@@ -185,6 +174,7 @@ export function ComposerPanel({
   onClose,
   handle,
   memory,
+  assistant,
 }: {
   /** "plus": opened from the + with its own search box; "at": a typed @, filtered by `query`. */
   from: "plus" | "at";
@@ -200,6 +190,7 @@ export function ComposerPanel({
   onClose: (refocus: boolean) => void;
   handle?: Ref<ComposerPanelHandle>;
   memory?: CatalogMemory;
+  assistant?: AssistantMentions;
 }) {
   const [search, setSearch] = useState("");
   const q = from === "plus" ? search : query;
@@ -208,7 +199,7 @@ export function ComposerPanel({
   const empty = !q.trim();
   const catalog = useSkillCatalog(source?.skills, machineId, source?.cwd, memory);
   const skillStatus = source?.skills ? catalog.status : undefined;
-  const { rows, loading } = useMentionRows(q, source, machineId, catalog.catalog?.skills);
+  const { rows, loading } = useMentionRows(q, source, machineId, catalog.catalog?.skills, assistant);
 
   const entries = useMemo<Entry[]>(() => {
     const actions: Extract<Entry, { kind: "action" }>[] = [];
@@ -282,7 +273,8 @@ export function ComposerPanel({
   const group = (e: Entry) => {
     if (e.kind === "action") return t("chat-composerpanel.add");
     return t(({ skill: "chat-composerpanel.skills", file: "chat-composerpanel.files",
-      session: "chat-composerpanel.sessions", workspace: "chat-composerpanel.workspaces" } as const)[e.row.kind]);
+      session: "chat-composerpanel.sessions", workspace: "chat-composerpanel.workspaces",
+      repository: "chat-composerpanel.repositories" } as const)[e.row.kind]);
   };
   const row = (e: Entry, common: PickerButton) => {
     if (e.kind === "action") {
@@ -298,7 +290,7 @@ export function ComposerPanel({
     if (r.kind === "skill") return <SkillRow skill={r.skill} common={common} />;
     return (
       <button key={r.id} {...common} title={r.detail ? `${r.name} · ${r.detail}` : r.name} className="relative flex h-9 w-full items-center gap-2 rounded-control px-2.5 text-left text-sm text-ink [@media(pointer:coarse)]:h-11">
-        <Icon name={r.kind === "session" ? "chat" : r.kind === "workspace" || r.dir ? "folder" : "file"} size={16} className="shrink-0 text-ink-3" />
+        <Icon name={r.kind === "session" ? "chat" : r.kind === "repository" ? "git" : r.kind === "workspace" || r.dir ? "folder" : "file"} size={16} className="shrink-0 text-ink-3" />
         <span className="min-w-0 truncate">{r.name}</span>
         {r.detail && <span className="ml-auto max-w-[min(240px,50%)] shrink-0 truncate pl-2 text-[12px] text-ink-3">{r.detail}</span>}
       </button>

@@ -23,8 +23,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import persona.core.contracts.Machine
 import persona.core.contracts.PaseoAgent
+import persona.core.contracts.TraeCliDisplayName
 import persona.core.contracts.api.AgentLauncher
 import persona.core.contracts.api.PickerTier
+import persona.core.contracts.isTraeCliId
 import persona.core.designsystem.*
 import persona.core.designsystem.dense
 import persona.feature.chat.UltracodeQuotaLines
@@ -473,7 +475,12 @@ internal fun startable(state: NewAgentState, machines: List<Machine>): Boolean =
         machines.any { it.id == state.machineId && it.online } &&
         (!state.promptRequired || state.prompt.isNotBlank() || usableForward(state.context) != null) && state.attachmentsHold == null
 
-internal fun String.agentLabel() = when (this) { "claude" -> "Claude Code"; "codex" -> "Codex"; "traex" -> "TRAEX"; else -> this }
+internal fun String.agentLabel() = when {
+    this == "claude" -> "Claude Code"
+    this == "codex" -> "Codex"
+    isTraeCliId(this) -> TraeCliDisplayName
+    else -> this
+}
 
 /**
  * What the "Agent type" list calls a launcher's agent type ([agentLabel]): Paseo's providers other than Claude Code and

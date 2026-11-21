@@ -33,6 +33,7 @@ struct WorkspaceNavigationTests {
         #expect(!w.contains(try session(kind: "herdr"), catalog: [w]))
         #expect(!w.contains(try session(kind: "tern"), catalog: [w]), "a Tern session is placed by Tern, not by its directory")
         #expect(!w.contains(try session(kind: "cindy"), catalog: [w]))
+        #expect(!w.contains(try session(kind: "t3code"), catalog: [w]))
     }
 
     @Test func explicitWorkspaceIdentityWinsOverItsDirectory() throws {

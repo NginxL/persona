@@ -42,6 +42,8 @@ data class ChatChromeBindings(
     val renamer: SessionRenamer? = null,
     /** Read-only access to the session's machine: the photos sent with messages (`<attached_images>`) load from it. */
     val files: SessionFiles? = null,
+    /** The hub group identity for scoping local machine-file caches across multi-hub sessions. */
+    val hubScope: String = "",
     /** Opens the session's machine's ports on the phone (docs/operations/ports.md); null: port links open as plain pages. */
     val ports: persona.core.contracts.api.PortOpener? = null,
     /**

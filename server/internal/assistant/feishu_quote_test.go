@@ -92,6 +92,88 @@ func TestFeishuQuotedPictureGoneStillSends(t *testing.T) {
 	}
 }
 
+// A quote reply to a notify_user copy returns to the conversation that made the notification and carries the copied
+// card's identity and text. Two nearby notices make a default-conversation fallback visible.
+func TestFeishuQuoteReplyToOwnNotificationKeepsSourceAndQuote(t *testing.T) {
+	e := newThreadEnv(t, nil)
+	e.features.Pushes = true
+	e.s.setBotCurrent(botTarget{Kind: targetPersona, MachineID: "server", SessionID: "m1"})
+	ids := []string{"om_notice_main", "om_notice_work"}
+	e.f.answerApp(AppFeishu, FeishuPost, func(json.RawMessage) (any, error) {
+		if len(ids) == 0 {
+			return nil, errors.New("unexpected extra notification card")
+		}
+		id := ids[0]
+		ids = ids[1:]
+		return map[string]any{"message_id": id}, nil
+	})
+	if err := e.s.feishuPushTold(context.Background(), "server", "m1", "First notification", "First original body", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.feishuPushTold(context.Background(), "server", "c1x1x1", "Second notification", "Second original body", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	target := e.s.botTargetFor("", "om_notice_work")
+	if target.Kind != targetPersona || target.MachineID != "server" || target.SessionID != "c1x1x1" {
+		t.Fatalf("notification reply target %+v", target)
+	}
+	e.f.answerApp(AppFeishu, FeishuMessages, func(json.RawMessage) (any, error) {
+		return map[string]any{"items": []map[string]any{{
+			"message_id": "om_notice_work", "msg_type": "interactive", "sender": map[string]any{"sender_type": "app"},
+			"body": map[string]any{"content": `{"schema":"2.0","header":{"title":{"tag":"plain_text","content":"Second notification"}},"body":{"elements":[{"tag":"markdown","content":"Second original body"}]}}`},
+		}}}, nil
+	})
+	ev := privateEvent("om_notice_answer", "Which notice is this?")
+	ev.Message.ParentID, ev.Message.RootID = "om_notice_work", "om_notice_work"
+	e.deliver(ev)
+	h := onlyHandoff(t, e.f)
+	if h.machine != "server" || h.session != "c1x1x1" {
+		t.Fatalf("reply went to %+v", h)
+	}
+	for _, want := range []string{"om_notice_work", "Second notification", "Second original body", "Which notice is this?"} {
+		if !strings.Contains(h.text, want) {
+			t.Errorf("reply lacks %q:\n%s", want, h.text)
+		}
+	}
+}
+
+// An ordinary private reply does not read or invent a quote.
+func TestFeishuPlainPrivateReplySkipsQuoteLookup(t *testing.T) {
+	e := newThreadEnv(t, nil)
+	e.deliver(privateEvent("om_plain", "Plain private words"))
+	h := onlyHandoff(t, e.f)
+	if h.machine != "server" || h.session != "m1" || !strings.Contains(h.text, "Plain private words") || strings.Contains(h.text, "引用的消息") {
+		t.Fatalf("plain reply changed: %+v", h)
+	}
+	if got := e.f.appParams(AppFeishu, FeishuMessages); len(got) != 0 {
+		t.Fatalf("plain reply read a quote: %v", got)
+	}
+}
+
+// An unknown source keeps the existing current-conversation fallback, but the quoted message still has its ID.
+func TestFeishuQuoteReplyUnknownSourceKeepsFallbackAndQuoteID(t *testing.T) {
+	e := newThreadEnv(t, nil)
+	e.s.setBotCurrent(botTarget{Kind: targetPersona, MachineID: "server", SessionID: "c1x1x1"})
+	e.f.answerApp(AppFeishu, FeishuMessages, func(json.RawMessage) (any, error) {
+		return map[string]any{"items": []map[string]any{{
+			"message_id": "om_unknown", "msg_type": "text", "sender": map[string]any{"id": "ou_a", "sender_type": "user"},
+			"body": map[string]any{"content": `{"text":"Original external words"}`},
+		}}}, nil
+	})
+	ev := privateEvent("om_unknown_answer", "Answer the quote")
+	ev.Message.ParentID, ev.Message.RootID = "om_unknown", "om_unknown"
+	e.deliver(ev)
+	h := onlyHandoff(t, e.f)
+	if h.machine != "server" || h.session != "c1x1x1" {
+		t.Fatalf("reply went to %+v", h)
+	}
+	for _, want := range []string{"om_unknown", "Original external words", "Answer the quote"} {
+		if !strings.Contains(h.text, want) {
+			t.Errorf("reply lacks %q:\n%s", want, h.text)
+		}
+	}
+}
+
 // A quoted or forwarded message read back carries its own mentions: an @ in it reaches the model as the person's name,
 // not as the message's @_user_N key.
 func TestFeishuQuoteAndForwardNameTheirMentions(t *testing.T) {

@@ -1,4 +1,4 @@
-Name a direction (a leader conversation, one of assistant.leaders, current or ended): main conversation only. The name is what the app and the work-log extension show for the direction, so make it short and plain, the way the user calls that line of work (「Persona 产品」「基建」), never a conversation title with a date or kind in it. An empty name takes yours away: the direction then shows its knowledge-base project's name, else its conversation title without the date and kind. Whoever names it last, the user in the app or you, that name shows.
+Name a direction (a leader conversation, one of assistant.leaders, current or ended): main conversation only. The name is what the app and the work-log extension show for the direction, so make it short and plain, the way the user calls that line of work (「Persona 产品」「基建」), never a conversation title with a date or kind in it. An empty name takes yours away: the direction then shows its knowledge-base project's name, else its conversation title without the date and kind. Whoever names it last, the user in the app or you, that name shows.{{template "shared/mcp_language" .}}
 
 ```json
 {

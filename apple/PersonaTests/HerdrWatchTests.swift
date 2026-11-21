@@ -20,7 +20,9 @@ import Testing
         #expect(!HerdrWatch.watched(machine("a", engine: .herdrApp)))
         #expect(!HerdrWatch.watched(machine("a", engine: .orca)))
         #expect(!HerdrWatch.watched(machine("a", engine: .tern)), "Tern runs no herdr server")
+        #expect(!HerdrWatch.watched(machine("a", engine: .rex)), "Rex runs no herdr server")
         #expect(!HerdrWatch.watched(machine("a", engine: .cindy)))
+        #expect(!HerdrWatch.watched(machine("a", engine: .t3code)))
         #expect(!HerdrWatch.watched(machine("a", online: false)))
     }
 

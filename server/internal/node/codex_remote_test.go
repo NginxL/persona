@@ -172,11 +172,14 @@ func (f *remoteFixture) serve(w http.ResponseWriter, r *http.Request) {
 			result = map[string]any{"turn": map[string]any{"id": "turn-1"}}
 			fallthrough // its effort is the thread's from then on, as a settings update's
 		case "thread/settings/update":
-			if e, ok := p["effort"].(string); ok {
-				f.mu.Lock()
-				f.threadEffort = e
-				f.mu.Unlock()
+			f.mu.Lock()
+			if mod, ok := p["model"].(string); ok {
+				f.threadModel = mod
 			}
+			if e, ok := p["effort"].(string); ok {
+				f.threadEffort = e
+			}
+			f.mu.Unlock()
 		case "model/list":
 			if models != nil {
 				result = models

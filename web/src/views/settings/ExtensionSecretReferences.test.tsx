@@ -42,6 +42,7 @@ const vault = (): HubExtensionDetail => ({
   id: "onepassword", name: "1Password", kind: "process", status: "running", source: "installed", enabled: true,
   secret_users: [
     { kind: "extension", extension: "example-notes", extension_name: "Example notes", secret: "api_key", secret_title: "API key", reference: "op://Dev/Notes/credential" },
+    { kind: "extension", extension: "example-notes", extension_name: "Example notes", secret: "entry_work", secret_title: "Account key", entry_title: "Work", reference: "op://Dev/Notes/work" },
     { kind: "launcher", launcher: "gateway", launcher_name: "Gateway", machine: "box", reference: "op://Dev/Gateway/key" },
   ],
   handoff_rules: [{ id: "0123456789abcdef", reference: "op://Dev/GitHub/credential", launcher: "claude", machine: "box", by: "device:d1", at: "2026-11-12T08:00:00Z" }],
@@ -101,6 +102,8 @@ describe("a secret provider's page", () => {
     await open("onepassword");
     const users = host.querySelector("[data-secret-users]")!;
     expect(users.textContent).toContain("Example notes › API key");
+    expect(users.textContent).toContain("Example notes › Account key (Work)");
+    expect(users.textContent).toContain("Work · op://Dev/Notes/work");
     expect(users.textContent).toContain("MacBook 上「Gateway」的 Key");
     const rules = host.querySelector("[data-handoff-rules]")!;
     expect(rules.textContent).toContain("MacBook 上的「claude」");

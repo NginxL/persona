@@ -1,6 +1,7 @@
 import { api, ApiError, errorText } from "./api";
 import { t } from "../i18n";
 import { sameValue } from "./stable-lines";
+import { mergeStableRows, type StableRowOrder } from "./side-sessions";
 
 export const SESSIONS_LIST_FEATURE = "sessions_list";
 /** Asked for in the WebSocket URL: a `sessions_list` hint after a change also says the revision before it (`since`)
@@ -61,11 +62,16 @@ export interface ListCounts {
   background_waiting?: number;
   /** How many of `state.idle` are Just finished (#9751, `sessions_just_finished`); absent when none. */
   just_finished?: number;
+  /** How many of `state.needs_you` only wait on held non-interrupting cards (P1/P2) for push grading. */
+  held_needs?: number;
   revision: string;
 }
 export interface ListPage<T> {
   sessions: T[];
   remove: string[];
+  /** Delta rows created after the baseline, not existing rows that only changed or entered the filter. Current hubs
+   *  always send the array, including empty; an older hub omits it. */
+  added?: string[];
   has_more: boolean;
   next_cursor?: string;
   revision: string;
@@ -87,7 +93,14 @@ export interface ListSnapshot<T> {
   supported: boolean | null;
 }
 
+export interface SessionListPresentation<T> extends StableRowOrder<T> {
+  /** Keeps a side session under its loaded parent while the stable order is retained. */
+  parentOf?: (row: T) => string | undefined;
+}
+
 export interface SessionListOptions<T> {
+  /** Retains presented rows across transport refreshes and sorts admitted rows by current structural placement. */
+  presentation?: SessionListPresentation<T>;
   /** Side data refreshed with a coalesced list read, never once per raw hint. */
   onRefresh?: () => void;
   summary?: boolean;
@@ -108,7 +121,7 @@ export interface SessionListOptions<T> {
  *  the one it reaches, and the rows changed in between as `[machine_id, session_id]`. */
 export interface ListChangeHint { revision?: unknown; since?: unknown; changed?: unknown }
 
-type PreparedDelta<T> = { overlay: Map<string, T | null>; changes: Map<string, T | null>; revision: string; total: number };
+type PreparedDelta<T> = { overlay: Map<string, T | null>; changes: Map<string, T | null>; added?: Set<string>; revision: string; total: number };
 type Work = { generation: number; load: boolean; more: boolean; kind: "load" | "more" | null; promise?: Promise<void> };
 class Rebaseline extends Error {}
 
@@ -143,6 +156,12 @@ export class SessionList<T> {
   private pageCounts: () => boolean;
   private counted: boolean;
   private onRefresh?: () => void;
+  private presentation?: SessionListPresentation<T>;
+  private presented: readonly T[] = [];
+  // Remember admission after a filter exit removes the row. A later filter entrance is not a creation in the hub's
+  // `added` markers, but an identity already presented in this baseline belongs in the list again.
+  private admitted = new Set<string>();
+  private transport: T[] = [];
 
   constructor(
     private path: string,
@@ -153,6 +172,7 @@ export class SessionList<T> {
     options: SessionListOptions<T> = {},
   ) {
     this.onRefresh = options.onRefresh;
+    this.presentation = options.presentation;
     this.summary = options.summary ?? true;
     this.roots = options.roots ?? false;
     this.onDelta = options.onDelta;
@@ -165,6 +185,15 @@ export class SessionList<T> {
   isRoots(): boolean { return this.roots; }
   /** For a list over the same collection, e.g. a filtered copy of this one. */
   usesPageCounts(): boolean { return this.pageCounts(); }
+
+  /** Give an already shared root the same stable presentation as its filtered copies, without replacing its baseline. */
+  setPresentation(presentation: SessionListPresentation<T>): void {
+    if (this.presentation === presentation) return;
+    this.presentation = presentation;
+    if (!this.snapshot.loaded) return;
+    const rows = this.snapshot.supported === false ? this.complete(this.snapshot.rows) : this.visible();
+    this.publish({ rows });
+  }
 
   /** Changing projection invalidates its bound cursors, but preserves filters and does not start a read. */
   setSummary(value: boolean): void {
@@ -181,6 +210,8 @@ export class SessionList<T> {
   }
 
   getSnapshot = (): ListSnapshot<T> => this.snapshot;
+  /** The newest-first loaded prefix, before stable presentation retains or reorders rows. Activity windows read this. */
+  getTransportRows(): readonly T[] { return this.transport; }
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
@@ -266,6 +297,9 @@ export class SessionList<T> {
     this.frozen = new Map();
     this.overlay = new Map();
     this.prefixSize = PAGE_SIZE;
+    this.presented = [];
+    this.admitted = new Set();
+    this.transport = [];
     this.publish(this.empty());
   }
 
@@ -355,7 +389,7 @@ export class SessionList<T> {
     if (!this.current(generation)) return null;
     if (typeof response.has_more !== "boolean" || typeof response.revision !== "string" || typeof response.total !== "number" || !Array.isArray(response.remove)) {
       const rows = Array.isArray(response.sessions) ? response.sessions : [];
-      this.publish({ rows: this.stabilize(rows), loaded: true, supported: false, total: rows.length, hasMore: false });
+      this.publish({ rows: this.complete(rows), loaded: true, supported: false, total: rows.length, hasMore: false });
       return null;
     }
     if (!Array.isArray(response.sessions) || !response.revision || (response.has_more && !response.next_cursor)) {
@@ -419,13 +453,14 @@ export class SessionList<T> {
     this.cursor = page.has_more ? page.next_cursor : undefined;
     this.frozenRevision = page.revision;
     this.checkpoint = page.revision;
-    this.publish({ rows: this.visible(), loaded: true, supported: this.snapshot.supported !== false, total: page.total, hasMore: !!this.cursor });
+    this.publish({ rows: this.visible(true), loaded: true, supported: this.snapshot.supported !== false, total: page.total, hasMore: !!this.cursor });
   }
 
   private async readDelta(generation: number, withCounts = false): Promise<PreparedDelta<T> | null> {
     const since = this.checkpoint!;
     const overlay = new Map(this.overlay);
     const changes = new Map<string, T | null>();
+    let added: Set<string> | undefined = new Set();
     let cursor: string | undefined;
     let target = since;
     let first = true;
@@ -452,12 +487,16 @@ export class SessionList<T> {
         overlay.set(id, row);
         changes.set(id, row);
       }
+      // Current hubs send an array on every delta page, including an empty one. Absence is the older-hub capability
+      // gap, not an empty set: retain the legacy behavior and admit the delta's new transport identities.
+      if (Array.isArray(page.added)) for (const id of page.added) added?.add(this.removeIdentity(id));
+      else added = undefined;
       if (overlay.size > JOURNAL_LIMIT) throw new Rebaseline();
       cursor = page.has_more ? page.next_cursor : undefined;
       if (cursor && cursors.has(cursor)) throw new Error(t("paged-agents.repeated_cursor"));
       if (cursor) cursors.add(cursor);
     } while (cursor);
-    return { overlay, changes, revision: target, total };
+    return { overlay, changes, added, revision: target, total };
   }
 
   private commitDelta(generation: number, delta: PreparedDelta<T>): void {
@@ -465,7 +504,7 @@ export class SessionList<T> {
     if (!this.current(generation)) return;
     this.overlay = delta.overlay;
     this.checkpoint = delta.revision;
-    const rows = this.visible();
+    const rows = this.visible(false, delta.added);
     this.publish({ rows, total: delta.total, hasMore: !!this.cursor || this.candidateCount() > this.prefixSize });
     // Publishing may synchronously reset/switch the list through onRows or a subscriber.
     if (!this.current(generation) || !this.onDelta) return;
@@ -539,11 +578,28 @@ export class SessionList<T> {
 
   private candidateCount(): number { return this.candidates().size; }
 
-  private visible(): T[] {
-    return this.stabilize([...this.candidates().values()].sort(this.compare).slice(0, this.prefixSize));
+  private visible(resetPresentation = false, added?: ReadonlySet<string>): T[] {
+    const candidates = this.candidates();
+    const transport = [...candidates.values()].sort(this.compare).slice(0, this.prefixSize);
+    this.transport = this.stabilize(transport);
+    if (!this.presentation) return this.transport;
+    if (resetPresentation) this.presented = [];
+    const admitted = added === undefined ? undefined : new Set([...added, ...this.admitted]);
+    this.presented = mergeStableRows(this.presented, transport, candidates, this.identity, this.presentation, this.presentation.parentOf, admitted);
+    for (const row of this.presented) this.admitted.add(this.identity(row));
+    return this.stabilize(this.presented);
   }
 
-  private stabilize(rows: T[]): T[] {
+  /** An older hub's complete, unpaginated answer has no transport window to retain. */
+  private complete(rows: T[]): T[] {
+    this.transport = this.stabilize(rows);
+    if (!this.presentation) return this.transport;
+    const candidates = new Map(rows.map((row) => [this.identity(row), row]));
+    this.presented = mergeStableRows([], rows, candidates, this.identity, this.presentation, this.presentation.parentOf);
+    return this.stabilize(this.presented);
+  }
+
+  private stabilize(rows: readonly T[]): T[] {
     const old = new Map(this.snapshot.rows.map((row) => [this.identity(row), row]));
     const next = rows.map((row) => {
       const had = old.get(this.identity(row));

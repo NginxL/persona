@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/nwverse/persona/server/internal/connector"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 )
 
@@ -56,7 +57,7 @@ func (w *inboxThings) Catalog(ctx context.Context) ([]connector.CatalogSource, e
 		sources = append(sources, connector.CatalogSource{ID: w.ID(), Name: w.Name(), Tools: []connector.CatalogTool{}})
 		at = len(sources) - 1
 	}
-	t := prompts.Tool("connector_inbox_things")
+	t := prompts.Tool("connector_inbox_things", string(i18n.From(ctx)))
 	sources[at].Tools = append(sources[at].Tools, connector.CatalogTool{Name: InboxThingsTool, Description: t.Description,
 		InputSchema: t.InputSchema, ReadOnly: true})
 	return sources, nil

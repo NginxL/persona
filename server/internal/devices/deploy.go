@@ -37,19 +37,10 @@ func isPersonaNodeBuild(bin string) bool {
 	return strings.HasPrefix(filepath.Base(bin), nodeproto.ProgramPersonaNode+"-")
 }
 
-// deviceNode says the node runs from the device's own file (bin/persona-node), whichever program that holds now (a hub
-// without a persona-node build of its version sends personad there): its updates go to that file, and bring
-// persona-node again once the hub has it.
+// deviceNode identifies a device's own executable path for SSH deployment, including paths that hold personad
+// from an earlier deployment.
 func deviceNode(info proto.NodeInfo) bool {
 	return info.Program == nodeproto.ProgramPersonaNode || (info.Executable != "" && update.IsDeviceFile(info.Executable))
-}
-
-// nodeProgram is the program to send a node: persona-node to one that runs from the device's own file.
-func nodeProgram(info proto.NodeInfo) string {
-	if deviceNode(info) {
-		return nodeproto.ProgramPersonaNode
-	}
-	return info.Program
 }
 
 // remoteTarget is the file an ssh deploy of bin replaces on the machine: the device's own file for a node that runs
@@ -183,7 +174,7 @@ func (m *Machine) startDeployOf(auto bool) (*deployRun, error) {
 	}
 	// The build for its platform and kind of program (packages.go): looked up afresh, a release's manifest at most.
 	lookup, cancel := context.WithTimeout(m.d.deployContext(), packageLookup)
-	pkg, err := m.d.nodePackageFor(lookup, info.OS, info.Arch, nodeProgram(info))
+	pkg, err := m.d.nodePackageFor(lookup, info.OS, info.Arch, info.Program)
 	cancel()
 	m.d.changed() // what the machine should run may be another build now
 	if err != nil {

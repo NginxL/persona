@@ -6,6 +6,8 @@ import { createContext } from "react";
 export interface ReplyPictures {
   text: string;
   ask: boolean;
+  mid?: string;
+  cwd?: string;
 }
 
 export const ReplyPicturesContext = createContext<ReplyPictures>({ text: "", ask: false });

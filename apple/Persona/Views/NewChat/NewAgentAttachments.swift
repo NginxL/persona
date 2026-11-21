@@ -16,15 +16,16 @@ nonisolated enum FirstMessage {
         return text.isEmpty && photos > 0 ? String(localized: "Please look at the image [Assistant View 5ad878]") : text
     }
 
-    /// What the attachments hold Start Chat back for, said under it in a line; nil: nothing. A Codex launcher takes none:
-    /// it starts with its first message as text (`codexRefusal` says what to do). Paths go only once the files are on
-    /// the computer.
-    static func hold(codex: Bool, attached: Bool, uploading: Bool) -> String? {
+    /// What the attachments hold Start Chat back for, said under it in a line; nil: nothing. A Codex or omp launcher
+    /// takes none: it starts with its first message as text (`codexRefusal` says what to do). Paths go only once the
+    /// files are on the computer.
+    static func hold(codex: Bool, omp: Bool = false, attached: Bool, uploading: Bool) -> String? {
         if codex && attached { return String(localized: "Codex takes no attachments") }
+        if omp && attached { return String(localized: "omp takes no attachments") }
         return uploading ? String(localized: "Waiting for the files to finish uploading") : nil
     }
 
-    /// Under the attachments a Codex launcher can't take: the web's words when it refuses such a start.
+    /// Under the attachments a Codex or omp launcher can't take: the web's words when it refuses such a start.
     static var codexRefusal: String {
         String(localized: "This launcher can't take attachments in the first message. Pick another launcher, or start with text and send the attachments in the session.")
     }

@@ -6,7 +6,7 @@ Read first with computer_state when unsure what is on screen, and again for a sc
 
 Never System Settings or macOS's permission and password prompts: a call that names one or would act in one is refused, and the user does that themselves on the Mac or through the live screen in the Persona app. Only they are off limits: with System Settings open, steps on other apps (by name or element token, keys to a named app) still run, but a point where System Settings is on top, keys with no app while it is in front, and scripts are refused, so prefer element tokens and steps then. Nothing runs while a permission or password prompt is on screen. Name every app a script touches with a literal `cua.getApp("…")` or `cua.launch("…")`; a script that names them otherwise, or names none, is refused. Steps naming no app run one at a time.
 
-On a machine whose computer-use backend is LCU, `script` is that runtime's JavaScript and `steps` are translated into it. Per-app, session, always, and site confirmations are asked on the phone or the web, on the same cards as other computer-use approvals. A refusal is the user's: do not retry or approve it yourself.
+On a machine whose computer-use backend is LCU, `script` is that runtime's JavaScript and `steps` are translated into it. Per-app, session, always, and site confirmations are asked on the phone or the web, on the same cards as other computer-use approvals. A refusal is the user's: do not retry or approve it yourself.{{template "shared/mcp_language" .}}
 
 ```json
 {

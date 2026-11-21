@@ -35,12 +35,24 @@ type layout struct {
 // the agents it gave last. A host that is not running (host.ErrNotRunning: herdr-core without its socket) answered: it
 // has no agents.
 func (n *Node) refreshHosts(ctx context.Context, only ...host.Host) error {
-	return n.refreshHostInventory(ctx, false, only...)
+	return n.refreshHostInventoryWithFailures(ctx, false, nil, only...)
+}
+
+// refreshHostsWithFailures refreshes only (or every host when empty) and reports which host kinds failed to answer.
+// host.ErrNotRunning counts as an answer (not a failure).
+func (n *Node) refreshHostsWithFailures(ctx context.Context, only ...host.Host) (map[string]bool, error) {
+	failed := map[string]bool{}
+	err := n.refreshHostInventoryWithFailures(ctx, false, failed, only...)
+	return failed, err
 }
 
 // refreshHostInventory retains the display's tolerant refresh by default. An
 // update evidence producer must request every host and reject cached fallbacks.
 func (n *Node) refreshHostInventory(ctx context.Context, strict bool, only ...host.Host) error {
+	return n.refreshHostInventoryWithFailures(ctx, strict, nil, only...)
+}
+
+func (n *Node) refreshHostInventoryWithFailures(ctx context.Context, strict bool, failed map[string]bool, only ...host.Host) error {
 	if n.sessionScope != nil {
 		if strict {
 			return errors.New("scoped node cannot attest complete host inventory")
@@ -118,6 +130,9 @@ func (n *Node) refreshHostInventory(ctx context.Context, strict bool, only ...ho
 		if o.err != nil {
 			if firstErr == nil {
 				firstErr = o.err
+			}
+			if failed != nil {
+				failed[o.kind] = true
 			}
 			o.agents = n.hostAgents[o.kind]
 		} else {
@@ -524,15 +539,20 @@ func (n *Node) setAgentsAt(agents []host.Agent, epoch uint64, heard map[string]b
 			id = named
 		} else if claimed {
 			id = "" // the title names another pane's thread: keeping the stale reported one would misroute this row
-		} else if _, match, ok := codexTitleName(a.Title); ok && (reported == "" ||
-			(!sub && threadTitle(home, id) != "" && !threadFormerlyNamed(home, id, match))) {
-			// An unrecognised current title must not reuse a stale pane binding either, nor a thread the host named
-			// that the index knows under another name (a /resume in Codex since). A reported thread the index has no
-			// name for is not contradicted by a name the index lacks, so the host's word stands: left out, the pane
-			// was listed nowhere and its thread only as its app-server's row, with no terminal (#7538). Nor is a
-			// reported subagent contradicted by its conversation's name, which is not the name of the thread reported,
-			// nor a renamed thread by the name the index gave it before (a rename on the app-server the title missed).
-			id = ""
+		} else if _, match, ok := codexTitleName(a.Title); ok {
+			moved := false
+			if reported == "" && bound != "" && n.state != nil {
+				if st, exists := n.state.get(bound); exists && st.Pane != "" && st.Pane != a.PaneID {
+					moved = true
+				}
+			}
+			if moved || (!sub && id != "" && threadTitle(home, id) != "" && !threadFormerlyNamed(home, id, match)) {
+				// A moved pane binding or a thread the index knows under another name must not be reused on an
+				// unrecognised title (a /resume or new thread in Codex since). An uncontradicted reported thread or
+				// pane binding whose title the index lacks stands: left out, a Persona-started pane whose host omits
+				// reported IDs was dropped completely and only listed as read-only codex_history (#7538, #12389).
+				id = ""
+			}
 		}
 		if id != "" {
 			id = n.codexPublicID(home, id)

@@ -25,7 +25,7 @@ class HerdrNoticeTest {
         assertFalse(stopped.herdrStopped(off.copy(known = false)))
         assertFalse(stopped.herdrStopped(null))
         assertFalse(stopped.herdrStopped(off.copy(running = true)))
-        for (engine in listOf("herdr-core", "orca", "tern", "paseo", "cindy", "future"))
+        for (engine in listOf("herdr-core", "orca", "tern", "rex", "paseo", "cindy", "t3code", "future"))
             assertFalse(engine, stopped.copy(engine = engine).herdrStopped(off))
     }
 

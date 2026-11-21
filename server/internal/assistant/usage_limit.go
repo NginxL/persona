@@ -11,8 +11,8 @@ import (
 // Subscription usage limits (docs/assistant/agent-work.md "Usage limits", #1710): a turn a subscription's 5-hour or
 // weekly limit refused is no failure to report and nothing for the user to fix. It waits for the reset; the CLI goes
 // on by itself when it said so (typing into it would cancel that), otherwise the manager continues it a minute or so
-// after the reset (agents_work_act.go). Only a subscription's limit has a reset time to wait for
-// (proto.Session.TurnErrorResetsAt): a gateway's or an API key's 429 is handled as before.
+// after the reset (agents_work_act.go). Gateway quota errors with an explicit UTC reset use the same wait.
+// Other gateway/API-key errors keep their existing handling.
 
 const (
 	// limitContinueAfter / limitContinueSpread: the manager continues a turn its usage limit stopped this long after
@@ -29,11 +29,15 @@ const (
 
 // decorateLimit completes what the session list says of a usage limit (sess decorated with its turn error): Claude
 // Code's own line for one counts as one when the node did not say (an older node, an older Claude Code), its reset
-// read off its words when they name a time zone. A kind the node gave stands: it read the record, and a gateway's 429
-// without quotaLimits is not a subscription's limit. Without a turn error, or for another kind, nothing of a limit is left.
+// read off its words when they name a time zone. Known gateway quota/capacity wording also completes older nodes
+// that did not classify it. A kind the node gave stands. Other kinds carry no usage-limit metadata.
 func decorateLimit(sess *proto.Session) {
-	if sess.TurnErrorKind == "" && transcript.UsageLimitText(sess.TurnError) {
-		sess.TurnErrorKind = proto.TurnErrorUsageLimit
+	if sess.TurnErrorKind == "" {
+		if kind, _ := transcript.GatewayErrorKind(sess.TurnError, sess.UpdatedAt); kind != "" {
+			sess.TurnErrorKind = kind
+		} else if transcript.UsageLimitText(sess.TurnError) {
+			sess.TurnErrorKind = proto.TurnErrorUsageLimit
+		}
 	}
 	if sess.TurnError == "" || sess.TurnErrorKind != proto.TurnErrorUsageLimit {
 		sess.TurnErrorResetsAt, sess.TurnErrorResumes, sess.TurnErrorAfterWork = nil, false, false

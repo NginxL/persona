@@ -1,4 +1,4 @@
-Read one GitHub pull request or issue: title, state, author, labels, the description, and for a pull request its branches, merge state, requested reviewers and reviews; then its comments, newest first (long texts are cut). Use github_diff for what a pull request changes and github_checks for its CI.
+Read one GitHub pull request or issue: title, state, author, labels, the description, and for a pull request its branches, merge state, requested reviewers and reviews; then its comments, newest first (long texts are cut). Use github_diff for what a pull request changes and github_checks for its CI.{{template "shared/mcp_language" .}}
 
 ```json
 {

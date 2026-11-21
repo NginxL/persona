@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/acceptloop"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -55,8 +56,12 @@ type RuntimeHost struct {
 	orca orcaBridgeState
 	// cindy runs the Cindy bridge while the machine's engine is Cindy (cindybridge.go).
 	cindy cindyBridgeState
+	// t3code runs the T3 Code bridge while the machine's engine is T3 Code (t3codebridge.go).
+	t3code t3codeBridgeState
 	// agy runs the Antigravity CLI companion when agy is installed and autoCompanions is enabled (agybridge.go).
-	agy            agyBridge
+	agy agyBridge
+	// opencode runs the opencode ACP companion when opencode is installed and autoCompanions is enabled (opencodebridge.go).
+	opencode       opencodeBridge
 	autoCompanions bool
 }
 
@@ -125,6 +130,7 @@ func (rh *RuntimeHost) Listen(ctx context.Context) error {
 	rh.startDaemons(ctx)
 	if rh.autoCompanions {
 		rh.setAgyBridge(true)
+		rh.setOpencodeBridge(true)
 	}
 	go func() {
 		t := time.NewTicker(15 * time.Second)
@@ -203,6 +209,9 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 		if id == agyRuntimeID {
 			rh.wakeAgyBridge()
 		}
+		if h.isOpencodeRuntime() {
+			rh.wakeOpencodeBridge()
+		}
 		rh.logger.Printf("runtime %s #%d left: %v", id, h.serial, err)
 	}
 	if n := rh.current(); n != nil {
@@ -215,8 +224,10 @@ func (rh *RuntimeHost) serveConn(ctx context.Context, c io.ReadWriteCloser, daem
 
 func (rh *RuntimeHost) registerRuntime(ctx context.Context, h *runtimeConn, hello runtimeHello) error {
 	var preempt func(*runtimeConn, runtimeHello) bool
+	isBuiltinAgy := false
 	if hello.Runtime == agyRuntimeID && !h.isDaemon() {
 		instance := rh.builtinAgyInstance()
+		isBuiltinAgy = instance != "" && hello.Instance == instance
 		if instance != "" && hello.Instance != instance {
 			if !rh.agy.takeover.TryLock() {
 				return &rpc.Error{Code: "runtime_conflict", Message: "another agy runtime is taking over"}
@@ -243,10 +254,49 @@ func (rh *RuntimeHost) registerRuntime(ctx context.Context, h *runtimeConn, hell
 			}
 		}
 	}
+	var yieldedOpencode *runtimeConn
+	if !h.isDaemon() && isOpencodeRuntimeHello(hello) {
+		instance := rh.builtinOpencodeInstance()
+		isBuiltinOpencode := hello.Runtime == opencodeRuntimeID && instance != "" && hello.Instance == instance
+		if instance != "" && !isBuiltinOpencode {
+			if !rh.opencode.takeover.TryLock() {
+				return &rpc.Error{Code: "runtime_conflict", Message: "another opencode runtime is taking over"}
+			}
+			defer rh.opencode.takeover.Unlock()
+			if builtin, external := rh.opencodePeers(instance); builtin != nil && !external {
+				builtin.peer.SuspendCalls()
+				defer builtin.peer.ResumeCalls()
+				grace := rh.opencode.yieldGrace
+				if grace == 0 {
+					grace = opencodeYieldGrace
+				}
+				drain, cancel := context.WithTimeout(ctx, grace)
+				builtin.waitAgyIdle(drain)
+				cancel()
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				yieldedOpencode = builtin
+			}
+			if hello.Runtime == opencodeRuntimeID {
+				preempt = func(old *runtimeConn, _ runtimeHello) bool {
+					old.mu.Lock()
+					defer old.mu.Unlock()
+					return old.hello.Instance == instance
+				}
+			}
+		}
+	}
 	stale, err := rh.reg.hello(h, hello, rh.reservedID, preempt)
 	if err != nil {
 		return err
 	}
+	if yieldedOpencode != nil && !slices.Contains(stale, yieldedOpencode) {
+		stale = append(stale, yieldedOpencode)
+	}
+	h.mu.Lock()
+	h.builtinAgy = isBuiltinAgy
+	h.mu.Unlock()
 	for _, old := range stale {
 		old.mu.Lock()
 		drop := old.drop
@@ -258,6 +308,9 @@ func (rh *RuntimeHost) registerRuntime(ctx context.Context, h *runtimeConn, hell
 	}
 	if hello.Runtime == agyRuntimeID {
 		rh.wakeAgyBridge()
+	}
+	if !h.isDaemon() && isOpencodeRuntimeHello(hello) {
+		rh.wakeOpencodeBridge()
 	}
 	return nil
 }
@@ -307,7 +360,7 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		// (runtimeworkspaces.go).
 		features := []string{"prefer_running", "resume_argv", "handover", "transcript", "launchers", "start_params", "modes", "resume", "codex_thread", "unlisted_transcripts", "workspaces", "usage"}
 		if !h.isDaemon() {
-			features = append(features, "leader_tools", "supervision_policy")
+			features = append(features, "usage_windows", "leader_tools", "supervision_policy", "a2a_mcp")
 			if hello.Caps.Assistant {
 				features = append(features, "assistant_pids")
 			}
@@ -320,6 +373,8 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		return res, nil
 	case "runtime.package":
 		return rh.servePackage(h, params)
+	case "runtime.a2a_mcp":
+		return rh.a2aMCPToken(h, params)
 	case "interaction.create":
 		n := rh.current()
 		if n == nil { // no hub to put it in front of the phone: ask again (same id) once one is connected
@@ -327,9 +382,6 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		}
 		return n.runtimeAsk(ctx, h, params)
 	case "mcp.tools":
-		if h.isDaemon() { // its link answers these itself; a daemon gets no phone or Persona tools
-			return nil, errUnsupportedForDaemons("Persona tools")
-		}
 		n := rh.current()
 		if n == nil || n.peer == nil {
 			return map[string]any{"tools": []proto.Tool{}}, nil
@@ -342,7 +394,7 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 			SessionID  string `json:"session_id"`
 		}
 		_ = json.Unmarshal(params, &p)
-		if p.SessionID != "" && !rh.reg.owns(h, p.SessionID) {
+		if p.SessionID != "" && !rh.reg.owns(h, p.SessionID) || h.isDaemon() && p.SessionID == "" {
 			return map[string]any{"tools": []proto.Tool{}}, nil
 		}
 		assistant := p.Assistant && h.assistant()
@@ -363,14 +415,14 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		if assistant && !p.LeaderOnly {
 			res.Tools = append(res.Tools, n.gateTools()...)
 		}
+		if h.isDaemon() {
+			res.Tools = slices.DeleteFunc(res.Tools, func(tool proto.Tool) bool { return !assistantwire.IsA2ATool(tool.Name) })
+		}
 		if res.Tools == nil {
 			res.Tools = []proto.Tool{}
 		}
 		return res, nil
 	case "mcp.call":
-		if h.isDaemon() {
-			return nil, errUnsupportedForDaemons("Persona tools")
-		}
 		n := rh.current()
 		if n == nil || n.peer == nil {
 			return proto.TextResult("Persona hub is not connected", true), nil
@@ -383,6 +435,9 @@ func (rh *RuntimeHost) request(ctx context.Context, h *runtimeConn, method strin
 		}
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, fmt.Errorf("bad mcp.call: %w", err)
+		}
+		if h.isDaemon() && !assistantwire.IsA2ATool(p.Name) {
+			return nil, errUnsupportedForDaemons("non-A2A tools")
 		}
 		// As the assistant only for one of the assistant's conversations that this runtime runs.
 		assistant := p.Assistant && h.assistant() && rh.reg.owns(h, p.SessionID) && n.isAssistantSession(p.SessionID)

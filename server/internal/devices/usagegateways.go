@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"slices"
 	"sort"
 	"strconv"
@@ -43,6 +44,9 @@ type UsageConfig struct {
 	// PollMinutes is how often each gateway is asked (default 5, at most a day).
 	PollMinutes int                 `json:"poll_minutes,omitempty"`
 	Sources     []UsageSourceConfig `json:"sources,omitempty"`
+	// HiddenProviders are providers ("codex", "claude"…) the usage bars leave out (#11753). Display only: nodes and
+	// gateways are still read and the scheduler's capacity view still counts them.
+	HiddenProviders []string `json:"hidden_providers,omitempty"`
 }
 
 // UsageSourceConfig is one gateway.
@@ -50,10 +54,15 @@ type UsageSourceConfig struct {
 	ID string `json:"id"`
 	// Name is what the sidebar calls the source ("Relay").
 	Name string `json:"name"`
-	// Type: relay | generic (usagesource; an older manager.json's earlier name of relay reads as relay).
+	// Type: relay | relay_key | generic | extension (usagesource; an older manager.json's earlier name of relay reads as relay).
 	Type string `json:"type"`
 	URL  string `json:"url"`
-	// Key is the gateway's management key (a secret: manager.json is 0600; no API answer or log ever has it).
+	// Extension and Launcher are for the extension type only (usagesource.TypeExtension): the extension that reads, by
+	// id, and the launcher whose gateway it reads. URL and Key stay empty; the launcher has both.
+	Extension string `json:"extension,omitempty"`
+	Launcher  string `json:"launcher,omitempty"`
+	// Key is the gateway's management key, for relay_key an ordinary API key of the gateway (a secret either way:
+	// manager.json is 0600; no API answer or log ever has it).
 	Key     string `json:"key,omitempty"`
 	Enabled *bool  `json:"enabled,omitempty"`
 }
@@ -84,7 +93,7 @@ func (c UsageConfig) interval() time.Duration {
 // fingerprint changes when what a source reads changes (its type, address or key): the samples of the old one are
 // not the new one's.
 func (s UsageSourceConfig) fingerprint() string {
-	sum := sha256.Sum256([]byte(s.Type + "\x00" + s.URL + "\x00" + s.Key))
+	sum := sha256.Sum256([]byte(s.Type + "\x00" + s.URL + "\x00" + s.Key + "\x00" + s.Extension + "\x00" + s.Launcher))
 	return hex.EncodeToString(sum[:8])
 }
 
@@ -111,6 +120,8 @@ type usageGateways struct {
 	wake  chan struct{}
 	// fetch reads one source (usagesource.Fetch; tests put their own).
 	fetch func(ctx context.Context, cfg usagesource.Config, now time.Time) (usagesource.Result, error)
+	// fetchExtension reads one extension source (Options.UsageExtension; nil: none can be read here).
+	fetchExtension func(ctx context.Context, extension, launcher string) (json.RawMessage, error)
 	// changed is called when the answers changed (the merged list is stale).
 	changed func()
 	logf    func(string, ...any)
@@ -137,6 +148,7 @@ func (g *usageGateways) setConfig(cfg UsageConfig) {
 
 func (g *usageGateways) setLocked(cfg UsageConfig) {
 	cfg.Sources = slices.Clone(cfg.Sources)
+	cfg.HiddenProviders = slices.Clone(cfg.HiddenProviders)
 	g.cfg = cfg
 	if g.state == nil {
 		g.state = map[string]*gatewayState{}
@@ -160,6 +172,7 @@ func (g *usageGateways) config() UsageConfig {
 	defer g.mu.Unlock()
 	c := g.cfg
 	c.Sources = slices.Clone(c.Sources)
+	c.HiddenProviders = slices.Clone(c.HiddenProviders)
 	return c
 }
 
@@ -240,7 +253,13 @@ func (g *usageGateways) read(ctx context.Context, s UsageSourceConfig, now time.
 	if fetch == nil {
 		fetch = usagesource.Fetch
 	}
-	res, err := fetch(c, usagesource.Config{Type: s.Type, URL: s.URL, Key: s.Key}, now)
+	var res usagesource.Result
+	var err error
+	if s.Type == usagesource.TypeExtension {
+		res, err = g.readExtension(c, s, now)
+	} else {
+		res, err = fetch(c, usagesource.Config{Type: s.Type, URL: s.URL, Key: s.Key}, now)
+	}
 	g.mu.Lock()
 	st := g.state[s.ID]
 	if st == nil || st.fingerprint != s.fingerprint() { // edited or removed while it was being read
@@ -269,6 +288,25 @@ func (g *usageGateways) read(ctx context.Context, s UsageSourceConfig, now time.
 	}
 }
 
+// readExtension asks the extension of an extension source (usage.query): its answer is checked and cut to size
+// (usagesource.FromExtension). The extension's own errors are not kept: only that it failed.
+func (g *usageGateways) readExtension(ctx context.Context, s UsageSourceConfig, now time.Time) (usagesource.Result, error) {
+	g.mu.Lock()
+	ask := g.fetchExtension
+	g.mu.Unlock()
+	if ask == nil || s.Extension == "" || s.Launcher == "" {
+		return usagesource.Result{}, &usagesource.Error{Code: usagesource.CodeBadConfig}
+	}
+	raw, err := ask(ctx, s.Extension, s.Launcher)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return usagesource.Result{}, &usagesource.Error{Code: usagesource.CodeTimeout}
+		}
+		return usagesource.Result{}, &usagesource.Error{Code: usagesource.CodeUnreachable}
+	}
+	return usagesource.FromExtension(raw, now)
+}
+
 // accounts are the samples of every source that is on, as the sidebar's merge takes them: named after their source,
 // with the gateway's account id (qualified by the source) as their identity. A source whose last read failed still
 // gives its last answer, marked as such.
@@ -290,7 +328,9 @@ func (g *usageGateways) accounts(now time.Time) []proto.UsageAccount {
 			}
 			a.Windows = slices.Clone(a.Windows)
 			a.Sources = []string{s.Name}
-			if a.Ref != "" {
+			if a.Pass { // an extension's row: its own, never merged; the id says which source and which row
+				a.Ref, a.Origin = "", s.ID+"#"+strconv.Itoa(n)
+			} else if a.Ref != "" {
 				a.Ref = s.ID + ":" + a.Ref
 				a.Origin = a.Ref
 			} else {

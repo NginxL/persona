@@ -1,4 +1,4 @@
-Save one attachment of a message (a PDF, CSV, xlsx, zip…) as a file on this computer, the one you run on, and return its path. The id is the one mail_read lists after the attachment. Files go under the Persona data directory's attachments/mail folder, in the subfolder dir if given; an existing file is never overwritten (the new one gets a numbered name). At most 25 MB. Does not mark the message as read. Read, unzip or move the saved file with your own tools afterwards.
+Save one attachment of a message (a PDF, CSV, xlsx, zip…) as a file on this computer, the one you run on, and return its path. The id is the one mail_read lists after the attachment. Files go under the Persona data directory's attachments/mail folder, in the subfolder dir if given; an existing file is never overwritten (the new one gets a numbered name). At most 25 MB. Does not mark the message as read. Read, unzip or move the saved file with your own tools afterwards.{{template "shared/mcp_language" .}}
 
 ```json
 {

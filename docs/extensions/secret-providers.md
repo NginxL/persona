@@ -2,7 +2,7 @@
 
 An extension can supply the values of secret **references** such as `op://vault/item/field`, so a secret Persona needs comes from the user's password manager when it is used instead of being pasted into Settings. The first provider is the 1Password extension in the public extensions repository. Design and decisions: #3962.
 
-This page describes what is built so far: the extension point, the manager's calls to the provider, the record of each use, and references in an extension's secrets. Launcher and model provider keys and the phone-approved hand-off of a value to one Agent run follow in their own steps of #3962.
+This page describes the extension point, the manager's calls to the provider, the record of each use, references in extension and model-provider settings, and the phone-approved hand-off of a value to one Agent run.
 
 ## The contribution
 
@@ -47,6 +47,7 @@ Code: `server/internal/extension/secret_refs.go`, `server/internal/extmgr/secret
 - **Resolved** each time the manager hands the extension its secrets: just before `initialize` (or into `PERSONA_EXTENSION_SECRETS` for a program without the protocol), for its programs on computers (the names `node.secrets` sends), and for a settings check, which checks the value the reference stands for. The extension gets the value as if it had been typed in; nothing changes for it. A reference that does not resolve fails the whole hand-over: the program does not start with a secret missing or a reference in its place, and its error says why in the provider's words.
 - **Its provider off**: the extension is `needs_setup` ("Secret “Key”: no extension that is on supplies op:// references"). Switching a provider on, off, upgrading or removing it applies again every extension that holds one of its references (not a dependency: the provider can still be switched off without a cascade).
 - **Details**: the secret answers `set: true`, no `hint`, and `reference: {provider, provider_name, reference, title}`, where `title` is what `secrets.describe` says the reference names (waited for at most 2 seconds; the reference itself otherwise). The apps show **From 1Password: op://…** with the title under it. A provider's details answer `secret_users: [{kind: "extension", extension, extension_name, secret, secret_title, reference}]`: every installed extension's secret that holds one of its references, so the user sees what each standing approval covers.
+- **Entry-list secrets** (#9504): a saved entry's reserved `_id` is the flat secret name in these same routes and sealed rows. Value and reference writes follow the same rules, and provider “used by” rows add a nonempty `entry_title`: the live entry's display title, or its localized numbered fallback when every text field is empty. Web includes that title in both the label and a wrapping hint so large text does not hide which standing approval it is. Opted-in details add `list` and `entry_title` to the secret view. Removing the entry, or changing its configured network target, deletes the value or reference and its standing approval atomically with configuration; an orphaned dynamic row is never resolved or delivered. These secrets stay in their entry editor rather than appearing again as fixed secrets, and cannot be named by `node.secrets`.
 
 ## Launcher keys
 
@@ -153,9 +154,9 @@ an existing chat, a page's selection used as context or for an AI edit, another 
 decisions. Only a workspace mention the manager resolves is theirs: at the start of the message, every `kind` it names is
 `workspace` and its computer and folder are known, so the manager writes the block anew and the app's words in it never reach
 the model. What Siri, Shortcuts
-or another App Intent ("Ask Persona", which runs on a locked phone too), the iPhone's share sheet or a card's button (the Today
+or another App Intent ("Ask Persona", which runs on a locked phone too), the iPhone's or Android's share sheet or a card's button (the Today
 card's Prep, with a calendar event's title in it) sends is marked `via` and never counts either; a notification's reply, which
-needs the phone unlocked, does. Android does not mark its share sheet yet, so what it shares counts as typed. A line counts only when it holds those words (the node ties an id to a line by its first words), and the
+needs the phone unlocked, does. A line counts only when it holds those words (the node ties an id to a line by its first words), and the
 transcript's window must open with the turn's prompt. An id counts once: for the first line it is read on, never for another
 line that carries it; a send the hub did not vouch for that carries it, or a second vouched send of it with other words, voids
 it. A `client_msg_id` alone proves nothing (channels, the inbox, extensions and Persona's own sends carry one too, and the hub
@@ -222,15 +223,22 @@ holds every answer to it before it reaches the manager:
   settings that hold its references) and **Always for Agents** (its rules, each removed after a confirm).
 - **iPhone** (`apple/Persona/Views/Interactions/SecretHandoffForm.swift`, `apple/Persona/Views/Settings/ExtensionsViews.swift`):
   the same card, extension secrets and provider page, an Always rule removed after a confirm.
-- **Model provider keys**, in both apps (`web/src/views/settings/ProviderFields.tsx` `KeyField`,
-  `apple/Persona/Views/Settings/ProviderKeyField.swift`): where the hub has
+- **Model provider keys**, in every app (`web/src/views/settings/ProviderFields.tsx` `KeyField`,
+  `apple/Persona/Views/Settings/ProviderKeyField.swift`, Android `feature/settings/ProviderKeyField.kt`): where the hub has
   `launcher_secret_references`, a provider's key, a preset's key and each computer's own key offer **Use a reference**; a
   stored reference opens with it on and says **From <provider>** with its item, as the provider's page does. A reference
   is never sent to the connection test or the model list, which would hand its value to the address in the request: while
   one is typed, both wait for the save (a stored one is probed by the provider's name, as a stored key is), and a preset's
   key given as a reference skips its key test and is checked when it is saved.
-
-## What comes next (#3962)
-
-Android's part is #3986, which lists the interfaces it needs; until then an Android phone shows the card as the hub sends
-it and cannot approve it.
+- **Android** (`feature/chat/SecretHandoffSummary.kt`, `feature/settings/ExtensionsScreen.kt`): the same full hand-off card
+  in a conversation and the Agents request sheet, with no approval action on its notification or ongoing status. Any
+  unreadable variable invalidates the whole approval instead of being hidden while the remaining variables stay
+  approvable. The two settings gates also require an enabled, compatible extension whose `secret_providers`
+  contribution is enabled, checked for the assistant whose page is open; a stopped provider still counts, while
+  unreadable provider metadata fails closed. A saved reference stays readable when that gate later closes. Editors are
+  locked during the fresh save-time capability check so a newer draft cannot be mistaken for the request that was sent. Provider details list **Used by** and **Always for Agents**, with rule removal behind a confirmation.
+  `ShareQueue` marks new and existing-chat sends `via: "share"`, and the Today-card message uses `via: "card"`; both the
+  first conversation creation and its session-message POST carry the mark through the durable outbox and retries. Ordinary
+  typed messages and notification replies carry none. Android currently has no direct voice-assistant, App Action or
+  shortcut caller that submits text without opening the composer; such a caller must use `via: "intent"`, while merely
+  opening the composer leaves the eventual typed message unmarked.

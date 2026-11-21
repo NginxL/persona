@@ -56,7 +56,7 @@ func TestFailedStartWakesTheMainConversationAtOnce(t *testing.T) {
 	}
 }
 
-// Only a failed start skips the gap; every other signal still waits it out.
+// Failed starts and other decision-bearing signals skip the shared gap.
 func TestDigestWaitFailedStartIsImmediate(t *testing.T) {
 	now := time.Date(2026, 11, 13, 8, 51, 0, 0, time.UTC)
 	p := superviseTimings{gather: 15 * time.Second, every: 10 * time.Minute, urgent: 2 * time.Minute}
@@ -64,7 +64,7 @@ func TestDigestWaitFailedStartIsImmediate(t *testing.T) {
 	if got, ok := digestWait(now, last, []superviseSignal{{Kind: sigFailed, At: now}}, p); !ok || got != p.gather {
 		t.Fatalf("failed start waits %v, %v; want %v", got, ok, p.gather)
 	}
-	if got, _ := digestWait(now, last, []superviseSignal{{Kind: sigNeedsYou, At: now}}, p); got != p.urgent-36*time.Second {
-		t.Fatalf("needs-you waits %v; want the urgent gap", got)
+	if got, _ := digestWait(now, last, []superviseSignal{{Kind: sigNeedsYou, At: now}}, p); got != p.gather {
+		t.Fatalf("needs-you waits %v; want only the gather", got)
 	}
 }

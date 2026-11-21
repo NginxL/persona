@@ -3,6 +3,7 @@ package persona.feature.inbox
 import persona.core.contracts.api.ConnectionState
 import persona.core.contracts.api.LarkConversationTransport
 import persona.core.contracts.api.LarkInvalidation
+import persona.core.contracts.api.LarkMember
 import persona.core.contracts.api.ManagerPins
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -122,6 +123,11 @@ class LarkInboxRepository(
     }
     override suspend fun userProfile(userId: String, feedId: String?): JsonObject? {
         return transports.value?.userProfile(userId, feedId)
+    }
+    override suspend fun larkMembers(feedId: String, query: String, limit: Int): List<LarkMember> {
+        val transport = transport()
+        val source = LarkContentSource(transport, pinnedManager(feedId))
+        return parseLarkMembers(source.read { transport.larkMembers(feedId, query, limit) })
     }
     override suspend fun quickReactions(): List<String> {
         return transports.value?.quickReactions() ?: emptyList()

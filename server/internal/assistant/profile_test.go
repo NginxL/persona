@@ -211,7 +211,7 @@ func TestRecordingDaysKeepsLastGoodOnReadFailure(t *testing.T) {
 
 	// Never successfully read, and the read fails: there is no good value to keep.
 	expire()
-	st.failSetting = errors.New("database locked")
+	st.setFailSetting(errors.New("database locked"))
 	if _, ok := s.settingsLastGood(ctx); ok {
 		t.Fatal("never read + failure: want !ok")
 	}
@@ -220,10 +220,10 @@ func TestRecordingDaysKeepsLastGoodOnReadFailure(t *testing.T) {
 	}
 
 	// The user picked 365; a failure past the 5s freshness keeps serving 365 instead of falling back to 14.
-	st.failSetting = nil
+	st.setFailSetting(nil)
 	setSettings(t, s, func(v *Settings) { v.RecordingDays = days(365) })
 	expire()
-	st.failSetting = errors.New("database locked")
+	st.setFailSetting(errors.New("database locked"))
 	if v, ok := s.settingsLastGood(ctx); !ok || v.RecordingDays == nil || *v.RecordingDays != 365 {
 		t.Fatalf("failure with last-good: ok=%v days=%v", ok, v.RecordingDays)
 	}
@@ -237,7 +237,7 @@ func TestRecordingDaysKeepsLastGoodOnReadFailure(t *testing.T) {
 	}
 
 	// A successful refresh still picks up a value another hub wrote (the 5s freshness behaviour is unchanged).
-	st.failSetting = nil
+	st.setFailSetting(nil)
 	if err := st.PutSetting(ctx, settingsKey, Settings{RecordingDays: days(30)}); err != nil {
 		t.Fatal(err)
 	}
@@ -248,11 +248,11 @@ func TestRecordingDaysKeepsLastGoodOnReadFailure(t *testing.T) {
 
 	// Failing again serves the new last-good value (30); once the database recovers the read works again.
 	expire()
-	st.failSetting = errors.New("database busy")
+	st.setFailSetting(errors.New("database busy"))
 	if d := s.recordingDaysNow(); d != 30 {
 		t.Fatalf("failure after refresh: days=%d, want 30", d)
 	}
-	st.failSetting = nil
+	st.setFailSetting(nil)
 	expire()
 	if d := s.recordingDaysNow(); d != 30 {
 		t.Fatalf("recovered: days=%d, want 30", d)
@@ -422,7 +422,7 @@ func TestBoolSettingsSet(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		def  bool
-	}{{"main_tasks_quiet", true}, {"start_requested_tasks", true}, {"done_needs_delivery", false}, {"interject_background", false}, {"agent_tasks", false}, {"close_ended_terminals", false}, {"main_background_folded", true}, {"recent_task_chats", false}, {"inbox_signals", false}, {"main_supervises_own_tasks", false}} {
+	}{{"main_tasks_quiet", true}, {"start_requested_tasks", true}, {"interject_background", false}, {"agent_tasks", false}, {"task_lessons", false}, {"close_ended_terminals", false}, {"main_background_folded", true}, {"recent_task_chats", false}, {"inbox_signals", false}, {"main_supervises_own_tasks", false}} {
 		key := "assistant." + c.name
 		get := func() string { out, _ := tool(`{"action":"get","key":"` + key + `"}`); return out }
 		set := func(value string) (string, bool) {
@@ -445,6 +445,44 @@ func TestBoolSettingsSet(t *testing.T) {
 		go answer(true, card)
 		if out, _ := set(fmt.Sprint(!c.def)); !strings.HasPrefix(out, key+" is "+fmt.Sprint(!c.def)) || get() != fmt.Sprint(!c.def) {
 			t.Fatalf("%s approved: %s", key, out)
+		}
+	}
+	// Legacy assistant.done_needs_delivery aliases the 3-tier delivery_gate (true->live, false->off); from the default
+	// merged tier, setting false disables the gate to off instead of reporting unchanged.
+	{
+		const key = "assistant.done_needs_delivery"
+		get := func() string { out, _ := tool(`{"action":"get","key":"` + key + `"}`); return out }
+		set := func(value string) (string, bool) {
+			return tool(`{"action":"set","key":"` + key + `","value":` + value + `}`)
+		}
+		if out := get(); out != "false" {
+			t.Fatalf("%s default: %s", key, out)
+		}
+		if out, isErr := set(`"yes"`); !isErr || !strings.Contains(out, "true or false") {
+			t.Fatalf("%s set to a string: %s", key, out)
+		}
+		if out, isErr := set(`null`); !isErr || !strings.Contains(out, "true or false") || len(s.pendingQuestions()) != 0 || s.deliveryGate(ctx) != deliveryGateMerged {
+			t.Fatalf("%s set to null: err=%v out=%q pending=%d gate=%s", key, isErr, out, len(s.pendingQuestions()), s.deliveryGate(ctx))
+		}
+		mergedToOff := i18n.T(i18n.Default, "assistant-settings_tool.change_delivery_gate", i18n.Args{
+			"before": i18n.T(i18n.Default, "assistant-settings_tool.delivery_gate_merged"),
+			"after":  i18n.T(i18n.Default, "assistant-settings_tool.delivery_gate_off"),
+		})
+		go answer(true, mergedToOff)
+		if out, _ := set("false"); !strings.HasPrefix(out, key+" is false") || s.deliveryGate(ctx) != deliveryGateOff {
+			t.Fatalf("%s disable from merged: %s (gate=%s)", key, out, s.deliveryGate(ctx))
+		}
+		if out, isErr := set("false"); isErr || !strings.Contains(out, "没有变化") || len(s.pendingQuestions()) != 0 {
+			t.Fatalf("%s set to false while already off: %s", key, out)
+		}
+		card := i18n.T(i18n.Default, "assistant-settings_tool.change_done_needs_delivery", i18n.Args{"before": word[false], "after": word[true]})
+		go answer(false, card)
+		if out, _ := set("true"); !strings.Contains(out, "declined") || get() != "false" {
+			t.Fatalf("%s declined: %s", key, out)
+		}
+		go answer(true, card)
+		if out, _ := set("true"); !strings.HasPrefix(out, key+" is true") || get() != "true" || s.deliveryGate(ctx) != deliveryGateLive {
+			t.Fatalf("%s approved: %s (gate=%s)", key, out, s.deliveryGate(ctx))
 		}
 	}
 }

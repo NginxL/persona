@@ -85,40 +85,35 @@ func waitRecoverySend(t *testing.T, sent chan modelExecution) modelExecution {
 // The 23:20 regression: a safeguards refusal on the main conversation's configured model moves it to the next model,
 // and the move is recorded where every client reads it, with the configured model, the model now answering and why.
 // Before #7824 the node switched silently and the apps said no other model was used.
-func TestRecoverySwitchIsVisibleOnTheMainConversation(t *testing.T) {
+func TestProtectedConversationsNeverRecoverOnAnotherModel(t *testing.T) {
 	const id = "11111111-2222-3333-4444-555555555555"
-	n, sent := recoveryTestNode(t, id, true, false)
-	p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
-	n.procs[id] = p
-	if !n.recoverAssistantResult(p, true, "API Error: Opus 5.5's safeguards flagged this message") {
-		t.Fatal("the refusal was not recovered")
-	}
-	if e := waitRecoverySend(t, sent); e.Model != "fallback-model" {
-		t.Fatalf("recovery sent on %q", e.Model)
-	}
-	waitRecovery(t, "the marker", func() bool { return n.modelRecovery(id) != nil })
-	r := n.modelRecovery(id)
-	if r.From != "primary-model" || r.To != "fallback-model" || r.Reason != proto.ModelRecoveryReasonSafeguards || r.ChainExhausted {
-		t.Fatalf("marker %+v", r)
-	}
-	if len(r.Tried) < 2 || r.Tried[0] != "primary-model" || r.Tried[len(r.Tried)-1] != "fallback-model" {
-		t.Fatalf("tried %v", r.Tried)
-	}
-	// The session row carries it in the shape the shipped apps already draw as "switched to X".
-	s := proto.Session{SessionID: id}
-	n.decorateModelRecovery(&s)
-	f := s.ModelFallback
-	if f == nil || f.Subtype != "model_refusal_fallback" || f.OriginalModel != "primary-model" || f.FallbackModel != "fallback-model" ||
-		f.Category != proto.ModelRecoveryReasonSafeguards || f.Scope != "session" {
-		t.Fatalf("projected fallback %+v", f)
-	}
-	// Persisted with the session's record, so a node restart keeps it.
-	if st, _ := n.state.get(id); st.ModelRecovery == nil || st.ModelRecovery.To != "fallback-model" {
-		t.Fatalf("not persisted: %+v", st.ModelRecovery)
-	}
-	// It never changes the configured model.
-	if st, _ := n.state.get(id); st.Model != "primary-model" {
-		t.Fatalf("the configured model changed to %q", st.Model)
+	for _, role := range []struct {
+		name         string
+		main, leader bool
+	}{
+		{"main", true, false}, {"supervisor", false, true},
+	} {
+		for _, failure := range []string{
+			"API Error: 429 Too many requests",
+			"API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 23:59 UTC (in 32m)",
+			"API Error: safeguards flagged this message",
+			"API Error: 503 unavailable",
+		} {
+			t.Run(role.name+"/"+failure, func(t *testing.T) {
+				n, sent := recoveryTestNode(t, id, role.main, role.leader)
+				p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
+				n.procs[id] = p
+				// Exercise repeated failures, including the old exhausted same-model budget.
+				for attempt := 0; attempt < 3; attempt++ {
+					if n.recoverAssistantResult(p, true, failure, proto.TurnErrorTransient, assistantRecordKind) {
+						t.Fatal("protected failure entered automatic model recovery")
+					}
+				}
+				if p.model.Model != "primary-model" || n.modelRecovery(id) != nil || n.recoveries[id] != nil || len(sent) != 0 {
+					t.Fatal("protected failure changed model or queued an immediate retry")
+				}
+			})
+		}
 	}
 }
 
@@ -190,48 +185,13 @@ func TestModelRecoveryPersistenceSerializesConcurrentWriters(t *testing.T) {
 // → the very next request runs on Opus, not on the cheaper model for the rest of the hold window.
 func TestRecoveryReturnsToTheConfiguredModelOnTheNextRequest(t *testing.T) {
 	const id = "11111111-2222-3333-4444-555555555555"
-	n, sent := recoveryTestNode(t, id, true, false)
-	p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
-	n.procs[id] = p
-	if !n.recoverAssistantResult(p, true, "API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 23:59 UTC (in 32m)", "", assistantRecordKind) {
-		t.Fatal("the quota failure was not recovered")
-	}
-	// The gateway quota 429 gets one same-model try first (#3788), then the switch.
-	first := waitRecoverySend(t, sent)
-	if first.Model == "primary-model" {
-		p2 := &assistantProc{id: id, agent: "claude", launcher: "claude", model: first}
-		n.mu.Lock()
-		n.procs[id] = p2
-		n.mu.Unlock()
-		waitRecovery(t, "the first attempt to finish", func() bool {
-			n.mu.Lock()
-			defer n.mu.Unlock()
-			r := n.recoveries[id]
-			return r != nil && !r.running
-		})
-		if !n.recoverAssistantResult(p2, true, "API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 23:59 UTC (in 32m)", "", assistantRecordKind) {
-			t.Fatal("the second quota failure was not recovered")
-		}
-		first = waitRecoverySend(t, sent)
-	}
-	if first.Model != "fallback-model" {
-		t.Fatalf("switched to %q", first.Model)
-	}
-	waitRecovery(t, "the marker", func() bool { r := n.modelRecovery(id); return r != nil && r.To == "fallback-model" })
-	if r := n.modelRecovery(id); r.Reason != proto.ModelRecoveryReasonQuota || r.ResetsAt == nil {
-		t.Fatalf("quota marker %+v", r)
-	}
-
-	// The fallback answered: the hold starts, as before.
-	fp := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "fallback-model"}}
+	n, _ := recoveryTestNode(t, id, true, false)
+	// Compatibility coverage for a switch written by an older node.
+	n.recordRecoverySwitch(id, "claude", "primary-model", "", "fallback-model", proto.ModelRecoveryReasonQuota, nil, []string{"primary-model", "fallback-model"})
 	n.mu.Lock()
-	n.procs[id] = fp
+	n.holdFallback(id, "claude", modelExecution{Model: "primary-model"}, modelExecution{Model: "fallback-model"})
 	n.mu.Unlock()
-	n.clearAssistantRecovery(fp, true)
 	asked := modelExecution{Model: "primary-model"}
-	if got := n.heldFallback(id, "claude", asked); got.Model != "fallback-model" {
-		t.Fatalf("the hold did not start: %q", got.Model)
-	}
 
 	// While the configured model still fails its probe, the next request stays on the fallback.
 	var probes atomic.Int32
@@ -285,55 +245,13 @@ func TestDefaultModelRecoveryReturnsAfterProbe(t *testing.T) {
 			name = "literal-default"
 		}
 		t.Run(name, func(t *testing.T) {
-			n, sent := recoveryTestNode(t, id, true, false)
-			assistantRecoveryModels = func(context.Context, *Node, string) (proto.LauncherModels, error) {
-				return proto.LauncherModels{Models: []proto.AgentModel{
-					{ID: "default", Default: true}, // unresolved defaults rely on the first reply's concrete model
-					{ID: "fallback-model"}, {ID: "last-model"},
-				}}, nil
-			}
-			st, _ := n.state.get(id)
-			st.Model = requested
-			n.state.put(id, st)
-			p := &assistantProc{id: id, agent: "codex", launcher: "claude", model: modelExecution{Model: requested}}
-			n.procs[id] = p
-			const failure = "API Error: safeguards flagged"
-			if !n.recoverAssistantResult(p, true, failure, "", assistantRecordKind) {
-				t.Fatal("the first default-model failure was not recovered")
-			}
-			if first := waitRecoverySend(t, sent); first.Model != requested {
-				t.Fatalf("the same-default retry used %q, want %q", first.Model, requested)
-			}
-			waitRecovery(t, "the same-default attempt to finish", func() bool {
-				n.mu.Lock()
-				defer n.mu.Unlock()
-				r := n.recoveries[id]
-				return r != nil && !r.running
-			})
-			// The first failure emitted no message_start. Only the retry names the concrete default; the existing
-			// recovery chain must capture it now rather than staying unprobeable or reading a later fallback's name.
-			p.mu.Lock()
-			p.replyModel = "primary-model"
-			p.mu.Unlock()
-			if !n.recoverAssistantResult(p, true, failure, "", assistantRecordKind) {
-				t.Fatal("the second default-model failure was not recovered")
-			}
-			if next := waitRecoverySend(t, sent); next.Model != "fallback-model" {
-				t.Fatalf("the default-model recovery used %q", next.Model)
-			}
-			waitRecovery(t, "the default recovery marker", func() bool { return n.modelRecovery(id) != nil })
-			r := n.modelRecovery(id)
-			if r.From != requested || r.ProbeFrom != "primary-model" || r.To != "fallback-model" {
-				t.Fatalf("default marker %+v", r)
-			}
-			if st, _ := n.state.get(id); st.ModelRecovery == nil || st.ModelRecovery.From != requested || st.ModelRecovery.ProbeFrom != "primary-model" {
-				t.Fatalf("the default probe identity was not persisted: %+v", st.ModelRecovery)
-			}
-			fp := &assistantProc{id: id, agent: "codex", launcher: "claude", model: modelExecution{Model: "fallback-model"}}
+			n, _ := recoveryTestNode(t, id, true, false)
+			// A pre-upgrade default-model marker still has to render and return correctly.
+			n.recordRecoverySwitch(id, "claude", requested, "primary-model", "fallback-model", proto.ModelRecoveryReasonQuota, nil, []string{"primary-model", "fallback-model"})
 			n.mu.Lock()
-			n.procs[id] = fp
+			n.holdFallback(id, "claude", modelExecution{Model: requested}, modelExecution{Model: "fallback-model"})
 			n.mu.Unlock()
-			n.clearAssistantRecovery(fp, true)
+
 			var probed string
 			assistantModelProbe = func(_ context.Context, _ *Node, _, model string) bool {
 				probed = model
@@ -469,15 +387,22 @@ func TestRecoveryMarkerOnlyForMainAndLeaders(t *testing.T) {
 		n, sent := recoveryTestNode(t, id, c.isMain, c.follows)
 		p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
 		n.procs[id] = p
-		if !n.recoverAssistantResult(p, true, "API Error: Opus 5.5's safeguards flagged this message") {
-			t.Fatalf("%s: not recovered", c.name)
-		}
-		waitRecoverySend(t, sent)
-		n.mu.Lock()
-		done := n.recoveries[id].done
-		n.mu.Unlock()
-		if done != nil {
-			<-done // the recovery is over, with any marker it sets
+		if c.want {
+			// Legacy records remain visible even though new protected turns cannot switch.
+			n.recordRecoverySwitch(id, "claude", "primary-model", "", "fallback-model", proto.ModelRecoveryReasonSafeguards, nil, []string{"primary-model", "fallback-model"})
+		} else {
+			if !n.recoverAssistantResult(p, true, "API Error: safeguards flagged this message") {
+				t.Fatal("worker recovery was disabled")
+			}
+			if e := waitRecoverySend(t, sent); e.Model != "fallback-model" {
+				t.Fatalf("worker recovered on %q", e.Model)
+			}
+			n.mu.Lock()
+			done := n.recoveries[id].done
+			n.mu.Unlock()
+			if done != nil {
+				<-done
+			}
 		}
 		if got := n.modelRecovery(id) != nil; got != c.want {
 			t.Errorf("%s: marker %v, want %v", c.name, got, c.want)
@@ -489,33 +414,12 @@ func TestRecoveryMarkerOnlyForMainAndLeaders(t *testing.T) {
 // from it, and it is projected without a fallback model so the apps' fallback card does not claim a switch.
 func TestRecoveryChainExhausted(t *testing.T) {
 	const id = "11111111-2222-3333-4444-555555555555"
-	models := assistantRecoveryModels
-	n, sent := recoveryTestNode(t, id, true, false)
-	assistantRecoveryModels = func(context.Context, *Node, string) (proto.LauncherModels, error) {
-		return proto.LauncherModels{Models: []proto.AgentModel{{ID: "primary-model"}}}, nil // nothing to move to
-	}
-	t.Cleanup(func() { assistantRecoveryModels = models })
-	p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
-	n.procs[id] = p
-	const quota = "API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 23:59 UTC (in 32m)"
-	if !n.recoverAssistantResult(p, true, quota, "", assistantRecordKind) {
-		t.Fatal("not recovered")
-	}
-	if e := waitRecoverySend(t, sent); e.Model != "primary-model" {
-		t.Fatalf("same-model try on %q", e.Model)
-	}
-	waitRecovery(t, "the attempt to finish", func() bool {
-		n.mu.Lock()
-		defer n.mu.Unlock()
-		r := n.recoveries[id]
-		return r != nil && !r.running
-	})
-	if !n.recoverAssistantResult(p, true, quota, "", assistantRecordKind) {
-		t.Fatal("the second failure was not taken")
-	}
-	waitRecovery(t, "the exhausted marker", func() bool { r := n.modelRecovery(id); return r != nil && r.ChainExhausted })
+	n, _ := recoveryTestNode(t, id, true, false)
+	// Preserve the failure-card projection of records persisted before the no-switch policy.
+	reset := time.Now().Add(time.Hour)
+	n.recordRecoveryExhausted(id, proto.ModelRecoveryReasonQuota, &reset, []string{"primary-model"})
 	r := n.modelRecovery(id)
-	if r.Reason != proto.ModelRecoveryReasonQuota || r.ResetsAt == nil || r.ResetsAt.UTC().Format("15:04") != "23:59" {
+	if r.Reason != proto.ModelRecoveryReasonQuota || r.ResetsAt == nil || !r.ResetsAt.Equal(reset) {
 		t.Fatalf("exhausted marker %+v", r)
 	}
 	s := proto.Session{SessionID: id}
@@ -708,11 +612,8 @@ func TestRecoveryHoldExpiryKeepsStickyFallback(t *testing.T) {
 	from, launcher, sticky := n.recentFallback(id)
 	_, unavailableKept := n.unavailable[unavailableKey("claude", "primary-model")]
 	n.mu.Unlock()
-	if !sticky || launcher != "claude" || from.Model != "primary-model" {
-		t.Fatalf("natural expiry destroyed the sticky fallback: %+v %q %v", from, launcher, sticky)
-	}
-	if !unavailableKept {
-		t.Fatal("natural expiry cleared the configured model's unavailable record")
+	if sticky || unavailableKept {
+		t.Fatalf("protected send retained legacy fallback: %+v %q %v", from, launcher, sticky)
 	}
 	if n.recoverAssistantResult(p, true, "API Error: 429 Too many requests", "", assistantRecordKind) {
 		t.Fatal("throttling bypassed manager scheduling")
@@ -861,8 +762,8 @@ func TestRecoveryConfirmedReturnReleasesFallbackThroughAssistantSend(t *testing.
 			if unavailable {
 				t.Fatal("the confirmed return left the unavailable entry")
 			}
-			if tc.probe && probes.Load() == 0 {
-				t.Fatal("the probe case returned without checking the configured model")
+			if probes.Load() != 0 {
+				t.Fatal("a protected send probed before using its configured model")
 			}
 		})
 	}
@@ -892,10 +793,7 @@ func TestTaskExecutionSkipsConversationRecoveryAtRPCBoundary(t *testing.T) {
 				"session_id": id, "cwd": st.Cwd, "launcher": "claude", "model": "primary-model",
 				"text": "next request", "task_execution": strict, "follows_setting": true,
 			})
-			want := fallback
-			if strict {
-				want = primary
-			}
+			want := primary
 			if !errors.Is(err, want) {
 				t.Fatalf("wrong model reached: %v, want %v", err, want)
 			}
@@ -1010,5 +908,121 @@ func TestClearAssistantRecoveryAcceptsLauncherDefault(t *testing.T) {
 	}
 	if f == nil || f.from.Model != "" || f.to.Model != "" {
 		t.Fatalf("the default answer did not preserve its sticky hold: %+v", f)
+	}
+}
+
+// Role flags on a fresh execution protect it before the first session state write.
+func TestProtectedExecutionBeforeSessionState(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	for _, execution := range []modelExecution{
+		{Model: "primary-model", IsMain: true},
+		{Model: "primary-model", FollowsSetting: true},
+	} {
+		n, sent := recoveryTestNode(t, id, false, false)
+		p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: execution}
+		n.procs[id] = p
+		if n.recoverAssistantResult(p, true, "API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 23:59 UTC (in 32m)", proto.TurnErrorTransient, assistantRecordKind) || len(sent) != 0 {
+			t.Fatal("an unpersisted protected role entered quota fallback")
+		}
+	}
+}
+
+func TestQueuedProtectedRecoveryCannotSwitch(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	n, sent := recoveryTestNode(t, id, false, true)
+	execution := modelExecution{Model: "primary-model"}
+	p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: execution}
+	n.procs[id] = p
+	r := n.newAssistantRecovery(id, "claude", execution, execution.Model, execution.Model, "")
+	n.runAssistantRecovery(p, r, "claude", "", execution, execution.Model, false)
+	if p.model.Model != execution.Model || len(sent) != 0 || n.recoveries[id] != nil {
+		t.Fatal("a queued legacy recovery switched the protected model")
+	}
+}
+
+func TestProtectedClaudeQuotaClassificationRetainsResetWait(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	for _, protected := range []bool{false, true} {
+		for _, strict := range []bool{false, true} {
+			n, _ := recoveryTestNode(t, id, protected, false)
+			st, _ := n.state.get(id)
+			st.TaskExecution = strict
+			n.state.put(id, st)
+			writeRefusalTranscript(t, n, id, `{"type":"assistant","uuid":"quota","timestamp":"2026-11-20T12:00:00Z","isApiErrorMessage":true,"apiErrorStatus":429,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 13:00 UTC (in 60m)"}]}}`)
+			kinds := n.claudeResultKinds(id)
+			want := proto.TurnErrorTransient
+			if protected && !strict {
+				want = proto.TurnErrorUsageLimit
+			}
+			if len(kinds) != 2 || kinds[0] != want || kinds[1] != assistantRecordKind {
+				t.Fatalf("protected=%v strict=%v: classification %v, want %s", protected, strict, kinds, want)
+			}
+		}
+	}
+}
+
+func TestProtectedSendWithoutLegacyRecoveryKeepsSharedAvailability(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	n, _ := recoveryTestNode(t, id, true, false)
+	key := unavailableKey("claude", "primary-model")
+	n.unavailable = map[string]time.Time{key: time.Now().Add(time.Hour)}
+	sentinel := errors.New("configured model selected")
+	probeKey := n.home + "\x00claude\x00primary-model"
+	modelProbeCache.Lock()
+	modelProbeCache.results[probeKey] = modelProbeResult{at: time.Now(), agent: "claude", err: sentinel}
+	modelProbeCache.Unlock()
+	t.Cleanup(func() {
+		modelProbeCache.Lock()
+		delete(modelProbeCache.results, probeKey)
+		modelProbeCache.Unlock()
+	})
+	st, _ := n.state.get(id)
+	_, err := n.assistantSend(context.Background(), id, st.Cwd, "claude", "next request", nil, "", "", modelExecution{Model: "primary-model", IsMain: true})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("configured model not selected: %v", err)
+	}
+	n.mu.Lock()
+	_, kept := n.unavailable[key]
+	n.mu.Unlock()
+	if !kept {
+		t.Fatal("a protected send without a legacy hold changed shared worker availability")
+	}
+}
+
+func TestProtectedStrictTaskKeepsOneSameModelRetry(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	for _, main := range []bool{false, true} {
+		for _, failure := range []string{
+			"API Error: 503 unavailable", "API Error: 429 Too many requests",
+			"API Error: Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at 23:59 UTC (in 32m)",
+		} {
+			n, sent := recoveryTestNode(t, id, main, !main)
+			execution := modelExecution{Strict: true, Model: "primary-model", IsMain: main, FollowsSetting: !main}
+			p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: execution}
+			n.procs[id] = p
+			if !n.recoverAssistantResult(p, true, failure, proto.TurnErrorTransient, assistantRecordKind) {
+				t.Fatalf("strict protected task lost its same-model retry: %s", failure)
+			}
+			if retry := waitRecoverySend(t, sent); !sameModelChoice(retry, execution) || !retry.Strict {
+				t.Fatalf("strict retry changed execution: %+v", retry)
+			}
+			n.mu.Lock()
+			r := n.recoveries[id]
+			var done chan struct{}
+			if r != nil {
+				done = r.done
+			}
+			n.mu.Unlock()
+			if r == nil {
+				t.Fatal("strict retry lost its budget")
+			}
+			if done != nil {
+				<-done
+			}
+			if n.recoverAssistantResult(p, true, failure, proto.TurnErrorTransient, assistantRecordKind) || len(sent) != 0 {
+				t.Fatal("strict protected task retried again or changed model")
+			}
+			n.clearAssistantRecovery(p, false)
+		}
 	}
 }

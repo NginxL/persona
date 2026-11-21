@@ -286,7 +286,7 @@
     <string name="settings_off">关闭</string>
     <string name="settings_retry_cleanup">重试清理</string>
     <string name="settings_try_demo">没有 Hub？先体验一下</string>
-    <string name="settings_style_title">界面风格</string>
+    <string name="settings_style_title">外观</string>
     <string name="settings_avatar_title">形象</string>
     <string name="settings_about_persona">关于 Persona</string>
     <string name="settings_phone_data_title">手机数据</string>

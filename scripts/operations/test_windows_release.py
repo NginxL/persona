@@ -351,6 +351,17 @@ class WindowsGzipReleaseTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 release.check_windows_artifacts(self.assets(report), VERSION)
 
+    def test_an_amd64_receipt_does_not_fabricate_an_arm64_verification(self):
+        assets = self.assets()
+        self.path = self.root / "persona-link-windows-arm64.exe.gz"
+        self.path.write_bytes(gzip.compress(pe_fixture(b"arm64 bytes", machine=0xAA64), mtime=0))
+        assets.append({"name": self.path.name, "path": str(self.path)})
+        release.check_windows_artifacts(assets, VERSION, architecture="amd64")
+        with self.assertRaisesRegex(ValueError, "arm64.*native verification report|native verification report.*arm64"):
+            release.check_windows_artifacts(assets, VERSION, architecture="arm64")
+        with self.assertRaisesRegex(ValueError, "architecture"):
+            release.check_windows_artifacts(assets, VERSION, architecture="x86")
+
     def test_the_report_binds_the_decompressed_program_not_only_a_filename(self):
         stale = self.report()
         self.path.write_bytes(gzip.compress(pe_fixture(b"same-named replacement"), mtime=0))

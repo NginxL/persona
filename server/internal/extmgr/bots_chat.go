@@ -271,9 +271,15 @@ func (h *Manager) botMessage(ev feishubot.MessageEvent, raw json.RawMessage, sin
 		}
 		b.mu.Unlock()
 	}
-	// The owner wrote it (the hub checked the sender): what it answers, it answers once, like a card's press — but
-	// only a question: the bot takes no typed answer to a plan, a permission or a terminal (#4675).
-	h.handToAssistant(api, ev, raw, h.issueMessageAction(channel.Feishu, proto.IxQuestion), "", since, pass, false)
+	// The owner wrote it (the hub checked the sender). The action keeps the old
+	// question-only answer capability and a separate, exact direct-parent proof
+	// for server-owned permission proposals. It never broadens legacy typed
+	// answers to plans, permissions or terminal dialogs.
+	content := feishubot.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
+	action := h.issueOwnerReplyAction(channel.Feishu, assistantwire.OwnerApprovalProof{
+		MessageID: msg.MessageID, ParentID: msg.ParentID, ChatID: msg.ChatID, Text: content.Text,
+	})
+	h.handToAssistant(api, ev, raw, action, "", since, pass, false)
 }
 
 // handToAssistant hands the owner's message to the assistant; one it cannot take is answered that it could not be

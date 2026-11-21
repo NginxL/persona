@@ -12,5 +12,6 @@
   "someday_until": "Pick a time ahead, no later than the year 9999",
   "not_found": "This to-do no longer exists",
   "round_not_found": "That part of the to-do's conversation is no longer there",
+  "agent_not_listed": "This Agent isn't listed on its computer yet. Try again in a moment.",
   "images_forbidden": "This device can’t read to-do images"
 }

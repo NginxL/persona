@@ -904,8 +904,15 @@ func TestAssistantRecoveryCannotRestartOnTheOldNodeAfterHandover(t *testing.T) {
 	r := &assistantTurnRecovery{retried: map[string]bool{}, used: map[string]bool{"primary-model": true}}
 	a.recoveries = map[string]*assistantTurnRecovery{id: r}
 
-	send := assistantRecoverySend
+	stubHandoverRecovery(t, a, b)
 	entered, release, handed := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var released atomic.Bool
+	releaseSend := func() {
+		if released.CompareAndSwap(false, true) {
+			close(release)
+		}
+	}
+	t.Cleanup(releaseSend)
 	var spawned atomic.Int32
 	assistantRecoverySend = func(_ context.Context, n *Node, p *assistantProc, _, _ string, _ modelExecution) error {
 		close(entered)
@@ -919,7 +926,6 @@ func TestAssistantRecoveryCannotRestartOnTheOldNodeAfterHandover(t *testing.T) {
 		}
 		return nil
 	}
-	t.Cleanup(func() { assistantRecoverySend = send })
 	if !a.recoverAssistantResult(p, true, "API Error: safeguards flagged") {
 		t.Fatal("the failed turn did not enter recovery")
 	}
@@ -936,12 +942,14 @@ func TestAssistantRecoveryCannotRestartOnTheOldNodeAfterHandover(t *testing.T) {
 	case <-handed: // an implementation that does not wait for the active send
 	case <-time.After(50 * time.Millisecond):
 	}
-	close(release)
+	releaseSend()
 	select {
 	case <-handed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("handover did not finish after the active send returned")
 	}
+	// Adoption clears the old recovery map. Join the sender first so it cannot hide an old-node restart.
+	waitHandoverRecovery(t, a, r)
 	if adopted := k.adopt(b); len(adopted) != 1 || adopted[0] != p {
 		t.Fatalf("the live conversation was not handed over: %+v", adopted)
 	}

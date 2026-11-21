@@ -17,6 +17,8 @@ struct MessageBarInfo {
     /// Who wrote it, when not the chat's Agent or Persona (`messageActionBar(from:)`).
     var from: String? = nil
     var delete: MessageBarDelete? = nil
+    var starItem: Item? = nil
+    var starredAction: StarredMenuAction? = nil
 }
 
 /// The bar's last item on a message that is only on this phone (`PendingMessage.onlyHere`, #4626), in the danger color:
@@ -809,7 +811,8 @@ private struct LiftedMessage: View {
                                            deletes: lift.bar.delete != nil)
         let barWidth = min(MessageActionBar.width(count: count), bounds.width - 2 * Theme.Space.s)
         let selects = MessageActionBar.selects(id: lift.bar.id, menu: menu, pending: lift.bar.pending)
-        let bar = CGSize(width: barWidth, height: MessageActionBar.height(selects: selects))
+        let star = lift.bar.starredAction
+        let bar = CGSize(width: barWidth, height: MessageActionBar.height(selects: selects, stars: star != nil))
         let p = LiftLayout.place(message: message, press: lift.press.y + pad.top + above, bar: bar, bounds: bounds,
                                  margin: Theme.Space.s, gap: Theme.Space.s, trailing: lift.bar.isUser,
                                  part: lift.part != nil ? above : nil, pressInSight: Theme.Size.tapTarget)
@@ -829,7 +832,7 @@ private struct LiftedMessage: View {
             if !selecting {
                 MessageActionBar(id: lift.bar.id, text: lift.bar.text, isUser: lift.bar.isUser, date: lift.bar.date, menu: menu,
                                  pending: lift.bar.pending, from: lift.bar.from, delete: lift.bar.delete,
-                                 itemWidth: MessageActionBar.itemWidth(barWidth, count: count))
+                                 itemWidth: MessageActionBar.itemWidth(barWidth, count: count), starredAction: star)
                     .position(x: p.bar.midX, y: p.bar.midY)
                     .transition(.scale(scale: 0.85, anchor: p.below ? .top : .bottom).combined(with: .opacity))
             }

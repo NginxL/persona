@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.annotation.StringRes
+import persona.core.contracts.api.LarkMention
 import persona.core.contracts.api.MailReplyTarget
 import persona.core.contracts.api.MailReplyTargetChanged
 import kotlinx.coroutines.CancellationException
@@ -160,12 +161,22 @@ class ReplyComposer(
         }
     }
 
-    fun update(text: String) {
+    fun update(text: String) = edit(text, state.value.draft.mentions)
+
+    /** Pick a person for the active @ query; the new text and its recipients share one durable draft. */
+    fun mention(mention: LarkMention) {
         val current = state.value
-        if (!current.canEdit || current.draft.text == text) return
+        if (!current.canEdit || larkMentionQuery(current.draft.text) == null) return
+        edit(larkInsertMention(current.draft.text, mention), current.draft.mentions + mention)
+    }
+
+    private fun edit(text: String, picked: List<LarkMention>) {
+        val current = state.value
+        if (!current.canEdit || current.draft.text == text && current.draft.mentions == picked) return
         pristine = false
-        // Edited AI text is still AI's draft; clearing it makes the reply the user's own.
-        val draft = ReplyDraft(text, ai = current.draft.ai && text.isNotBlank())
+        // Edited AI text is still AI's draft; clearing it makes the reply the user's own. Deleted @names stay pruned even
+        // if an undo later restores the characters: only a new explicit pick can restore that recipient.
+        val draft = ReplyDraft(text, ai = current.draft.ai && text.isNotBlank(), mentions = larkMentions(text, picked))
         mutableState.value = current.copy(draft = draft, error = null, sent = false, delivery = ReplyDelivery.Ready)
         save(draft)
     }
@@ -189,14 +200,16 @@ class ReplyComposer(
         if (current.delivery in setOf(ReplyDelivery.Queued, ReplyDelivery.WaitingForNetwork, ReplyDelivery.Verifying)) return
         if (current.delivery in setOf(ReplyDelivery.Unknown, ReplyDelivery.NeedsConfirmation)) { verify(); return }
         val text = current.draft.text
-        mutableState.value = current.copy(sending = true, error = null, sent = false, delivery = ReplyDelivery.Sending, targetChanged = false)
+        val draft = current.draft.copy(mentions = larkMentions(text, current.draft.mentions))
+        mutableState.value = current.copy(draft = draft, sending = true, error = null, sent = false,
+            delivery = ReplyDelivery.Sending, targetChanged = false)
         scope.launch(context) {
             var submitted = false
             try {
                 writes.withLock {
-                    repository.saveDraft(target, current.draft)
+                    repository.saveDraft(target, draft)
                     submitted = true
-                    repository.reply(target, ReplyRequest(text, current.draft.clientId, mailTarget))
+                    repository.reply(target, ReplyRequest(text, draft.clientId, mailTarget, draft.mentions))
                 }
                 mutableState.value = ReplyComposerState(draft = ReplyDraft(""), loading = false, sent = true)
             } catch (error: CancellationException) {
@@ -222,7 +235,7 @@ class ReplyComposer(
     }
 
     private suspend fun targetChanged(previous: ReplyDraft) {
-        val draft = ReplyDraft(previous.text, ai = previous.ai)
+        val draft = ReplyDraft(previous.text, ai = previous.ai, mentions = previous.mentions)
         mutableState.value = state.value.copy(draft = draft, sending = false, targetChanged = true,
             delivery = ReplyDelivery.Ready, error = ReplyError.TargetChanged)
         try { writes.withLock { repository.saveDraft(target, draft) } }
@@ -239,7 +252,7 @@ class ReplyComposer(
                 mutableState.value = if (result == ReplyDelivery.Sent) {
                     ReplyComposerState(draft = ReplyDraft(""), loading = false, sent = true)
                 } else if (result == ReplyDelivery.Ready) {
-                    val fresh = ReplyDraft(draft.text, ai = draft.ai)
+                    val fresh = ReplyDraft(draft.text, ai = draft.ai, mentions = draft.mentions)
                     writes.withLock { repository.saveDraft(target, fresh) }
                     state.value.copy(draft = fresh, sending = false, delivery = ReplyDelivery.Ready, error = ReplyError.NotSent)
                 } else state.value.copy(sending = false, delivery = result,

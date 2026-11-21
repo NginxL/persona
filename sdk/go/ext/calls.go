@@ -62,7 +62,7 @@ type Empty = wire.Empty
 const ConnectorNamespace = "connector"
 
 // RepositoryNamespace is the repository_providers extension point's: the manager asks repo.parse, repo.check, repo.link
-// and repo.describe (schema/extension/repository.schema.json), with the repository_providers item's id as the
+// and the optional repo.describe and repo.pr_status (schema/extension/repository.schema.json), with the repository_providers item's id as the
 // contribution. A provider answers them with ext.Methods under this namespace.
 const RepositoryNamespace = "repo"
 

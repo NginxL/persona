@@ -151,5 +151,15 @@
   "rule_remove": "移除",
   "rule_remove_title": "移除这条规则？",
   "rule_remove_body": "下次 {machine} 上的 {launcher} 需要它时，会重新请你批准。",
-  "rule_removed": "规则已移除"
+  "rule_removed": "规则已移除",
+  "entry_untitled": "条目 {count}",
+  "entry_save_before_secret": "保存此条目后才能设置密钥。",
+  "entry_secret": "密钥",
+  "entry_remove": "移除{entry}",
+  "entry_add": "添加条目",
+  "entry_editor_hint": "每个条目都有单独的密钥，单独存储且保存后不再显示。",
+  "entry_rebind_hint": "保存更改后的地址会清除该条目的密钥。",
+  "entry_remove_title": "移除「{entry}」？",
+  "entry_remove_body": "保存时将删除此条目及其已保存的密钥。",
+  "entry_remove_confirm": "移除条目"
 }

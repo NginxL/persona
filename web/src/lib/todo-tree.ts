@@ -217,8 +217,8 @@ const LOOSE_GROUPS = [
  * their order (sortTodos's, the task board's) come from buildTodoAgentGroups. `keepEmpty`: the group is listed while
  * empty (the sidebar's "By to-do" with nothing narrowing the list), its explanation inside it.
  */
-export function buildTodoTree(all: Session[], machines: Machine[], todos: Todo[], mutes?: AgentMutes, now = Date.now(), { keepEmpty = false }: { keepEmpty?: boolean } = {}): TodoTree {
-  const groups = buildTodoAgentGroups(all, machines, todos, mutes);
+export function buildTodoTree(all: Session[], machines: Machine[], todos: Todo[], mutes?: AgentMutes, now = Date.now(), { keepEmpty = false, compareSessions }: { keepEmpty?: boolean; compareSessions?: (a: Session, b: Session) => number } = {}): TodoTree {
+  const groups = buildTodoAgentGroups(all, machines, todos, mutes, compareSessions);
   // the sessions its groups' statuses were read from, for what a waiting one waits on
   const lookup = makeSessionLookup(splitAgentSessions(all, machines).live);
   const byId = new Map(todos.map((td) => [td.id, td]));

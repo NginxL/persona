@@ -33,7 +33,7 @@ func leaderPlanArgs(role string) json.RawMessage {
 
 // workerArgs is a task leader's task_plan of one worker.
 func workerArgs(extra map[string]any) json.RawMessage {
-	task := map[string]any{"title": "改登录页", "prompt": "只改登录页的布局，补测试", "readonly": false, "permission": "bypassPermissions",
+	task := map[string]any{"title": "改登录页", "prompt": "只改登录页的布局，补测试", "role": "worker", "readonly": false, "permission": "bypassPermissions",
 		"done_when": []string{"登录页布局改好", "测试通过"}}
 	for k, v := range extra {
 		task[k] = v
@@ -165,7 +165,8 @@ func TestTaskLeaderGetsRestrictedTaskPlanAndWorkersDoNot(t *testing.T) {
 		}
 	}
 	if len(restricted) != 1 || !strings.Contains(restricted[0].Description, "Hand part of your own task to workers") ||
-		strings.Contains(string(restricted[0].InputSchema), "todo_id") || strings.Contains(string(restricted[0].InputSchema), `"role"`) {
+		strings.Contains(string(restricted[0].InputSchema), "todo_id") || !strings.Contains(string(restricted[0].InputSchema), `"role"`) ||
+		!strings.Contains(string(restricted[0].InputSchema), `"worker"`) {
 		t.Fatalf("the leader's tools: %+v", restricted)
 	}
 	if got := leaderToolNames(s.sessionMCPTools(ctx, "box", "someone-else", false, false)); slices.Contains(got, "task_plan") {
@@ -351,7 +352,7 @@ func TestWritableTaskPlanNeedsNoExplicitPermission(t *testing.T) {
 	setSettings(t, s, func(v *Settings) { v.Leaders = []string{"lead1"} })
 	ctx := context.Background()
 	plan := func(self string, readonly bool, permission string) (string, error) {
-		task := map[string]any{"title": "修登录崩溃", "prompt": "修好并补测试", "machine": "box", "cwd": "/code/app", "readonly": readonly,
+		task := map[string]any{"title": "修登录崩溃", "prompt": "修好并补测试", "role": "worker", "machine": "box", "cwd": "/code/app", "readonly": readonly,
 			"why": "这个仓库在 box 上"}
 		if permission != "" {
 			task["permission"] = permission
@@ -614,7 +615,7 @@ func TestTaskLeaderSurvivesARestart(t *testing.T) {
 	if p, err := restarted.loadPlan(ctx, todo.PlanID); err != nil || p.Tasks[0].Role != roleLeader || p.Tasks[0].Parent != "" {
 		t.Fatalf("the leader's plan after a restart: %+v %v", p, err)
 	}
-	if p, err := restarted.loadPlan(ctx, w.PlanID); err != nil || p.Conversation != "box/s1" || p.Tasks[0].Role != "" || p.Tasks[0].Parent != todo.ID {
+	if p, err := restarted.loadPlan(ctx, w.PlanID); err != nil || p.Conversation != "box/s1" || p.Tasks[0].Role != "worker" || p.Tasks[0].Parent != todo.ID {
 		t.Fatalf("the worker's plan after a restart: %+v %v", p, err)
 	}
 	// And in the rows the link is read from:
@@ -717,7 +718,7 @@ func TestTaskLeaderListRefreshesAfterItsLink(t *testing.T) {
 // The messages the leader and its workers are given.
 func TestTaskLeaderMessages(t *testing.T) {
 	for _, want := range []string{"you are the leader of this task", "task_plan", "default permission mode", "Persona · supervision", "task_review", "stop and ask the user"} {
-		if !strings.Contains(prompts.RenderTaskLeader(), want) {
+		if !strings.Contains(prompts.RenderTaskLeader(prompts.TaskLeader{}), want) {
 			t.Errorf("the leader's brief lacks %q", want)
 		}
 	}
@@ -1942,6 +1943,7 @@ func TestLeaderWorkersNeedABrief(t *testing.T) {
 	startTaskLeader(t, s, f)
 	s.briefsOptional = false
 	call := func(task map[string]any) proto.ToolResult {
+		task["role"] = "worker"
 		raw, _ := json.Marshal(map[string]any{"tasks": []any{task}})
 		return s.mcpCall(context.Background(), "box", "s1", "task_plan", raw, false)
 	}

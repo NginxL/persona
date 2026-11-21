@@ -59,10 +59,12 @@ type dispatchTask struct {
 	Cwd         string    `json:"cwd,omitempty"`
 	Title       string    `json:"title,omitempty"`
 	At          time.Time `json:"at"`
+	a2a         *a2aTask
 }
 
 // dispatchBook is the dispatched tasks, read from the settings on first use and saved on every change.
 type dispatchBook struct {
+	admit  sync.Mutex
 	mu     sync.Mutex
 	loaded bool
 	tasks  []dispatchTask
@@ -143,6 +145,9 @@ func (s *Service) dispatchTool(ctx context.Context, machine, session, name strin
 	var res string
 	var err error
 	if name == "dispatch_start" {
+		if err := s.guardRefusal(ctx, machine, session, "agent_start"); err != nil {
+			return proto.TextResult(err.Error(), true)
+		}
 		res, err = s.dispatchStart(ctx, machine, session, args, time.Now())
 	} else {
 		res, err = s.dispatchRead(ctx, machine, session, args)
@@ -154,13 +159,14 @@ func (s *Service) dispatchTool(ctx context.Context, machine, session, name strin
 }
 
 // dispatchStart starts a new agent on another computer for agent machine/session and records it as that agent's.
-func (s *Service) dispatchStart(ctx context.Context, machine, session string, args json.RawMessage, now time.Time) (string, error) {
+func (s *Service) dispatchStart(ctx context.Context, machine, session string, args json.RawMessage, now time.Time) (result string, resultErr error) {
 	var a struct {
-		Machine  string `json:"machine"`
-		Cwd      string `json:"cwd"`
-		Prompt   string `json:"prompt"`
-		Launcher string `json:"launcher"`
-		Worktree struct {
+		Machine   string `json:"machine"`
+		Cwd       string `json:"cwd"`
+		Prompt    string `json:"prompt"`
+		Launcher  string `json:"launcher"`
+		MessageID string `json:"message_id"`
+		Worktree  struct {
 			Branch string `json:"branch"`
 		} `json:"worktree"`
 	}
@@ -171,14 +177,6 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 	if a.Machine == "" || a.Cwd == "" || a.Prompt == "" {
 		return "", errors.New("machine, cwd and prompt are required; nothing was started")
 	}
-	tasks := s.dispatched(ctx)
-	// One level: a dispatched task does its work where it is, so tasks do not spawn tasks across computers without end.
-	for _, t := range tasks {
-		if t.Machine == machine && t.Session == session {
-			return "", errors.New("you are a task another agent handed to this computer: do the work here (your own in-session " +
-				"subagents are fine), a dispatched task does not dispatch; nothing was started")
-		}
-	}
 	am, ok := s.machineByName(ctx, a.Machine)
 	if !ok {
 		return "", fmt.Errorf("unknown computer %q (computers: %s); nothing was started", a.Machine, s.machineIDs(ctx))
@@ -188,24 +186,35 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 		return "", errors.New("that is the computer you run on: use your own in-session subagents for work here; nothing was started")
 	case s.isWorkMachine(am.ID):
 		return "", fmt.Errorf("%s is a work computer: tasks are not handed to it; nothing was started", am.Name)
-	case !am.Online && !am.Reachable:
-		return "", fmt.Errorf("%s is offline; nothing was started", am.Name)
 	}
-	limit, active := s.hello(ctx).Agents.Dispatch.Limit(), 0
-	for _, t := range tasks {
-		if t.FromMachine == machine && t.FromSession == session && s.dispatchWorking(ctx, t, now) {
-			active++
-		}
-	}
-	if active >= limit {
-		return "", fmt.Errorf("%d tasks you dispatched are still working (the limit is %d): read them with dispatch_read and "+
-			"wait for one to stop; nothing was started", active, limit)
-	}
-
 	// The start is detached from the calling turn, as agent_start's is: a computer waking up can take minutes.
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentStartTimeout)
 	defer cancel()
 	a.Cwd = proto.ExpandHome(a.Cwd, am.Home)
+	source := a2aRef{machine, session}
+	launch := a2aLaunch{CWD: a.Cwd, Launcher: strings.TrimSpace(a.Launcher), Branch: strings.TrimSpace(a.Worktree.Branch), Title: clip(oneLine(a.Prompt), 100)}
+	tracker, existing, err := s.admitDispatchA2A(sctx, source, s.canonical(am.ID), a.MessageID, a.Prompt, launch, now)
+	if err != nil {
+		return "", err
+	}
+	if existing {
+		return dispatchA2AResult(tracker.task, fmt.Sprintf("Task %s on %s: %s.", tracker.task.TargetSession, am.Name, dispatchA2AStatus(tracker.task))), nil
+	}
+	var res struct {
+		Session proto.Session `json:"session"`
+	}
+	attempted := false
+	finished := false
+	var startErr error
+	defer func() {
+		if finished {
+			return
+		}
+		if startErr == nil {
+			startErr = resultErr
+		}
+		s.finishDispatchA2A(sctx, tracker, res.Session, attempted, startErr)
+	}()
 	from := prompts.DispatchTask{Prompt: a.Prompt}
 	if fm, ok := s.machineByName(ctx, machine); ok {
 		from.FromMachine = fm.Name
@@ -216,11 +225,20 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 	title := s.tabName(sctx, a.Prompt)
 	params := map[string]any{"cwd": a.Cwd, "launcher": strings.TrimSpace(a.Launcher), "model": "", "effort": "",
 		"tab_name": title, "title": title, "prompt": s.withCloseoutBrief(sctx, am.ID, prompts.RenderDispatchTask(from), false)}
+	if tracker != nil {
+		task := tracker.task
+		first := task.Events[0]
+		first.Text = params["prompt"].(string)
+		params["prompt"] = a2aPrompt(task, &first, source, string(s.lang(sctx)))
+		params["session_id"] = task.TargetSession
+		params["client_msg_id"] = a2aDeliveryID(task.ID, 1)
+		params["message_source"] = a2aMessageSource(source)
+	}
 	if err := s.applyModel(sctx, "agent.new", params); err != nil {
 		return "", fmt.Errorf("%w; nothing was started", err)
 	}
 	note := ""
-	if branch := strings.TrimSpace(a.Worktree.Branch); branch != "" {
+	if branch := launch.Branch; branch != "" {
 		wt, err := s.newWorktree(sctx, am.ID, a.Cwd, branch)
 		if err != nil {
 			return "", fmt.Errorf("the worktree on branch %s was not made, nothing was started: %w", branch, err)
@@ -229,27 +247,36 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 		params["cwd"], params["workspace_id"] = wt.Path, wt.WorkspaceID
 		note = fmt.Sprintf(" It runs in a new worktree on branch %s.", wt.Branch)
 	}
-	var res struct {
-		Session proto.Session `json:"session"`
-	}
 	s.setPlanThen(ctx, am.ID, params)
-	if err := s.call(sctx, am.ID, DeviceSessionStart, params, &res); err != nil {
+	attempted = true
+	if startErr = s.call(sctx, am.ID, DeviceSessionStart, params, &res); startErr != nil {
 		switch {
-		case errors.Is(err, apierr.ErrOffline):
+		case errors.Is(startErr, apierr.ErrOffline):
 			return "", fmt.Errorf("%s is offline; nothing was started", am.Name)
-		case startResultUnknown(err):
+		case startResultUnknown(startErr) || sendUnknown(startErr):
+			if tracker != nil {
+				return "", fmt.Errorf("%s has not confirmed the start of A2A task %s. Check that task before starting another Agent", am.Name, tracker.task.ID)
+			}
 			return "", fmt.Errorf("%s did not answer the start in time: an agent may or may not have started there, and it is "+
 				"not recorded as yours. Tell the user instead of starting it again", am.Name)
 		}
-		return "", fmt.Errorf("the start on %s failed: %w", am.Name, err)
+		return "", fmt.Errorf("the start on %s failed: %w", am.Name, startErr)
 	}
+	res.Session.Cwd = cmp.Or(res.Session.Cwd, a.Cwd)
+	s.finishDispatchA2A(sctx, tracker, res.Session, true, nil)
+	finished = true
 	title = s.nameStartedAgent(sctx, am.ID, res.Session, title)
-	s.addDispatched(ctx, dispatchTask{FromMachine: machine, FromSession: session, Machine: s.canonical(am.ID),
-		Session: res.Session.SessionID, Cwd: a.Cwd, Title: title, At: now})
+	if tracker == nil {
+		s.addDispatched(ctx, dispatchTask{FromMachine: machine, FromSession: session, Machine: s.canonical(am.ID),
+			Session: res.Session.SessionID, Cwd: a.Cwd, Title: title, At: now})
+	}
 	s.logf("dispatch %s/%s -> %s/%s in %s", machine, short(session), am.ID, short(res.Session.SessionID), a.Cwd)
 	child := res.Session
-	child.Cwd = cmp.Or(child.Cwd, a.Cwd)
 	s.superviseDispatched(ctx, am, child, a.Prompt, cmp.Or(from.From, short(session)), cmp.Or(from.FromMachine, machine))
+	if tracker != nil {
+		return fmt.Sprintf("Started on %s in %s: session %s.%s A2A task %s. Questions and results will be delivered to this session. Read details with dispatch_read or a2a_get.",
+			am.Name, a.Cwd, res.Session.SessionID, note, tracker.task.ID), nil
+	}
 	return fmt.Sprintf("Started on %s in %s: session %s.%s It works on its own and the user can watch it in the apps. "+
 		"Read its state and final reply with dispatch_read (session_id %s, wait_seconds up to 50).",
 		am.Name, a.Cwd, res.Session.SessionID, note, res.Session.SessionID), nil
@@ -257,6 +284,9 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 
 // dispatchState checks the computer before its session. Only a listed done or idle session is known to have stopped.
 func (s *Service) dispatchState(ctx context.Context, t dispatchTask, now time.Time) string {
+	if t.a2a != nil {
+		return dispatchA2AStatus(t.a2a)
+	}
 	computer := s.computerState(t.Machine)
 	switch computer.state {
 	case standingComputerRemoved:
@@ -305,8 +335,12 @@ func (s *Service) dispatchRead(ctx context.Context, machine, session string, arg
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %v", err)
 	}
+	tasks, _, err := s.dispatchTasks(ctx, a2aRef{machine, session})
+	if err != nil {
+		return "", err
+	}
 	var mine []dispatchTask
-	for _, t := range s.dispatched(ctx) {
+	for _, t := range tasks {
 		if t.FromMachine == machine && t.FromSession == session {
 			mine = append(mine, t)
 		}
@@ -317,7 +351,7 @@ func (s *Service) dispatchRead(ctx context.Context, machine, session string, arg
 	}
 	var found []dispatchTask
 	for _, t := range mine {
-		if t.Session == id || len(id) >= 8 && strings.HasPrefix(t.Session, id) {
+		if t.Session == id || len(id) >= 8 && strings.HasPrefix(t.Session, id) || t.a2a != nil && t.a2a.ID == id {
 			found = append(found, t)
 		}
 	}
@@ -326,6 +360,9 @@ func (s *Service) dispatchRead(ctx context.Context, machine, session string, arg
 	}
 	t := found[0]
 	wait := min(time.Duration(max(a.WaitSeconds, 0))*time.Second, dispatchWaitMost)
+	if t.a2a != nil {
+		return s.readDispatchA2A(ctx, a2aRef{machine, session}, t.a2a, wait)
+	}
 	state := s.dispatchState(ctx, t, time.Now())
 	for deadline := time.Now().Add(wait); state == "working" && time.Now().Before(deadline); {
 		select {
@@ -372,8 +409,11 @@ func (s *Service) dispatchOverview(ctx context.Context, machine string, mine []d
 	var b strings.Builder
 	b.WriteString("Computers a task can go to:\n")
 	n := 0
+	_, durableErr := s.a2aStore()
+	cfg := s.a2aConfig(ctx)
 	for _, m := range s.devices(ctx) {
-		if s.canonical(m.ID) == machine || s.isWorkMachine(m.ID) {
+		if s.canonical(m.ID) == machine || s.isWorkMachine(m.ID) ||
+			durableErr == nil && !s.a2aMachineAllowed(ctx, cfg, s.canonical(m.ID)) {
 			continue
 		}
 		state := "offline"

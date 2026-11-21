@@ -170,12 +170,12 @@ func (s *Service) withTaskSpaceStart(ctx context.Context, t PlanTask, m Device, 
 		return ctx, func() {}, nil
 	}
 	params["task_id"] = root
+	params["workspace_label"] = space.Label
+	delete(params, "reopen_worktree_workspace")
 	if space.ID != "" {
 		params["workspace_id"] = space.ID
-		delete(params, "workspace_label")
 	} else {
 		delete(params, "workspace_id")
-		params["workspace_label"] = space.Label
 	}
 	return context.WithValue(ctx, taskSpaceCallKey{}, taskSpaceCall{root: root, held: true}), unlock, nil
 }

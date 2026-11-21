@@ -13,6 +13,7 @@ class AssistantSidebarHost {
     val opened = mutableStateOf(false)
     var personaState by mutableStateOf(persona.core.designsystem.PersonaState.Idle)
     var active by mutableStateOf<persona.core.contracts.SessionKey?>(null)
+    var healthInFront by mutableStateOf(false)
     var action by mutableStateOf<AssistantSidebarAction?>(null)
     var retired by mutableStateOf(emptySet<persona.core.contracts.SessionKey>())
 }

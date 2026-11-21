@@ -139,6 +139,11 @@ type Task struct {
 	// it was kept). Stored, never sent: tasksView sends it as last_run (#10182).
 	StatusRun time.Time `json:"status_run,omitzero"`
 	NextRun   time.Time `json:"next_run,omitempty"`
+	// SkipNextAt is an owner's pending skip of this exact occurrence. Calendar rules also save its zone.
+	SkipNextAt    time.Time `json:"skip_next_at,omitzero"`
+	SkipNextZone  string    `json:"skip_next_zone,omitempty"`
+	SkipNextToken string    `json:"skip_next_token,omitempty"`
+	CanSkipNext   bool      `json:"can_skip_next,omitempty"` // the task view only
 	// A cron task's expression in words in the reader's language and its next runs; set on the view (tasksView), never stored.
 	CronText string      `json:"cron_text,omitempty"`
 	NextRuns []time.Time `json:"next_runs,omitempty"`
@@ -165,6 +170,7 @@ func disabledTransition(old Task, t *Task, now time.Time) {
 // earlier today for one the hub missed while it was down, and recorded "Persona was down and missed the time" (#3816).
 func rearm(old Task, t *Task, now time.Time) {
 	disabledTransition(old, t, now)
+	t.keepSkipFrom(old)
 	if !t.calendar() || !t.Enabled {
 		return
 	}
@@ -306,6 +312,7 @@ type ScheduleRun struct {
 	Error              string                  `json:"error,omitempty"`
 	RunIfError         string                  `json:"run_if_error,omitempty"`
 	ConditionSkipped   bool                    `json:"condition_skipped,omitempty"`
+	OwnerSkipped       bool                    `json:"owner_skipped,omitempty"`
 	Manual             bool                    `json:"manual,omitempty"` // "Run now"
 	MachineID          string                  `json:"machine_id,omitempty"`
 	SessionID          string                  `json:"session_id,omitempty"`
@@ -390,7 +397,7 @@ type taskDeletion struct {
 func (sc *schedule) missedRuns(since time.Time) []ScheduleRun {
 	var missed []ScheduleRun
 	for i, r := range sc.runs {
-		if r.At.Before(since) || (r.Status != runFailed && r.Status != runSkipped) || r.Manual || r.ConditionSkipped {
+		if r.At.Before(since) || (r.Status != runFailed && r.Status != runSkipped) || r.Manual || r.ConditionSkipped || r.OwnerSkipped {
 			continue
 		}
 		recovered := false
@@ -563,6 +570,12 @@ func (s *Service) scheduleReadable(ctx context.Context) error {
 // reversible change use a separate slice so a failed write leaves the live list untouched. Runtime outcomes
 // already observed use sc.tasks itself: a storage outage cannot undo work or hide its result.
 func (s *Service) saveLocked(sc *schedule, tasks []Task) error {
+	return s.saveScheduleLocked(sc, tasks, nil)
+}
+
+// A consumed owner skip has both a new task cursor and a history entry. Publish the two only
+// after they were saved together, so a restart cannot execute the skipped occurrence or lose its receipt.
+func (s *Service) saveScheduleLocked(sc *schedule, tasks []Task, ownerSkips []ScheduleRun) error {
 	if !sc.loaded {
 		return errScheduleUnavailable
 	}
@@ -572,7 +585,21 @@ func (s *Service) saveLocked(sc *schedule, tasks []Task) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	dropEditedTaskGrants(sc.tasks, tasks)
-	if st := s.store(); st != nil {
+	if len(ownerSkips) > 0 {
+		runs := append(slices.Clone(sc.runs), ownerSkips...)
+		if len(runs) > maxRuns {
+			runs = slices.Clone(runs[len(runs)-maxRuns:])
+		}
+		st, ok := s.store().(scheduleSkipStore)
+		if !ok {
+			return errScheduleSave
+		}
+		if err := st.PutSettings(ctx, map[string]any{tasksKey: tasks, runsKey: runs}); err != nil {
+			s.logf("save tasks and owner skips: %v", err)
+			return errScheduleSave
+		}
+		sc.runs = runs
+	} else if st := s.store(); st != nil {
 		if err := st.PutSetting(ctx, tasksKey, tasks); err != nil {
 			s.logf("save tasks: %v", err)
 			return errScheduleSave
@@ -1026,6 +1053,7 @@ func (s *Service) scheduleOwn(ctx context.Context, sessionID, title, rawPrompt, 
 		sc.mu.Unlock()
 		return "", t.ID, true, err
 	}
+	t.keepSkipFrom(previous)
 	out += stopsAt(*t, loc)
 	err = s.saveLocked(sc, tasks)
 	sc.mu.Unlock()
@@ -1496,6 +1524,7 @@ func weekdayText(ds []int) string {
 // knowledge base.
 func (s *Service) Run(ctx context.Context) {
 	s.running.Store(&ctx)
+	go s.a2aLoop(ctx)
 	go s.transcriptionReadyLoop(ctx)
 	recoverCtx, cancel := context.WithTimeout(ctx, taskFailTimeout)
 	if err := s.recoverTaskStarts(recoverCtx, s.tasks.recoverBefore); err != nil {
@@ -1527,6 +1556,7 @@ func (s *Service) Run(ctx context.Context) {
 	go s.healthLoop(ctx)       // each machine's launchers (launcher_health.go)
 	go s.instructionsLoop(ctx) // the CLAUDE.md on the assistant's machine (start.go)
 	go s.searchLoop(ctx)       // the chat search index (search_index.go)
+	go s.historyLoop(ctx)      // durable assistant history, on by default
 	go s.undeliveredLoop(ctx)  // the owner's messages that could not go in (undelivered.go)
 	s.scheduleLoop(ctx)
 	s.todoViewsStop() // the To-dos view's timers (todo_view_push.go)
@@ -1589,6 +1619,9 @@ func (s *Service) nextDue(ctx context.Context, now time.Time) time.Time {
 		if until, ok := sc.held[t.ID]; ok && until.After(now) {
 			n = until // held for the owner (runDue): looked at again when the hold ends
 		}
+		if t.skipMatches(loc) && (n.IsZero() || t.SkipNextAt.Before(n)) {
+			n = t.SkipNextAt // consume even if the conversation is held; retry if the durable write failed
+		}
 		if !n.IsZero() && (next.IsZero() || n.Before(next)) {
 			next = n
 		}
@@ -1622,11 +1655,21 @@ func (s *Service) runDue(ctx context.Context, now time.Time) {
 		return h > 0
 	}
 	var due []dueTask
-	var skipped []ScheduleRun
+	var skipped, ownerSkips []ScheduleRun
 	changed := false
 	tasks := slices.Clone(sc.tasks)
 	for i := range tasks {
 		t := &tasks[i]
+		if !t.SkipNextAt.IsZero() {
+			switch {
+			case !t.skipMatches(loc):
+				t.clearSkip()
+				changed = true
+			case !t.SkipNextAt.After(now):
+				ownerSkips = append(ownerSkips, t.consumeOwnerSkip(s.lang(ctx)))
+				changed = true
+			}
+		}
 		if !t.Enabled {
 			continue
 		}
@@ -1741,7 +1784,7 @@ func (s *Service) runDue(ctx context.Context, now time.Time) {
 		kept = append(kept, t)
 	}
 	if changed {
-		if err := s.saveLocked(sc, kept); err != nil {
+		if err := s.saveScheduleLocked(sc, kept, ownerSkips); err != nil {
 			sc.mu.Unlock()
 			return // none of this batch was consumed: leave it due for the next turn
 		}
@@ -1752,6 +1795,9 @@ func (s *Service) runDue(ctx context.Context, now time.Time) {
 	}
 	for _, r := range skipped {
 		s.recordRun(r)
+	}
+	if len(ownerSkips) > 0 {
+		s.snapshotOld()
 	}
 	s.broadcastSchedule()
 	for _, d := range due {
@@ -2811,6 +2857,7 @@ func (s *Service) tasksView(ctx context.Context, keep func(Task) bool) []Task {
 	loc, lang := s.location(ctx), s.requestCtxLang(ctx)
 	machine := s.settings(ctx).MachineID
 	now := time.Now()
+	_, supportsSkip := s.store().(scheduleSkipStore)
 	sc.mu.Lock()
 	tasks := slices.Clone(sc.tasks)
 	sc.mu.Unlock()
@@ -2820,6 +2867,14 @@ func (s *Service) tasksView(ctx context.Context, keep func(Task) bool) []Task {
 			continue
 		}
 		t.NextRun = t.next(now, loc)
+		if !t.skipMatches(loc) {
+			t.clearSkip()
+		}
+		t.CanSkipNext = supportsSkip && t.skippableOccurrence(t.NextRun, now)
+		if !t.SkipNextAt.IsZero() {
+			t.CanSkipNext = supportsSkip && t.SkipNextAt.After(now)
+		}
+		t.SkipNextZone = "" // only the scheduler needs the zone in which the owner marked the skip
 		if t.Repeat == repeatCron {
 			if r, err := parseCron(t.Cron); err == nil {
 				t.CronText = r.text(lang)
@@ -2895,7 +2950,13 @@ func (s *Service) scheduleRoutes() {
 			apierr.Write(w, http.StatusServiceUnavailable, err)
 			return
 		}
-		apierr.WriteJSON(w, map[string]any{"tasks": s.tasksView(i18n.With(r.Context(), s.requestLang(r)), nil)})
+		tasks := s.tasksView(i18n.With(r.Context(), s.requestLang(r)), nil)
+		if !fullRole(r) {
+			for i := range tasks {
+				tasks[i].CanSkipNext, tasks[i].SkipNextToken = false, ""
+			}
+		}
+		apierr.WriteJSON(w, map[string]any{"tasks": tasks})
 	})
 	// A cron expression checked before it is saved: what it is in words and when it runs next, in the user's time zone;
 	// 400 with what is wrong.
@@ -3080,6 +3141,8 @@ func (s *Service) scheduleRoutes() {
 	})
 	s.handle("DELETE /api/v1/assistant/tasks/{id}", s.deleteTaskRoute)
 	s.handle("POST /api/v1/assistant/tasks/{id}/run", s.runTaskRoute)
+	s.handle("POST /api/v1/assistant/tasks/{id}/skip-next", s.skipNextRoute)
+	s.handle("DELETE /api/v1/assistant/tasks/{id}/skip-next", s.skipNextRoute)
 	s.handle("POST /api/v1/assistant/tasks/{id}/fresh", func(w http.ResponseWriter, r *http.Request) {
 		t, ok, err := s.forgetConversation(r.Context(), r.PathValue("id"))
 		if err != nil {

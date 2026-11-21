@@ -8,18 +8,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
-	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/clitext"
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/hubclient"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -27,7 +24,6 @@ const Usage = "  personad outbox list|retry|discard  inspect and recover held Ag
 
 const (
 	tokenEnv         = "PERSONA_OUTBOX_TOKEN"
-	maxTokenBytes    = 4096
 	maxResponseBytes = 2 << 20
 )
 
@@ -75,26 +71,23 @@ func Run(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	target := flags.Args()
 	for _, id := range target {
-		if !validID(id) {
+		if !hubclient.ValidID(id) {
 			return clitext.UsageError(i18n.T(lang, "outbox.invalid_id"))
 		}
 	}
 	if command == "list" && (!devicewire.HeldOutboxStateValid(state) ||
-		pageSize < 1 || pageSize > devicewire.HeldOutboxMaxPage || session != "" && !validID(session)) {
+		pageSize < 1 || pageSize > devicewire.HeldOutboxMaxPage || session != "" && !hubclient.ValidID(session)) {
 		return clitext.UsageError(i18n.T(lang, "outbox.invalid_page"))
 	}
-	base, err := hubURL(*hub)
+	base, err := hubclient.BaseURL(*hub)
 	if err != nil {
 		return clitext.UsageError(i18n.T(lang, "outbox.invalid_hub"))
 	}
-	token, err := tokenValue(*tokenFile)
+	token, err := hubclient.Token(*tokenFile, tokenEnv)
 	if err != nil {
 		return errors.New(i18n.T(lang, "outbox.token"))
 	}
-	request := client{base: base, token: token, lang: lang, http: &http.Client{
-		Timeout:       20 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}
+	request := client{hub: hubclient.New(base, token, lang, 20*time.Second), lang: lang}
 	if command == "list" {
 		query := url.Values{"limit": {strconv.Itoa(pageSize)}}
 		for key, value := range map[string]string{"session": session, "state": state, "after": after} {
@@ -107,105 +100,31 @@ func Run(ctx context.Context, args []string, stdout io.Writer) error {
 	return request.act(ctx, stdout, command, target)
 }
 
-func validID(s string) bool {
-	return s != "" && s != "." && s != ".." && !strings.ContainsFunc(s, unicode.IsControl)
-}
-
-func hubURL(raw string) (*url.URL, error) {
-	addr, err := url.Parse(raw)
-	if err != nil || addr.Hostname() == "" || addr.User != nil || addr.RawQuery != "" ||
-		addr.ForceQuery || addr.Fragment != "" || strings.Contains(raw, "#") {
-		return nil, errors.New("invalid hub URL")
-	}
-	switch addr.Scheme {
-	case "https":
-		return addr, nil
-	case "http":
-		host := addr.Hostname()
-		if strings.EqualFold(host, "localhost") || net.ParseIP(host).IsLoopback() {
-			return addr, nil
-		}
-	}
-	return nil, errors.New("invalid hub scheme or host")
-}
-
-func tokenValue(path string) (string, error) {
-	raw := os.Getenv(tokenEnv)
-	if path != "" {
-		file, err := os.Open(path)
-		if err != nil {
-			return "", err
-		}
-		defer file.Close()
-		data, err := io.ReadAll(io.LimitReader(file, maxTokenBytes+1))
-		if err != nil {
-			return "", err
-		}
-		raw = string(data)
-	}
-	token := strings.TrimSpace(raw)
-	if len(raw) > maxTokenBytes || token == "" ||
-		strings.ContainsFunc(token, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) {
-		return "", errors.New("invalid token")
-	}
-	return token, nil
-}
-
 type client struct {
-	base  *url.URL
-	token string
-	lang  i18n.Lang
-	http  *http.Client
-}
-
-// endpoint keeps any hub mount prefix and quotes each ID as one path segment.
-func (c client) endpoint(path string, query url.Values) string {
-	base := *c.base
-	base.RawPath = strings.TrimRight(base.EscapedPath(), "/") + path
-	base.Path, _ = url.PathUnescape(base.RawPath)
-	base.RawQuery = query.Encode()
-	return base.String()
+	hub  *hubclient.Client
+	lang i18n.Lang
 }
 
 func (c client) getJSON(ctx context.Context, method, path string, query url.Values, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, c.endpoint(path, query), nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Accept-Language", string(c.lang))
-	resp, err := c.http.Do(req)
-	if err != nil {
-		if method != http.MethodGet {
-			return errors.New(i18n.T(c.lang, "outbox.action_unknown"))
+	_, err := c.hub.JSON(ctx, method, path, query, maxResponseBytes, out)
+	var failure *hubclient.HTTPError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &failure):
+		if method == http.MethodGet && failure.Status == http.StatusNotFound && !failure.Named {
+			return errors.New(i18n.T(c.lang, "outbox.missing"))
 		}
-		return errors.New(i18n.T(c.lang, "outbox.read_failed"))
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if err != nil || len(body) > maxResponseBytes {
-		return c.badResponse(method)
-	}
-	if resp.StatusCode != http.StatusOK {
-		detail := apierr.Describe(body)
-		if detail == "" {
-			if method == http.MethodGet && resp.StatusCode == http.StatusNotFound {
-				return errors.New(i18n.T(c.lang, "outbox.missing"))
-			}
-			detail = resp.Status
-		}
-		detail = clitext.Inert(strings.ReplaceAll(detail, c.token, "[redacted]"))
-		message := i18n.T(c.lang, "outbox.http_error", i18n.Args{"status": resp.StatusCode, "detail": detail})
-		if method != http.MethodGet && resp.StatusCode >= http.StatusInternalServerError {
+		message := i18n.T(c.lang, "outbox.http_error", i18n.Args{"status": failure.Status, "detail": failure.Detail})
+		if method != http.MethodGet && failure.Status >= http.StatusInternalServerError {
 			message += " " + i18n.T(c.lang, "outbox.action_unknown")
 		}
 		return errors.New(message)
-	}
-	if err := json.Unmarshal(body, out); err != nil {
+	case method == http.MethodGet && errors.Is(err, hubclient.ErrTransport):
+		return errors.New(i18n.T(c.lang, "outbox.read_failed"))
+	default:
 		return c.badResponse(method)
 	}
-	return nil
 }
 
 func (c client) badResponse(method string) error {

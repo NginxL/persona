@@ -1,0 +1,5 @@
+{
+  "field_required": "{field} is required",
+  "field_one_of": "{field} must be one of {values}",
+  "field_nonnegative": "{field} must be 0 or more"
+}

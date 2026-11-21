@@ -192,4 +192,47 @@ class ExtensionCodeReviewTest {
         assertEquals(ExtensionFileLines("a.go", "new", 3, listOf("x"), 9), res.lines)
         assertEquals("k", res.items.single().key)
     }
+
+    @Test fun viewModelPreservesLoadedDiffsAcrossRedrawQuietlyAndPressAndRethrowsCancellation() = kotlinx.coroutines.runBlocking {
+        val unloaded = ExtensionView(sections = listOf(ExtensionViewSection(items = listOf(diff("a"), diff("b")))))
+        var cancelRedraw = false
+        var actionResult = ExtensionUiResult()
+        val api = object : ExtensionUi {
+            override suspend fun uiPlaces(placement: String, launcher: String?, machine: String?) = emptyList<ExtensionUiPlace>()
+            override suspend fun renderUi(extension: String, ui: String, context: ExtensionUiContext?, state: String?): ExtensionView {
+                if (cancelRedraw) throw kotlinx.coroutines.CancellationException("page left")
+                return unloaded
+            }
+            override suspend fun uiAction(extension: String, ui: String, action: String, context: ExtensionUiContext?,
+                                          state: String?, values: Map<String, String>?) = actionResult
+            override suspend fun uiImage(path: String) = byteArrayOf()
+        }
+        val model = ExtensionViewModel(api, "review-ext", "pr")
+        model.load()
+        actionResult = ExtensionUiResult(items = listOf(diff("a", listOf("+loaded"))))
+        model.fetch(ExtensionViewAction("load"), emptyMap())
+        assertEquals(listOf("+loaded"), model.state.value.view!!.sections[0].items[0].hunks!!.single().lines)
+
+        val rowControl = ExtensionRowControl(kind = "switch", name = "viewed", action = ExtensionViewAction("mark_viewed"))
+        // 1. Silent control change triggers redraw(): loaded diff stays
+        actionResult = ExtensionUiResult()
+        model.change(rowControl, "true")
+        assertEquals(listOf("+loaded"), model.state.value.view!!.sections[0].items[0].hunks!!.single().lines)
+
+        // 2. quietly() returning a fresh view: loaded diff stays
+        actionResult = ExtensionUiResult(view = unloaded)
+        model.quietly("more", emptyMap()) { it }
+        assertEquals(listOf("+loaded"), model.state.value.view!!.sections[0].items[0].hunks!!.single().lines)
+
+        // 3. press() returning a fresh view: loaded diff stays
+        actionResult = ExtensionUiResult(view = unloaded)
+        model.press(ExtensionViewAction("refresh"))
+        assertEquals(listOf("+loaded"), model.state.value.view!!.sections[0].items[0].hunks!!.single().lines)
+
+        // 4. CancellationException inside redraw() propagates out of change() instead of being swallowed
+        actionResult = ExtensionUiResult()
+        cancelRedraw = true
+        val thrown = runCatching { model.change(rowControl, "false") }.exceptionOrNull()
+        assertTrue("expected CancellationException, got $thrown", thrown is kotlinx.coroutines.CancellationException)
+    }
 }

@@ -9,6 +9,7 @@ import persona.core.contracts.Session
 import persona.core.contracts.api.MessageRequest
 import persona.core.contracts.api.MessageEvidence
 import persona.core.contracts.api.MessageTransportResult
+import persona.core.contracts.api.MessageVia
 import java.net.InetAddress
 import java.security.MessageDigest
 import java.util.Base64
@@ -215,6 +216,7 @@ class HttpMessageTransportTest {
                         assertFalse("launcher" in body)
                         assertFalse("model" in body)
                         assertNull("only the message that carries a launcher switch out says so", body["apply_switch"])
+                        assertNull("an ordinary typed message has no provenance mark", body["via"])
                     }
                     responses.send(MockResponse().setResponseCode(202).setBody(
                         """{"delivered":"later","undelivered":{"id":"stable-id","text":"hello","at":"2026-11-17T10:00:00Z","state":"waiting"}}"""))
@@ -234,6 +236,12 @@ class HttpMessageTransportTest {
                     assertEquals(MessageTransportResult.Accepted, transport.send(message.copy(applySwitch = true)))
                     val switching = JsonCodec.parseToJsonElement(withTimeout(5000) { requests.receive() }.body.readUtf8()).jsonObject
                     assertEquals(JsonPrimitive(true), switching["apply_switch"])
+                    for (via in listOf(MessageVia.Share, MessageVia.Intent, MessageVia.Card)) {
+                        responses.send(MockResponse().setBody("""{"ok":true}"""))
+                        assertEquals(MessageTransportResult.Accepted, transport.send(message.copy(via = via)))
+                        val marked = JsonCodec.parseToJsonElement(withTimeout(5000) { requests.receive() }.body.readUtf8()).jsonObject
+                        assertEquals(via, marked["via"]?.jsonPrimitive?.content)
+                    }
                     // A first Codex send returns the new thread before it enters the session-list window.
                     val firstReply = """{"ok":true,"session":{"machine_id":"","session_id":"thread","agent":"codex","pane_id":"pane"}}"""
                     responses.send(MockResponse().setBody(firstReply))

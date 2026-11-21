@@ -1,7 +1,6 @@
 package assistant
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -34,7 +33,7 @@ func TestParseDeployedCommits(t *testing.T) {
 	if l == nil || l.repo != "owner/repo" || l.head != newHub || l.count != 3 {
 		t.Fatalf("%+v", l)
 	}
-	if l.prs[12] != newHub || l.prs[9] != mergeSHA || len(l.prs) != 2 {
+	if l.prs[12] != (deployReceipt{sha: newHub}) || l.prs[9] != (deployReceipt{sha: mergeSHA}) || len(l.prs) != 2 {
 		t.Fatalf("prs %+v", l.prs)
 	}
 	if !l.runs(newHub[:9]) || !l.runs(strings.ToUpper(newHub)) || l.runs(oldHub) || l.runs("cccc") {
@@ -62,7 +61,7 @@ func TestDeployedCommitsWithoutGitHub(t *testing.T) {
 		a := askOf(s, todo.ID)
 		return a != nil && !a.AcceptedAt.IsZero() && todoNow(s, todo.ID).Stage == "verify"
 	})
-	if forge.calls != 1 || verifyCards(posts()) != 0 {
+	if forge.calls != 0 || verifyCards(posts()) != 0 {
 		t.Fatalf("%d GitHub calls, %d cards", forge.calls, verifyCards(posts()))
 	}
 
@@ -142,7 +141,8 @@ func TestDeployedCommitsPRHeads(t *testing.T) {
 	if l == nil || l.head != newHub || l.count != 4 {
 		t.Fatalf("%+v", l)
 	}
-	if l.prs[31] != head || l.prs[9] != mergeSHA || l.prs[12] != oldHub || len(l.prs) != 3 {
+	if l.prs[31] != (deployReceipt{sha: head, byHead: true}) ||
+		l.prs[9] != (deployReceipt{sha: mergeSHA}) || l.prs[12] != (deployReceipt{sha: oldHub}) || len(l.prs) != 3 {
 		t.Fatalf("prs %+v", l.prs)
 	}
 }
@@ -162,7 +162,7 @@ func TestDeployedBeforeTheUpstreamMerge(t *testing.T) {
 		a := askOf(s, todo.ID)
 		return a != nil && !a.AcceptedAt.IsZero() && todoNow(s, todo.ID).Stage == "verify"
 	})
-	if got := todoNow(s, todo.ID); got.Delivery != nil && got.Delivery.State != deliveryLive || forge.calls != 1 {
+	if got := todoNow(s, todo.ID); got.Delivery != nil && got.Delivery.State != deliveryLive || forge.calls != 0 {
 		t.Fatalf("%+v, %d GitHub calls", got.Delivery, forge.calls)
 	}
 
@@ -181,21 +181,38 @@ func TestDeployedBeforeTheUpstreamMerge(t *testing.T) {
 func TestCloseoutReportsLocalDeploymentAndUpstreamMergeIndependently(t *testing.T) {
 	for _, tc := range []struct {
 		name, merged, text string
-		forgeErr           error
+		byHead, offline    bool
 	}{
-		{"open", proto.CloseoutNo, "没合并，本机部署包含该 PR", nil},
-		{"unavailable", "", "合没合查不出，本机部署包含该 PR", errors.New("timeout")},
-		{"merged", proto.CloseoutYes, "已合并，本机部署包含该 PR", nil},
+		{"open head", proto.CloseoutNo, "没合并，本机部署包含该 PR", true, false},
+		{"unavailable head", "", "合没合查不出，本机部署包含该 PR", true, true},
+		{"merged upstream, deployed by head", proto.CloseoutYes, "已合并，本机部署包含该 PR", true, false},
+		{"unavailable subject", "", "合没合查不出，线上正在跑的版本里有它", false, true},
+		{"open subject", proto.CloseoutNo, "没合并，线上正在跑的版本里有它", false, false},
+		{"merged subject", proto.CloseoutYes, "已合并，线上正在跑的版本里有它", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _, _, _, forge := deployService(t)
-			forge.merged, forge.err = tc.merged == proto.CloseoutYes, tc.forgeErr
-			head := strings.Repeat("d", 40)
-			writeDeployed(t, s, oldHub, head+" local change", "# pr: 9 "+head)
+			forge.merged = tc.merged == proto.CloseoutYes
+			if tc.offline {
+				forge.err = errors.New("timeout")
+			}
+			if tc.byHead {
+				head := strings.Repeat("d", 40)
+				writeDeployed(t, s, oldHub, head+" local change", "# pr: 9 "+head)
+			} else {
+				writeDeployed(t, s, oldHub, mergeSHA+" change (#9)")
+			}
+			pr := "https://github.com/o/r/pull/9"
+			if r := s.checkDeployed(t.Context(), pr); r.State != deployIn || forge.calls != 0 {
+				t.Fatalf("deployment gate did not use its receipt: %+v, %d upstream calls", r, forge.calls)
+			}
 			var c proto.Closeout
-			s.checkCloseout(context.Background(), &c, []proto.WorkArtifact{{Kind: "pr", Ref: "https://github.com/o/r/pull/9"}})
-			if c.Checked == nil || c.Checked.Merged != tc.merged || c.Checked.Deployed != proto.CloseoutYes {
+			s.checkCloseout(t.Context(), &c, []proto.WorkArtifact{{Kind: "pr", Ref: pr}})
+			if c.Checked == nil || c.Checked.Merged != tc.merged || c.Checked.Deployed != proto.CloseoutYes || c.Checked.LocalDeployment != tc.byHead {
 				t.Fatalf("merge and deploy facts: %+v", c.Checked)
+			}
+			if forge.calls != 1 || forge.compareCalls != 0 || !s.deploy.githubDown.IsZero() {
+				t.Fatalf("the closeout only needs the PR merge read: %d PR reads, %d compares, pause %v", forge.calls, forge.compareCalls, s.deploy.githubDown)
 			}
 			line := prompts.RenderSupervise(prompts.Supervise{Entries: []prompts.SuperviseEntry{{Closeout: &prompts.SuperviseCloseout{
 				CheckedMerged: c.Checked.Merged, CheckedDeployed: c.Checked.Deployed, LocalDeployment: c.Checked.LocalDeployment,

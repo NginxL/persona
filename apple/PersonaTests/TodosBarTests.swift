@@ -94,6 +94,14 @@ struct TodosListLayoutTests {
         #expect(out.doneRows == 0)
     }
 
+    @Test func anOutsideDecisionKeepsItsOwnRowWithAnOpenParent() {
+        let rows = [filed("p", TodoListSection.needsYou), filed("todo_od_1", TodoListSection.needsYou, partOf: "p")]
+        let out = TodosListLayout.layout(input(rows))
+        #expect(out.groups.map(\.id) == [TodoListSection.needsYou])
+        #expect(out.groups[0].keys == ["/p", "/todo_od_1"] && out.groups[0].count == 2)
+        #expect(out.sections["/todo_od_1"] == TodoListSection.needsYou, "the request is associated with the parent, not carried as its step")
+    }
+
     @Test func choicesDrawTheirOwnSections() {
         let rows = [filed("a", TodoListSection.needsYou), filed("b", TodoListSection.canWait), filed("c", TodoListSection.working),
                     filed("d", TodoListSection.waiting), filed("e", TodoListSection.justFinished), filed("f", TodoListSection.todo),

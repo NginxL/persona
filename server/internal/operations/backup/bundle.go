@@ -45,7 +45,7 @@ func validPayloadPath(name string) bool {
 		return false
 	}
 	rel := strings.TrimPrefix(name, "runtime/")
-	for _, prefix := range []string{"managers/assistant/", "extensions/", "skills/", "hub.machines_kept/"} {
+	for _, prefix := range []string{"managers/assistant/", "extensions/", "skills/", "hub.machines_kept/", "tls/"} {
 		if strings.HasPrefix(rel, prefix) {
 			return true
 		}

@@ -26,7 +26,7 @@ import { UltracodeSwitchRow } from "./Ultracode";
 /** The panel for an Agent's chat: its computer's launchers as providers, picks applied through POST …/modes one at a
  *  time (a waiting switch dropped, the model, then the effort, then the speed; or one switch to another launcher), each
  *  drawn at once and put back if it fails. */
-export function SessionModelPanel({ session, anchor, onClose }: { session: Session; anchor: HTMLElement; onClose: () => void }) {
+export function SessionModelPanel({ session, displayModel, anchor, onClose }: { session: Session; displayModel?: string; anchor: HTMLElement; onClose: () => void }) {
   const version = useModelLists();
   const { set, latest, switchLauncher } = useModeSet(session);
   const mid = session.machine_id;
@@ -38,9 +38,9 @@ export function SessionModelPanel({ session, anchor, onClose }: { session: Sessi
   const engineSwitch = useStore((s) => hubHas(s.features, ENGINE_SWITCH_FEATURE));
   const launchers = machineLauncherList(mid);
   const { providers, state } = useMemo(
-    () => sessionPanel(session, launchers, listEntry, { switching, engineSwitch }),
+    () => sessionPanel(session, launchers, listEntry, { switching, engineSwitch, displayModel }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `version` stands for what was read
-    [session, launchers, listEntry, version, switching, engineSwitch],
+    [session, launchers, listEntry, version, switching, engineSwitch, displayModel],
   );
   // the engine of a pick's launcher, as the panel shows it (a favorite from a list not read yet knows it too)
   const options = (): PanelOptions => ({ switching, engineSwitch, engineOf: (name) => providers.find((p) => p.id === name)?.engine });

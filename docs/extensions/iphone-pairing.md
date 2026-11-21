@@ -49,9 +49,12 @@ this computer only; the phone keeps listing the computer as trusted until its us
 
 ### Preparing the phone
 
-The developer services behind screenshots, input and apps are there only while the phone has its personalized developer disk image
-mounted, and a phone drops it at every restart (`ddi_not_mounted`). The guided setup's **Prepare** (`StartPrepare`, a background job like
-pairing, `POST /api/v1/machines/{mid}/iphone/prepare`) mounts it through the session (`mount_ddi`, [iphone-bridge.md](iphone-bridge.md)).
+The developer services behind screenshots, input and apps are there only while the phone has its developer disk image mounted (from
+iOS 27 a cryptex, as Xcode installs it there). A phone drops the personalized image at every restart (`ddi_not_mounted`); whether an
+iOS 27 phone keeps the cryptex across a restart is not verified, and either way the node mounts it again as below. The guided setup's **Prepare**
+(`StartPrepare`, a background job like pairing, `POST /api/v1/machines/{mid}/iphone/prepare`) mounts it through the session (`mount_ddi`,
+[iphone-bridge.md](iphone-bridge.md)); an image already there, Xcode's included, counts as mounted. Right after a mount the session reads
+`device_info` again, so the phone's status says it is ready at once instead of at the next health check (#12171).
 Done, the record keeps `auto_prepare`: the owner allowed this computer to mount it again by itself, and from then on a link that comes up
 with `ddi_mounted: false` (after the restart) mounts it in the background, once per link, a failure only logged. Every mount asks Apple's
 signing server for the phone's ticket, which carries the phone's chip ID (ECID); the app says so before the first Prepare. The image comes

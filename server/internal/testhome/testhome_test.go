@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/identity"
 )
 
 // quiet is Main without the message about a write to ~/.persona, which these tests provoke on purpose.
@@ -40,6 +43,33 @@ func TestMainGivesAnEmptyHomeAndRestoresTheEnvironment(t *testing.T) {
 	}
 	if _, err := os.Stat(home); !os.IsNotExist(err) {
 		t.Fatalf("the throw-away home is still there: %v", err)
+	}
+}
+
+// PERSONA_HOME's former name goes too: with PERSONA_HOME unset, identity reads it, and a test's state directory was the
+// one it named (a Persona of an older install) instead of the throw-away home's. It comes back afterwards.
+func TestMainClearsTheFormerStateVariable(t *testing.T) {
+	_, legacy := compat.EnvNames("PERSONA_HOME")
+	t.Setenv("HOME", "/real/home")
+	t.Setenv("PERSONA_HOME", "/real/state")
+	t.Setenv(legacy, "/real/former-state")
+	t.Setenv(isolated, "")
+	_ = os.Unsetenv(isolated)
+	code := quiet(func() int {
+		home := os.Getenv("HOME")
+		if v, ok := os.LookupEnv(legacy); ok {
+			t.Errorf("%s=%q in the tests", legacy, v)
+		}
+		if got, want := identity.DataDir(home), filepath.Join(home, ".persona"); got != want {
+			t.Errorf("state directory %q, want %q", got, want)
+		}
+		return 0
+	})
+	if code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	if os.Getenv(legacy) != "/real/former-state" {
+		t.Fatalf("not restored: %s=%q", legacy, os.Getenv(legacy))
 	}
 }
 

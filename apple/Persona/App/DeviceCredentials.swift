@@ -168,6 +168,11 @@ struct DevicesView: View {
     @State private var current: String?
     /// Per credential, how the hub pushes to its device (#5998); empty from an older hub.
     @State private var push: [String: APIClient.PushRoute] = [:]
+    /// Which device takes the phone tools' calls, and the choices it lists (`PhonePrimaryChoices`); nil from an older hub.
+    @State private var phone: APIClient.PhonePrimary?
+    @State private var phoneOptions: [PhonePrimaryChoices.Option] = []
+    /// A choice is on its way to the hub: one save at a time.
+    @State private var savingPhone = false
     @State private var loaded = false
     @State private var revoking: APIClient.DeviceToken?
     @State private var connecting = false
@@ -194,6 +199,22 @@ struct DevicesView: View {
                 ForEach(tokens.filter { $0.revokedAt == nil }) { t in row(t) }
             } footer: {
                 Text("Each device has its own credentials. If you lose one, revoke just that one; the others keep working. A watch can only view and answer; it can't change settings or start and stop agents.")
+            }
+            if PhonePrimaryChoices.isShown(phone) {
+                Section {
+                    Picker(selection: Binding(
+                        get: { PhonePrimaryChoices.selection(phone: phone, options: phoneOptions) },
+                        set: { id in Task { await choosePhone(id) } }
+                    )) {
+                        ForEach(phoneOptions) { o in Text(optionTitle(o)).tag(o.id) }
+                    } label: {
+                        Text("Primary Device").lineLimit(1)
+                    }
+                    .disabled(savingPhone)
+                    .accessibilityIdentifier("devices.phonePrimary")
+                } footer: {
+                    Text("When Persona needs your phone (your location, Health, reminders), it asks this device first. If it can't be reached, another of your devices answers and Persona says which. Automatic uses the device you used most recently.")
+                }
             }
             let revoked = tokens.filter { $0.revokedAt != nil }
             if !revoked.isEmpty {
@@ -299,11 +320,39 @@ struct DevicesView: View {
         return String(localized: "Added \(t.createdAt?.formatted(date: .abbreviated, time: .shortened) ?? "")")
     }
 
+    private func optionTitle(_ o: PhonePrimaryChoices.Option) -> String {
+        guard let device = o.device else { return String(localized: "Automatic") }
+        return o.isCurrent ? String(localized: "\(device.name) · This Device") : device.name
+    }
+
+    /// The page's phone choice and the options listed for it, together.
+    private func apply(phone new: APIClient.PhonePrimary?) {
+        phone = new
+        phoneOptions = PhonePrimaryChoices.options(phone: new, tokens: tokens, current: current)
+    }
+
+    /// The choice shows at once; the hub's answer then replaces it, and a failure puts the old one back.
+    private func choosePhone(_ id: String) async {
+        guard !savingPhone, let api = model.api,
+              id != PhonePrimaryChoices.selection(phone: phone, options: phoneOptions) else { return }
+        let before = phone
+        savingPhone = true
+        apply(phone: PhonePrimaryChoices.choosing(id, in: phone))
+        do {
+            apply(phone: try await api.setPhonePrimary(id))
+        } catch {
+            apply(phone: before)
+            model.show(error)
+        }
+        savingPhone = false
+    }
+
     private func load() async {
         guard let api = model.api else { return }
         do {
             let r = try await api.deviceTokens()
             (tokens, current, push) = (r.tokens, r.current, r.push ?? [:])
+            apply(phone: savingPhone ? phone : r.phone) // a save on its way answers for itself
         } catch {
             model.show(error)
         }

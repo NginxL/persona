@@ -1985,12 +1985,11 @@ private struct AgentsList: View {
         // `Theme.Space.xl` in, 4 pt left of the Persona tab's (#8359).
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(UnifiedSidebar.columnSpace)).minX } action: { x in
             guard sidebarRows == nil, let unified, x >= 0 else { return }
-            let leading = unified.linedUpWith?.ui.rowsLeading ?? x + Theme.Space.s
-            if unified.ui.rowsLeading != leading { unified.ui.rowsLeading = leading }
+            unified.ui.placeRows(at: unified.linedUpWith?.ui.rowsLeading ?? x + Theme.Space.s)
         }
         .onChange(of: sidebarRows == nil ? unified?.linedUpWith?.ui.rowsLeading : nil, initial: true) { _, line in
-            guard let line, let unified, unified.ui.rowsLeading != line else { return }
-            unified.ui.rowsLeading = line
+            guard let line, let unified else { return }
+            unified.ui.placeRows(at: line)
         }
         .id(UnifiedSidebar.agentsAnchor)
     }

@@ -1,0 +1,196 @@
+// @vitest-environment jsdom
+import { act, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.hoisted(() => {
+  globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
+  window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
+});
+vi.mock("./ConfigurationManager", () => ({ ConfigurationManager: ({ children }: { children: (id: string) => unknown }) => children("assistant") }));
+vi.mock("./ModelProfiles", () => ({ ModelProfiles: () => null }));
+vi.mock("../../ui/atoms", async (original) => ({ ...(await original<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
+import { initI18n, t } from "../../i18n";
+import { BYPASS_WARNING, modeTitle } from "../../lib/session-actions";
+import type { ModelBinding, ModelProvider, ModelPurpose } from "../../lib/model-config";
+import { getState, reset } from "../../lib/store";
+import { ModelConfiguration } from "./ModelConfiguration";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const PROVIDERS: ModelProvider[] = [
+  { id: "launcher.claude", name: "Claude Code", kind: "launcher", agent: "claude" },
+  { id: "launcher.codex", name: "Codex", kind: "launcher", agent: "codex" },
+  { id: "launcher.agy", name: "Antigravity", kind: "launcher", agent: "agy" },
+  { id: "launcher.omp", name: "omp", kind: "launcher", agent: "omp" },
+  { id: "launcher.grok", name: "Grok", kind: "launcher", agent: "paseo", permission_modes: ["default", "bypassPermissions"] },
+  { id: "launcher.messages", name: "Direct API", kind: "api", api: "messages", model: "api-model", has_key: true },
+];
+
+let agents: ModelPurpose;
+let lark: ModelPurpose;
+let triage: ModelPurpose;
+let writes: { path: string; body: Record<string, unknown> }[] = [];
+let host: HTMLDivElement;
+let root: Root;
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+const flush = async () => { for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); }); };
+
+function makeAgents(binding: ModelBinding = { provider: "launcher.claude", permission_mode: "acceptEdits" }): ModelPurpose {
+  return {
+    id: "agent.new", name: "Agents", group: "Agents", kind: "launcher", launch: "engine", category_id: "agent.new",
+    override: binding, effective: { provider: "launcher.claude", ...binding }, revision: 3,
+    fields: ["provider", "model", "effort", "permission_mode"],
+    provider_ids: ["launcher.claude", "launcher.codex", "launcher.agy", "launcher.omp", "launcher.grok"],
+  };
+}
+
+function makeLark(override: ModelBinding = {}, revision = 5): ModelPurpose {
+  const effective = override.provider && override.provider !== agents.effective.provider
+    ? override
+    : { ...agents.effective, ...override };
+  return {
+    id: "lark.agent", name: "Lark /agent", group: "Agents", kind: "launcher", launch: "headless",
+    parent: "agent.new", category_id: "agent.new",
+    override, effective, revision, inherited_from: override.provider ? "" : "Agents",
+    fields: ["provider", "model", "effort", "permission_mode"],
+    provider_ids: ["launcher.claude", "launcher.codex", "launcher.agy", "launcher.omp", "launcher.grok"],
+  };
+}
+
+function makeTriage(): ModelPurpose {
+  return {
+    id: "inbox.triage", name: "Sorting", group: "Sorting", kind: "api", category_id: "inbox.triage",
+    override: { provider: "launcher.messages", model: "api-model" },
+    effective: { provider: "launcher.messages", model: "api-model" },
+    revision: 2, fields: ["provider", "model", "effort"], provider_ids: ["launcher.messages"],
+  };
+}
+
+async function hub(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const path = String(input).split("?")[0];
+  if (path === "/api/v1/model-profiles") return json({ error: "not found" }, 404);
+  if (path === "/api/v1/model-config") return json({ purposes: [agents, lark, triage], providers: PROVIDERS });
+  if (path.endsWith("/models")) {
+    const providerId = decodeURIComponent(path.split("/").slice(-2)[0] ?? "");
+    const provider = PROVIDERS.find((p) => p.id === providerId);
+    return json({ agent: provider?.agent ?? "claude", models: [{ id: "default", name: "Default", default: true }] });
+  }
+  const purpose = [agents, lark, triage].find((p) => path === `/api/v1/model-config/purposes/${p.id}`);
+  if (purpose && init?.method === "PATCH") {
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    writes.push({ path, body });
+    const next: ModelBinding = { ...purpose.override };
+    for (const k of ["provider", "model", "effort", "permission_mode"] as const) {
+      if (k in body) {
+        if (body[k] == null) delete next[k];
+        else next[k] = String(body[k]);
+      }
+    }
+    if (purpose.id === "lark.agent") lark = makeLark(next, purpose.revision + 1);
+    else if (purpose.id === "agent.new") agents = makeAgents(next);
+    return json({ purpose: purpose.id === "lark.agent" ? lark : agents, providers: PROVIDERS });
+  }
+  if (purpose) return json({ purpose, providers: PROVIDERS });
+  if (path.startsWith("/api/v1/model-config/purposes/")) return json({ error: "not found" }, 404);
+  return json({ error: `unexpected ${path}` }, 500);
+}
+
+const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')!;
+const button = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label)!;
+const permSelect = () => dialog().querySelector<HTMLSelectElement>("[data-permission-mode-select]");
+const providerSelect = () => dialog().querySelector<HTMLSelectElement>("select")!;
+
+async function render() {
+  function Harness() {
+    const [open, onOpen] = useState<string | null>(null);
+    return <ModelConfiguration open={open} onOpen={onOpen} onProviders={() => {}} />;
+  }
+  await act(async () => root.render(<Harness />));
+  await flush();
+}
+
+async function openPurpose(id: string) {
+  await act(async () => host.querySelector<HTMLButtonElement>(`[data-model-purpose="${id}"] button`)!.click());
+  await flush();
+}
+
+async function selectValue(el: HTMLSelectElement, value: string) {
+  await act(async () => {
+    el.value = value;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await flush();
+}
+
+beforeEach(async () => {
+  await initI18n("en");
+  reset();
+  Object.assign(getState(), { features: [], machines: [], sessions: {}, assistant: undefined });
+  agents = makeAgents();
+  lark = makeLark();
+  triage = makeTriage();
+  writes = [];
+  vi.stubGlobal("fetch", vi.fn(hub));
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+});
+
+afterEach(async () => {
+  act(() => root.unmount());
+  host.remove();
+  vi.unstubAllGlobals();
+  reset();
+  await initI18n("zh-Hans");
+});
+
+describe("ModelConfiguration unified permission mode", () => {
+  it("shows permission mode for launcher purposes, inherits parent mode, warns on bypass, saves and resets", async () => {
+    await render();
+    await openPurpose("lark.agent");
+    const select = permSelect()!;
+    expect(select).not.toBeNull();
+    // Default option shows inherited mode from Agents
+    expect(select.options[0].textContent).toContain(modeTitle("acceptEdits"));
+    expect([...select.options].map((o) => o.value)).toEqual(["", "default", "acceptEdits", "plan", "auto", "bypassPermissions"]);
+
+    await selectValue(select, "bypassPermissions");
+    expect(dialog().textContent).toContain(BYPASS_WARNING);
+    await act(async () => button(t("common.save"), dialog()).click());
+    await flush();
+    expect(writes[0]).toEqual({
+      path: "/api/v1/model-config/purposes/lark.agent",
+      body: { revision: 5, provider: null, model: null, effort: null, permission_mode: "bypassPermissions" },
+    });
+
+    // Resetting clears permission_mode back to null
+    await openPurpose("lark.agent");
+    await act(async () => button(t("settings-modelconfiguration.follow_agents"), dialog()).click());
+    await flush();
+    expect(writes[1].body).toEqual({ revision: 6, provider: null, model: null, effort: null, permission_mode: null });
+  });
+
+  it("filters permission modes by provider capability and hides selector on omp and direct API purposes", async () => {
+    await render();
+    // Direct API purpose never renders permission mode selector
+    await openPurpose("inbox.triage");
+    expect(permSelect()).toBeNull();
+    await act(async () => button(t("common.cancel"), dialog()).click());
+    await flush();
+
+    // Launcher purpose: omp hides permission mode; Grok lists only its supported modes; Codex/AGY show all 5
+    await openPurpose("agent.new");
+    await selectValue(providerSelect(), "launcher.omp");
+    expect(permSelect()).toBeNull();
+
+    await selectValue(providerSelect(), "launcher.grok");
+    expect([...permSelect()!.options].map((o) => o.value)).toEqual(["", "default", "bypassPermissions"]);
+
+    await selectValue(providerSelect(), "launcher.agy");
+    expect([...permSelect()!.options].map((o) => o.value)).toEqual(["", "default", "acceptEdits", "plan", "auto", "bypassPermissions"]);
+
+    await selectValue(providerSelect(), "launcher.codex");
+    expect([...permSelect()!.options].map((o) => o.value)).toEqual(["", "default", "acceptEdits", "plan", "auto", "bypassPermissions"]);
+  });
+});

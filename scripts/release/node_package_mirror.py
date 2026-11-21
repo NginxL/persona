@@ -3,13 +3,12 @@ import copy
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import stat
 import tempfile
 
 from hub_release_paths import validate_release_paths
-from node_artifacts import PLATFORMS, digest, verify_archive, verify_binary
+from node_artifacts import node_files, validate_node_manifest, verify_archive, verify_installed_nodes
 
 
 def regular(path, directory=False):
@@ -19,17 +18,10 @@ def regular(path, directory=False):
 
 
 def consumer_manifest(manifest):
-    version = manifest.get('version', '')
-    commit = manifest.get('commit', '')
-    if (not isinstance(version, str) or not re.fullmatch(r'master-[0-9a-f]{12}-[0-9]{12}', version)
-            or not isinstance(commit, str) or not re.fullmatch(r'[0-9a-f]{40}', commit)
-            or version != f"master-{commit[:12]}-{manifest.get('build')}"
-            or set(manifest.get('files', {})) != PLATFORMS
-            or manifest.get('programs') or manifest.get('nodes')):
-        raise ValueError('Invalid node download identity')
+    validate_node_manifest(manifest)
     result = copy.deepcopy(manifest)
-    for platform, artifact in result['files'].items():
-        artifact['name'] = f'personad-{platform}.gz'
+    for program, platform, artifact in node_files(result):
+        artifact['name'] = f'{program}-{platform}.gz'
     return result
 
 
@@ -48,16 +40,17 @@ def mirror_root(root, namespace):
 
 def check_directory(directory, manifest):
     regular(directory, directory=True)
+    standard = consumer_manifest(manifest)
     expected = {'manifest.json', 'source-manifest.json'}
-    expected.update(artifact['name'] for artifact in consumer_manifest(manifest)['files'].values())
+    expected.update(artifact['name'] for _, _, artifact in node_files(standard))
     if {path.name for path in directory.iterdir()} != expected:
         raise ValueError('Unexpected immutable node download contents')
     for name in ('manifest.json', 'source-manifest.json'):
         regular(directory / name)
-    if (json.loads((directory / 'manifest.json').read_text()) != consumer_manifest(manifest)
+    if (json.loads((directory / 'manifest.json').read_text()) != standard
             or json.loads((directory / 'source-manifest.json').read_text()) != manifest):
         raise ValueError('Immutable node download manifest changed')
-    for artifact in consumer_manifest(manifest)['files'].values():
+    for _, _, artifact in node_files(standard):
         verify_archive(directory, artifact)
 
 
@@ -104,21 +97,16 @@ def prepare_downloads(root, namespace, staged, manifest, native_directory):
         raise ValueError('Downloads must use the prepared native release')
     regular(expected.parent, directory=True)
     regular(expected, directory=True)
-    for platform, artifact in manifest['files'].items():
-        binary = expected / f'personad-{platform}'
-        regular(binary)
-        verify_binary(binary, platform, manifest)
-        if digest(binary) != artifact['binary_sha256']:
-            raise ValueError('Node download differs from prepared native binary')
+    verify_installed_nodes(expected, manifest)
     destination = mirror / manifest['version']
     if destination.exists() or destination.is_symlink():
         check_directory(destination, manifest)
         return destination
     temporary = Path(tempfile.mkdtemp(prefix='.stage-' + manifest['version'] + '-', dir=mirror))
     try:
-        for platform, artifact in manifest['files'].items():
+        for program, platform, artifact in node_files(manifest):
             source = verify_archive(staged, artifact)
-            target = temporary / standard['files'][platform]['name']
+            target = temporary / f'{program}-{platform}.gz'
             with source.open('rb') as reader, target.open('xb') as writer:
                 shutil.copyfileobj(reader, writer)
                 writer.flush()

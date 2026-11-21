@@ -6,4 +6,7 @@
     <string name="settings_language_system_now">現在は%1$s</string>
     <string name="settings_language_caption">「システムと同じ」では、第一優先言語に翻訳があればその言語を、なければ英語を使います。</string>
     <string name="settings_model_assistant">アシスタント</string>
+    <string name="settings_sidebar">サイドバー</string>
+    <string name="settings_sidebar_separate">分ける</string>
+    <string name="settings_sidebar_merged">まとめる</string>
 </resources>

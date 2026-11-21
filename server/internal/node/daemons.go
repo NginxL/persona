@@ -14,7 +14,7 @@ package node
 //   - its session ids reach the hub as "<id>.<its id>" and its interaction ids are replaced, so its sessions never
 //     collide with this machine's or another runtime's — and a call about a session without its prefix (the node
 //     asking every runtime who has an unknown session) is answered by the link, never shown to the daemon;
-//   - only the protocol's caps (start, send, interrupt, rename, close), no mcp.* (phone and Persona tools), and no
+//   - only approved runtime capabilities and opt-in A2A tools for their own sessions, with no
 //     pane_id / resume_argv / transcript (a pane to claim, a command to run in the terminal engine, a transcript to read).
 
 import (
@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/compat"
 	"io"
 	"net"
@@ -107,6 +108,7 @@ type daemonConfig struct {
 	// Launcher names its entry in the new-session form when it can start sessions; default ID.
 	Launcher string `json:"launcher,omitempty"`
 	Disabled bool   `json:"disabled,omitempty"`
+	A2A      bool   `json:"a2a,omitempty"`
 }
 
 // validate checks one entry; the error says which field is wrong, never a value of the token.
@@ -605,11 +607,38 @@ func (l *daemonLink) fromDaemon(ctx context.Context, method string, params json.
 		err := l.rp.Call(ctx, "interaction.create", p, &res)
 		return res, err
 	case "mcp.tools":
+		if l.cfg.A2A {
+			return l.a2aTool(ctx, method, params)
+		}
 		return map[string]any{"tools": []any{}}, nil
 	case "mcp.call":
+		if l.cfg.A2A {
+			return l.a2aTool(ctx, method, params)
+		}
 		return nil, errUnsupportedForDaemons("Persona tools")
 	}
 	return nil, &rpc.Error{Message: "unsupported: unknown method " + method, Code: "unsupported"}
+}
+
+func (l *daemonLink) a2aTool(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	var p struct {
+		Name      string          `json:"name"`
+		SessionID string          `json:"session_id"`
+		Args      json.RawMessage `json:"args"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, err
+	}
+	sid, ok := l.outer(p.SessionID)
+	if !ok {
+		return nil, errUnsupportedForDaemons("tools without an owned session")
+	}
+	if method == "mcp.call" && !assistantwire.IsA2ATool(p.Name) {
+		return nil, errUnsupportedForDaemons("non-A2A tools")
+	}
+	var res json.RawMessage
+	err := l.rp.Call(ctx, method, map[string]any{"name": p.Name, "session_id": sid, "args": p.Args}, &res)
+	return res, err
 }
 
 // hello is what the host hears: the config's id, name, agent and launcher; only the caps daemons may have.

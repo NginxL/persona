@@ -226,6 +226,45 @@ func TestCodexAppChatsAreListedLikeTheSidebar(t *testing.T) {
 	}
 }
 
+func TestPaginatedOpeningPromptIsOnlyAListTitle(t *testing.T) {
+	n := remoteTestNode(t)
+	home, project := n.codexHome(), t.TempDir()
+	updated := time.Now()
+	want := strings.Repeat("界", 255) + "🙂"
+	prompt := want + strings.Repeat("x", 65<<10)
+	writeCodexApp(t, home, project, codexAppSchema+
+		codexAppRow(appChat, "", project, "", updated, 0)+
+		codexAppRow(appOld, "", project, "Chosen name", updated, 0)+
+		`ALTER TABLE threads ADD COLUMN history_mode TEXT DEFAULT 'paginated';
+		UPDATE threads SET title = '`+prompt+`';`)
+	writeCodexHistory(t, home, []historyTurn{{thread: appChat, id: "turn-1", status: "completed",
+		ordinal: 1, items: [][2]string{userItem("u1", prompt)}}})
+
+	live, ok := codexPaginatedThreadOf(codexSource{home: home, thread: appChat})
+	if !ok || live.Title != want {
+		t.Errorf("live title: found %t, got %d bytes, want %d bytes", ok, len(live.Title), len(want))
+	}
+	rows := rowsByThread(n.codexSessions(map[string]bool{}))
+	if got := rows[appChat].Title; got != want {
+		t.Errorf("stored title: got %d bytes, want %d bytes", len(got), len(want))
+	}
+	if got := rows[appOld].Title; got != "Chosen name" {
+		t.Errorf("stored name = %q", got)
+	}
+	f, err := n.file(rows[appChat].SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := f.Refresh()
+	if err != nil || !strings.Contains(historyText(items), "user:text:"+want) {
+		t.Fatalf("opening prompt missing from history: %v", err)
+	}
+	raw, err := os.ReadFile(f.Where())
+	if err != nil || !strings.Contains(string(raw), prompt) {
+		t.Fatalf("full opening prompt missing from materialized history: %v", err)
+	}
+}
+
 // One list reads the App's state once per home, not twice for each of its chats: each read globbed the home for the
 // App's state database, about 1,100 globs a second for 550 chats.
 func TestCodexAppStateReadOncePerList(t *testing.T) {

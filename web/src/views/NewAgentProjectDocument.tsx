@@ -1,4 +1,5 @@
 import { createContext, useContext, useId, useLayoutEffect, useRef, useState } from "react";
+import { LEGACY_CONTEXT_OR_FILE_RE } from "../lib/compatibility";
 import { t } from "../i18n";
 import { loadApprovedProjectDocument, TeamProjectDocumentError, type TeamProjectDocument } from "../lib/teamProjectDocument";
 import { Button } from "../ui/atoms";
@@ -11,7 +12,7 @@ export function projectDocumentText({ content, ...source }: ProjectDocumentSnaps
   for (let suffix = 1; ends.has(`</${boundary}>`); suffix++) boundary = `persona-project-document-${suffix}`;
   // A terminal can consume control bytes, and a legacy hub rewrites context/file tags in first messages.
   const encoded = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/u.test(content)
-    || /<\s*\/?\s*(?:persona|jarvis)-(?:context|file)\b/i.test(content);
+    || LEGACY_CONTEXT_OR_FILE_RE.test(content);
   const metadata = encoded ? { ...source, content_encoding: "json-string" } : source;
   const body = encoded
     ? JSON.stringify(content).replace(/[<\u007f-\u009f]/gu, char => "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0"))

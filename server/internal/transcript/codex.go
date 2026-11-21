@@ -282,7 +282,7 @@ func parseCodexLine(seq int, line []byte, meta *Meta) []proto.Item {
 		return nil
 	case "turn_context":
 		if p.Model != "" {
-			meta.Model = p.Model
+			meta.Model, meta.ModelAt = p.Model, l.Timestamp
 		}
 		meta.codexTurnModel = p.Model
 		meta.PermissionMode, meta.CodexSandbox, meta.ModeAt = p.ApprovalPolicy, p.SandboxPolicy.Type, l.Timestamp

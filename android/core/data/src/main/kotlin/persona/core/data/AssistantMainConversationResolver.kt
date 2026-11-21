@@ -19,9 +19,11 @@ class AssistantMainConversationResolver(private val transport: InboxAssistantTra
 
     override suspend fun findMainConversation(): SessionKey? = lock.withLock { lookup() }
 
-    override suspend fun createMainConversation(): SessionKey = lock.withLock {
+    override suspend fun createMainConversation(): SessionKey = createMainConversation(null)
+
+    override suspend fun createMainConversation(via: String?): SessionKey = lock.withLock {
         // Another entry point or device may have installed the main pointer since the first lookup.
-        lookup() ?: JsonCodec.decodeFromJsonElement<Session>(transport.createConversationOf(null, true).getValue("session")).key
+        lookup() ?: JsonCodec.decodeFromJsonElement<Session>(transport.createConversationOf(null, true, null, via).getValue("session")).key
     }
 
     private suspend fun lookup(): SessionKey? {

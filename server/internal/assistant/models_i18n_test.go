@@ -30,9 +30,9 @@ func TestModelConfigSpeaksTheRequestLanguage(t *testing.T) {
 		return res
 	}
 	for _, c := range []struct{ lang, name, group, use, child string }{
-		{"", "主对话", "默认模型", "定时任务", "跟「信息筛选」同一个接入"},
-		{"en-US", "Main chat", "Default models", "Scheduled tasks", "Same connection as triage"},
-		{"ja", "メインチャット", "デフォルトのモデル", "定期タスク", "振り分けと同じ接続"},
+		{"", "对话默认值", "默认模型", "定时任务", "跟「信息筛选」同一个接入"},
+		{"en-US", "Conversation defaults", "Default models", "Scheduled tasks", "Same connection as triage"},
+		{"ja", "会話の既定値", "デフォルトのモデル", "定期タスク", "振り分けと同じ接続"},
 	} {
 		res := get("/api/v1/model-config", c.lang)
 		if res.Status != 200 {

@@ -1,6 +1,8 @@
 {
   "picture": "图片",
   "retry": "图片没加载出来，点一下重试",
+  "retry_button": "重试",
+  "local_load_failed": "本地图片加载失败",
   "more": "还有 {n} 张",
   "load_image": "加载图片",
   "load_images": "加载 {n} 张图片"

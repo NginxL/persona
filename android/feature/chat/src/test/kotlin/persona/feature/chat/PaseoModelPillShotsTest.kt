@@ -45,7 +45,7 @@ import java.io.File
 
 /**
  * Glass's model pill and panel in a Paseo provider's chat (#8143): the pill marks the agent as Grok, by its letter and
- * its name, and the panel names it so where another engine's provider needs a new conversation; "paseo" nowhere. Light
+ * its name, and the panel uses the named providers where switching to another engine needs a new conversation. Light
  * and dark. PNGs in `build/paseo-model-pill-shots/` (or `-Dpersona.shots=<dir>`).
  */
 @RunWith(AndroidJUnit4::class)
@@ -68,14 +68,14 @@ class PaseoModelPillShotsTest {
     private val creation = object : AgentCreationService {
         override val scope = "test"
         override suspend fun launchers(machineId: String) =
-            listOf(AgentLauncher("claude"), AgentLauncher("grok", agentType = "paseo"), AgentLauncher("kimi", agentType = "paseo"))
+            listOf(AgentLauncher("claude"), AgentLauncher("grok", agentType = "paseo"), AgentLauncher("traex", agentType = "paseo", displayName = "My CLI"))
         override suspend fun directories(machineId: String, path: String) = AgentDirectories(path)
         override suspend fun start(request: AgentStartRequest, operationId: String) = AgentStartResult.Unknown
         override suspend fun operation(operationId: String) = AgentStartResult.Unknown
         override suspend fun launcherModels(machineId: String, launcher: String, refresh: Boolean) = when (launcher) {
             "grok" -> LauncherModels("paseo", listOf(AgentModel("grok-5", "Grok 5", isDefault = true, efforts = listOf("low", "high")),
                 AgentModel("grok-5-fast", "Grok 5 Fast")))
-            "kimi" -> LauncherModels("paseo", listOf(AgentModel("kimi-k3", "Kimi K3")))
+            "traex" -> LauncherModels("paseo", listOf(AgentModel("workspace-model", "Workspace model")))
             else -> LauncherModels("claude", listOf(AgentModel("sonnet", "Sonnet 4.5", isDefault = true)))
         }
     }
@@ -113,11 +113,11 @@ class PaseoModelPillShotsTest {
                 assertTrue(rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
             }
             rule.onNodeWithTag("model-pill").performClick()
-            rule.waitUntil(5_000) { rule.onAllNodes(inPanel("Kimi K3"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(5_000) { rule.onAllNodes(inPanel("Workspace model"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
             settle()
             assertTrue(rule.onAllNodes(inPanel("Switching from Grok to Claude Code needs a new conversation"), useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty())
-            assertTrue(rule.onAllNodes(inPanel("Switching from Grok to kimi needs a new conversation"), useUnmergedTree = true)
+            assertTrue(rule.onAllNodes(inPanel("Switching from Grok to My CLI needs a new conversation"), useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty())
             rule.onAllNodesWithText("paseo", substring = true, ignoreCase = true, useUnmergedTree = true).assertCountEquals(0)
             rule.onAllNodesWithContentDescription("paseo", substring = true, ignoreCase = true, useUnmergedTree = true).assertCountEquals(0)

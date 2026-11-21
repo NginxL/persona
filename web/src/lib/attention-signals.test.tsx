@@ -13,20 +13,29 @@ let hubPrefs: Record<string, unknown> = {};
 // the hub's events this page listens to, and what its client_hello declares beyond the basics (#8145)
 const hubListeners = new Map<string, Set<(msg: Record<string, unknown>) => void>>();
 let helloExtras: () => string[] = () => [];
-const hellos: string[][] = [];
+let hellos: string[][] = [];
 let assistantRows: Session[] = [];
+let pushGrading = false;
+let badgeCount = 0;
 vi.mock("./store", () => ({
-  useStore: (select: (s: { loaded: boolean; interactions: Interaction[] }) => unknown) => select({ loaded: true, interactions }),
-  getState: () => ({ mutes, interactions, sessions: { server: assistantRows }, assistant: { machine_id: "server", main: "main", conversations: [] } }),
+  useStore: (select: (s: { loaded: boolean; interactions: Interaction[]; pushGrading: boolean }) => unknown) =>
+    select({ loaded: true, interactions, pushGrading }),
+  getState: () => ({ mutes, interactions, pushGrading, sessions: { server: assistantRows }, assistant: { machine_id: "server", main: "main", conversations: [] } }),
   onHubEvent: (type: string, l: (msg: Record<string, unknown>) => void) => {
     if (!hubListeners.has(type)) hubListeners.set(type, new Set());
     hubListeners.get(type)!.add(l);
     return () => void hubListeners.get(type)?.delete(l);
   },
+  onHello: () => () => {},
+  appSocketReady: () => false,
+  send: () => {},
+  connect: () => {},
+  disconnect: () => {},
+  DESKTOP_UNREGISTER_FEATURE: "desktop_unregister",
   setHelloExtras: (fn: () => string[]) => void (helloExtras = fn),
   sayHello: () => void hellos.push(helloExtras()),
 }));
-vi.mock("./sessions", () => ({ useCounts: () => ({ badge: 0 }), useAgentSessions: () => sessions }));
+vi.mock("./sessions", () => ({ useCounts: () => ({ badge: badgeCount }), useAgentSessions: () => sessions }));
 vi.mock("./api", async (original) => ({
   ...(await original<typeof import("./api")>()),
   api: async () => ({ input: true, done: "long", long_turn_seconds: 60, ...hubPrefs }),
@@ -87,6 +96,8 @@ beforeEach(() => {
   hellos.length = 0;
   assistantRows = [];
   hubPrefs = {};
+  pushGrading = false;
+  badgeCount = 0;
   _setTabId("tab-me");
   root = createRoot(document.createElement("div"));
 });
@@ -478,5 +489,95 @@ describe("the hub's notify events: the assistant's conversations (#8145)", () =>
     await open();
     await notify({ kind: "assistant", machine_id: "server", session_id: "work-chat", title: "Work", body: "muted" });
     expect(posted).toEqual([]);
+  });
+});
+
+describe("push grading open-page signals (#11771)", () => {
+  it("suppresses P1 cards, finished (P2) turns, sound, and P1/P2 notify events when grading is on while P0 still interrupts", async () => {
+    let chimeOscillators = 0;
+    class FakeAudioContext {
+      state = "running";
+      currentTime = 0;
+      destination = {};
+      resume = async () => {};
+      createGain = () => ({ gain: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} }, connect: () => this.destination });
+      createOscillator = () => {
+        chimeOscillators++;
+        return { type: "sine", frequency: { value: 0 }, connect: (g: unknown) => g, start: () => {}, stop: () => {} };
+      };
+    }
+    localStorage.setItem("persona.attentionSound", "1");
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+
+    pushGrading = true;
+    const setBadge = vi.fn();
+    Object.defineProperty(window, "personaDesktop", { value: { setBadge, notify: () => false, closeNotification: () => {}, clearNotifications: () => {}, notificationPermission: () => "granted" }, configurable: true });
+    const link = document.createElement("link");
+    link.setAttribute("rel", "icon");
+    link.setAttribute("href", "/icon.png");
+    document.head.append(link);
+
+    badgeCount = 0;
+    await show([session("p1", "working"), session("p0", "working"), session("fin", "working", "2026-01-01T09:57:00Z")], []);
+    await act(async () => {});
+    // Trigger a user gesture so armAudio activates AudioContext.
+    window.dispatchEvent(new Event("pointerdown"));
+
+    // P1 escalated card + finished (P2) turn: silent (no notification, no sound, badge stays 0).
+    await show(
+      [session("p1", "needs_you"), session("p0", "working"), session("fin", "unread")],
+      [{ id: "ix_p1", machine_id: "m", session_id: "p1", kind: "permission", summary: "run tests", push_level: "P1" }],
+    );
+    await act(async () => void vi.advanceTimersByTime(SETTLE_MS + BATCH_QUIET_MS + 10));
+    expect(posted).toEqual([]);
+    expect(chimeOscillators).toBe(0);
+    expect(document.title).toBe("Persona");
+    expect(setBadge).toHaveBeenLastCalledWith(0);
+
+    // Defensive WS notify check: held P1/P2 notify does not pop or chime when grading is on; P0 still does.
+    await act(async () => {
+      hubListeners.get("notify")?.forEach((l) => l({ kind: "assistant", push_level: "P1", title: "Held", body: "briefing" }));
+      hubListeners.get("notify")?.forEach((l) => l({ kind: "alert", push_level: "P2", title: "Silent", body: "bg" }));
+    });
+    expect(posted).toEqual([]);
+    expect(chimeOscillators).toBe(0);
+
+    // P0 needs_you + badgeCount=1: immediate popup, chime, tab title, and Mac Dock badge.
+    badgeCount = 1;
+    await show(
+      [session("p1", "needs_you"), session("p0", "needs_you"), session("fin", "unread")],
+      [
+        { id: "ix_p1", machine_id: "m", session_id: "p1", kind: "permission", summary: "run tests", push_level: "P1" },
+        { id: "ix_p0", machine_id: "m", session_id: "p0", kind: "question", summary: "Approve deploy?", push_level: "P0" },
+      ],
+    );
+    expect(posted.map((p) => p.tag)).toEqual(["m/p0#needs"]);
+    expect(chimeOscillators).toBe(2); // needs chime plays two notes
+    expect(document.title).toBe("(1) Persona");
+    expect(setBadge).toHaveBeenLastCalledWith(1);
+
+    // New P1 card added to already-waiting p0 does not re-notify or chime; new P0 alert does.
+    chimeOscillators = 0;
+    vi.advanceTimersByTime(4000);
+    await show(
+      [session("p1", "needs_you"), session("p0", "needs_you"), session("fin", "unread")],
+      [
+        { id: "ix_p1", machine_id: "m", session_id: "p1", kind: "permission", summary: "run tests", push_level: "P1" },
+        { id: "ix_p0", machine_id: "m", session_id: "p0", kind: "question", summary: "Approve deploy?", push_level: "P0" },
+        { id: "ix_p0_held", machine_id: "m", session_id: "p0", kind: "permission", summary: "extra p1", push_level: "P1" },
+      ],
+    );
+    expect(posted).toHaveLength(1);
+    expect(chimeOscillators).toBe(0);
+
+    // Turning grading OFF restores finished notifications and P1 card alerts.
+    pushGrading = false;
+    posted.length = 0;
+    await show([session("done2", "working", "2026-01-01T09:57:00Z")], []);
+    await show([session("done2", "unread")], []);
+    await act(async () => void vi.advanceTimersByTime(SETTLE_MS + BATCH_QUIET_MS + 10));
+    expect(posted.map((p) => p.tag)).toEqual(["m/done2#finished"]);
+    link.remove();
+    delete (window as { personaDesktop?: unknown }).personaDesktop;
   });
 });

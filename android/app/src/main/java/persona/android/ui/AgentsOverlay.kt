@@ -94,9 +94,9 @@ private class AgentsOverlayScene(
 
 /** The unselected page also stays full width under a narrow regular window's floating list, as on iOS. */
 @Composable
-internal fun AgentsEmptyPage(onShowList: () -> Unit) {
+internal fun AgentsEmptyPage(onShowList: (() -> Unit)?) {
     JPage(stringResource(R.string.app_tab_agents), actions = {
-        JIconButton(PersonaIcons.sidebar, stringResource(R.string.app_show_list), onShowList)
+        if (onShowList != null) JIconButton(PersonaIcons.sidebar, stringResource(R.string.app_show_list), onShowList)
     }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             DetailPlaceholder(stringResource(R.string.app_pane_agents_title), stringResource(R.string.app_pane_agents_detail), PersonaIcons.agentChat)

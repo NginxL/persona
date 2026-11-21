@@ -197,7 +197,8 @@ func renderNotice(n *quietNotice, reporting bool, retryWith string) string {
 		Ask: n.ask, Text: n.text, Files: taskFilePrompts(n.files), Reporting: reporting, RetryWith: retryWith})
 }
 
-// replaceQueuedNotice: a notice about the same task still waits in the queue: msg takes its place (true).
+// replaceQueuedNotice: a quiet notice about the same task still waits in the queue: msg takes its place (true).
+// Agent report relays have no quiet-notice state and stay separate, so a later quiet notice cannot erase one.
 func (s *Service) replaceQueuedNotice(to string, msg relayMsg) bool {
 	b := &s.relays
 	b.mu.Lock()
@@ -208,7 +209,7 @@ func (s *Service) replaceQueuedNotice(to string, msg relayMsg) bool {
 	q := b.st.Queue[to]
 	for i := range q {
 		// The first one may be going in right now (drainRelays takes it off once delivered): leave it.
-		if q[i].Tool == noticeTool && q[i].From == msg.From && (i > 0 || !b.draining[to]) {
+		if q[i].Tool == noticeTool && q[i].State != "" && q[i].From == msg.From && (i > 0 || !b.draining[to]) {
 			q[i] = msg.replacing(q[i], time.Now()) // it waited since then (relay_presence.go)
 			s.saveRelayLocked()
 			return true

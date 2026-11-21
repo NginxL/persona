@@ -4,22 +4,73 @@
 // break). Runs that only blank lines kept apart (separate paragraphs) are one. Quotes, code, links and tables are left
 // as they are. Loaded with a reply's first picture (reply-images-lazy.ts), so others never carry it.
 import type { Element, ElementContent, Root, RootContent } from "hast";
+import { isMachineRef } from "../lib/files";
 import { isWebImage } from "../lib/reply-images";
 
 export const GROUP_TAG = "reply-images";
 
 type Node = ElementContent;
+type PictureKind = "web" | "local";
 interface Line {
   nodes: Node[];
   /** What ended the line before this one: a <br>, or a line break in the text. */
   after: "br" | "nl" | null;
 }
 
-const isPicture = (n: Node | RootContent): n is Element =>
-  n.type === "element" && n.tagName === "img" && isWebImage(typeof n.properties?.src === "string" ? n.properties.src : "");
+const imgSrc = (n: Node | RootContent): string =>
+  n.type === "element" && n.tagName === "img" && typeof n.properties?.src === "string" ? n.properties.src : "";
+const isWebPicture = (n: Node | RootContent): n is Element =>
+  n.type === "element" && n.tagName === "img" && isWebImage(imgSrc(n));
+const isLocalPicture = (n: Node | RootContent, local: boolean): n is Element =>
+  local && n.type === "element" && n.tagName === "img" && isMachineRef(imgSrc(n));
+const pictureKind = (n: Node | RootContent, local: boolean): PictureKind | null =>
+  isWebPicture(n) ? "web" : isLocalPicture(n, local) ? "local" : null;
 const isBlank = (n: Node | RootContent) => n.type === "text" && !n.value.trim();
-const pictureLine = (l: Line) => l.nodes.some(isPicture) && l.nodes.every((n) => isPicture(n) || isBlank(n));
+const lineKind = (l: Line, local: boolean): PictureKind | null => {
+  let kind: PictureKind | null = null;
+  for (const n of l.nodes) {
+    if (isBlank(n)) continue;
+    const k = pictureKind(n, local);
+    if (!k) return null;
+    if (kind && kind !== k) return null;
+    kind = k;
+  }
+  return kind;
+};
 const emptyLine = (l: Line) => l.nodes.every(isBlank);
+
+/** Lift any local inline image out of a mixed line into its own block line while preserving surrounding text order
+ *  (aligned with iOS PR #12102 so inline local image failures use the same feedback + manual retry path). */
+function liftLocalInline(ls: Line[], local: boolean): Line[] {
+  if (!local) return ls;
+  const out: Line[] = [];
+  for (const l of ls) {
+    if (lineKind(l, true) !== null || !l.nodes.some((n) => isLocalPicture(n, true))) {
+      out.push(l);
+      continue;
+    }
+    let cur: Node[] = [];
+    let after = l.after;
+    const flush = () => {
+      if (cur.length && !cur.every(isBlank)) {
+        out.push({ nodes: cur, after });
+        after = "nl";
+      }
+      cur = [];
+    };
+    for (const n of l.nodes) {
+      if (isLocalPicture(n, true)) {
+        flush();
+        out.push({ nodes: [n], after: "nl" });
+        after = "nl";
+      } else {
+        cur.push(n);
+      }
+    }
+    flush();
+  }
+  return out;
+}
 
 /** A paragraph's children cut into lines, at each <br> (with the line break the parser writes after it) and at each
  *  line break inside its text. */
@@ -60,12 +111,12 @@ function join(ls: Line[]): Node[] {
 }
 
 /** A paragraph with block pictures as paragraphs and runs, or null when it has none. */
-function split(p: Element): Element[] | null {
-  const ls = lines(p.children);
-  if (!ls.some(pictureLine)) return null;
+function split(p: Element, local: boolean): Element[] | null {
+  const ls = liftLocalInline(lines(p.children), local);
+  if (!ls.some((l) => lineKind(l, local) !== null)) return null;
   const out: Element[] = [];
   let text: Line[] = [];
-  let run: Element[] | null = null;
+  let run: { kind: PictureKind; nodes: Element[] } | null = null;
   const endText = () => {
     while (text.length && emptyLine(text[0])) text.shift();
     while (text.length && emptyLine(text[text.length - 1])) text.pop();
@@ -73,16 +124,18 @@ function split(p: Element): Element[] | null {
     text = [];
   };
   const endRun = () => {
-    if (run) out.push({ type: "element", tagName: GROUP_TAG, properties: {}, children: run });
+    if (run) out.push({ type: "element", tagName: GROUP_TAG, properties: { "data-kind": run.kind }, children: run.nodes });
     run = null;
   };
   for (const l of ls) {
-    if (pictureLine(l)) {
-      if (!run) {
+    const kind = lineKind(l, local);
+    if (kind !== null) {
+      if (!run || run.kind !== kind) {
+        endRun();
         endText();
-        run = [];
+        run = { kind, nodes: [] };
       }
-      run.push(...l.nodes.filter(isPicture));
+      run.nodes.push(...l.nodes.filter((n): n is Element => pictureKind(n, local) === kind));
     } else if (!(run && emptyLine(l))) {
       endRun();
       text.push(l);
@@ -95,7 +148,7 @@ function split(p: Element): Element[] | null {
 
 const SKIP = new Set(["blockquote", "pre", "code", "a", "table"]);
 
-function walk(parent: Root | Element): void {
+function walk(parent: Root | Element, local: boolean): void {
   const kids: (RootContent | Node)[] = [];
   for (const c of parent.children) {
     if (c.type !== "element" || SKIP.has(c.tagName)) {
@@ -103,24 +156,24 @@ function walk(parent: Root | Element): void {
       continue;
     }
     if (c.tagName === "p") {
-      const parts = split(c);
+      const parts = split(c, local);
       if (parts) {
         kids.push(...parts);
         continue;
       }
     } else {
-      walk(c);
+      walk(c, local);
     }
     kids.push(c);
   }
-  // Runs only blank text kept apart (pictures in paragraphs of their own) are one.
+  // Runs of the same kind only blank text kept apart (pictures in paragraphs of their own) are one.
   const merged: (RootContent | Node)[] = [];
   for (const k of kids) {
     if (k.type === "element" && k.tagName === GROUP_TAG) {
       let j = merged.length - 1;
       while (j >= 0 && isBlank(merged[j])) j--;
       const prev = merged[j];
-      if (prev && prev.type === "element" && prev.tagName === GROUP_TAG) {
+      if (prev && prev.type === "element" && prev.tagName === GROUP_TAG && prev.properties?.["data-kind"] === k.properties?.["data-kind"]) {
         prev.children.push(...k.children);
         merged.length = j + 1;
         continue;
@@ -132,6 +185,7 @@ function walk(parent: Root | Element): void {
 }
 
 /** The rehype plugin. */
-export function rehypeReplyImages() {
-  return (tree: Root) => walk(tree);
+export function rehypeReplyImages(opts?: { local?: boolean }) {
+  const local = Boolean(opts?.local);
+  return (tree: Root) => walk(tree, local);
 }

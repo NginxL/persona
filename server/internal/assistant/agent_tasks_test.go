@@ -245,8 +245,8 @@ func TestReportFromAnUnsupervisedTodoReachesTheMainConversation(t *testing.T) {
 	}
 }
 
-// A todo the user made gets a supervisor when they link an agent to it (no done_when); off, and for a reporting
-// conversation's task, it gets none.
+// A todo the user made gets a supervisor when they link an agent to it (no done_when). Off it gets none; a reporting
+// conversation's task gets that conversation as supervisor when its agent reports.
 func TestLinkedTodoGetsASupervisor(t *testing.T) {
 	ctx := context.Background()
 	link := func(s *Service, origin string) Todo {
@@ -281,14 +281,15 @@ func TestLinkedTodoGetsASupervisor(t *testing.T) {
 	if v := todoNow(s, other.ID).Supervision; v == nil || v.Supervisor != "conv1" {
 		t.Fatalf("hand-off: %+v", v)
 	}
-	// A reporting conversation's task keeps its notices: no ledger, and its agent's report still has nobody.
+	// A reporting conversation's task keeps its notices; its agent's report gives it that conversation as supervisor.
 	s.markReporter(ctx, "server", "lark1")
 	theirs := link(s, "lark1")
 	if theirs.Supervision != nil {
-		t.Fatalf("a reporting conversation's task: %+v", theirs.Supervision)
+		t.Fatalf("a reporting conversation's task was supervised before its report: %+v", theirs.Supervision)
 	}
-	if _, ok := s.superviseOpenTodoOf(ctx, "box", "s1"); ok {
-		t.Fatal("a reporting conversation's task was given a supervisor on report")
+	reported, ok := s.superviseOpenTodoOf(ctx, "box", "s1")
+	if !ok || reported.Supervision == nil || reported.Supervision.Supervisor != "lark1" {
+		t.Fatalf("a reporting conversation's task on report: ok %v, supervision %+v", ok, reported.Supervision)
 	}
 }
 

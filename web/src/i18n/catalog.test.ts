@@ -24,6 +24,7 @@ const admins: Record<string, Record<string, string>> = Object.fromEntries(
 const SRC = join(__dirname, "..");
 const LOCALES = join(__dirname, "locales");
 const BASELINE = join(__dirname, "hardcoded-baseline.json");
+const PLURAL_FORMS = ["zero", "one", "two", "few", "many", "other"] as const;
 const PLURAL = /_(zero|one|two|few|many|other)$/;
 const CJK = /[　-〿぀-ヿ㐀-䶿一-鿿！-｠]/;
 
@@ -45,6 +46,33 @@ function catalogs(): Record<string, Record<string, Catalog>> {
 const CATALOGS = catalogs();
 
 const placeholders = (s: string) => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
+
+// The runtime considers suffixes only when count may be numeric. A key that
+// ends in "_other" can also be the exact name of a string.
+function callTexts(cat: Catalog, key: string, vars?: string[]): string[] {
+  const names = vars === undefined || vars.includes("count")
+    ? [key, ...PLURAL_FORMS.map((form) => `${key}_${form}`)]
+    : [key];
+  return names.filter((name) => Object.hasOwn(cat, name)).map((name) => cat[name]);
+}
+
+describe("literal calls", () => {
+  const sample = {
+    sign_in_other: "Sign in to {provider}.",
+    saved_one: "{count} item",
+    saved_other: "{count} items in {group}",
+  };
+
+  it("keeps the exact name and placeholders of a singular key ending in _other", () => {
+    expect(callTexts(sample, "sign_in_other", ["provider"])).toEqual(["Sign in to {provider}."]);
+  });
+
+  it("checks the possible plural forms when count can be provided", () => {
+    expect(callTexts(sample, "saved", ["count", "group"])).toEqual(["{count} item", "{count} items in {group}"]);
+    expect(callTexts(sample, "saved")).toEqual(["{count} item", "{count} items in {group}"]);
+    expect(callTexts(sample, "saved", [])).toEqual([]);
+  });
+});
 
 /** key without its plural suffix → the placeholders of all its forms */
 function shape(cat: Catalog): Map<string, string[]> {
@@ -271,6 +299,12 @@ describe("code", () => {
   // The independent viewer is a real resource consumer too, but never imports the authenticated translator.
   const files = [...sourceFiles(SRC), ...sourceFiles(join(SRC, "..", "public-share"))];
   const scans = new Map(files.map((f) => [relative(SRC, f), scan(f)]));
+  const sourceCatalog = CATALOGS[SOURCE_LANG];
+  const texts = ({ key, vars }: Scan["keys"][number]) => {
+    const dot = key.indexOf(".");
+    const cat = sourceCatalog[key.slice(0, dot)];
+    return cat ? callTexts(cat, key.slice(dot + 1), vars) : [];
+  };
 
   it("uses admin-* keys only in the admin UI, whose page is the only one that loads them", () => {
     const outside = [...scans]
@@ -280,9 +314,7 @@ describe("code", () => {
   });
 
   it("only uses keys that exist", () => {
-    const flat = new Set<string>();
-    for (const [ns, cat] of Object.entries(CATALOGS[SOURCE_LANG])) for (const k of Object.keys(cat)) flat.add(`${ns}.${k.replace(PLURAL, "")}`);
-    const missing = [...scans].flatMap(([f, s]) => s.keys.filter((k) => !flat.has(k.key)).map((k) => `${f}:${k.line} ${k.key}`));
+    const missing = [...scans].flatMap(([f, s]) => s.keys.filter((call) => !texts(call).length).map((k) => `${f}:${k.line} ${k.key}`));
     expect(missing).toEqual([]);
   });
 
@@ -304,12 +336,11 @@ describe("code", () => {
 
   // interpolate() and tRich() leave a placeholder with no value as a literal `{name}` on the page
   it("passes every placeholder a key's text uses", () => {
-    const want = new Map<string, string[]>();
-    for (const [ns, cat] of Object.entries(CATALOGS[SOURCE_LANG])) for (const [k, ps] of shape(cat)) want.set(`${ns}.${k}`, ps);
     const missing = [...scans].flatMap(([f, s]) =>
-      s.keys.flatMap(({ line, key, vars }) => {
+      s.keys.flatMap((call) => {
+        const { line, key, vars } = call;
         if (!vars) return [];
-        const lacks = (want.get(key) ?? []).filter((p) => !vars.includes(p));
+        const lacks = [...new Set(texts(call).flatMap(placeholders))].filter((p) => !vars.includes(p));
         return lacks.length ? [`${f}:${line} ${key} lacks ${lacks.join(", ")}`] : [];
       }),
     );

@@ -8,7 +8,7 @@ import (
 // Machine trust comes from the manager's device configuration, never node.info or an MCP hint.
 func (s *Service) isWorkMachine(machine string) bool {
 	if s.devs != nil {
-		machine = s.devs.Canonical(machine)
+		machine = s.physicalDevices().Canonical(machine)
 		for _, d := range s.devs.List() {
 			if d.ID == machine && d.Trust == "work" {
 				return true
@@ -28,7 +28,7 @@ func (s *Service) sameMachine(a, b string) bool {
 		return false
 	}
 	if s.devs != nil {
-		return s.devs.Canonical(a) == s.devs.Canonical(b)
+		return s.physicalSameMachine(a, b)
 	}
 	return a == b
 }

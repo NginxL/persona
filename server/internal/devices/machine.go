@@ -612,6 +612,19 @@ func (m *Machine) callOnce(ctx context.Context, method string, params any, out a
 			return &rpc.Error{Code: proto.CodeStartGoalUnsupported, Message: i18n.T(i18n.From(ctx), "hub-machine.node_no_start_goal")}
 		}
 	}
+	if devicewire.IsSessionStart(method) && !nodeHas(info, nodeproto.ResumeOutsideHealth) {
+		raw, _ := json.Marshal(params)
+		var fields struct {
+			Checked bool `json:"resume_outside_health"`
+		}
+		_ = json.Unmarshal(raw, &fields)
+		if fields.Checked {
+			// An extension's resume the hub does not list (#10941): an older node would resume it unchecked, or start
+			// a new conversation under an id it has nothing of. The hub asks only a node it saw announce the check;
+			// this holds when the node changed since.
+			return &rpc.Error{Code: proto.CodeNodeOutdated, Message: i18n.T(i18n.From(ctx), "rpc-errors.node_outdated")}
+		}
+	}
 	if !nodeHas(info, nodeproto.AssistantConfigDir) && (method == "assistant.send" || method == "assistant.warm" || method == "session.send") {
 		raw, _ := json.Marshal(params)
 		var fields struct {

@@ -302,7 +302,7 @@ function ToolLoopCard({ ix }: { ix: Interaction }) {
 
 const SessionReviewCard = lazyPage(() => import("./SessionReviewCard").then((m) => m.SessionReviewCard));
 
-function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean }) {
+export function QuestionCard({ ix, canApprove, onAnswer }: { ix: Interaction; canApprove: boolean; onAnswer?: (answers: Record<string, string>) => Promise<boolean> }) {
   const ime = useComposition();
   const qs = ix.questions ?? [];
   const localOnly = ix.tool_name === "persona_triage" && !canApprove;
@@ -310,6 +310,7 @@ function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [custom, setCustom] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
   const q = qs[qi];
   // picking on a single-select slides to the next question by itself, a beat later; going on before that (Enter, the
   // arrow) cancels the slide, or the two would advance a question each and skip one
@@ -350,7 +351,8 @@ function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean
   const all = qs.every((_, i) => answered(i) && allowed(i));
 
   const send = async (directLabel?: string) => {
-    if (directLabel === undefined && !all) return;
+    if (submitting.current || directLabel === undefined && !all) return;
+    submitting.current = true;
     setBusy(true);
     const answers: Record<string, string> = {};
     if (directLabel === undefined) {
@@ -361,11 +363,18 @@ function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean
       // The pick's state update has not rendered yet, so carry its label into the immediate submission explicitly.
       answers[q.question] = directLabel;
     }
-    await resolve(ix, { answers });
-    setBusy(false);
+    try {
+      // The caller owns completion: false keeps the picks for retry, and finally only unlocks the form.
+      if (onAnswer) await onAnswer(answers);
+      else await resolve(ix, { answers });
+    } finally {
+      submitting.current = false;
+      setBusy(false);
+    }
   };
 
   const toggle = (label: string) => {
+    if (submitting.current) return;
     if (localOnly && !q.options?.some((o) => o.label === label && o.action === "defer")) return;
     const singleChoice = qs.length === 1 && !q.multi_select;
     const hasCustomAnswer = singleChoice && Boolean(custom[qi]?.trim());
@@ -387,7 +396,7 @@ function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean
       looking={looking}
       cardKeys={keys}
       tapGuard={tapGuard}
-      onDismiss={() => resolve(ix, { dismiss: true })}
+      onDismiss={onAnswer ? undefined : () => resolve(ix, { dismiss: true })}
       busy={busy}
       footer={
         <>
@@ -447,7 +456,7 @@ function QuestionCard({ ix, canApprove }: { ix: Interaction; canApprove: boolean
       )}
       <div key={qi} className="flex flex-col gap-0.5" style={{ animation: `fade-up 300ms ${EASE} both` }}>
         {(q.options ?? []).map((o, i) => (
-          <Choice key={o.label} on={(picked[qi] ?? []).includes(o.label)} multi={q.multi_select} label={o.label} desc={o.description} pick={picks[qi]?.includes(o.label)} hint={keys.focused && i < 9 ? i + 1 : undefined} disabled={localOnly && o.action !== "defer"} onClick={() => toggle(o.label)} marker />
+          <Choice key={o.label} on={(picked[qi] ?? []).includes(o.label)} multi={q.multi_select} label={o.label} desc={o.description} pick={picks[qi]?.length ? picks[qi].includes(o.label) : q.recommend === o.label} hint={keys.focused && i < 9 ? i + 1 : undefined} disabled={localOnly && o.action !== "defer"} onClick={() => toggle(o.label)} marker />
         ))}
         <label className="-mx-1.5 flex items-center gap-2 rounded-control px-1.5 py-1.5 transition-colors focus-within:bg-hover hover:bg-hover">
           <span aria-hidden className="size-4 shrink-0" />

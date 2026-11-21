@@ -20,10 +20,11 @@ import (
 // keepManager is a manager on the real bus that answers SendParams with the message as it came (or refuses it with
 // ahead) and records assistant.keep_undelivered (or refuses it when noKeep: an older manager).
 type keepManager struct {
-	mu     sync.Mutex
-	kept   []assistantwire.KeepUndeliveredParams
-	ahead  bool
-	noKeep bool
+	mu             sync.Mutex
+	kept           []assistantwire.KeepUndeliveredParams
+	ahead          bool
+	noKeep         bool
+	approvalTarget string
 }
 
 func (k *keepManager) keeps() []assistantwire.KeepUndeliveredParams {
@@ -61,6 +62,9 @@ func undeliveredHub(t *testing.T, send func(context.Context) error) (*Hub, *Mach
 			}
 			var p assistantwire.SendParams
 			_ = json.Unmarshal(raw, &p)
+			if k.approvalTarget != "" {
+				return map[string]any{"params": map[string]any{"owner_approval_handled": k.approvalTarget}}, nil
+			}
 			p.Params["live_snapshot"] = "added by the manager" // never kept: a later send makes its own
 			return map[string]any{"params": p.Params}, nil
 		case assistantwire.MethodKeepUndelivered:

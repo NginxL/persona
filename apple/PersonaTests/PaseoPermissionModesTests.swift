@@ -22,6 +22,9 @@ import Testing
     private static let paseoCodex = Launcher(name: "my-codex", agent: "codex", source: "paseo",
                                              permissionModes: ["default", "bypassPermissions"])
     private static let claude = Launcher(name: "my-claude", source: "paseo")
+    private static let terminalTraex = Launcher(name: "traex", model: "默认", agent: "traex", source: "zshrc")
+    private static let unknown = Launcher(name: "future-agent", agent: "future-agent", source: "zshrc")
+    private static let terminalCodex = Launcher(name: "codex", agent: "codex", source: "zshrc")
     /// Grok from a computer older than the list: told by its agent instead (#8144).
     private static let olderGrok = Launcher(name: "grok", agent: "paseo", source: "paseo")
 
@@ -88,6 +91,42 @@ import Testing
         #expect(StartModes.efforts(known: nil, for: Self.paseoCodex).isEmpty)
         #expect(StartModes.efforts(known: ["low", "high"], for: Self.paseoCodex).map(\.id) == ["low", "high"])
         #expect(StartModes.efforts(known: nil, for: Self.claude).map(\.id) == SessionModes.startEffortLevels.map(\.id))
+    }
+
+    /// #1842: a discovered terminal Traex takes no Claude Code permission mode, effort or ultracode, even when Claude's
+    /// remembered Plan Only and an effort list are present. This is not Paseo's Allow Everything-only rule.
+    @Test func discoveredTerminalTraexHasNoClaudeStartControls() {
+        let traex = Self.terminalTraex
+        #expect(StartModes.listed(traex) == nil)
+        #expect(StartModes.modes(for: traex).isEmpty)
+        #expect(StartModes.detail("plan", for: traex) == nil)
+        #expect(StartModes.efforts(known: nil, for: traex).isEmpty)
+        #expect(StartModes.efforts(known: ["low", "high"], for: traex).isEmpty)
+        for mode in ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] {
+            #expect(StartModes.sent(mode, for: traex) == nil, "\(mode)")
+        }
+        #expect(!Ultracode.startOffered(features: [Ultracode.feature], agent: "traex"))
+    }
+
+    /// The Traex boundary must not become a rule for every non-Claude launcher, nor for a Paseo launcher named Traex.
+    @Test func onlyDiscoveredTerminalTraexLosesThoseStartControls() {
+        for launcher in [Self.claude, Self.terminalCodex, Self.unknown] {
+            #expect(StartModes.modes(for: launcher).map(\.id) == SessionModes.permissionModes.map(\.id), "\(launcher.name)")
+            #expect(StartModes.efforts(known: nil, for: launcher).map(\.id) == SessionModes.startEffortLevels.map(\.id), "\(launcher.name)")
+            #expect(StartModes.sent("plan", for: launcher) == "plan", "\(launcher.name)")
+        }
+        // The existing Paseo controls stay provider-led, including a launcher whose startup name happens to be Traex.
+        let paseoNamedTraex = Launcher(name: "traex", agent: "paseo", source: "paseo",
+                                       permissionModes: ["default", "bypassPermissions"])
+        for launcher in [Self.grok, Self.paseoCodex, paseoNamedTraex] {
+            #expect(StartModes.modes(for: launcher).map(\.id) == ["bypassPermissions"], "\(launcher.name)")
+            #expect(StartModes.sent("plan", for: launcher) == nil, "\(launcher.name)")
+            #expect(StartModes.sent("bypassPermissions", for: launcher) == "bypassPermissions", "\(launcher.name)")
+            #expect(StartModes.efforts(known: nil, for: launcher).isEmpty, "\(launcher.name)")
+            #expect(StartModes.efforts(known: ["low"], for: launcher).map(\.id) == ["low"], "\(launcher.name)")
+        }
+        #expect(Ultracode.startOffered(features: [Ultracode.feature], agent: "claude"))
+        #expect(!Ultracode.startOffered(features: [Ultracode.feature], agent: "codex"))
     }
 
     /// A computer older than the list says nothing: #8144's rule by the agent still holds there.

@@ -436,6 +436,9 @@ func (s *Service) ringAsks(todo string, ids []string, d *proto.Delegate, esc esc
 		}
 		p.route = nil
 		p.ix.Delegating = false
+		if esc.level != "" {
+			p.ix.PushLevel = esc.level
+		}
 		if d != nil {
 			c := *d
 			p.ix.Delegate = &c

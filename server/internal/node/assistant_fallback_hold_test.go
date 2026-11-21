@@ -11,14 +11,13 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// The main conversation asks for its configured model with every message. After a refusal moved it to a fallback that
-// answered, the next message stays on that fallback: no restart onto the model that refused it (#3788).
+// A worker can hold the fallback that answered. Main and supervisor conversations keep their configured model (#12169).
 func TestAssistantStaysOnTheFallbackThatAnswered(t *testing.T) {
 	f := cliTest(t)
 	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), "bin", "claude"), []byte("#!/bin/sh\n"+claudeLikeCLI), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	configured := modelExecution{Model: "primary-model", Fingerprint: "fp-main", IsMain: true}
+	configured := modelExecution{Model: "primary-model", Fingerprint: "fp-main"}
 	cwd := t.TempDir()
 	id, err := f.n.assistantSend(context.Background(), "", cwd, "claude", "original request", nil, "", "", configured)
 	if err != nil {
@@ -36,7 +35,29 @@ func TestAssistantStaysOnTheFallbackThatAnswered(t *testing.T) {
 		t.Fatalf("the next message restarted the conversation (%d starts, was %d): %s", got, starts, f.file("cli-argv"))
 	}
 	if p := f.proc(id); p == nil || p.model.Model != "fallback-model" {
-		t.Fatalf("the next message left the fallback: %+v", p)
+		t.Fatalf("the worker's next message left the fallback: %+v", p)
+	}
+}
+
+func TestProtectedConversationDoesNotSwitchToTheFallback(t *testing.T) {
+	const id = "11111111-2222-3333-4444-555555555555"
+	for _, role := range []struct {
+		name         string
+		main, leader bool
+	}{{"main", true, false}, {"supervisor", false, true}} {
+		t.Run(role.name, func(t *testing.T) {
+			n, sent := recoveryTestNode(t, id, role.main, role.leader)
+			p := &assistantProc{id: id, agent: "claude", launcher: "claude", model: modelExecution{Model: "primary-model"}}
+			n.procs[id] = p
+			for attempt := 0; attempt < 3; attempt++ {
+				if n.recoverAssistantResult(p, true, "API Error: 429 Too many requests", proto.TurnErrorTransient, assistantRecordKind) {
+					t.Fatal("protected failure entered automatic model recovery")
+				}
+			}
+			if p.model.Model != "primary-model" || n.modelRecovery(id) != nil || n.recoveries[id] != nil || len(sent) != 0 {
+				t.Fatal("protected failure changed model or queued an immediate retry")
+			}
+		})
 	}
 }
 

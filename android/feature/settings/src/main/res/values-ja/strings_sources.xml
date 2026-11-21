@@ -107,6 +107,9 @@
     <string name="settings_src_lark_quarantined">開けません。Lark ゲートウェイで再試行するか削除してください</string>
     <string name="settings_src_signed_in">ログイン済み</string>
     <string name="settings_src_lark_accounts_caption">ログイン済みのアカウントはすべて受信トレイに入り、「メッセージ」ページで切り替えられます。/agent、アシスタント、ナレッジはデフォルトのアカウントを使います。アカウントの追加やログアウトは Lark ゲートウェイで行います。</string>
+    <string name="settings_src_lark_accounts_caption_default">ログイン済みのアカウントはすべて受信トレイに入ります。「メッセージ」、/agent、アシスタント、ナレッジはデフォルトのアカウントを使います。アカウントの追加やログアウトは Lark ゲートウェイで行います。</string>
+    <string name="settings_src_lark_home_messages">ホームにメッセージを表示</string>
+    <string name="settings_src_lark_home_messages_detail">サイドバーに「メッセージ」を追加し、すべての個人チャットとグループチャットを表示します。受信トレイとアカウントやチャット履歴を共有します。このデバイスでのみ有効です。</string>
     <string name="settings_src_lark_uses_header">PersonaがLarkで行うこと</string>
     <string name="settings_src_lark_use_inbox">受信トレイ</string>
     <string name="settings_src_lark_use_inbox_detail">個人チャット、@メンション、グループ、ドキュメントのメンションをAIが仕分けて返信を下書き</string>

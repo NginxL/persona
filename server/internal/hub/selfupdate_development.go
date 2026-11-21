@@ -14,14 +14,27 @@ import (
 
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
+	"github.com/nwverse/persona/server/internal/operations/backup"
 	"github.com/nwverse/persona/server/internal/update"
 )
 
+// developmentBackupRetainDefault is how many verified snapshots are kept when
+// the operator did not choose another number.
+const developmentBackupRetainDefault = 3
+
 type developmentView struct {
-	Configured       bool   `json:"configured"`
-	Branch           string `json:"branch"`
-	CurrentCommit    string `json:"current_commit,omitempty"`
-	CurrentUpdatedAt string `json:"current_updated_at,omitempty"`
+	Configured bool   `json:"configured"`
+	Why        string `json:"why,omitempty"` // localized: why it cannot be selected
+	Branch     string `json:"branch"`
+	// BackupDirectory is the effective snapshot folder, BackupDefaultDirectory
+	// the recommended one under the runtime; BackupRetain how many verified
+	// snapshots are kept. BuiltinQuiesce: the hub pauses its own writers.
+	BackupDirectory        string `json:"backup_directory,omitempty"`
+	BackupDefaultDirectory string `json:"backup_default_directory,omitempty"`
+	BackupRetain           int    `json:"backup_retain,omitempty"`
+	BuiltinQuiesce         bool   `json:"builtin_quiesce,omitempty"`
+	CurrentCommit          string `json:"current_commit,omitempty"`
+	CurrentUpdatedAt       string `json:"current_updated_at,omitempty"`
 }
 
 // Installation time is recorded by confirmation, never inferred from a build or Git date.
@@ -43,9 +56,70 @@ func (u *updater) developmentConfig() *update.DevelopmentConfig {
 	return u.h.cfg.Update.Development
 }
 
+// developmentAvailable: the hub can prepare Web development updates. The hub
+// pauses its own writers for the snapshot by default (quiesceDevelopmentWriters);
+// hub.json's quiesce/resume hooks are an optional advanced override and must be
+// configured as a pair. The topology check is part of availability so the Web UI
+// does not offer a channel that its first check would refuse.
 func (u *updater) developmentAvailable() bool {
-	c := u.developmentConfig()
-	return c != nil && len(c.Backup.Quiesce) > 0 && len(c.Backup.Resume) > 0 && u.h.build.Channel != update.Docker && runtime.GOOS != "windows"
+	if u.h.cfg == nil || u.h.build.Channel == update.Docker || runtime.GOOS == "windows" {
+		return false
+	}
+	if c := u.developmentConfig(); c != nil && !c.Backup.Coordinated() {
+		return false
+	}
+	return u.developmentTopology() == nil
+}
+
+// developmentUnavailableWhy is what the Web UI says when development updates
+// cannot be selected, localized; "" for a Docker hub, which has its own view.
+func (u *updater) developmentUnavailableWhy(l i18n.Lang) string {
+	if u.h.cfg == nil {
+		return ""
+	}
+	if u.h.build.Channel == update.Docker {
+		return i18n.Localize(i18n.Err("hub-selfupdate.err_development_docker"), l)
+	}
+	if runtime.GOOS == "windows" {
+		return i18n.Localize(i18n.Err("hub-selfupdate.err_development_platform"), l)
+	}
+	if c := u.developmentConfig(); c != nil && !c.Backup.Coordinated() {
+		return i18n.Localize(i18n.Err("hub-selfupdate.err_development_config"), l)
+	}
+	return i18n.Localize(i18n.Err("hub-selfupdate.err_development_topology"), l)
+}
+
+// developmentBackupConfigLocked is the snapshot configuration in effect: the
+// folder chosen in the Web UI (which may be the recommended one an operator
+// chose over hub.json's), else hub.json's, else the recommended one under the
+// runtime's update/ directory; the chosen retention, else three. Builtin says
+// the hub itself pauses the writers. Caller holds u.mu.
+func (u *updater) developmentBackupConfigLocked() update.DevelopmentBackupConfig {
+	var c update.DevelopmentBackupConfig
+	if u.h.cfg != nil && u.h.cfg.Update.Development != nil {
+		c = u.h.cfg.Update.Development.Backup
+	}
+	if u.settings.DevelopmentBackupDirectory != nil {
+		c.Directory = *u.settings.DevelopmentBackupDirectory
+	} else if c.Directory == "" && u.h.cfg != nil {
+		c.Directory = backup.RecommendedDevelopmentBackupDir(u.h.cfg.dir)
+	}
+	if u.settings.DevelopmentBackupRetain > 0 {
+		c.Retain = u.settings.DevelopmentBackupRetain
+	}
+	if c.Retain <= 0 {
+		c.Retain = developmentBackupRetainDefault
+	}
+	c.Builtin = !c.ExternalQuiesce()
+	return c
+}
+
+// developmentRequestConfig is what one helper phase receives, with the snapshot
+// settings resolved.
+func (u *updater) developmentRequestConfig() *update.DevelopmentConfig {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return &update.DevelopmentConfig{Backup: u.developmentBackupConfigLocked()}
 }
 
 func (u *updater) developmentLocked() bool { return u.settings.Source == "web-dev" }
@@ -98,10 +172,81 @@ func (u *updater) unreplacedCandidate(r *update.Published) error {
 }
 
 func (u *updater) runDevelopment(ctx context.Context, operation string, input map[string]any, result any) error {
-	if err := u.devRun(ctx, u.developmentConfig(), filepath.Join(u.dir, "development"), operation, input, result); err != nil {
+	if err := u.devRun(ctx, u.developmentRequestConfig(), filepath.Join(u.dir, "development"), operation, input, result); err != nil {
 		return i18n.Err("hub-selfupdate.err_development_phase", i18n.Args{"phase": operation})
 	}
 	return nil
+}
+
+// quiesceDevelopmentWriters pauses the writers a snapshot must not see moving.
+// With hub.json's quiesce/resume hooks the helper runs them itself; otherwise
+// the hub pauses itself: request writes, the built-in child manager and the
+// background writers, then checks both databases with backup.Quiesced rules.
+// The returned resume always runs, including after a partial pause.
+func (u *updater) quiesceDevelopmentWriters(ctx context.Context, cfg update.DevelopmentBackupConfig) (func(), error) {
+	if !cfg.Coordinated() {
+		return nil, i18n.Err("hub-selfupdate.err_development_config")
+	}
+	if cfg.ExternalQuiesce() {
+		return func() {}, nil
+	}
+	if u.h.cfg == nil || !u.h.cfg.Assistant.StartsBuiltin() {
+		return nil, i18n.Err("hub-selfupdate.err_development_topology")
+	}
+	if err := u.h.pauseDevelopmentWriters(ctx); err != nil {
+		return nil, i18n.Err("hub-selfupdate.err_development_quiesce", i18n.Args{"error": i18n.Localize(err, u.h.userLang())})
+	}
+	resumed := false
+	resume := func() {
+		if resumed {
+			return
+		}
+		resumed = true
+		u.h.resumeDevelopmentWriters()
+	}
+	if err := u.waitDevelopmentQuiesced(ctx); err != nil {
+		resume()
+		return nil, i18n.Err("hub-selfupdate.err_development_quiesce", i18n.Args{"error": i18n.Localize(err, u.h.userLang())})
+	}
+	return resume, nil
+}
+
+// waitDevelopmentQuiesced checks the databases the snapshot dumps with the
+// backup command's own Quiesced rules, after giving the manager's connections a
+// moment to close. Only this hub's pool sessions count as its own.
+func (u *updater) waitDevelopmentQuiesced(ctx context.Context) error {
+	pids, ok := u.h.store.(interface{ BackendPIDs() []int32 })
+	if !ok {
+		return nil // no real database in this hub (tests): nothing to verify
+	}
+	if u.h.cfg == nil || u.h.cfg.DatabaseURL == "" {
+		return errors.New("the hub has no database connection to verify")
+	}
+	// The same targets webdev.py's inventory dumps: a built-in manager whose
+	// tables are still in the hub database needs only that one checked, and one
+	// that moved to its own is checked separately.
+	hubTarget, managerTarget, shared, err := backup.DiscoverDevelopment(backup.Options{Home: u.h.cfg.dir, DatabaseURL: u.h.cfg.DatabaseURL})
+	if err != nil {
+		return err
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		err := backup.QuiescedExcept(ctx, hubTarget, hubTarget.Database, pids.BackendPIDs()...)
+		if err == nil && !shared {
+			err = backup.QuiescedDatabase(ctx, managerTarget, managerTarget.Database, true)
+		}
+		if err == nil {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 func (u *updater) checkDevelopment(ctx context.Context) (*update.Published, error) {
@@ -219,26 +364,34 @@ func (u *updater) backupDevelopment(ctx context.Context, r *update.Published, ta
 			return nil, err
 		}
 	}
-	var backup update.DevelopmentBackup
+	var saved update.DevelopmentBackup
 	u.mu.Lock()
 	updatedAt := u.currentUpdatedAtLocked()
+	cfg := u.developmentBackupConfigLocked()
 	u.mu.Unlock()
-	err := u.runDevelopment(ctx, "backup", map[string]any{
+	// The hub's own writers pause around every dump and the file archive; with
+	// hub.json's hooks the helper does it instead.
+	resume, err := u.quiesceDevelopmentWriters(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer resume()
+	err = u.runDevelopment(ctx, "backup", map[string]any{
 		"runtime": u.h.cfg.dir, "candidate": r.Development, "hub_database": u.h.cfg.DatabaseURL,
 		"from_version": u.h.version, "from_commit": u.h.build.Commit, "from_build": u.h.build.Number,
 		"from_updated_at": updatedAt, "platform": runtime.GOOS + "-" + runtime.GOARCH,
-		"executables": programs, "node_directory": identity.NodeBinaryDir()}, &backup)
+		"executables": programs, "node_directory": identity.NodeBinaryDir()}, &saved)
 	if err != nil {
 		return nil, err
 	}
 	u.mu.Lock()
-	u.settings.DevelopmentBackup = &backup
+	u.settings.DevelopmentBackup = &saved
 	err = u.saveLocked(ctx)
 	u.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	return &backup, nil
+	return &saved, nil
 }
 
 // Only the built-in child manager is known to share this Hub's package directory

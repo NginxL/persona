@@ -125,6 +125,14 @@
     <string name="assistant_direction_todos_of">%1$s 的待办</string>
     <string name="assistant_direction_agents_of">%1$s 的 Agent</string>
     <string name="assistant_conversation_actions">对话操作</string>
+    <string name="assistant_arrange_chats">排列对话</string>
+    <string name="assistant_arrange_move_up">上移</string>
+    <string name="assistant_arrange_move_down">下移</string>
+    <string name="assistant_arrange_drag">拖动调整对话顺序</string>
+    <string name="assistant_arrange_reset">按活动时间重新排列</string>
+    <string name="assistant_arrange_reset_done">已恢复按活动时间排列</string>
+    <string name="assistant_arrange_undo">撤销</string>
+    <string name="assistant_arrange_save_failed">无法保存对话顺序，请重试。</string>
     <string name="assistant_demo_title">体验模式</string>
     <string name="assistant_demo_notice">内容仅保存在本次体验中。</string>
     <string name="assistant_demo_reply">这是示例对话。接入助手后，回复会显示在这里。</string>
@@ -193,6 +201,12 @@
     <string name="assistant_tags_hint">按回车添加。最多 %1$d 个标签，每个不超过 %2$d 个字符。</string>
     <string name="assistant_tag_too_long">每个标签最多 %1$d 个字符。</string>
     <string name="assistant_tag_count_limit">一段对话最多 %1$d 个标签。</string>
+    <string name="assistant_tag_filters_customize">自定义标签筛选</string>
+    <string name="assistant_tag_filters_empty">没有标签筛选</string>
+    <string name="assistant_tag_filters_placeholder">添加标签筛选</string>
+    <string name="assistant_tag_filters_reset">恢复自动筛选</string>
+    <string name="assistant_tag_filters_done">完成</string>
+    <string name="assistant_tag_filters_count_limit">最多添加 %1$d 个标签筛选。</string>
     <string name="assistant_tags_saved">已保存「%1$s」的标签</string>
     <string name="assistant_copy_diagnostics">拷贝诊断</string>
     <string name="assistant_diagnostics_copied">已拷贝诊断</string>
@@ -230,4 +244,12 @@
     <string name="assistant_usage_unavailable">Token 用量不可用</string>
     <string name="assistant_usage_unavailable_detail">当前 Hub 不提供历史 Token 用量。</string>
     <string name="assistant_usage_unknown_machine">以前的电脑</string>
+    <string name="assistant_sidebar_pages">页面</string>
+    <string name="assistant_sidebar_chats">Persona 对话</string>
+    <string name="assistant_sidebar_search">搜索</string>
+    <string name="assistant_sidebar_search_chats">对话</string>
+    <string name="assistant_sidebar_search_agents">智能体</string>
+    <string name="assistant_sidebar_search_no_agents">没有匹配的智能体</string>
+    <string name="assistant_sidebar_search_no_agents_detail">试试其他搜索词。</string>
+    <string name="assistant_sidebar_search_agent_field">搜索智能体</string>
 </resources>

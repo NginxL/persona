@@ -65,7 +65,7 @@ func TestTaskWorkspaceNewUsesEngineAndPersistsActualCwd(t *testing.T) {
 			t.Fatalf("task did not use the machine engine: %v", f.worktrees)
 		}
 		create := f.worktrees[len(f.worktrees)-1]
-		if create["branch"] != wantBranch || len(f.starts) != 1 || f.starts[0]["workspace_id"] != "ws-new" {
+		if create["branch"] != wantBranch || len(f.starts) != 1 || f.starts[0]["workspace_id"] != "ws-new" || f.starts[0]["reopen_worktree_workspace"] != true {
 			t.Fatalf("create=%v starts=%v; want branch %s", create, f.starts, wantBranch)
 		}
 		path := create["path"].(string)

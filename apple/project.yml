@@ -756,6 +756,18 @@ schemes:
       # The tests' expectations and the pixel / layout baselines are the Chinese UI (docs/apple/ios.md「Interface language」).
       language: zh-Hans
       region: CN
+  # Offline unit-test builds and runs share one graph without the unused UI-test bundle (#12474).
+  PersonaOfflineUnitTests:
+    build:
+      targets:
+        Persona: all
+        PersonaTests: [test]
+    run:
+      config: Debug
+    test:
+      targets: [PersonaTests]
+      language: zh-Hans
+      region: CN
   # Only the app and unit-test bundle: visual evidence never builds PersonaUITests.
   AboutVersionVisualTests:
     build:

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/sessionlist"
 )
@@ -277,5 +278,46 @@ func TestRuntimeListHierarchyValidationAndBinding(t *testing.T) {
 	gone := runtimePage(t, h, "summary=1&machine_id=demo&parent_session_id=lead&since="+neturl.QueryEscape(under.Revision))
 	if !slices.Equal(gone.Remove, []string{runtimeListID("demo", "mid")}) || gone.Total != 2 {
 		t.Fatalf("under delta: %v remove %v total %d", pageIDs(gone), gone.Remove, gone.Total)
+	}
+}
+
+func TestPagedCountsHeldNeeds(t *testing.T) {
+	h := newTestHub(t)
+	m := newMachine(h, MachineConfig{ID: "demo"})
+	h.machines, h.byID["demo"] = []*Machine{m}, m
+	now := time.Unix(2000, 0)
+	lead := proto.Session{MachineID: "demo", SessionID: "lead", Title: "lead", State: proto.StateIdle, UpdatedAt: now}
+	lead.SetFold("", "", "", &proto.SessionChildren{Total: 1, NeedsYou: 1})
+	leaf := proto.Session{MachineID: "demo", SessionID: "leaf", Title: "leaf", State: proto.StateNeedsYou, UpdatedAt: now}
+	leaf.SetFold("lead", "", "", nil)
+	m.sessions = []proto.Session{
+		lead,
+		leaf,
+		{MachineID: "demo", SessionID: "solo-p1", Title: "solo-p1", State: proto.StateNeedsYou, UpdatedAt: now},
+		{MachineID: "demo", SessionID: "mix-p0", Title: "mix-p0", State: proto.StateNeedsYou, UpdatedAt: now},
+		{MachineID: "demo", SessionID: "asst-p1", Title: "asst-p1", Assistant: true, State: proto.StateNeedsYou, UpdatedAt: now},
+	}
+	h.reported.mu.Lock()
+	h.reported.interactions = map[string]proto.Interaction{
+		"ix-leaf":  {ID: "ix-leaf", MachineID: "demo", SessionID: "leaf", FoldedUnder: "lead", Kind: proto.IxPermission, PushLevel: assistantwire.LevelP1},
+		"ix-solo":  {ID: "ix-solo", MachineID: "demo", SessionID: "solo-p1", Kind: proto.IxPermission, PushLevel: assistantwire.LevelP1},
+		"ix-mix-1": {ID: "ix-mix-1", MachineID: "demo", SessionID: "mix-p0", Kind: proto.IxPermission, PushLevel: assistantwire.LevelP1},
+		"ix-mix-0": {ID: "ix-mix-0", MachineID: "demo", SessionID: "mix-p0", Kind: proto.IxQuestion, PushLevel: assistantwire.LevelP0},
+		"ix-asst":  {ID: "ix-asst", MachineID: "demo", SessionID: "asst-p1", Kind: proto.IxQuestion, PushLevel: assistantwire.LevelP1},
+	}
+	h.reported.mu.Unlock()
+
+	c := hierarchyCounts(t, h, "agents_only=1&roots=1")
+	if c.State[proto.StateNeedsYou] != 3 || c.HeldNeeds != 2 {
+		t.Fatalf("counts = %+v, want needs_you=3 held_needs=2", c)
+	}
+	w := httptest.NewRecorder()
+	h.listSessions(w, httptest.NewRequest("GET", "/api/v1/sessions?summary=1&limit=10&agents_only=1&roots=1&with_counts=1", nil))
+	var pc sessionlist.PageWithCounts
+	if err := json.Unmarshal(w.Body.Bytes(), &pc); w.Code != 200 || err != nil {
+		t.Fatalf("with_counts: %d %s %v", w.Code, w.Body, err)
+	}
+	if pc.Counts.State[proto.StateNeedsYou] != 3 || pc.Counts.HeldNeeds != 2 {
+		t.Fatalf("with_counts = %+v, want needs_you=3 held_needs=2", pc.Counts)
 	}
 }

@@ -62,13 +62,17 @@ func (h *Hub) forwardSend(w http.ResponseWriter, r *http.Request, id string) {
 var errSendInDoubt = i18n.Err("hub-bus_forward.send_in_doubt")
 
 // readRelayed reads r's body for the bus with io.ReadAll's results: the bytes to its end, or the error that stopped
-// the read (an *http.MaxBytesError past busHTTPLimit). A body whose Content-Length is known and within the limit is read
+// the read (an *http.MaxBytesError past the route's limit). A body whose Content-Length is known and within the limit is read
 // into one buffer of that size, where io.ReadAll grows buffers and copies them into one more (49 MB for a 22 MB
 // upload). Bytes past the Content-Length are read on as io.ReadAll reads them; a body that ends early is what it was.
 func readRelayed(w http.ResponseWriter, r *http.Request) ([]byte, error) {
-	body := http.MaxBytesReader(w, r.Body, busHTTPLimit)
+	limit := int64(busHTTPLimit)
+	if r.Method == http.MethodPost && (r.URL.Path == assistantwire.StarredImportPath || r.URL.Path == assistantwire.StarredImportPreviewPath) {
+		limit = assistantwire.StarredImportBodyMax
+	}
+	body := http.MaxBytesReader(w, r.Body, limit)
 	size := r.ContentLength
-	if size < 0 || size > busHTTPLimit {
+	if size < 0 || size > limit {
 		return io.ReadAll(body)
 	}
 	b := make([]byte, size)

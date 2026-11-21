@@ -124,10 +124,24 @@ class HttpAssistantManagement private constructor(
             }, compactHttp)
         }
     }
-    override suspend fun assistantLauncherList(machineId: String): AssistantLaunchers {
+    override suspend fun assistantLauncherList(machineId: String): AssistantLaunchers = assistantLauncherList(machineId, refresh = false)
+    override suspend fun assistantLauncherList(machineId: String, refresh: Boolean): AssistantLaunchers {
         require(machineId.isNotBlank())
         return JsonCodec.decodeFromJsonElement(request("GET", listOf("api", "v1", "machines", machineId, "launchers"),
-            query = mapOf("purpose" to "assistant")))
+            query = buildMap {
+                put("purpose", "assistant")
+                if (refresh) put("refresh", "1")
+            }))
+    }
+    override suspend fun mainAssistantLauncherList(machineId: String, refresh: Boolean): AssistantLaunchers {
+        val shared = assistantLauncherList(machineId, refresh)
+        val own: AssistantLaunchers = try {
+            JsonCodec.decodeFromJsonElement(request("GET", listOf("api", "v1", "machines", machineId, "launchers"),
+                query = mapOf("purpose" to "assistant.main")))
+        } catch (failure: HubFailure) {
+            if (failure.status == 404) return shared else throw failure
+        }
+        return shared.copy(default = own.default ?: shared.default)
     }
     override suspend fun setModelPick(session: SessionKey, pick: persona.core.contracts.ModelPick): persona.core.contracts.ModelPick {
         require(session.sessionId.isNotBlank() && pick.launcher.isNotBlank())

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/json"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"maps"
@@ -220,7 +221,7 @@ func (f *File) openWindow(fh *os.File, size int64) (fresh []proto.Item, ok bool,
 	w.ids = seedTaskIDs(data)
 	meta := f.seeded(fh, w, b, lastNL, w.ids)
 	var kept []proto.Item
-	f.cut = nil
+	f.refs = nil
 	f.tree = f.freshTree()
 	f.parseLines(data, starts[b-1], b, &meta, f.tree, &kept, &fresh)
 	tail := make([]byte, size-lastNL)
@@ -548,11 +549,8 @@ func (f *File) parseLines(data []byte, pos int64, n int, meta *Meta, tree *branc
 				}
 				k, cut := light(it, false)
 				*kept = append(*kept, k)
-				if cut {
-					if f.cut == nil {
-						f.cut = map[int]lineRef{}
-					}
-					f.cut[n] = lineRef{at, i}
+				if cut || it.SourceFingerprint != "" {
+					f.rememberLine(n, lineRef{at, i})
 				}
 			}
 		}
@@ -666,23 +664,27 @@ func (f *File) ensureAfter(afterSeq int) {
 // (its items are named by the uuid). A line that names it without holding it (a child's parentUuid, a call's output)
 // sends the search further back. An id no line names loads nothing: a stale or mistyped one used to parse the whole
 // file under the lock and keep all of it. Callers hold f.mu.
-func (f *File) findOlder(id string) (proto.Item, bool) {
+func (f *File) findOlder(id string) (proto.Item, bool, error) {
 	if f.base == 0 || f.win == nil || id == "" {
-		return proto.Item{}, false
+		return proto.Item{}, false, nil
 	}
 	fh, err := os.Open(f.Path)
 	if err != nil {
-		return proto.Item{}, false
+		return proto.Item{}, false, err
 	}
 	defer fh.Close()
 	stem := uuidOf(id)
 	if rest, ok := strings.CutPrefix(stem, "line"); ok {
 		if n, err := strconv.Atoi(rest); err == nil && n > 0 && strconv.Itoa(n) == rest {
 			if n <= f.base && !f.win.codex && claudeLineUUID(fh, f.win.starts, n) != "" {
-				return proto.Item{}, false // a stale id: a rewind or a replaced file moved its line
+				return proto.Item{}, false, nil // a stale id: a rewind or a replaced file moved its line
 			}
 			f.ensureAfter(n - 1)
-			return f.item(id)
+			if n <= f.base {
+				return proto.Item{}, false, fmt.Errorf("could not read transcript line %d", n)
+			}
+			it, found := f.item(id)
+			return it, found, nil
 		}
 	}
 	needles := [][]byte{quoteID(stem)}
@@ -692,18 +694,18 @@ func (f *File) findOlder(id string) (proto.Item, bool) {
 	for f.base > 0 && f.win != nil {
 		line := lastMention(fh, f.win.starts, f.win.starts[f.base], needles)
 		if line == 0 {
-			return proto.Item{}, false
+			return proto.Item{}, false, nil
 		}
 		base := f.base
 		f.ensureAfter(line - 1)
 		if it, ok := f.item(id); ok {
-			return it, true
+			return it, true, nil
 		}
 		if f.base == base { // the file changed: loadOlder parsed nothing
-			return proto.Item{}, false
+			return proto.Item{}, false, nil
 		}
 	}
-	return proto.Item{}, false
+	return proto.Item{}, false, nil
 }
 
 // claudeLineUUID is the uuid of line n (1-based, starts as in window) of a Claude transcript, which names the line's

@@ -27,7 +27,9 @@ internal fun chatLinkAnnotations(text: String): AnnotatedString {
 
 @Composable
 fun ChatLinkText(text: String, modifier: Modifier = Modifier, style: TextStyle = PersonaTheme.type.body.copy(color = PersonaTheme.palette.ink)) {
-    Text(chatLinkAnnotations(text), modifier, style = style)
+    val annotated = chatLinkAnnotations(text)
+    val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
+    Text(annotated, modifier.chatLinkLongPress(annotated) { layout.value }, style = style, onTextLayout = { layout.value = it })
 }
 
 /**

@@ -54,9 +54,11 @@ type nodeStateStore interface {
 
 // Options are what Devices needs from the manager it runs in.
 type Options struct {
-	Hub   Host
-	Store Store // nil: nothing is kept (tests)
-	Logf  func(format string, args ...any)
+	// ProjectState lets the owning manager retain transport identities independently of computers.
+	ProjectState func(devicewire.States) devicewire.States
+	Hub          Host
+	Store        Store // nil: nothing is kept (tests)
+	Logf         func(format string, args ...any)
 	// ManagerID is the manager these devices are ("" and "assistant": the built-in one): its health space on a computer
 	// is named after it (identity.HealthDirName, healthreports.go).
 	ManagerID string
@@ -97,6 +99,14 @@ type Options struct {
 	// ConfigFile is the manager's manager.json (internal/managerconf): its usage section (the account-pool gateways
 	// and their keys, usagegateways.go) is read and written there. "": none (tests).
 	ConfigFile string
+	// LauncherBalances reads the prepaid balances of the provider launchers the manager holds keys for (#11825,
+	// usagebalance.go). The assistant owns it, since it owns the launchers and their sealed keys. known false: the
+	// launcher list could not be read, so the last samples stay. nil: no balance source.
+	LauncherBalances func(ctx context.Context) (accounts []proto.UsageAccount, known bool)
+	// UsageExtension asks an extension (contributes.usage) about a launcher's gateway: usage.query, whose answer is the
+	// accounts to draw (usagesource.ExtensionAnswer). The extensions are the manager's, so it owns this; it holds the
+	// launcher's key and sends the extension's requests with it. nil: extension sources cannot be read.
+	UsageExtension func(ctx context.Context, extension, launcher string) (json.RawMessage, error)
 	// TailcatKey is the identity file the computers reached over tailcat trust (tunnel.LoadOrCreateHubKey); "": this
 	// machine's data directory's (tunnel.HubKeyPath).
 	TailcatKey string
@@ -182,6 +192,7 @@ type Devices struct {
 
 	usageWin usageWindowsHub // subscription rate-limit windows across machines (usagewindows.go, #2432)
 	usageGW  usageGateways   // the account-pool gateways that add accounts to it (usagegateways.go, #2595)
+	usageBal usageBalances   // the launchers' prepaid balances that add accounts to it (usagebalance.go, #11825)
 
 	// reqPrefix and reqSeq make the nodes' requests' keys for the hub (devices.request), unique across managers.
 	reqPrefix string
@@ -207,6 +218,9 @@ func New(o Options) *Devices {
 	}
 	d.usageWin.gateways = d.usageGW.accounts
 	d.usageGW.init(usage, d.usageWin.invalidate, d.logf)
+	d.usageWin.balances = d.usageBal.accounts
+	d.usageGW.fetchExtension = o.UsageExtension
+	d.usageBal.init(o.LauncherBalances, d.usageWin.invalidate, d.logf)
 	return d
 }
 
@@ -244,7 +258,8 @@ func (d *Devices) Run(ctx context.Context) error {
 	// The messages held while their computers were away (held.go).
 	d.workers.Add(1)
 	go func() { defer d.workers.Done(); d.heldLoop(mctx) }()
-	go d.usageGW.run(ctx) // the account-pool gateways (usagegateways.go)
+	go d.usageGW.run(ctx)   // the account-pool gateways (usagegateways.go)
+	go d.usageBal.run(mctx) // the launchers' prepaid balances (usagebalance.go, #11825)
 	// A switch to Persona Link a restart left (link_switch.go).
 	go d.resumeLinkSwitches(mctx)
 	// The hub's hand-over, or after ownListWait the manager's own list (ownlist.go) until it comes.
@@ -530,6 +545,9 @@ func (d *Devices) report(all bool) {
 	d.reportMu.Lock()
 	defer d.reportMu.Unlock()
 	st := d.states()
+	if d.opts.ProjectState != nil {
+		st = d.opts.ProjectState(st)
+	}
 	b, err := json.Marshal(st)
 	if err != nil {
 		return
@@ -1105,6 +1123,25 @@ func (d *Devices) Canonical(id string) string {
 	return id
 }
 
+// PhysicalAliases returns the configured identities currently naming the same
+// computer. It reads the fleet directly, before projected transport identities.
+func (d *Devices) PhysicalAliases(id string) []string {
+	m := d.machineByID(id)
+	if m == nil {
+		return []string{id}
+	}
+	out := []string{id, m.cfg.ID}
+	d.fleet.mu.Lock()
+	for from, to := range d.fleet.absorbed {
+		if to == m {
+			out = append(out, from.cfg.ID)
+		}
+	}
+	d.fleet.mu.Unlock()
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 // ConnectedAt is when the machine's node's current connection began (zero: none).
 func (d *Devices) ConnectedAt(id string) time.Time {
 	m := d.machineByID(id)
@@ -1202,3 +1239,6 @@ var errHandoffRefused = &rpc.Error{Code: devicewire.CodeHandoffRefused, Message:
 func refusesHandoff(method string, params json.RawMessage) bool {
 	return method == proto.MethodSecretStage || devicewire.IsSessionStart(method) && startHasSecretTicket(params)
 }
+
+// ReportState republishes manager-owned transport aliases after a routing change.
+func (d *Devices) ReportState() { d.report(true) }

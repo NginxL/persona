@@ -6,7 +6,7 @@ vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
-import { connect, reset, savePins } from "../lib/store";
+import { connect, putLaunch, reset, savePins } from "../lib/store";
 import { cycleGrouping } from "../lib/sidebar-api";
 import { SESSIONS_AGENTS_ONLY_FEATURE, runtimeAgents, runtimeSessions } from "../lib/runtime-list";
 import { filterAgentList, getAgentListFilters, resetAgentListFilters } from "../lib/agent-list-filters";
@@ -203,4 +203,71 @@ it("uses the complete Agents list when the hub supports paging without the Agent
   expect(host.textContent).not.toContain(healthDir.title);
   expect(host.textContent).not.toContain(managerHealthDir.title);
   expect(fetch.mock.calls.some(([input]) => input.includes("agents_only"))).toBe(false);
+});
+
+it("keeps an in-flight sending launch in Starting only without duplicating it in paged groups, then moves it once ready", async () => {
+  await render(true, emptyPins, "machine");
+  await act(async () => vi.dynamicImportSettled());
+  await flush();
+
+  // Baseline: "First page agent" is rendered once inside the open machine group.
+  const group = () => host.querySelector('[data-session-group="computer"]')!;
+  expect(group()).not.toBeNull();
+  expect(group().querySelectorAll("[data-session-row]")).toHaveLength(1);
+  expect(group().textContent).toContain(first.title);
+  expect(host.querySelectorAll('a[href*="/computer/First%20page%20agent"]')).toHaveLength(1);
+
+  // While the launch is in flight ("sending") with its created session already present in the hub's paged list,
+  // it renders only under Starting (with the matching engine mark) and is excluded from the machine group.
+  act(() => {
+    putLaunch({
+      id: "local-sending-1",
+      machineId: first.machine_id,
+      cwd: first.cwd,
+      launcher: "",
+      displayLauncher: "claude",
+      displayEngine: "claude",
+      displayModel: "deepseek-v4.1-flash",
+      text: "Starting agent task",
+      attachments: [],
+      phase: "sending",
+      session: first,
+      uploaded: {},
+      startOpId: "op-1",
+      startPromptOpId: "op-2",
+      messageId: "msg-1",
+    });
+  });
+  await flush();
+
+  expect(host.textContent).toContain("正在启动");
+  expect(host.querySelector('a[href*="/computer/local-sending-1"] [data-agent-mark="claude"]')).not.toBeNull();
+  expect(group().querySelectorAll("[data-session-row]")).toHaveLength(0);
+  expect(host.querySelectorAll('a[href*="/computer/First%20page%20agent"]')).toHaveLength(0);
+
+  // Once handoff reaches "ready", Starting disappears and the session renders in its machine group again.
+  act(() => {
+    putLaunch({
+      id: "local-sending-1",
+      machineId: first.machine_id,
+      cwd: first.cwd,
+      launcher: "",
+      displayLauncher: "claude",
+      displayEngine: "claude",
+      displayModel: "deepseek-v4.1-flash",
+      text: "Starting agent task",
+      attachments: [],
+      phase: "ready",
+      session: first,
+      uploaded: {},
+      startOpId: "op-1",
+      startPromptOpId: "op-2",
+      messageId: "msg-1",
+    });
+  });
+  await flush();
+
+  expect(host.textContent).not.toContain("正在启动");
+  expect(group().querySelectorAll("[data-session-row]")).toHaveLength(1);
+  expect(host.querySelectorAll('a[href*="/computer/First%20page%20agent"]')).toHaveLength(1);
 });

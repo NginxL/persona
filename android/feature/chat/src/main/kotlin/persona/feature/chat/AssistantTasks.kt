@@ -201,37 +201,46 @@ private fun FeedLine(item: FeedItem, host: AssistantTaskHost) {
     // Glass draws the records as iOS's new conversation layout does (#4339 C13); Brief and Board keep their looks.
     val glass = PersonaTheme.style == persona.core.designsystem.AppStyle.Glass
     val openTodo = todos.firstOrNull { it.id == item.ref }?.let { todo -> { openTask(host, todo) } }
-    when (item.kind) {
-        "plan" -> (item.ref?.let { plans[it] } ?: item.plan)?.let { PlanCard(it, host) }
-        "task" -> todos.firstOrNull { it.id == item.ref }?.let { todo ->
-            val today = AssistantLines.time(item.at)?.atZone(ZoneId.systemDefault())?.toLocalDate() == LocalDate.now()
-            if (today) TaskCard(todo, host) else TaskLine(todo, host)
+    // The transcript hosts this row in a Box (`ChatSearchHighlight`). Two composables emitted here would occupy the
+    // same place. iOS `FeedLine` case `.routed` draws only the message (TaskViews.swift). A newly started Agent is not
+    // that line: `HandoffCardView` is an inbox write-back (`item.handoffCard`, kind `inboxSuggestion`), and
+    // `DispatchHandoffCards` names a plan or task item's Agents linked within two minutes of the first
+    // (DispatchHandoffCard.swift: a later Agent is not on this hand-off). This message's Agent is that later one, so
+    // it stays under the message. The gap is iOS's between hand-off cards (`VStack` spacing `Theme.Space.s`).
+    // `spacedBy` adds nothing around a single child, so every other row stays as it was.
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        when (item.kind) {
+            "plan" -> (item.ref?.let { plans[it] } ?: item.plan)?.let { PlanCard(it, host) }
+            "task" -> todos.firstOrNull { it.id == item.ref }?.let { todo ->
+                val today = AssistantLines.time(item.at)?.atZone(ZoneId.systemDefault())?.toLocalDate() == LocalDate.now()
+                if (today) TaskCard(todo, host) else TaskLine(todo, host)
+            }
+            "answered" -> AnsweredLine(item, title, todos.firstOrNull { it.id == item.ref }?.let { todo -> { openTask(host, todo) } })
+            "receipt" -> ReceiptCard(item, host, todos)
+            // The entry names its task itself (#5084): a review drawn in the conversation says which task even when the
+            // list no longer has it (then there is nothing to open).
+            "review" -> ReviewLine(item, todos.firstOrNull { it.id == item.ref }?.title ?: item.field("title")?.takeIf(String::isNotBlank) ?: title,
+                todos.firstOrNull { it.id == item.ref }?.let { todo -> { openTask(host, todo) } })
+            "report" -> if (glass) ReportExchange(item, title, openTodo) else ReportCard(item, title, openTodo)
+            // Persona's own message to the task's agent is folded, never the user's bubble (#1542, #1623).
+            "routed" -> if (item.sentByPersona) { if (glass) RoutedExchange(item, title, openTodo) else SentLine(item, title, openTodo) }
+            else if (glass) UserRoutedExchange(item, title)
+            else Column(Modifier.fillMaxWidth().padding(start = Tokens.Space.xxl).testTag("routed-owner"), horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+                Text(stringResource(R.string.chat_tasks_routed_to, title), style = PersonaTheme.type.caption, color = PersonaTheme.palette.accent, maxLines = 1)
+                Text(item.field("text").orEmpty(), Modifier.clip(PersonaTheme.shapes.controlShape).background(PersonaTheme.palette.surfaceStrong)
+                    .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
+            }
+            "today" -> TodayCard(item, host, todos)
+            "brief" -> BriefCard(item, host)
+            "message" -> if (item.ref != null && item.id !in later) MessageCard(item, host, todos)
+            // A live card: drawn where it was created, as the hub's latest version of it (docs/assistant/assistant-views.md "Live cards").
+            "view" -> item.ref?.let { id -> persona.core.designsystem.LocalViewBlocks.current?.live?.invoke(id) }
+            "notice" -> NoticeLine(item)
         }
-        "answered" -> AnsweredLine(item, title, todos.firstOrNull { it.id == item.ref }?.let { todo -> { openTask(host, todo) } })
-        "receipt" -> ReceiptCard(item, host, todos)
-        // The entry names its task itself (#5084): a review drawn in the conversation says which task even when the
-        // list no longer has it (then there is nothing to open).
-        "review" -> ReviewLine(item, todos.firstOrNull { it.id == item.ref }?.title ?: item.field("title")?.takeIf(String::isNotBlank) ?: title,
-            todos.firstOrNull { it.id == item.ref }?.let { todo -> { openTask(host, todo) } })
-        "report" -> if (glass) ReportExchange(item, title, openTodo) else ReportCard(item, title, openTodo)
-        // Persona's own message to the task's agent is folded, never the user's bubble (#1542, #1623).
-        "routed" -> if (item.sentByPersona) { if (glass) RoutedExchange(item, title, openTodo) else SentLine(item, title, openTodo) }
-        else if (glass) UserRoutedExchange(item, title)
-        else Column(Modifier.fillMaxWidth().padding(start = Tokens.Space.xxl), horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-            Text(stringResource(R.string.chat_tasks_routed_to, title), style = PersonaTheme.type.caption, color = PersonaTheme.palette.accent, maxLines = 1)
-            Text(item.field("text").orEmpty(), Modifier.clip(PersonaTheme.shapes.controlShape).background(PersonaTheme.palette.surfaceStrong)
-                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink)
-        }
-        "today" -> TodayCard(item, host, todos)
-        "brief" -> BriefCard(item, host)
-        "message" -> if (item.ref != null && item.id !in later) MessageCard(item, host, todos)
-        // A live card: drawn where it was created, as the hub's latest version of it (docs/assistant/assistant-views.md "Live cards").
-        "view" -> item.ref?.let { id -> persona.core.designsystem.LocalViewBlocks.current?.live?.invoke(id) }
-        "notice" -> NoticeLine(item)
+        if (item.kind == "routed" && !item.sentByPersona && !item.field("new_agent").isNullOrBlank())
+            NewAgentHandoff(item, title, todos.firstOrNull { it.id == item.ref }, host)
     }
-    if (item.kind == "routed" && !item.sentByPersona && !item.field("new_agent").isNullOrBlank())
-        NewAgentHandoff(item, title, todos.firstOrNull { it.id == item.ref }, host)
 }
 
 /**
@@ -483,6 +492,7 @@ internal fun PlanCard(given: TaskPlan, host: AssistantTaskHost) {
                             JChip(if (t.readonly == true) stringResource(R.string.chat_tasks_read_only) else permissionLabel(t.permission), selected = t.readonly == true)
                         }
                         t.why?.takeIf(String::isNotBlank)?.let { Text(it, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2) }
+                        t.brief?.let { PlanTaskBrief(it, t.title) }
                     }
                 }
                 Row(Modifier.clickable { remember = !remember }, verticalAlignment = Alignment.CenterVertically) {

@@ -1,7 +1,6 @@
 package assistant
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +15,6 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/managerconf"
 )
 
 const repositoriesKey = "assistant.repositories"
@@ -162,19 +160,11 @@ func (s *Service) checkRepository(ctx context.Context, id repository.Identity) e
 	if s.repositoryCheck != nil {
 		return s.repositoryCheck(ctx, id)
 	}
-	var cfg struct {
-		Targets []repository.TrustedTarget `json:"repository_trusted_targets"`
-		GitHub  struct {
-			Proxy string `json:"proxy"`
-		} `json:"github"`
+	cfg, err := s.readRepositoryConfig()
+	if err != nil {
+		return repositoryProblem("store")
 	}
-	if s.repositoryConfig != "" {
-		raw, err := managerconf.ReadFile(s.repositoryConfig)
-		if err != nil || raw != nil && (len(bytes.TrimSpace(raw)) == 0 || json.Unmarshal(raw, &cfg) != nil) {
-			return repositoryProblem("store")
-		}
-	}
-	return (repository.Checker{TrustedTargets: cfg.Targets, GitHubProxy: cfg.GitHub.Proxy}).Check(ctx, id)
+	return cfg.checker().Check(ctx, id)
 }
 
 func (s *Service) saveRepository(ctx context.Context, id string, binding RepositoryBinding) (RepositoryBinding, error) {

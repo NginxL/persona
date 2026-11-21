@@ -77,7 +77,7 @@ class ChatDetailsTest {
         assertEquals("给 Claude 发消息", agentPlaceholder(res, null))
         assertEquals("给 Codex 发消息", agentPlaceholder(res, session(agent = "codex")))
         assertEquals("给 Codex 发消息", agentPlaceholder(res, session(sourceKind = "codex_app_server")))
-        assertEquals("给 TRAEX 发消息", agentPlaceholder(res, session(agent = "traex")))
+        assertEquals("给 TRAE CLI 发消息", agentPlaceholder(res, session(agent = "traex")))
         // A runtime's agent by the hub's name for it, else its own.
         assertEquals("给 DSH 发消息", agentPlaceholder(res, session(agent = "dsh", hint = "DSH")))
         assertEquals("给 pi 发消息", agentPlaceholder(res, session(agent = "pi")))

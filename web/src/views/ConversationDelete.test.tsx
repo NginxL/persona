@@ -6,7 +6,7 @@ import { t } from "../i18n";
 import { CONVERSATION_DELETE_FEATURE } from "../lib/conversation-delete";
 import { getState, markConversationDeleted, reset, upsertSession } from "../lib/store";
 import type { Session } from "../lib/types";
-import { ConversationRowMenu } from "./ConversationMenu";
+import { ConversationRowMenu } from "./ConversationRowMenu";
 import { History } from "./assistant/History";
 import { ChatView } from "./chat/ChatView";
 vi.hoisted(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) }); });

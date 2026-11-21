@@ -204,13 +204,17 @@ export interface ExtensionField {
   max_length?: number;
   minimum?: number;
   maximum?: number;
-  /** A list's items; format machine: the hub's machines by id (of the systems in os), drawn as a switch each. */
-  items?: { type: string; enum?: ExtensionChoice[]; format?: string; os?: string[] };
+  /** A list's item schema; an entry list has one flat object with text fields. */
+  items?: ExtensionField;
   min_items?: number;
   max_items?: number;
   unique_items?: boolean;
-  /** An object's fields (a group of the form). */
+  /** An object's fields (a group of the form, or one entry's flat text fields). */
   fields?: ExtensionField[];
+  /** x-secret: one write-only secret owned by each entry of this list. */
+  secret?: { name: string; title: string; description?: string; required?: boolean; hint?: string };
+  /** True on an address whose change clears the entry's secret on save. */
+  clears_secret?: boolean;
   /** x-confirm: what to ask before a switch of it is turned on (the extension cua's "no automatic screen lock while the extension is on"). */
   confirm?: string;
 }
@@ -226,6 +230,9 @@ export interface ExtensionSecret {
   hint?: string;
   /** It holds a provider's reference, not a value (docs/extensions/secret-providers.md). */
   reference?: SecretReference;
+  /** A live entry's storage ID is name; these associate it with its list and display title. */
+  list?: string;
+  entry_title?: string;
 }
 
 export type { SecretReference } from "./secret-reference";
@@ -237,6 +244,8 @@ export interface SecretUser {
   extension_name?: string;
   secret?: string;
   secret_title?: string;
+  /** A live entry's display title when secret is its host-owned storage ID. */
+  entry_title?: string;
   launcher?: string;
   launcher_name?: string;
   machine?: string;
@@ -293,6 +302,9 @@ export interface HubExtensionDetail extends HubExtension {
 // ── the hub ─────────────────────────────────────────────
 
 const base = (id: string) => `${extRoot()}/${enc(id)}/-`;
+// Every detail-returning settings request uses the same capability flag. A response without it would hide the entry
+// editor immediately after a save or lifecycle operation.
+const withEntryLists = (path: string) => `${path}${path.includes("?") ? "&" : "?"}entry_lists=1`;
 
 type ListAnswer = { extensions?: HubExtension[]; plugins?: HubExtension[]; can_install?: boolean; markets?: boolean };
 
@@ -306,7 +318,7 @@ export const listExtensionsInfo = () =>
   }));
 /** A detail as either kind of hub sends it, its pages' places read with the new keys. */
 export const detailOf = (d: HubExtensionDetail): HubExtensionDetail => (d.ui ? { ...d, ui: d.ui.map(placeOf) } : d);
-export const extensionDetail = (id: string) => api<HubExtensionDetail>(`${base(id)}/`).then(detailOf);
+export const extensionDetail = (id: string) => api<HubExtensionDetail>(withEntryLists(`${base(id)}/`)).then(detailOf);
 /** After a change that can start, stop or reconfigure an extension: its entries, cards and sections are asked for again. */
 export const changed = <T>(r: T): T => {
   refreshExtensionPlaces();
@@ -314,25 +326,28 @@ export const changed = <T>(r: T): T => {
   return r;
 };
 export const setExtensionEnabled = (id: string, enabled: boolean, cascade = false) =>
-  api<HubExtensionDetail>(`${base(id)}/enabled`, { method: "PUT", json: { enabled, ...(cascade ? { cascade } : {}) } }).then(detailOf).then(changed);
+  api<HubExtensionDetail>(withEntryLists(`${base(id)}/enabled`), { method: "PUT", json: { enabled, ...(cascade ? { cascade } : {}) } }).then(detailOf).then(changed);
 export const setContribution = (id: string, point: string, cid: string, enabled: boolean) =>
-  api<HubExtensionDetail>(`${base(id)}/contributions/${enc(point)}/${enc(cid)}`, { method: "PUT", json: { enabled } }).then(detailOf).then(changed);
+  api<HubExtensionDetail>(withEntryLists(`${base(id)}/contributions/${enc(point)}/${enc(cid)}`), { method: "PUT", json: { enabled } }).then(detailOf).then(changed);
 export const setExtensionAutoUpgrade = (id: string, auto: boolean) =>
-  api<HubExtensionDetail>(`${base(id)}/auto-upgrade`, { method: "PUT", json: { auto } }).then(detailOf);
+  api<HubExtensionDetail>(withEntryLists(`${base(id)}/auto-upgrade`), { method: "PUT", json: { auto } }).then(detailOf);
 /** The auto-upgrade switch for all market extensions; a hub from before it has no route (null). */
 export const extensionUpgrades = (manager?: string) =>
   api<{ auto: boolean; upgrades?: ExtensionUpgrade[] }>(`${extRoot()}/-/upgrades`, { headers: itemHeaders(manager) }).then((r) => r.auto, () => null);
 export const setExtensionUpgrades = (auto: boolean) => api<{ auto: boolean }>(`${extRoot()}/-/upgrades`, { method: "PUT", json: { auto } }).then((r) => r.auto);
 export const setExtensionConfig = (id: string, config: JsonObject) =>
-  api<HubExtensionDetail>(`${base(id)}/config`, { method: "PUT", json: { config } }).then(detailOf).then(changed);
+  api<HubExtensionDetail>(withEntryLists(`${base(id)}/config`), { method: "PUT", json: { config } }).then(detailOf).then(changed);
+/** An immediate fixed-field save, not an entry-list edit: the hub keeps its current arrays and answers with the capable form. */
+export const setExtensionConfigPreservingEntries = (id: string, config: JsonObject) =>
+  api<HubExtensionDetail>(`${withEntryLists(`${base(id)}/config`)}&preserve_entries=1`, { method: "PUT", json: { config } }).then(detailOf).then(changed);
 export const setExtensionSecret = (id: string, name: string, value: string) =>
-  api<HubExtensionDetail>(`${base(id)}/secrets/${enc(name)}`, { method: "PUT", json: { value } }).then(detailOf).then(changed);
+  api<HubExtensionDetail>(withEntryLists(`${base(id)}/secrets/${enc(name)}`), { method: "PUT", json: { value } }).then(detailOf).then(changed);
 export const setExtensionSecretReference = (id: string, name: string, reference: string) =>
-  api<HubExtensionDetail>(`${base(id)}/secrets/${enc(name)}`, { method: "PUT", json: { reference } }).then(detailOf).then(changed);
+  api<HubExtensionDetail>(withEntryLists(`${base(id)}/secrets/${enc(name)}`), { method: "PUT", json: { reference } }).then(detailOf).then(changed);
 export const removeHandoffRule = (id: string, rule: string) =>
-  api<HubExtensionDetail>(`${base(id)}/handoff-rules/${enc(rule)}`, { method: "DELETE" }).then(detailOf).then(changed);
+  api<HubExtensionDetail>(withEntryLists(`${base(id)}/handoff-rules/${enc(rule)}`), { method: "DELETE" }).then(detailOf).then(changed);
 export const clearExtensionSecret = (id: string, name: string) =>
-  api<HubExtensionDetail>(`${base(id)}/secrets/${enc(name)}`, { method: "DELETE" }).then(detailOf).then(changed);
+  api<HubExtensionDetail>(withEntryLists(`${base(id)}/secrets/${enc(name)}`), { method: "DELETE" }).then(detailOf).then(changed);
 
 /** A 400 invalid_config: the field the hub refused (its dotted path, "" when it names none) and why. */
 export function configError(e: unknown): { field: string; message: string } | null {
@@ -559,34 +574,54 @@ export function same(a: Json | undefined, b: Json | undefined): boolean {
 export function valueAt(draft: JsonObject, path: string[]): Json | undefined {
   let cur: Json | undefined = draft;
   for (const k of path) {
-    if (!cur || typeof cur !== "object" || Array.isArray(cur)) return undefined;
-    cur = cur[k];
+    if (Array.isArray(cur)) {
+      if (!/^(0|[1-9]\d*)$/.test(k)) return undefined;
+      cur = cur[Number(k)];
+    } else if (cur && typeof cur === "object") {
+      cur = cur[k];
+    } else {
+      return undefined;
+    }
   }
   return cur === null ? undefined : cur;
 }
 
-/** Sets (undefined: removes) the value at path; a group left empty goes too. */
+/** Sets (undefined: removes) the value at path; a group left empty goes too. Numeric segments address entry rows. */
 export function setAt(draft: JsonObject, path: string[], value: Json | undefined): JsonObject {
+  const next = setNested(draft, path, value);
+  return next && typeof next === "object" && !Array.isArray(next) ? next : {};
+}
+
+function setNested(current: Json | undefined, path: string[], value: Json | undefined): Json | undefined {
   const [key, ...rest] = path;
-  if (key === undefined) return draft;
-  const out: JsonObject = { ...draft };
-  let next: Json | undefined = value;
-  if (rest.length) {
-    const inner = out[key];
-    const obj = inner && typeof inner === "object" && !Array.isArray(inner) ? inner : {};
-    const set = setAt(obj, rest, value);
-    next = Object.keys(set).length ? set : undefined;
+  if (key === undefined) return value;
+  if (Array.isArray(current)) {
+    if (!/^(0|[1-9]\d*)$/.test(key)) return current;
+    const index = Number(key);
+    const out = [...current];
+    const next = rest.length ? setNested(out[index], rest, value) : value;
+    if (next === undefined) out.splice(index, 1);
+    else out[index] = next;
+    return out;
   }
-  if (next === undefined) delete out[key];
+  const out: JsonObject = current && typeof current === "object" ? { ...current } : {};
+  if (!rest.length) {
+    if (value === undefined) delete out[key];
+    else out[key] = value;
+    return out;
+  }
+  const next = setNested(out[key], rest, value);
+  if (next === undefined || (isGroup(next) && !Object.keys(next).length)) delete out[key];
   else out[key] = next;
   return out;
 }
 
-/** Without empty strings and lists the user cleared: "not set" (the schema's default applies). */
-export function compact(obj: JsonObject): JsonObject {
+/** Without empty strings and lists the user cleared: "not set" (the schema's default applies). A required entry list
+ *  named in requiredEntryLists is the exception: its explicit [] is a present, valid value the hub must receive. */
+export function compact(obj: JsonObject, requiredEntryLists?: ReadonlySet<string>): JsonObject {
   const out: JsonObject = {};
   for (const [k, v] of Object.entries(obj)) {
-    if (v === null || v === "" || (Array.isArray(v) && !v.length)) continue;
+    if (v === null || v === "" || (Array.isArray(v) && !v.length && !requiredEntryLists?.has(k))) continue;
     if (typeof v === "object" && !Array.isArray(v)) {
       const inner = compact(v);
       if (Object.keys(inner).length) out[k] = inner;
@@ -618,13 +653,14 @@ export function numberProblems(typed: Record<string, { text: string; integer: bo
 }
 
 /** Whether the draft differs from what the hub has (both read as sent: compacted). */
-export const isDirty = (draft: JsonObject, config: JsonObject | undefined) => !same(compact(draft), compact(config ?? {}));
+export const isDirty = (draft: JsonObject, config: JsonObject | undefined, requiredEntryLists?: ReadonlySet<string>) =>
+  !same(compact(draft, requiredEntryLists), compact(config ?? {}, requiredEntryLists));
 
 const isGroup = (v: Json | undefined): v is JsonObject => !!v && typeof v === "object" && !Array.isArray(v);
 
 /** What a draft changes of the configuration it was made on (both read as sent): each changed field's path and its value
  *  in the draft (undefined: cleared). Groups are gone into, so a change is one field's, not its whole group's. */
-function draftEdits(draft: JsonObject, base: JsonObject): { path: string[]; value: Json | undefined }[] {
+function draftEdits(draft: JsonObject, base: JsonObject, requiredEntryLists?: ReadonlySet<string>): { path: string[]; value: Json | undefined }[] {
   const out: { path: string[]; value: Json | undefined }[] = [];
   const walk = (a: JsonObject, b: JsonObject, at: string[]) => {
     for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
@@ -633,7 +669,7 @@ function draftEdits(draft: JsonObject, base: JsonObject): { path: string[]; valu
       else if (!same(x, y)) out.push({ path: [...at, k], value: x });
     }
   };
-  walk(compact(draft), compact(base), []);
+  walk(compact(draft, requiredEntryLists), compact(base, requiredEntryLists), []);
   return out;
 }
 
@@ -643,8 +679,9 @@ function draftEdits(draft: JsonObject, base: JsonObject): { path: string[]; valu
 export function rebaseDraft<T extends { text: string; integer: boolean }>(
   kept: { base: JsonObject; draft: JsonObject; typed: Record<string, T> },
   fresh: JsonObject,
+  requiredEntryLists?: ReadonlySet<string>,
 ): { draft: JsonObject; typed: Record<string, T> } {
-  const edits = draftEdits(kept.draft, kept.base);
+  const edits = draftEdits(kept.draft, kept.base, requiredEntryLists);
   const edited = new Set(edits.map((e) => e.path.join(".")));
   const problems = numberProblems(kept.typed);
   return {
@@ -657,6 +694,39 @@ export function rebaseDraft<T extends { text: string; integer: boolean }>(
 export function listItems(draft: JsonObject, path: string[], f: ExtensionField): string[] {
   const v = valueAt(draft, path) ?? f.default;
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+/** Dotted field path with entry indexes in the hub's validation-error form: accounts[0].address. */
+export function fieldPath(path: string[]): string {
+  return path.reduce((out, part) => (/^(0|[1-9]\d*)$/.test(part) ? `${out}[${part}]` : out ? `${out}.${part}` : part), "");
+}
+
+export function isEntryList(f: ExtensionField): boolean {
+  return f.type === "array" && f.items?.type === "object" && !!f.secret && !!f.items.fields?.length;
+}
+
+export function entryItems(draft: JsonObject, path: string[]): JsonObject[] {
+  const value = valueAt(draft, path);
+  return Array.isArray(value) ? value.filter(isGroup) : [];
+}
+
+export function entryID(entry: JsonObject): string | undefined {
+  return typeof entry._id === "string" && entry._id ? entry._id : undefined;
+}
+
+// Browser-only identity for an entry the hub has not saved yet. Object spreading preserves the enumerable symbol through
+// immutable field edits; Object.keys and JSON.stringify ignore it, so it never enters comparisons or an API payload.
+const unsavedEntryKey = Symbol("personaUnsavedEntry");
+type LocalEntry = JsonObject & { [unsavedEntryKey]?: string };
+let nextEntryKey = 0;
+export function entryKey(entry: JsonObject): string {
+  const saved = entryID(entry);
+  if (saved) return saved;
+  const local = entry as LocalEntry;
+  if (!local[unsavedEntryKey]) {
+    Object.defineProperty(local, unsavedEntryKey, { value: `new-entry-${++nextEntryKey}`, enumerable: true });
+  }
+  return local[unsavedEntryKey]!;
 }
 
 /** A machine on an extension's machine list (format machine): online or not, and for an extension that operates computers how

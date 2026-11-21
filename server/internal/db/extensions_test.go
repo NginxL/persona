@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -104,6 +105,81 @@ func TestExtensionIdentityStableCiphertextAndCAS(t *testing.T) {
 	}
 	if err = d.PutExtensionPlan(ctx, []extension.Record{old}); err == nil {
 		t.Fatal("concurrent new installation overwrote existing slot")
+	}
+}
+
+func TestExtensionConfigDeleteSecretsTransaction(t *testing.T) {
+	d, ctx := open(t), t.Context()
+	const id = "entry-list-transaction"
+	cleanup := func() {
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = d.pool.Exec(c, `DROP TRIGGER IF EXISTS entry_list_delete_guard ON plugin_secrets`)
+		_, _ = d.pool.Exec(c, `DROP FUNCTION IF EXISTS reject_entry_list_secret_delete()`)
+		_, _ = d.pool.Exec(c, `DELETE FROM plugins WHERE id=$1`, id)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	row := extension.Record{ID: id, Source: extension.SourceInstalled, Version: "1.0.0", Manifest: json.RawMessage(`{"id":"entry-list-transaction"}`),
+		Config: json.RawMessage(`{"accounts":[{"_id":"entry_one"},{"_id":"entry_two"}],"flag":false}`), InstalledAt: time.Now(), UpdatedAt: time.Now()}
+	if err := d.PutExtension(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"entry_one", "entry_two"} {
+		if err := d.PutExtensionSecret(ctx, id, name, "synthetic-sealed-"+name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := row
+	next.Config = json.RawMessage(`{"accounts":[{"_id":"entry_one"}],"flag":true}`)
+	next.ExpectedID, next.ExpectedVersion, next.ExpectedConfig = id, row.Version, row.Config
+	next.DeleteSecrets = []string{"entry_two"}
+	if err := d.PutExtensionPlan(ctx, []extension.Record{next}); err != nil {
+		t.Fatal(err)
+	}
+	secrets, err := d.ExtensionSecrets(ctx, id)
+	if err != nil || len(secrets) != 1 || secrets["entry_one"] != "synthetic-sealed-entry_one" {
+		t.Fatalf("committed secrets: %+v, %v", secrets, err)
+	}
+
+	stale := next
+	stale.Config = json.RawMessage(`{"accounts":[],"flag":false}`)
+	stale.ExpectedConfig = row.Config
+	stale.DeleteSecrets = []string{"entry_one"}
+	if err := d.PutExtensionPlan(ctx, []extension.Record{stale}); !errors.Is(err, extension.ErrSettingsMoved) {
+		t.Fatalf("stale config CAS: %v", err)
+	}
+	secrets, _ = d.ExtensionSecrets(ctx, id)
+	if len(secrets) != 1 {
+		t.Fatalf("stale write deleted a secret: %+v", secrets)
+	}
+
+	if _, err := d.pool.Exec(ctx, `CREATE FUNCTION reject_entry_list_secret_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic delete failure'; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.pool.Exec(ctx, `CREATE TRIGGER entry_list_delete_guard BEFORE DELETE ON plugin_secrets FOR EACH ROW WHEN (OLD.plugin = 'entry-list-transaction') EXECUTE FUNCTION reject_entry_list_secret_delete()`); err != nil {
+		t.Fatal(err)
+	}
+	failing := next
+	failing.Config = json.RawMessage(`{"accounts":[],"flag":false}`)
+	failing.ExpectedConfig = next.Config
+	failing.DeleteSecrets = []string{"entry_one"}
+	if err := d.PutExtensionPlan(ctx, []extension.Record{failing}); err == nil {
+		t.Fatal("synthetic secret deletion failure was not returned")
+	}
+	var saved json.RawMessage
+	if err := d.pool.QueryRow(ctx, `SELECT config FROM plugins WHERE id=$1`, id).Scan(&saved); err != nil {
+		t.Fatal(err)
+	}
+	var got, want any
+	_ = json.Unmarshal(saved, &got)
+	_ = json.Unmarshal(next.Config, &want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed deletion changed config: %s, want %s", saved, next.Config)
+	}
+	secrets, _ = d.ExtensionSecrets(ctx, id)
+	if secrets["entry_one"] != "synthetic-sealed-entry_one" {
+		t.Fatal("rolled-back deletion removed ciphertext")
 	}
 }
 

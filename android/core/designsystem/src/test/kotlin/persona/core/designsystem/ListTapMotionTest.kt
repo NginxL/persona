@@ -1113,6 +1113,80 @@ class ListTapMotionTest {
         assertTrue("the row popped ($before -> $early -> $mid -> $late)", early > 10 && mid > 10 && late < early / 2)
     }
 
+    @Test fun pinningExpandedHierarchyAcrossViewportDisposeNeverLeavesRowsStuckOverlappingOnScroll() {
+        rule.mainClock.autoAdvance = false
+        val fillers = (1..14).map { "filler-$it" }
+        val hierarchy = listOf("session:task", "children:task", "session:child-1", "session:child-2")
+        var dark by mutableStateOf(false)
+        var rows by mutableStateOf(fillers + hierarchy)
+        val state = LazyListState(firstVisibleItemIndex = 11)
+        val motion = ListTapMotion()
+        var scrollTarget by mutableStateOf(-1)
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = false, style = AppStyle.Glass) {
+                BindListTapMotion(motion, rows)
+                LaunchedEffect(scrollTarget) { if (scrollTarget >= 0) state.scrollToItem(scrollTarget) }
+                LazyColumn(
+                    Modifier.width(411.dp).height(320.dp).background(PersonaTheme.palette.background)
+                        .nestedScroll(listTapScroll(motion)).testTag("shot"),
+                    state = state,
+                ) {
+                    with(ListTapLazyScope(this, motion, state)) {
+                        items(rows, key = { it }) { key ->
+                            JRow(key, Modifier.height(52.dp).testTag("row-$key"))
+                        }
+                    }
+                }
+            }
+        }
+        settle()
+        val out = File("build/pin-overlap-shots").also { it.mkdirs() }
+
+        // 1. Cross-list Pin jump where hierarchy leaves viewport and scrolls back to Pinned
+        motion.arm(ListTapMotionKind.State)
+        rows = listOf("group:pinned") + hierarchy + fillers.drop(1)
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        scrollTarget = 0
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeBy(800)
+        settle()
+
+        // 2. Direct cancelled-item-scope race (e.g. dispose + recompose in LazyColumn before spring dispatch)
+        // both with hostScope bound and with no hostScope bound:
+        val deadScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob().apply { cancel() })
+        motion.noteComposed(listOf("group:pinned") + hierarchy + fillers.drop(1))
+        motion.notePlaced("children:task", 420f, deadScope, motion.liveFade)
+        motion.arm(ListTapMotionKind.State)
+        motion.capture(listOf("group:pinned", "session:other") + hierarchy + fillers.drop(1))
+        motion.notePlaced("children:task", 120f, deadScope, motion.liveFade)
+        rule.mainClock.advanceTimeBy(800)
+        settle()
+
+        assertEquals("children:task shift froze with hostScope bound", 0, motion.shiftPx("children:task"))
+        save(out, "pin-hierarchy-after-light.png")
+        rule.runOnIdle { dark = true }
+        Snapshot.sendApplyNotifications()
+        settle()
+        save(out, "pin-hierarchy-after-dark.png")
+
+        val childBounds = rule.onNodeWithTag("row-children:task").getUnclippedBoundsInRoot()
+        val nextBounds = rule.onNodeWithTag("row-session:child-1").getUnclippedBoundsInRoot()
+        assertTrue(
+            "expanded hierarchy row overlapped neighbor (${childBounds.top}..${childBounds.bottom} vs ${nextBounds.top}..${nextBounds.bottom})",
+            childBounds.bottom <= nextBounds.top + 1.dp,
+        )
+
+        // 3. Standalone motion without hostScope: a cancelled item scope never leaves a frozen shift
+        val standalone = ListTapMotion()
+        standalone.noteComposed(listOf("a", "b"))
+        standalone.notePlaced("b", 300f, deadScope, standalone.liveFade)
+        standalone.arm(ListTapMotionKind.State)
+        standalone.capture(listOf("b", "a"))
+        standalone.notePlaced("b", 40f, deadScope, standalone.liveFade)
+        assertEquals("cancelled item scope must never leave a frozen shift", 0, standalone.shiftPx("b"))
+    }
+
     @Test fun aRowComposedDuringATapSnapsWhenAHubRemovesIt() {
         rule.mainClock.autoAdvance = false
         var rows by mutableStateOf(listOf("A"))

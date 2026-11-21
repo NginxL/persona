@@ -48,13 +48,15 @@ func TestIdleCompactPolicyReachesMainDeliveryPaths(t *testing.T) {
 	}
 	check(f.lastSend(t))
 
-	off, minutes, tokens := false, 45, 450000
+	off, minutes, tokens, release := false, 45, 450000, 40
 	wantWindow = 250000
 	setSettings(t, s, func(v *Settings) {
 		v.IdleAutoCompact, v.IdleAutoCompactMinutes, v.IdleAutoCompactTokens = &off, &minutes, &tokens
+		v.IdleReleaseMinutes = &release
 		v.MainCompactWindow = &wantWindow
 	})
-	want = assistantwire.IdleCompaction{Enabled: false, IdleMinutes: minutes, ContextTokens: tokens}
+	// Saved, the tokens are also the release-time threshold (#12008), with the switch off too.
+	want = assistantwire.IdleCompaction{Enabled: false, IdleMinutes: minutes, ContextTokens: tokens, ReleaseMinutes: release, ReleaseTokens: tokens}
 	params, err = s.SendParams(ctx, SendParams{MachineID: "server", SessionID: main.SessionID, Params: map[string]any{"text": "next"}})
 	if err != nil {
 		t.Fatal(err)

@@ -196,8 +196,9 @@ type runtimeStartParams struct {
 
 // engineRuntimes maps the engines that are a runtime to that runtime's id (engine.go).
 var engineRuntimes = map[string]string{
-	proto.EnginePaseo: proto.EnginePaseo,
-	proto.EngineCindy: proto.EngineCindy,
+	proto.EnginePaseo:  proto.EnginePaseo,
+	proto.EngineCindy:  proto.EngineCindy,
+	proto.EngineT3Code: proto.EngineT3Code,
 }
 
 // engineRuntime is the runtime that is the host of a start in ctx (Paseo: the one the start named, else the machine's
@@ -228,6 +229,23 @@ func (n *Node) engineRuntimeAway(ctx context.Context) error {
 	name := proto.EngineNames[n.startKind(ctx)]
 	return refusal(engineMissing, fmt.Sprintf("这台电脑的引擎是 %s，但 %s 现在没有连上 Persona（没在运行，或刚启动还没连上），不能在这里新开或接着会话，这次没有发送。"+
 		"在电脑上打开 %s 后再试。", name, name, name), nil)
+}
+
+// resumeHostRefusal is why no resume could go on in the host a start names (host; "" the machine's default),
+// whatever the id: a host this computer does not enable (checkStartHost), or an engine runtime that is not connected
+// (engineRuntimeAway, Paseo restarting its bridge included). An extension's resume the computer does not know
+// (resumeOutsideHealth) is told this before resume_unknown, as the owner's resume of any id is: the engine may have the
+// session (Paseo keeps its Agents, and lists an archived one only for a while), and the refusal says nothing of the id
+// (#10941). A host a record of the session picks (withResumeHost) is not asked: that would depend on the id.
+func (n *Node) resumeHostRefusal(ctx context.Context, host string) error {
+	if err := n.checkStartHost(host); err != nil {
+		return err
+	}
+	ctx = withStartHost(ctx, host)
+	if _, runtime := engineRuntimes[n.startKind(ctx)]; runtime && n.engineRuntime(ctx) == nil {
+		return n.engineRuntimeAway(ctx)
+	}
+	return nil
 }
 
 // startOnEngineRuntime starts a session on the machine's engine runtime: a launcher of the login shell's, or a session
@@ -360,6 +378,7 @@ func (n *Node) liveRuntimeModels(ctx context.Context, h *runtimeConn, name strin
 	// Apply the same bounds as runtime.launchers before exposing a native response.
 	clean := cleanLaunchers([]runtimeLauncher{{Name: name, Agent: fallback.Agent, Models: out.Models}})
 	out.Agent, out.Models = fallback.Agent, clean[0].Models
+	out.SupportsStartModel = false // only the node's native omp start can advertise this.
 	if out.Models == nil {
 		out.Models = []proto.AgentModel{}
 	}

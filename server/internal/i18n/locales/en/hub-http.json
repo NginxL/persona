@@ -1,3 +1,4 @@
 {
-  "watch_only": "This device can only watch, not take over"
+  "watch_only": "This device can only watch, not take over",
+  "sessions_not_listed": "This computer’s conversations haven’t come in yet. Try again in a moment."
 }

@@ -37,13 +37,17 @@ class HubSessionFiles internal constructor(
     private val features: () -> Set<String> = { emptySet() },
     /** A POST for files/rename, move, trash and restore: the hub gives the machine 2 minutes. */
     private val editPost: suspend (String, String) -> Response = post,
+    /** File Range reads stay unbuffered until the response has proved its size and range. */
+    private val range: suspend (String, Map<String, String>) -> SessionLogTail =
+        { _, _ -> throw UnsupportedOperationException("log tail") },
 ) : SessionFiles {
     constructor(connection: OkHttpHubConnection, decoding: CoroutineDispatcher = Dispatchers.Default) :
         this({ path -> connection.request(path, "GET", null) }, decoding, { path -> connection.request(path, "GET", null, buffered = false) },
             { path, seconds -> connection.request(path, "GET", null, readTimeoutSeconds = seconds) },
             { path, body -> connection.request(path, "POST", body.toRequestBody(JSON), readTimeoutSeconds = 100) },
             { connection.serverFeatures.value },
-            { path, body -> connection.request(path, "POST", body.toRequestBody(JSON), readTimeoutSeconds = EDIT_TIMEOUT_SECONDS) })
+            { path, body -> connection.request(path, "POST", body.toRequestBody(JSON), readTimeoutSeconds = EDIT_TIMEOUT_SECONDS) },
+            { path, headers -> connection.consumeStream(path, headers, ::readSessionLogTail) })
 
     companion object {
         /** Past the hub's 2 minutes for file/convert (the node gives LibreOffice 90 s), as agent creation waits 130 s. */
@@ -185,6 +189,14 @@ class HubSessionFiles internal constructor(
                 }
             }
         }
+    }
+
+    override suspend fun readLogTail(machineId: String, cwd: String, path: String, manager: String?): SessionLogTail {
+        require(machineId.isNotBlank() && cwd.isNotBlank() && path.isNotBlank())
+        // An empty pin also overrides the caller's ambient manager. The HTTP client omits it on the wire.
+        val owner = manager?.takeUnless(String::isBlank).orEmpty()
+        val url = apiUrl(machineId, "file/download", cwd, "path" to path, ManagerQuery to owner)
+        return range(url, mapOf("Range" to "bytes=-$LOG_TAIL_BYTES", "Cache-Control" to "no-store"))
     }
 
     private fun apiUrl(machineId: String, operation: String, cwd: String, vararg query: Pair<String, String>): String {

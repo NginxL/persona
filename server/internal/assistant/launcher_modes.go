@@ -9,8 +9,9 @@ import (
 // ---- which agents take a permission mode and an effort at their start (#7559) ----
 //
 // The hub matches what the node does with a permission mode or effort a start names (node/control.go):
-//   - work agents (proto.WorkAgentTypes: pi, cursor, agy, #8151) start anyway, the two ignored. The hub drops them too:
-//     no default mode, no tier's effort, and one the caller names is left out rather than refused.
+//   - work agents (proto.WorkAgentTypes: pi, cursor, #8151) start anyway, the two ignored. The hub drops them too:
+//     no default mode, no tier's effort, and one the caller names is left out rather than refused. agy is the
+//     exception: it takes both, in a terminal as at its ACP runtime, and runs in Allow all by default (allowAll).
 //   - traex and omp (proto.NoModeAgentTypes) are refused when a start names one. So the hub never fills one in for
 //     them, and one the caller names is refused here, saying why, before anything starts.
 //   - every other agent keeps what the start sends: Claude Code (--permission-mode, --effort), Codex (its sandbox and
@@ -21,8 +22,9 @@ import (
 // launcher, which starts in bypassPermissions, relies on.
 
 // startTakesModes: a start of agent takes a permission mode and an effort.
+// Antigravity (agy) runs via its ACP runtime and supports permission modes and effort.
 func startTakesModes(agent string) bool {
-	return !proto.IsWorkAgentType(agent) && !proto.IsNoModeAgentType(agent)
+	return agent == "agy" || (!proto.IsWorkAgentType(agent) && !proto.IsNoModeAgentType(agent))
 }
 
 // startModesRefused is the refusal of a permission mode or effort the caller named for a launcher whose agent the node

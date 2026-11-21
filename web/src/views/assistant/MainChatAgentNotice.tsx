@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { t } from "../../i18n";
 import { ASSISTANT_MODEL_PICK_FEATURE, mainChatAgentMismatch } from "../../lib/assistant-models";
-import { providerTitle } from "../../lib/provider-names";
+import { launcherTitle } from "../../lib/provider-names";
 import { assistantLaunchers, readAssistantLaunchers, useModelLists } from "../../lib/session-models";
 import { hubHas, useStore } from "../../lib/store";
 import type { Session } from "../../lib/types";
@@ -38,10 +38,7 @@ export function MainChatAgentNotice({ session, isMain, onNewMain }: { session: S
   }, [isMain, mid, session.rev]);
   const mismatch = mainChatAgentMismatch({ session, isMain, kept, config: assistant?.launcher }, info);
   if (!mismatch) return null;
-  const named = (launcher: string) => {
-    const row = info?.launchers.find((l) => l.name === launcher);
-    return row ? providerTitle(row) : launcher;
-  };
+  const named = (launcher: string) => launcherTitle(launcher, info?.launchers);
   return (
     <div data-main-chat-agent-notice role="status" className="flex min-h-9 items-center gap-2 rounded-[12px] bg-surface px-3 py-1.5 text-xs text-ink-2 shadow-card">
       <Icon name="info" size={13} className="shrink-0 text-ink-3" />

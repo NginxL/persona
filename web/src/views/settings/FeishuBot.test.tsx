@@ -456,6 +456,19 @@ describe("Feishu bot dialog", () => {
     expect(calls.update[0].body).toEqual({ features: { answer_new_card: true } });
   });
 
+  it("hides reading a group with /read for a hub from before it", async () => {
+    await open(saved());
+    expect(document.body.querySelector(`[role="switch"][aria-label="${t("settings-feishubot.feature_read_group_title")}"]`)).toBeNull();
+  });
+
+  it("switches reading a group with /read on its own, off by default", async () => {
+    const read = () => document.body.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${t("settings-feishubot.feature_read_group_title")}"]`)!;
+    await open(saved({ features: { ...saved().features, read_group: false } }));
+    expect(read().getAttribute("aria-checked")).toBe("false");
+    await act(async () => read().click());
+    expect(calls.update[0].body).toEqual({ features: { read_group: true } });
+  });
+
   it("switches the workbench on its own, off by default", async () => {
     const workbench = () => document.body.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${t("settings-feishubot.feature_workbench_title")}"]`)!;
     await open(saved({ features: { ...saved().features, workbench: false } }));

@@ -3,10 +3,9 @@
 // page comes back into view; the last answer stays until the new one comes, so the voice button does not blink.
 // Also the model a call starts with (the use `plugin.<id>`, as iOS's VoiceModelPick and Android's resolveVoiceModel).
 import { useSyncExternalStore } from "react";
-import { api, ApiError } from "../api";
+import { api, ApiError, enc } from "../api";
 import { listOf, extRoot } from "../extension-api";
 import type { HubExtension } from "../extensions";
-import { modelPurpose } from "../model-config";
 import { onHubEvent } from "../store";
 import { pickVoice, readInfo, type VoiceInfoState } from "./availability";
 import type { ModelPick } from "./conversation";
@@ -114,7 +113,9 @@ export function pickModel(choice: { model?: string; status?: string } | null, mo
  *  (the extension's default applies, and the socket will say what is wrong). */
 export async function resolveModel(extensionID: string): Promise<ModelPick> {
   const [choice, models] = await Promise.all([
-    modelPurpose(`plugin.${extensionID}`).then((r) => ({ model: r.purpose.effective?.model, status: r.purpose.status }), () => null),
+    // The request itself, not model-config's helper: keep lib/model-config off the first screen (FIRST_SCREEN_BUDGET).
+    api<{ purpose?: { effective?: { model?: string }; status?: string } }>(`/model-config/purposes/${enc(`plugin.${extensionID}`)}`)
+      .then((r) => ({ model: r.purpose?.effective?.model, status: r.purpose?.status }), () => null),
     api<{ models?: { id: string }[] }>(`${extRoot()}/${encodeURIComponent(extensionID)}/models`).catch(() => null),
   ]);
   return pickModel(choice, models);

@@ -37,6 +37,15 @@ interface MessageSender : MessageSendReceiptSource {
         require(launcher == null && model == null) { "Launcher/model overrides are not supported" }
         send(session, text, clientMessageId, clearDraft)
     }
+
+    /** A marked send must be implemented explicitly; an old sender must never silently drop its provenance. */
+    suspend fun send(
+        session: SessionKey, text: String, clientMessageId: String, clearDraft: String?,
+        launcher: String?, model: String?, via: String?,
+    ) {
+        require(via == null) { "Message provenance is not supported" }
+        send(session, text, clientMessageId, clearDraft, launcher, model)
+    }
     /**
      * [send] for the user's own message from a chat whose session shows a launcher switch waiting
      * (`pending_switch`, docs/protocol/protocol.md "Switching a running Agent to another provider"): it goes with

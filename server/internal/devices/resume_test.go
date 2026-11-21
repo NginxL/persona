@@ -89,6 +89,13 @@ func (n *residentNode) dial(context.Context) (net.Conn, error) {
 				_ = json.Unmarshal(params, &req)
 				return map[string]any{"data": strings.Repeat("d", req.Length)}, nil
 			case "sessions.list":
+				var req struct{ Large bool }
+				_ = json.Unmarshal(params, &req)
+				if req.Large {
+					return map[string]any{"sessions": []proto.Session{
+						{SessionID: "large", Title: strings.Repeat("s", 70<<20)},
+					}}, nil
+				}
 				return map[string]any{"sessions": []proto.Session{}}, nil
 			case "slow":
 				n.slowOnce.Do(func() { close(n.slowSeen) })
@@ -190,6 +197,25 @@ func resumingMachine(t *testing.T) (*Machine, *residentNode, *benchLog) {
 	runMachine(t, m)
 	eventually(t, 10*time.Second, "box connected, resumable", func() bool { return logs.count("lanes=on resume=on") > 0 })
 	return m, n, logs
+}
+
+func TestMachineKeepsConnectionAfterLargeSessionList(t *testing.T) {
+	m, n, _ := resumingMachine(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var result struct{ Sessions []proto.Session }
+	if err := m.call(ctx, "sessions.list", map[string]bool{"large": true}, &result); err != nil {
+		t.Fatalf("sessions.list: %v", err)
+	}
+	if len(result.Sessions) != 1 || result.Sessions[0].SessionID != "large" || len(result.Sessions[0].Title) != 70<<20 {
+		t.Fatal("sessions.list did not deliver the complete 70 MiB title")
+	}
+	if err := m.call(ctx, "ping", nil, nil); err != nil {
+		t.Fatalf("ping after sessions.list: %v", err)
+	}
+	if transports, fresh := n.counts(); transports != 1 || fresh != 1 {
+		t.Fatalf("connection changed: %d transports, %d fresh connections", transports, fresh)
+	}
 }
 
 // A dropped transport is taken back: the call in flight answers once the connection is resumed, nothing connects or

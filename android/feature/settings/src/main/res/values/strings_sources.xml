@@ -116,6 +116,9 @@
     <string name="settings_src_lark_quarantined">Can\'t open. Retry or remove it in the Lark gateway</string>
     <string name="settings_src_signed_in">Signed in</string>
     <string name="settings_src_lark_accounts_caption">Every signed-in account goes to the Inbox, and the Messages page can switch between them. /agent, the assistant and the knowledge base use the default account. Add or sign out of accounts in the Lark gateway.</string>
+    <string name="settings_src_lark_accounts_caption_default">Every signed-in account goes to the Inbox. Messages, /agent, the assistant and the knowledge base use the default account. Add or sign out of accounts in the Lark gateway.</string>
+    <string name="settings_src_lark_home_messages">Show messages on home</string>
+    <string name="settings_src_lark_home_messages_detail">Adds Messages to the sidebar to browse all direct and group chats. Shares the account and chat history with Inbox. Applies to this device only.</string>
     <string name="settings_src_lark_uses_header">What Persona does with Lark</string>
     <string name="settings_src_lark_use_inbox">Inbox</string>
     <string name="settings_src_lark_use_inbox_detail">Direct messages, @mentions, group messages and mentions in Docs, triaged by AI with drafted replies</string>

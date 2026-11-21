@@ -60,6 +60,20 @@ class AssistantConfigTest {
         }
     }
 
+    @Test fun conversationOrderWritesSavedIdsAndAnExplicitReset() = runBlocking {
+        MockWebServer().use { server ->
+            val api = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())
+            server.enqueue(MockResponse().setBody("""{"conversation_order":["b","unknown","a"]}"""))
+            val saved = api.updateConfig(AssistantConfigUpdate(conversationOrder = listOf("b", "unknown", "a")))
+            assertEquals("""{"conversation_order":["b","unknown","a"]}""", server.takeRequest().body.readUtf8())
+            assertEquals(listOf("b", "unknown", "a"), saved.conversationOrder)
+            server.enqueue(MockResponse().setBody("{}"))
+            val reset = api.updateConfig(AssistantConfigUpdate(conversationOrder = emptyList()))
+            assertEquals("""{"conversation_order":[]}""", server.takeRequest().body.readUtf8())
+            assertNull(reset.conversationOrder)
+        }
+    }
+
     @Test fun permissionDefaultsNameBothOwnersAndSendOnlyTheNewField() = runBlocking {
         MockWebServer().use { server ->
             val source = HttpAssistantManagement(server.url("/").toString(), "test-token", OkHttpClient())

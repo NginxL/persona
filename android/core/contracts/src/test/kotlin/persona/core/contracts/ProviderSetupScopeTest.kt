@@ -1,6 +1,8 @@
 package persona.core.contracts
 
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -11,6 +13,10 @@ class ProviderSetupScopeTest {
         val calls = mutableListOf<Pair<String, String?>>()
         val source = object : ProviderSetup {
             private suspend fun record(name: String) { calls += name to currentCoroutineContext()[RequestManager]?.id }
+            override val secretReferencesAvailable = flow {
+                record("references")
+                emit(true)
+            }
             override suspend fun presets(): List<ProviderPreset> { record("presets"); return emptyList() }
             override suspend fun add(provider: NewProvider) { record("add") }
             override suspend fun create(provider: NewProvider): ProviderAdded { record("create"); return ProviderAdded(provider.name) }
@@ -33,9 +39,10 @@ class ProviderSetupScopeTest {
         scoped.remove("demo"); scoped.restore("demo"); scoped.check("demo", null)
         scoped.update("demo", ProviderUpdate("demo", "launcher", "messages", "", "m", "", "", "", "", "", emptyList()))
         scoped.importPreview("computer"); scoped.import("computer", listOf("demo")); scoped.parse("alias demo='claude'")
+        assertTrue(scoped.secretReferencesAvailable.first())
         assertTrue(scoped.ownsMachine("mine"))
         assertFalse(scoped.ownsMachine("other"))
-        assertEquals(14, calls.size)
+        assertEquals(15, calls.size)
         assertTrue(calls.all { it.second == "work" })
         assertNull(currentCoroutineContext()[RequestManager])
     }

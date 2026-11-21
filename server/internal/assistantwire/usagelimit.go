@@ -18,5 +18,17 @@ var usageLimitLine = sync.OnceValue(func() *regexp.Regexp {
 // UsageLimitText: text is Claude Code's line for a subscription usage limit (only as the start of the text: a reply
 // may quote one). transcript.UsageLimitText calls this, so the line has one definition; CutOff uses it too.
 func UsageLimitText(text string) bool {
-	return usageLimitLine().MatchString(strings.TrimSpace(text))
+	return usageLimitLine().MatchString(strings.TrimSpace(text)) || GatewayQuotaText(text)
+}
+
+// GatewayQuotaText matches the gateway's own quota error, never a quotation in a normal answer.
+func GatewayQuotaText(text string) bool {
+	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "API Error:"))
+	return strings.HasPrefix(t, "Request rejected (429) · upstream account quota usage limit has been reached; an account becomes available again at ")
+}
+
+// GatewayCapacityText names a temporary lack of upstream accounts, not a user stop or a billing error.
+func GatewayCapacityText(text string) bool {
+	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "API Error:"))
+	return t == "Request rejected (429) · upstream account capacity is temporarily unavailable"
 }

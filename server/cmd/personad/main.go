@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/nwverse/persona/server/internal/agentsend"
+	"github.com/nwverse/persona/server/internal/chatexport"
 	"github.com/nwverse/persona/server/internal/extmgr"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/modelhttp"
@@ -82,6 +84,8 @@ const usage = `usage:
                            also personad ext …, and personad plugin … as before)
 ` + nodecmd.SysmonUsage + `
 ` + outboxcli.Usage + `
+` + chatexport.Usage + `
+` + agentsend.Usage + `
   personad backup create|inspect|verify|restore …
                            verified whole-install backup and staged recovery (personad backup <command> -h)
   personad release manifest|verify|check-next …
@@ -126,6 +130,10 @@ func main() {
 		}
 	case "outbox":
 		err = outboxcli.Run(ctx, os.Args[2:], os.Stdout)
+	case "agent":
+		err = agentsend.Run(ctx, os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
+	case "chat":
+		err = chatexport.Run(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "backup":
 		err = backup.Run(ctx, os.Args[2:], os.Stdout, os.Stderr)
 	case "release":
@@ -173,6 +181,9 @@ func main() {
 
 // finish reports how a command ended: a usage mistake with exit 2, -h with 0, any other error fatally.
 func finish(err error) {
+	if errors.Is(err, agentsend.ErrUnconfirmed) {
+		os.Exit(1) // the command already printed its result
+	}
 	var ue usageError
 	if errors.As(err, &ue) { // a usage mistake: what to type instead, exit 2 like the other usage mistakes
 		fmt.Fprintln(os.Stderr, string(ue))

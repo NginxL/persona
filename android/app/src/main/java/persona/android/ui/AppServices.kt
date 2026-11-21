@@ -158,7 +158,9 @@ class AppServices @Inject constructor(
                 val boundInteractions = object : InteractionCenter by interactions {
                     override suspend fun resolve(id: String, resolution: Resolution) { resolveOutcome(id, resolution) }
                     override suspend fun resolveOutcome(id: String, resolution: Resolution) =
-                        try { interactions.resolveOutcome(id, resolution) }
+                        resolveOutcome(id, resolution, handoffCard = false)
+                    override suspend fun resolveOutcome(id: String, resolution: Resolution, handoffCard: Boolean) =
+                        try { interactions.resolveOutcome(id, resolution, handoffCard) }
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (error: Exception) { feedback.failure(error, true); throw error }
                 }

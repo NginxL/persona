@@ -330,7 +330,7 @@ type readinessEvidence struct {
 func (s *Service) readiness(ctx context.Context, probe bool, wait time.Duration) Readiness {
 	lang := s.requestCtxLang(ctx)
 	v := s.settings(ctx)
-	launcher := s.launcherNow(ctx)
+	launcher := s.mainLauncherNow(ctx)
 	out := Readiness{Version: 1, Launcher: launcher, CheckedAt: time.Now().UTC().Truncate(time.Second)}
 
 	d, has := s.device(ctx, v.MachineID)

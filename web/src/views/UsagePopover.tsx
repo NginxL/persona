@@ -5,7 +5,8 @@ import { t as tr } from "../i18n";
 import { sendDraft } from "../lib/drafts";
 import { navigate } from "../lib/router";
 import { getState } from "../lib/store";
-import { isWarn, pace, planNote, resetLabel, sampleAge, sourceNames, windowKey, type PaceState, type UnconnectedProvider, type UsageAccount, type UsageWindow } from "../lib/usage-windows";
+import { balanceEmpty, balanceText } from "../lib/usage-balance";
+import { accountPace, isBalanceAccount, isWarn, planNote, resetLabel, sampleAge, sourceNames, windowKey, type PaceState, type UnconnectedProvider, type UsageAccount, type UsageWindow } from "../lib/usage-windows";
 import { cx, EASE } from "../ui/atoms";
 import { Meter } from "./UsageBars";
 
@@ -28,9 +29,27 @@ function problemText(a: UsageAccount): string {
   }
 }
 
+/** Why a balance could not be read, or why the amount shown is the last one the manager had. */
+function balanceProblemText(a: UsageAccount): string {
+  if (!isBalanceAccount(a)) return "";
+  switch (a.problem) {
+    case "rejected":
+      return tr("usage.balance_rejected");
+    case "unreachable":
+      return a.balance ? tr("usage.balance_unreachable_kept") : tr("usage.balance_unreachable");
+    case "failed":
+      return a.balance ? tr("usage.balance_failed_kept") : tr("usage.balance_failed");
+    default:
+      return "";
+  }
+}
+
+/** Why a provider has no bars, in plain words (#12411). Only the built-in subscriptions can be read on a computer, so
+ *  they have not been read yet; any other launcher (one run through Claude Code against another provider included)
+ *  can only be read through its relay, which is the case connectPrompt hands the assistant too. */
 function connectHint(p: UnconnectedProvider): string {
-  if (p.agent === "claude") return tr("usage.connect_hint_claude");
-  if (p.agent === "agy" || p.agent === "antigravity") return tr("usage.connect_hint_agy");
+  if (p.agent === "claude" && p.id === "claude") return tr("usage.connect_hint_claude");
+  if (p.agent === "agy" || p.agent === "antigravity" || (p.agent === "codex" && p.id === "codex")) return tr("usage.connect_hint_pending", { name: p.title });
   return tr("usage.connect_hint_other");
 }
 
@@ -95,7 +114,8 @@ export function UsagePopover({
 function AccountSection({ a, now }: { a: UsageAccount; now: number }) {
   const from = sourceNames(a);
   const plan = planNote(a);
-  const problem = problemText(a);
+  // A balance's failure is about the provider's balance route, not a usage gateway's stored windows (#11825).
+  const problem = isBalanceAccount(a) ? balanceProblemText(a) : problemText(a);
   return (
     <section aria-label={a.name} className={cx("flex flex-col gap-2", a.stale && "opacity-70")}>
       <header className="flex flex-col gap-0.5">
@@ -112,15 +132,22 @@ function AccountSection({ a, now }: { a: UsageAccount; now: number }) {
         )}
         {problem && <div className="text-[11px] leading-snug text-orange">{problem}</div>}
       </header>
+      {a.balance && (
+        <div data-usage-balance className="flex items-baseline justify-between gap-2 rounded-control bg-inset px-2.5 py-2">
+          <span className="text-xs text-ink-3">{tr("usage.balance_label")}</span>
+          <span className={cx("text-sm font-medium tabular-nums", balanceEmpty(a.balance) ? "text-orange" : "text-ink")}>{balanceText(a.balance)}</span>
+        </div>
+      )}
+      {!a.balance && isBalanceAccount(a) && <div data-usage-balance-unavailable className="text-xs text-orange">{tr("usage.balance_unavailable")}</div>}
       {a.windows.map((w) => (
-        <WindowRow key={windowKey(w)} name={a.name} w={w} now={now} />
+        <WindowRow key={windowKey(w)} name={a.name} w={w} stale={Boolean(a.stale)} now={now} />
       ))}
     </section>
   );
 }
 
-function WindowRow({ name, w, now }: { name: string; w: UsageWindow; now: number }) {
-  const p = pace(w, now);
+function WindowRow({ name, w, stale, now }: { name: string; w: UsageWindow; stale: boolean; now: number }) {
+  const p = accountPace({ stale }, w, now);
   return (
     <div className="flex flex-col gap-1">
       {w.model && (

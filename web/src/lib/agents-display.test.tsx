@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
-import { refreshAgentsDisplay, resetAgentsDisplay, retryAgentsDisplay, saveAgentsDisplay, useAgentsDisplay, useBotmuxHidden } from "./agents-display";
+import { refreshAgentsDisplay, resetAgentsDisplay, retryAgentsDisplay, saveAgentsDisplay, useAgentsDisplay, useBotmuxHidden, useHerdrTabName } from "./agents-display";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { setToken } from "./api";
@@ -82,6 +82,42 @@ it("hides botmux rows until the hub acknowledges the display preference", async 
   expect(host.textContent).toBe("shown");
   await act(async () => { root.unmount(); });
 });
+it("updates display consumers only when their own acknowledged choice changes", async () => {
+  saved = false;
+  await refreshAgentsDisplay();
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  let botmuxRenders = 0;
+  let titleRenders = 0;
+  function Botmux() {
+    botmuxRenders++;
+    return <span>{useBotmuxHidden() ? "hidden" : "shown"}</span>;
+  }
+  function Title() {
+    titleRenders++;
+    return <span>{useHerdrTabName() ? "tab" : "conversation"}</span>;
+  }
+  await act(async () => { root.render(<><Botmux /><Title /></>); });
+  expect(host.textContent).toBe("hiddenconversation");
+
+  await act(refreshAgentsDisplay);
+  fail = "GET";
+  await act(refreshAgentsDisplay);
+  expect([botmuxRenders, titleRenders]).toEqual([1, 1]);
+
+  fail = "";
+  preferTab = true;
+  await act(refreshAgentsDisplay);
+  expect(host.textContent).toBe("hiddentab");
+  expect([botmuxRenders, titleRenders]).toEqual([1, 2]);
+
+  saved = true;
+  await act(refreshAgentsDisplay);
+  expect(host.textContent).toBe("showntab");
+  expect([botmuxRenders, titleRenders]).toEqual([2, 2]);
+  await act(async () => { root.unmount(); });
+});
+
 it("does not apply a stale read over a save or a credential change",async()=>{
  let finish!:(response:Response)=>void;
  vi.mocked(fetch).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));

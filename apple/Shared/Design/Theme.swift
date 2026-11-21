@@ -155,6 +155,10 @@ nonisolated enum Theme {
     /// The AI color at half strength: a mark of the AI's that is at work but not the lit one (a workflow phase with
     /// agents running that the run has moved past), apart from a ring (not started) and the full dot (lit).
     static var aiMuted: Color { ai.opacity(0.5) }
+    /// Someday on a to-do's trailing swipe (#10465), beside Done's `positive`: the owner's "not now", the system's indigo,
+    /// no state's color. Close to `ai` and to Clay's accent, which never sit beside it in a row's swipe. White words on it
+    /// read at 4.5:1 or better in both appearances (`StyleSpecTests`).
+    static let somedayTint = Hue.indigo
 
     enum Role {
         static let danger = PersonaPalette.Pair(light: 0xD93A3A, dark: 0xFF5F57)
@@ -542,6 +546,9 @@ nonisolated enum Theme {
         /// Agents header has folded to its slim bar). The card the user has to answer gets the rest. A call keeps less for
         /// its captions (`voiceThreadRoom`).
         static let cardThreadRoom: CGFloat = 72
+        /// The shortest a question card over the composer can be made with its grabber (#12306): its title row and the
+        /// first lines of what it asks. The tallest leaves the conversation `Theme.Space.xl` (`FooterRoom.tallestRoom`).
+        static let cardLeast: CGFloat = 150
         /// How far a sideways strip fades out at an end with more to scroll to (`.edgeFade()`): a cut-off chip reads as
         /// "more", not as a broken row.
         static let fadeEdge: CGFloat = 24
@@ -775,6 +782,12 @@ nonisolated enum Theme {
         static let standard = state
         /// Task-draft dismissal uses the same six-second Undo window as the web.
         static let draftUndo: Duration = .seconds(6)
+        /// A to-do ticked, put in Someday or deleted from the list (#10465): its "Done · Undo" toast stays this long, and
+        /// the write waits as long on the device before it goes, so Undo sends nothing (`TodoOutbox`).
+        static let todoUndo: Duration = .seconds(4)
+        /// `todoUndo` while VoiceOver or Switch Control runs: the toast's Undo is out of their reach, so the rows offer it
+        /// and the write waits this long (HIG-005).
+        static let todoUndoAssistive: Duration = .seconds(20)
         /// How long an alert that follows another waits before asking: UIKit drops a presentation made while another is
         /// still going away, and SwiftUI took up to about 0.8 s to close one answered elsewhere (queued "already exists"
         /// questions, #6113).

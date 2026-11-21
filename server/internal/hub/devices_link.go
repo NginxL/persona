@@ -35,7 +35,8 @@ func (managerOfflineError) Is(target error) bool { return target == apierr.ErrOf
 
 // devicesState is the hub's side of the manager's machines.
 type devicesState struct {
-	mu sync.Mutex
+	transportOwners map[string]string // manager-owned transport aliases, no session mapping
+	mu              sync.Mutex
 	// entries are hub.json's machines and those the admin page added since (handed to the manager).
 	entries []MachineConfig
 	// absorbed: a hub.json entry whose computer another entry has → that machine's id; recEntries: this hub's

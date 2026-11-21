@@ -5,7 +5,7 @@
 // today's triage.
 
 import { TODO_LIST_SECTIONS, type TodoSummary } from "../../../lib/todo-view-wire";
-import { countsAsOpen, TRIAGE_SECTIONS, type Triage, type TriageGroup, type TriageResult, type TriageRule, type TriageSection } from "../../../lib/todo-triage";
+import { countsAsOpen, TRIAGE_SECTIONS, triageGroupKey, type Triage, type TriageGroup, type TriageResult, type TriageRule, type TriageSection } from "../../../lib/todo-triage";
 import { compareWaitAge } from "../../../lib/task-wait";
 import type { Todo } from "../../../lib/todos";
 import { knownView, legacyOf } from "./view-legacy";
@@ -70,7 +70,7 @@ export function drawnFromView(local: TriageResult, now: number): TriageResult {
         // what is left of a merged row: led by its most urgent member, as triageTodos leads it
         const lead = rest[0];
         const section = g.triage.get(lead.id)!.section;
-        const left = { key: lead.id, section, lead, members: rest, triage: new Map(rest.map((m) => [m.id, g.triage.get(m.id)!])), last: Math.max(...rest.map((m) => g.triage.get(m.id)!.last)) };
+        const left = { key: triageGroupKey(rest), section, lead, members: rest, triage: new Map(rest.map((m) => [m.id, g.triage.get(m.id)!])), last: Math.max(...rest.map((m) => g.triage.get(m.id)!.last)) };
         if (section === s) kept[s].push(left);
         else moved.push(left);
       }

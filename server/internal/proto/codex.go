@@ -37,6 +37,8 @@ type SessionCapabilities struct {
 	PermissionModes PermissionModeSet `json:"permission_modes,omitempty"`
 	// StopCause qualifies stopped-session recovery; absent/unknown never permits a supervisor resume.
 	StopCause StopCause `json:"stop_cause,omitempty"`
+	// A2AWakeOnSend lets a runtime accept task updates for an idle-retired session.
+	A2AWakeOnSend bool `json:"a2a_wake_on_send,omitempty"`
 	// SupervisionPolicy reports that a runtime-hosted session accepts manager-owned supervision_instructions
 	// on its own policy channel (separate from user messages) and fails closed if it cannot apply them.
 	// Absent/false keeps the conservative non-capable runtime routing and refusal behavior (#10338, #11121).
@@ -72,3 +74,6 @@ type CodexTakeover struct {
 
 // CanModes is a Modes value.
 func CanModes(on bool) *bool { return &on }
+
+// Bool returns a pointer to on for optional capability flags.
+func Bool(on bool) *bool { return &on }

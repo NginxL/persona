@@ -1,15 +1,20 @@
 import CoreGraphics
 import Foundation
 
-/// A picture a reply names by address (Markdown `![alt](https://…)`).
+/// A picture a reply names by address (Markdown `![alt](https://…)` or `![alt](path/on/the/machine.png)`).
 public nonisolated struct ReplyImage: Sendable, Hashable {
     public let url: String
     public let alt: String
+    /// The decoded machine path when `url` is an absolute or cwd-relative local destination; nil for web and other schemes.
+    public let localPath: String?
 
     public init(url: String, alt: String) {
         self.url = url
         self.alt = alt
+        localPath = URL(string: url).flatMap(PathLinkURL.localPath)
     }
+
+    public var isLocal: Bool { localPath != nil }
 }
 
 /// One run of pictures as the theme reads it back from its fence (`ReplyImages.apply`): every picture of the reply in
@@ -27,10 +32,11 @@ public nonisolated struct ReplyImageBlock: Sendable, Equatable {
 }
 
 /// The pictures in a reply, drawn to fit the text (#9474; the web's are the same rules, #9475). A line that holds only
-/// pictures on the web (http or https) is a block picture, however it sits in its paragraph (replies often put one right
-/// under a line of text); block pictures with only line breaks or blank lines between them are one run. Before the
-/// reply is parsed each run becomes one fenced block in `language`, which the theme draws (one picture, or a grid);
-/// a picture inside a line of text stays in it. Code (fenced or indented) and quotes are left as they are.
+/// pictures on the web (http or https) or the session machine is a block picture, however it sits in its paragraph; block
+/// pictures with only line breaks or blank lines between them are one run. Before the reply is parsed each run becomes one
+/// fenced block in `language`, which the theme draws (one picture, or a grid). A web picture inside a line of text stays in
+/// it; a local one is lifted into its own block so the machine-file loader and failure reason are visible. Code (fenced
+/// or indented) and quotes are left as they are.
 public nonisolated enum ReplyImages {
     /// The fence's language: the theme's code block draws it as pictures.
     public static let language = "persona-images"
@@ -41,7 +47,7 @@ public nonisolated enum ReplyImages {
     /// `<url>\t<alt>`: a block knows the whole reply's pictures, for the viewer, wherever it is drawn.
     public static func apply(_ text: String) -> String {
         guard text.contains("![") else { return text }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let lines = Self.liftLocalInline(text)
         let scan = Self.scan(lines)
         guard scan.blocks.contains(true) else { return text }
         var out: [String] = []
@@ -79,7 +85,7 @@ public nonisolated enum ReplyImages {
         return out.joined(separator: "\n")
     }
 
-    /// Every web picture the reply names outside code, in order (block and inline).
+    /// Every web or machine-local picture the reply names outside code, in order (block and inline).
     public static func all(in text: String) -> [ReplyImage] {
         guard text.contains("![") else { return [] }
         return scan(text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)).all
@@ -95,21 +101,81 @@ public nonisolated enum ReplyImages {
             let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
             return ReplyImage(url: String(parts[0]).trimmingCharacters(in: .whitespaces), alt: parts.count > 1 ? String(parts[1]) : "")
         }
-        guard last < all.count, all.allSatisfy({ isWeb($0.url) }) else { return nil }
+        guard last < all.count, all.allSatisfy({ isWeb($0.url) || $0.isLocal }) else { return nil }
         return ReplyImageBlock(all: all, shown: first ..< last + 1)
     }
 
-    /// Whether `url` is a picture on the web (http or https), the only ones drawn this way.
+    /// Whether `url` is a picture on the web (http or https).
     public static func isWeb(_ url: String) -> Bool {
         let lower = url.lowercased()
         return (lower.hasPrefix("https://") || lower.hasPrefix("http://")) && url.count > 8
     }
 
+    /// Whether `url` is an absolute or cwd-relative file on the session's machine, rather than a web or custom-scheme image.
+    public static func isLocal(_ url: String) -> Bool {
+        URL(string: url).flatMap(PathLinkURL.localPath) != nil
+    }
+
     // MARK: Scanning
+
+    /// Lift a local image out of a line of text so the chat's machine-file tile can show it (and any failure) with a
+    /// manual retry. Web images keep their inline treatment; the words before and after stay in their original order.
+    static func liftLocalInline(_ text: String) -> [String] {
+        var out: [String] = []
+        var open: MarkdownFence?
+        var previousBlank = true
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            defer { previousBlank = trimmed.isEmpty }
+            if let f = open {
+                out.append(line)
+                if f.isClosed(by: trimmed) { open = nil }
+                continue
+            }
+            let indent = Self.indentWidth(line)
+            if indent < 4, let f = MarkdownFence.opening(trimmed) {
+                open = f
+                out.append(line)
+                continue
+            }
+            if indent >= 4 && previousBlank || trimmed.hasPrefix(">") {
+                out.append(line)
+                continue
+            }
+            out.append(contentsOf: Self.liftLocalInlineLine(line))
+        }
+        return out
+    }
+
+    static func liftLocalInlineLine(_ line: String) -> [String] {
+        let chars = Array(line)
+        var pieces: [String] = []
+        var start = 0
+        var i = 0
+        var inCode = false
+        while i < chars.count {
+            let c = chars[i]
+            if c == "`" { inCode.toggle() }
+            if !inCode, c == "!", i + 1 < chars.count, chars[i + 1] == "[", (i == 0 || chars[i - 1] != "["),
+               let (image, next) = Self.image(chars, at: i), image.isLocal {
+                let before = String(chars[start..<i]).replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression)
+                if !before.isEmpty { pieces.append(before) }
+                pieces.append(String(chars[i..<next]))
+                start = next
+                i = next
+                continue
+            }
+            i += 1
+        }
+        guard !pieces.isEmpty else { return [line] }
+        let rest = String(chars[start...]).replacingOccurrences(of: #"^\s+"#, with: "", options: .regularExpression)
+        if !rest.isEmpty { pieces.append(rest) }
+        return pieces
+    }
 
     struct Scan {
         var all: [ReplyImage] = []
-        /// Per line: it holds only web pictures (and spaces), outside code and quotes.
+        /// Per line: it holds only supported pictures (and spaces), outside code and quotes.
         var blocks: [Bool] = []
         /// Per line: the place of its first picture among `all`, and how many it has.
         var firstImage: [Int] = []
@@ -144,10 +210,10 @@ public nonisolated enum ReplyImages {
                 continue
             }
             let (images, rest) = Self.images(in: trimmed)
-            let web = images.filter { isWeb($0.url) }
-            s.all.append(contentsOf: web)
-            s.count.append(web.count)
-            s.blocks.append(!images.isEmpty && web.count == images.count && indent < 4
+            let supported = images.filter { isWeb($0.url) || $0.isLocal }
+            s.all.append(contentsOf: supported)
+            s.count.append(supported.count)
+            s.blocks.append(!images.isEmpty && supported.count == images.count && indent < 4
                 && rest.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         return s

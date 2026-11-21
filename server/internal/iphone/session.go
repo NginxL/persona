@@ -587,6 +587,9 @@ func (s *session) call(ctx context.Context, op string, args json.RawMessage) (js
 		}
 		answer, err := s.roundTrip(ctx, c, op, args)
 		if err == nil {
+			if op == opMountDDI {
+				s.refreshInfo(ctx, c)
+			}
 			return answer, nil
 		}
 		if errors.Is(err, errNotSent) {
@@ -614,6 +617,19 @@ func (s *session) call(ctx context.Context, op string, args json.RawMessage) (js
 			return nil, err
 		}
 	}
+}
+
+// refreshInfo reads device_info again on c right after the developer disk image was mounted, so the phone's status
+// (its capabilities, ddi_mounted) says so at once rather than at the next health check, up to healthEvery later. A
+// failure keeps what was there: the next health check, or the next link's ready event, reads it again.
+func (s *session) refreshInfo(ctx context.Context, c *conn) {
+	info, err := s.roundTrip(ctx, c, "device_info", nil)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.info = info
+	s.mu.Unlock()
 }
 
 // waitDown waits for c to end; false when ctx ended first.

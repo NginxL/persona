@@ -74,6 +74,8 @@ nonisolated enum ServerEvent: Sendable {
     /// The user's saved prompts changed (#7329, #9436): read `GET /api/v1/assistant/saved-prompts` again. `manager`: the
     /// assistant whose list it is when not the default one; only the shown assistant's counts.
     case savedPrompts(manager: String?)
+    /// An invalidation for the assistant's starred snapshots. The event does not carry saved text.
+    case starredMessages(manager: String?)
     /// The personas the hub offers changed, e.g. a tiered look moved to another tier (docs/apple/persona.md): list them again.
     case personas
     /// The avatar chosen on the hub changed (another device chose one, or the hub went back to the default when its
@@ -301,6 +303,7 @@ nonisolated enum ServerEvent: Sendable {
         case "inbox": return .inbox
         case "todos": return .todos
         case "assistant_saved_prompts": return .savedPrompts(manager: e.manager?.string)
+        case "assistant_starred": return .starredMessages(manager: e.manager?.string)
         case "personas": return .personas
         case "look":
             guard (e.effective ?? e.id).map({ !$0.isEmpty }) == true else { return nil }
@@ -380,7 +383,7 @@ nonisolated extension ServerEvent {
             return .sessionsDelta(machineID: machine, upsert: upsert.map { var s = $0; s.group = group; return s }, remove: remove)
         case .sessionsList, .hello, .interactionResolved, .interactionReanswered, .toolCall, .revs, .lark, .messaging, .agents, .inbox, .fleet, .hubUpdate, .desktops, .todos,
              .personas, .look, .managers, .directions, .assistantFeed, .assistantView, .assistantViewAction, .assistantViewBlock, .taskPlan, .pluginBadge,
-             .extensionInvalidate, .fsChanged, .extensionOperation, .extensionAuth, .meetingLive, .urgentCall, .savedPrompts: return self
+             .extensionInvalidate, .fsChanged, .extensionOperation, .extensionAuth, .meetingLive, .urgentCall, .savedPrompts, .starredMessages: return self
         }
     }
 }
@@ -524,6 +527,10 @@ final class LiveConnection {
     @ObservationIgnored var makeLocalForTests: (() -> LocalSocket)?
     #endif
     @ObservationIgnored private var generation = 0
+    /// Requests made while the foreground connection chooses its way wait for that same attempt. They do not wait
+    /// for the WebSocket hello: once the route is installed, HTTP can use it independently.
+    @ObservationIgnored private var routeTask: Task<Void, Never>?
+    @ObservationIgnored private var routeWaiters: [UUID: CheckedContinuation<ServerConfig?, Error>] = [:]
     @ObservationIgnored private var backoff: TimeInterval = 1
     /// The hub said `hub_restarting` on this socket: its close is a restart whatever the close code.
     @ObservationIgnored private var restartNotice = false
@@ -574,6 +581,7 @@ final class LiveConnection {
     func disconnect() {
         personaContracts = false
         generation += 1
+        cancelRoute()
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
         local?.close()
@@ -619,10 +627,47 @@ final class LiveConnection {
         ping(task, generation)
     }
 
+    /// The config selected by an attempt already in progress, or the current config when routing has finished.
+    /// A closed or superseded attempt cancels its requests instead of sending directly while the tunnel is absent.
+    func waitForRoute() async throws -> ServerConfig? {
+        try Task.checkCancellation()
+        guard routeTask != nil else { return config }
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                routeWaiters[id] = continuation
+            }
+        } onCancel: { [weak self] in
+            Task { @MainActor in
+                self?.routeWaiters.removeValue(forKey: id)?.resume(throwing: CancellationError())
+            }
+        }
+    }
+
+    private func finishRoute(_ result: Result<ServerConfig?, Error>) {
+        let waiting = routeWaiters
+        routeWaiters.removeAll()
+        for continuation in waiting.values { continuation.resume(with: result) }
+    }
+
+    private func cancelRoute() {
+        routeTask?.cancel()
+        routeTask = nil
+        finishRoute(.failure(CancellationError()))
+    }
+
+    #if DEBUG
+    /// Deterministic ordering in route-recovery tests; no polling is added to the connection itself.
+    var waitingForRouteForTests: Int { routeWaiters.count }
+    #endif
+
     private func open() {
         guard let config, !suspended else { return }
         personaContracts = false
         generation += 1
+        cancelRoute()
+        attemptBegan = Date()
         let gen = generation
         task?.cancel(with: .goingAway, reason: nil)
         local?.close()
@@ -635,19 +680,28 @@ final class LiveConnection {
         state = .connecting
         stalled = false
         nextTry = nil
-        Task { @MainActor [weak self] in
+        routeTask = Task { @MainActor [weak self] in
+            guard !Task.isCancelled else { return }
             let picked = await route()
-            guard let self, gen == self.generation, !self.suspended else { return }
+            guard let self, gen == self.generation, !self.suspended, !Task.isCancelled else { return }
             if let picked, picked != self.config {
                 self.config = picked
                 self.onRoute?(picked)
             }
+            self.routeTask = nil
             self.openSocket(self.config ?? config, gen)
+            self.finishRoute(.success(self.config))
         }
     }
 
     /// The hub `route` picked for the next attempt.
     @ObservationIgnored var onRoute: ((ServerConfig) -> Void)?
+    /// What an attempt came to at the address it went to (#11390): `answers` once it connects, and when it fails before
+    /// connecting, why (`HubOutcome(failure:)`), with when the attempt began. A connected socket dropping is not an
+    /// attempt: the next one says.
+    @ObservationIgnored var onAttempt: ((ServerConfig, HubOutcome, Date) -> Void)?
+    /// When the current attempt began (`open`, before its route is picked): what `onAttempt` reports belongs to it.
+    @ObservationIgnored private var attemptBegan = Date()
 
     private func openSocket(_ given: ServerConfig, _ gen: Int) {
         let config = credential?(given) ?? given
@@ -763,6 +817,7 @@ final class LiveConnection {
                     if case .hello(let hello)? = event { self.personaContracts = hello.features.contains(HubNaming.feature) }
                     if first {
                         DevProbe.socket(.connected)
+                        if let on = self.config { self.onAttempt?(on, .answers, self.attemptBegan) }
                         self.state = .connected
                         self.sayHello()
                         self.backoff = 1
@@ -775,6 +830,7 @@ final class LiveConnection {
                     self.receive(t, gen)
                 case .failure(let err):
                     DevProbe.socket(.dropped)
+                    let attempt = self.state != .connected // not a drop: this attempt never connected
                     self.personaContracts = false
                     let planned = self.restartNotice || (!self.closedQuiet && t.closeCode == .goingAway)
                     self.dropped(restart: planned)
@@ -787,6 +843,9 @@ final class LiveConnection {
                     self.state = .failed(refused ? String(localized: "The hub doesn't accept this device's credentials (401)")
                                          : access?.localizedDescription ?? err.localizedDescription)
                     self.stalled = false
+                    if attempt, let on = self.config {
+                        self.onAttempt?(on, refused || access != nil ? HubOutcome.refusedHandshake : HubOutcome(failure: err), self.attemptBegan)
+                    }
                     self.scheduleReconnect(gen)
                 }
             }

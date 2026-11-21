@@ -306,6 +306,12 @@ func (ts Translations) Schema(l i18n.Lang, s *Schema) *Schema {
 	}
 	out := *s
 	out.Fields = localizeFields(s.Fields, levels)
+	for i := range out.Fields {
+		if out.Fields[i].Secret != nil {
+			shown := ts.Secret(l, *out.Fields[i].Secret)
+			out.Fields[i].Secret = &shown
+		}
+	}
 	return &out
 }
 
@@ -339,6 +345,7 @@ func localizeFields(fields []Field, levels []map[string]*FieldText) []Field {
 		if f.Items != nil {
 			items := *f.Items
 			items.Enum = localizeChoices(items.Enum, texts)
+			items.Fields = localizeFields(items.Fields, properties)
 			f.Items = &items
 		}
 		f.Fields = localizeFields(f.Fields, properties)

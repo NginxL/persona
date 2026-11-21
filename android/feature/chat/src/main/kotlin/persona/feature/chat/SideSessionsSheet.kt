@@ -36,10 +36,12 @@ internal fun ChatSideSessionsSheet(sides: List<Session>, rows: List<Session>, ro
     JSheet(onDismiss = onDismiss, title = stringResource(R.string.chat_side_sessions), scrollable = true) {
         when {
             sides.isNotEmpty() -> sides.forEach { side ->
-                val state = sideState(side, rows + sides)
-                val status = Status.entries.firstOrNull { it.name == state.name } ?: Status.Unknown
-                JRow(side.displayTitle, subtitle = status.localizedLabel, leading = { JStatusDot(status) },
-                    onClick = { onOpen(side.key) })
+                androidx.compose.runtime.key(side.key.path) {
+                    val state = sideState(side, rows + sides)
+                    val status = Status.entries.firstOrNull { it.name == state.name } ?: Status.Unknown
+                    JRow(side.displayTitle, subtitle = status.localizedLabel, leading = { JStatusDot(status) },
+                        onClick = { onOpen(side.key) })
+                }
             }
             rollup.count > 0 -> JLoading()
             else -> JEmptyState(stringResource(R.string.chat_side_sessions_empty), "", icon = PersonaIcons.sideSessions)

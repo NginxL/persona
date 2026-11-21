@@ -1,3 +1,14 @@
 {
-  "refused": "Dispatch is refused by the configured guard."
+  "refused": "Dispatch is refused by the configured guard.",
+  "invalid_json": "The dispatch guard request must contain exactly one valid JSON value with no unknown or duplicate fields.",
+  "required": "dispatch_guard is required and must be an object.",
+  "targets_required": "dispatch_guard.targets is required unless explicitly disabled.",
+  "targets_null": "dispatch_guard.targets must be an array, not null.",
+  "enabled_required": "dispatch_guard.enabled is required with non-empty targets.",
+  "duplicate_key": "Duplicate JSON key: {key}.",
+  "invalid_policy": "The dispatch guard policy is invalid.",
+  "read_failed": "The dispatch guard could not be read.",
+  "save_failed": "The dispatch guard could not be saved.",
+  "read_only_get": "Read-only role cannot read the dispatch guard.",
+  "read_only_write": "Read-only role cannot change the dispatch guard."
 }

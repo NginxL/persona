@@ -12,6 +12,7 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/textfmt"
 )
@@ -19,26 +20,44 @@ import (
 // launcherListing is a node's launchers.list: the launchers, and the shell and rc file they came from ("" from an
 // older node).
 type launcherListing struct {
-	Source    string           `json:"source,omitempty"`
-	Launchers []proto.Launcher `json:"launchers"`
-	Shell     string           `json:"shell"`
-	RCFile    string           `json:"rc_file"`
+	Source      string           `json:"source,omitempty"`
+	Launchers   []proto.Launcher `json:"launchers"`
+	HostRuntime bool             `json:"host_runtime,omitempty"`
+	Shell       string           `json:"shell"`
+	RCFile      string           `json:"rc_file"`
 }
 
-// listLaunchers asks one machine for its list, giving it launcherSyncTimeout; an offline machine is not asked.
+// listLaunchers asks one online machine for its list, giving it launcherSyncTimeout in total.
 // Ordinary lists never load external sources; those use their own handshake-gated, source-scoped RPC.
 func (s *Service) listLaunchers(ctx context.Context, d Device, refresh ...bool) (launcherListing, error) {
-	var res launcherListing
 	if !d.Online {
-		return res, apierr.ErrOffline
+		return launcherListing{}, apierr.ErrOffline
 	}
 	cctx, cancel := context.WithTimeout(ctx, launcherSyncTimeout)
 	defer cancel()
-	params := map[string]any{}
-	if len(refresh) > 0 && refresh[0] {
-		params["refresh"] = true
+	read := func(ctx context.Context, params map[string]any) (launcherListing, error) {
+		var res launcherListing
+		err := s.call(ctx, d.ID, DeviceLaunchersList, params, &res)
+		return res, err
 	}
-	err := s.call(cctx, d.ID, DeviceLaunchersList, params, &res)
+	var res launcherListing
+	var err error
+	if len(refresh) > 0 && refresh[0] {
+		// Retry starts a real scan. Reserve part of the same budget for the last node snapshot if the scan is slow
+		// or fails. Execution recovery uses machineLaunchersOn and requires a successful scan.
+		reserve := min(time.Second, launcherSyncTimeout/2)
+		rctx, stop := context.WithTimeout(cctx, launcherSyncTimeout-reserve)
+		res, err = read(rctx, map[string]any{"refresh": true})
+		stop()
+		if err != nil && cctx.Err() == nil {
+			cached, cacheErr := read(cctx, map[string]any{"cache_only": true})
+			if cacheErr == nil && len(cached.Launchers) > 0 {
+				return cached, nil
+			}
+		}
+	} else {
+		res, err = read(cctx, map[string]any{})
+	}
 	if err != nil && cctx.Err() != nil && ctx.Err() == nil {
 		err = context.DeadlineExceeded
 	}
@@ -113,6 +132,7 @@ func (s *Service) launcherViewsFrom(ctx context.Context, zshrc []zshrcLaunchers,
 	}
 	hidden := s.hiddenLaunchers(ctx)
 	byName := map[string]*LauncherView{}
+	unrestrictedModes := map[string]bool{}
 	var names []string
 	for _, m := range zshrc {
 		for _, l := range m.Launchers {
@@ -125,11 +145,25 @@ func (s *Service) launcherViewsFrom(ctx context.Context, zshrc []zshrcLaunchers,
 				if l.Source != "" {
 					src = l.Source
 				}
-				v = &LauncherView{Name: l.Name, Source: src, Agent: l.Agent, BaseURL: l.BaseURL, Model: l.Model, Hidden: slices.Contains(hidden, l.Name)}
+				v = &LauncherView{Name: l.Name, Source: src, Agent: l.Agent, BaseURL: l.BaseURL, Model: l.Model, Hidden: slices.Contains(hidden, l.Name), PermissionModes: l.PermissionModes, builtinCompanion: l.BuiltinCompanion, modelRunMachines: []string{}}
 				byName[l.Name] = v
 				names = append(names, l.Name)
+				if l.PermissionModes == 0 {
+					unrestrictedModes[l.Name] = true
+				}
+			} else if l.PermissionModes == 0 {
+				unrestrictedModes[l.Name] = true
+				v.PermissionModes = 0
+			} else if !unrestrictedModes[l.Name] {
+				v.PermissionModes |= l.PermissionModes
 			}
 			v.Machines = append(v.Machines, m.MachineID)
+			if l.BuiltinCompanion {
+				v.builtinCompanion = true
+			}
+			if modelRunSourceSupported(l.Source, viewAgent(LauncherView{Name: l.Name, Agent: l.Agent}), l.BuiltinCompanion) && !slices.Contains(v.modelRunMachines, m.MachineID) {
+				v.modelRunMachines = append(v.modelRunMachines, m.MachineID)
+			}
 			if rc := cmp.Or(m.Sync.RCFile, defaultRCFile); v.Source == "zshrc" && !slices.Contains(v.RCFiles, rc) {
 				v.RCFiles = append(v.RCFiles, rc)
 			}
@@ -265,11 +299,12 @@ func (s *Service) machineLaunchersFrom(ctx context.Context, machine string, res 
 		out = append(out, proto.Launcher{Name: "claude", Source: "builtin"})
 	}
 	agyAssistant := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "agy" && l.Assistant })
+	agyPolicy := slices.ContainsFunc(res.Launchers, func(l proto.LauncherEnvelope) bool { return l.Agent == "agy" && l.Assistant && l.SupervisionPolicy })
 	for _, m := range managed {
 		if m.Kind == "api" {
 			continue
 		}
-		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy" && agyAssistant,
+		out = append(out, proto.Launcher{Name: m.Name, BaseURL: m.BaseURL, Model: m.Model, Source: "persona", Agent: m.Agent, Assistant: m.Agent == "agy" && agyAssistant, SupervisionPolicy: m.Agent == "agy" && agyPolicy,
 			PromptOptional: m.Agent == "codex" && codexOptional, RunHere: m.Agent == "codex" && codexHere, Pi: m.PiAPI() != ""})
 	}
 	return out, res.HostRuntime
@@ -292,11 +327,64 @@ func (s *Service) pickerLaunchersKnown(ctx context.Context, machine, host string
 	if err != nil {
 		return nil, false, err
 	}
+	return s.pickerLaunchersFrom(ctx, machine, ls), known, nil
+}
+
+func (s *Service) pickerLaunchersFrom(ctx context.Context, machine string, ls []proto.Launcher) []ConfiguredLauncher {
 	discovered := make([]ConfiguredLauncher, 0, len(ls))
 	for _, l := range ls {
 		discovered = append(discovered, ConfiguredLauncher{Launcher: l})
 	}
-	return sessionLaunchers(discovered, s.hello(ctx).Models.Launchers[machine]), known, nil
+	return sessionLaunchers(discovered, s.hello(ctx).Models.Launchers[machine])
+}
+
+// assistantPickerLaunchers bounds live shell discovery to the launcher sync deadline. If the shell is slow to start,
+// the machine's last known shell launchers and scoped Persona providers can still populate the main chat's menu,
+// including providers that cannot run here and why.
+func (s *Service) assistantPickerLaunchers(ctx context.Context, d Device, refresh bool, lang i18n.Lang) (picker, fits []ConfiguredLauncher, unavailable []unavailableLauncher, err error) {
+	var syncErr error
+	if d.ExternalInventory {
+		picker, err = s.externalPickerLaunchers(ctx, d, refresh)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	} else {
+		var listing launcherListing
+		listing, syncErr = s.listLaunchers(ctx, d, refresh)
+		if syncErr != nil {
+			if ctx.Err() != nil || apierr.NodeCode(syncErr) != "timeout" {
+				return nil, nil, nil, syncErr
+			}
+			listing = launcherListing{} // the saved snapshot was requested without an engine host
+			lastSeen, _ := s.zshrcLaunchersLastSeen(ctx)
+			if i := slices.IndexFunc(lastSeen, func(m zshrcLaunchers) bool { return m.MachineID == d.ID }); i >= 0 {
+				// A saved runtime advertisement does not establish that the runtime is still connected.
+				for _, l := range lastSeen[i].Launchers {
+					if l.Source == "" || machineSource(l.Source) {
+						listing.Launchers = append(listing.Launchers, l)
+					}
+				}
+			}
+		}
+		res := machineLauncherListing{
+			Launchers:   make([]proto.LauncherEnvelope, 0, len(listing.Launchers)),
+			HostRuntime: listing.HostRuntime,
+		}
+		for _, l := range listing.Launchers {
+			res.Launchers = append(res.Launchers, proto.LauncherEnvelope(l))
+		}
+		launchers, _ := s.machineLaunchersFrom(ctx, d.ID, res, true)
+		picker = s.pickerLaunchersFrom(ctx, d.ID, launchers)
+	}
+	fits, err = s.assistantLaunchersOf(ctx, d.ID, picker)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	unavailable = s.mainChatUnavailable(ctx, d.ID, picker, fits, lang)
+	if len(fits) == 0 && len(unavailable) == 0 {
+		err = syncErr
+	}
+	return picker, fits, unavailable, err
 }
 
 // pickerLaunchersSeen is pickerLaunchers from seen, machine's own launchers as last seen, without asking its node for
@@ -309,11 +397,7 @@ func (s *Service) pickerLaunchersSeen(ctx context.Context, machine string, seen 
 		res.Launchers = append(res.Launchers, proto.LauncherEnvelope(l))
 	}
 	list, _ := s.machineLaunchersFrom(ctx, machine, res, ask)
-	discovered := make([]ConfiguredLauncher, 0, len(list))
-	for _, l := range list {
-		discovered = append(discovered, ConfiguredLauncher{Launcher: l})
-	}
-	return sessionLaunchers(discovered, s.hello(ctx).Models.Launchers[machine])
+	return s.pickerLaunchersFrom(ctx, machine, list)
 }
 
 // assistantLaunchers are the machine's launchers backed by a provider the main conversation supports.

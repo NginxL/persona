@@ -57,6 +57,7 @@ class MeetingHandoffTest {
         assertFalse(meetingHandoffEligible(ready, emptyList(), now))
         assertFalse(meetingHandoffEligible(recording(minutes = null, chars = 0), targets, now))
         assertFalse(meetingHandoffEligible(recording(endedAt = null, updated = now.toString()), targets, now))
+        assertFalse(meetingHandoffEligible(recording(endedAt = null, updated = null), targets, now))
         assertFalse(meetingHandoffEligible(recording(room = "ready"), targets, now))
         assertFalse(meetingHandoffEligible(recording(room = "starting"), targets, now))
         assertFalse(meetingHandoffEligible(recording(room = "unavailable"), targets, now))

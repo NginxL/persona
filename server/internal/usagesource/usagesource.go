@@ -3,10 +3,12 @@
 // weekly allowance is used. The hub asks it, read-only, and turns the answer into the proto.UsageAccount list the
 // sidebar draws; the node-local collectors (#2432) and the gateway's numbers meet in devices/usagewindows.go.
 //
-// Two source types:
+// Three source types:
 //
 //   - "relay": an account-pool relay's management API (relay.go). The account list and the stored quota windows, both read
 //     from its cache: nothing here ever asks it to probe an upstream.
+//   - "relay_key": the same relay's key self-service usage (relaykey.go), read with an ordinary API key instead of a
+//     management key: the stored windows of the accounts that key can use.
 //   - "generic": Persona's own small JSON shape (generic.go), for any other gateway that wants to feed the sidebar.
 //
 // Nothing here logs, returns or stores the key. An error carries a code, never the gateway's text.
@@ -26,17 +28,22 @@ import (
 )
 
 const (
-	TypeRelay   = "relay"
-	TypeGeneric = "generic"
+	TypeRelay    = "relay"
+	TypeRelayKey = "relay_key"
+	TypeGeneric  = "generic"
 )
 
+// Known reports whether t is a type a source may have (what the admin page accepts).
+//
+// TypeExtension is not one of them: it is read from manager.json (usage.sources[]) and has no address of its own.
+func Known(t string) bool { return t == TypeRelay || t == TypeRelayKey || t == TypeGeneric }
+
 // StoredType is the type of a source as a saved config (hub.json) names it. Before the relay type had its own name,
-// it was saved under the name of the one relay it was first written for; generic and relay are the only types there
-// have ever been, so any other non-empty name is that earlier one and reads as relay. What a person types on the admin
-// page is not read with this: there only relay and generic are accepted.
+// it was saved under the name of the one relay it was first written for; the types here are the only ones there have
+// ever been, so any other non-empty name is that earlier one and reads as relay. What a person types on the admin page
+// is not read with this: there only the known types are accepted.
 func StoredType(t string) string {
-	switch t {
-	case "", TypeGeneric, TypeRelay:
+	if t == "" || Known(t) || t == TypeExtension {
 		return t
 	}
 	return TypeRelay
@@ -85,6 +92,9 @@ type Seen struct {
 	Providers map[string]int `json:"providers"`
 	// Listed is how many accounts the gateway listed at all (those without a window we can draw too).
 	Listed int `json:"listed"`
+	// QuotaHidden: the gateway answered, but shares no account quota with this key (relay_key), so there is nothing
+	// to list whatever accounts the key can use.
+	QuotaHidden bool `json:"quota_hidden,omitempty"`
 }
 
 // Error codes. The admin UI words them; the text of what the gateway said is never kept.
@@ -132,7 +142,7 @@ func CodeOf(err error) string {
 }
 
 // Fetch reads the source once. Read-only by construction: the relay adapter sends two calls, a GET and a POST that
-// only reads (refresh is always false), and the generic one a GET.
+// only reads (refresh is always false); the relay_key and generic ones a GET.
 func Fetch(ctx context.Context, cfg Config, now time.Time) (Result, error) {
 	base, err := NormalizeURL(cfg.URL)
 	if err != nil {
@@ -145,6 +155,8 @@ func Fetch(ctx context.Context, cfg Config, now time.Time) (Result, error) {
 	switch cfg.Type {
 	case TypeRelay:
 		return fetchRelay(ctx, c, now)
+	case TypeRelayKey:
+		return fetchRelayKey(ctx, c, now)
 	case TypeGeneric:
 		return fetchGeneric(ctx, c, now)
 	}

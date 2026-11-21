@@ -22,6 +22,7 @@ func provenanceHerdr(n *Node) {
 }
 
 func TestStopRPCPersistsItsProvenance(t *testing.T) {
+	t.Run("gateway", testGatewayStoppedProvenance)
 	for _, tc := range []struct {
 		name, method string
 		params       map[string]any

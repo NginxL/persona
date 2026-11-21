@@ -147,9 +147,9 @@ func closeCodexStart(ctx context.Context, start codexAbandonedStart) error {
 	if !ok {
 		err = host.ErrUnsupported
 	} else {
-		space := start.workspace
+		space := start.created.SpaceID
 		if space == "" {
-			space = start.created.SpaceID
+			space = start.workspace
 		}
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		err = org.Close(cleanup, start.created.Pane, space, start.created.SlotID)

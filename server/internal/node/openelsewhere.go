@@ -52,6 +52,7 @@ type claudeProc struct {
 	ParkedJobID string `json:"parkedJobId"`
 	JobID       string `json:"jobId"` // a background session's job (claudebg.go)
 	Spare       bool   `json:"spare"` // a warm background process no session has claimed yet
+	StartedAt   int64  `json:"startedAt"`
 	// ProcStart is when that process started, as Claude Code writes it (on Linux the starttime of /proc/<pid>/stat): a
 	// file left by a claude that exited names a pid that may belong to another program by now.
 	ProcStart string `json:"procStart"`

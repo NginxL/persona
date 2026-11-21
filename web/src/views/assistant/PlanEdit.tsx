@@ -1,8 +1,8 @@
 // "Edit" on an open plan card (iOS PlanEditSheet): change each task's title, machine, directory, model, permission,
 // ultracode (#12) and first message before it starts; "Start" starts the plan with them.
 import { useState } from "react";
-import { PLAN_PERMISSIONS, planEditsChanged, planEditsOf, type PlanTaskEdit, type TaskPlan } from "../../lib/feed";
-import { hubHas, useStore } from "../../lib/store";
+import { PLAN_PERMISSIONS, planEditsChanged, planEditsOf, planEditsToSend, type PlanTask, type PlanTaskEdit, type TaskPlan } from "../../lib/feed";
+import { getState, hubHas, useStore } from "../../lib/store";
 import { machineStartBlocked, ULTRACODE_FEATURE } from "../../lib/ultracode";
 import { Button, Dialog } from "../../ui/atoms";
 import { UltracodeStartRow } from "../chat/Ultracode";
@@ -27,13 +27,14 @@ export function permissionLabel(mode: string): string {
 /** The hub keeps the plan's model when the field is sent empty (applyPlanEdit): say so rather than "use the default". */
 export function modelPlaceholder(planned?: string, tier?: string): string {
   const m = planned?.trim();
-  if (m) return t("assistant-tasks.plan_edit_model_placeholder_kept", { model: m });
-  return tier ? t("assistant-tasks.plan_edit_model_placeholder_tier", { tier }) : t("assistant-tasks.plan_edit_model_placeholder");
+  if (m) return t("assistant-taskeditor.plan_edit_model_placeholder_kept", { model: m });
+  return tier ? t("assistant-taskeditor.plan_edit_model_placeholder_tier", { tier }) : t("assistant-taskeditor.plan_edit_model_placeholder");
 }
 
 /** `ultracode`: each task's choice on the card, where "Edit" starts from: kept while its computer can't (the switch is
- *  drawn off, and what Start sends turns it off there), so moving the task to one that can turns it back on. */
-export function PlanEditDialog({ plan, ultracode, onClose, onStart }: { plan: TaskPlan; ultracode?: readonly boolean[]; onClose: () => void; onStart: (edits: PlanTaskEdit[]) => void }) {
+ *  drawn off, and what Start sends turns it off there), so moving the task to one that can turns it back on.
+ *  Keep the submit-only normalization here, off the first screen, and compare against the unedited plan. */
+export function PlanEditDialog({ plan, original, ultracode, onClose, onStart }: { plan: TaskPlan; original: TaskPlan; ultracode?: readonly boolean[]; onClose: () => void; onStart: (edits: Partial<PlanTask>[]) => void }) {
   const machines = useStore((s) => s.machines);
   const features = useStore((s) => s.features);
   const ultracodeOffered = hubHas(features, ULTRACODE_FEATURE);
@@ -41,7 +42,7 @@ export function PlanEditDialog({ plan, ultracode, onClose, onStart }: { plan: Ta
   const [tasks, setTasks] = useState<PlanTaskEdit[]>(before);
   const set = (i: number, patch: Partial<PlanTaskEdit>) => setTasks((list) => list.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const close = () => {
-    if (planEditsChanged(before, tasks) && !confirm(t("assistant-tasks.plan_edit_discard"))) return;
+    if (planEditsChanged(before, tasks) && !confirm(t("assistant-taskeditor.plan_edit_discard"))) return;
     onClose();
   };
   const ready = tasks.every((x) => x.title.trim() && x.cwd.trim() && x.prompt.trim());
@@ -54,7 +55,7 @@ export function PlanEditDialog({ plan, ultracode, onClose, onStart }: { plan: Ta
       footer={
         <>
           <Button onClick={close}>{t("common.cancel")}</Button>
-          <Button tone="accent" disabled={!ready} onClick={() => onStart(tasks)}>
+          <Button tone="accent" disabled={!ready} onClick={() => onStart(planEditsToSend(original, tasks, (machine) => Boolean(machineStartBlocked(getState(), machine))))}>
             {t("assistant-tasks.plan_start")}
           </Button>
         </>
@@ -66,14 +67,14 @@ export function PlanEditDialog({ plan, ultracode, onClose, onStart }: { plan: Ta
           const known = machines.some((m) => m.id === task.machine);
           return (
             <fieldset key={i} className="flex flex-col gap-3">
-              <legend className="mb-2 text-[12px] font-semibold text-ink-3">{tasks.length > 1 ? t("assistant-tasks.plan_edit_task_n", { n: i + 1 }) : t("assistant-tasks.plan_edit_task")}</legend>
+              <legend className="mb-2 text-[12px] font-semibold text-ink-3">{tasks.length > 1 ? t("assistant-taskeditor.plan_edit_task_n", { n: i + 1 }) : t("assistant-taskeditor.plan_edit_task")}</legend>
               <div>
-                <label htmlFor={`${id}-title`} className={LABEL}>{t("assistant-tasks.plan_edit_title")}</label>
+                <label htmlFor={`${id}-title`} className={LABEL}>{t("assistant-taskeditor.plan_edit_title")}</label>
                 <input id={`${id}-title`} value={task.title} onChange={(e) => set(i, { title: e.target.value })} className={FIELD} />
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label htmlFor={`${id}-machine`} className={LABEL}>{t("assistant-tasks.plan_edit_machine")}</label>
+                  <label htmlFor={`${id}-machine`} className={LABEL}>{t("assistant-taskeditor.plan_edit_machine")}</label>
                   <select id={`${id}-machine`} value={task.machine} onChange={(e) => set(i, { machine: e.target.value })} className={FIELD}>
                     {machines.map((m) => (
                       <option key={m.id} value={m.id}>
@@ -84,7 +85,7 @@ export function PlanEditDialog({ plan, ultracode, onClose, onStart }: { plan: Ta
                   </select>
                 </div>
                 <div>
-                  <label htmlFor={`${id}-permission`} className={LABEL}>{t("assistant-tasks.plan_edit_permission")}</label>
+                  <label htmlFor={`${id}-permission`} className={LABEL}>{t("assistant-taskeditor.plan_edit_permission")}</label>
                   <select id={`${id}-permission`} value={task.permission} onChange={(e) => set(i, { permission: e.target.value })} className={FIELD}>
                     {PLAN_PERMISSIONS.map((p) => (
                       <option key={p} value={p}>
@@ -95,13 +96,13 @@ export function PlanEditDialog({ plan, ultracode, onClose, onStart }: { plan: Ta
                 </div>
               </div>
               <div>
-                <label htmlFor={`${id}-cwd`} className={LABEL}>{t("assistant-tasks.plan_edit_cwd")}</label>
+                <label htmlFor={`${id}-cwd`} className={LABEL}>{t("assistant-taskeditor.plan_edit_cwd")}</label>
                 <input id={`${id}-cwd`} value={task.cwd} spellCheck={false} autoCapitalize="off" autoCorrect="off" onChange={(e) => set(i, { cwd: e.target.value })} className={`${FIELD} font-mono text-[12.5px]`} />
               </div>
               <TaskWorkspaceEditor plan={{ ...plan, tasks: plan.tasks.map((t, j) => ({ ...t, ...tasks[j], workspace_resolved: undefined })) }} index={i}
                 onChange={(workspace) => set(i, { workspace })} />
               <div>
-                <label htmlFor={`${id}-model`} className={LABEL}>{t("assistant-tasks.plan_edit_model")}</label>
+                <label htmlFor={`${id}-model`} className={LABEL}>{t("assistant-taskeditor.plan_edit_model")}</label>
                 <input id={`${id}-model`} value={task.model ?? ""} spellCheck={false} autoCapitalize="off" autoCorrect="off" placeholder={modelPlaceholder(plan.tasks[i]?.model, plan.tasks[i]?.tier)} onChange={(e) => set(i, { model: e.target.value })} className={FIELD} />
               </div>
               {ultracodeOffered && (
@@ -110,7 +111,7 @@ export function PlanEditDialog({ plan, ultracode, onClose, onStart }: { plan: Ta
                 </div>
               )}
               <div>
-                <label htmlFor={`${id}-prompt`} className={LABEL}>{t("assistant-tasks.plan_edit_prompt")}</label>
+                <label htmlFor={`${id}-prompt`} className={LABEL}>{t("assistant-taskeditor.plan_edit_prompt")}</label>
                 <textarea id={`${id}-prompt`} rows={4} value={task.prompt} onChange={(e) => set(i, { prompt: e.target.value })} className={`${FIELD} resize-y leading-relaxed`} />
               </div>
             </fieldset>

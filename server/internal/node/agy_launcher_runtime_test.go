@@ -179,6 +179,7 @@ func TestAgyStartRoutesHerdrAndCompanion(t *testing.T) {
 			if tc.model != "" {
 				command += " --model " + tc.model + " --effort " + tc.effort
 			}
+			command += " --dangerously-skip-permissions" // a start naming no mode runs in Allow all (agyStartMode)
 			want := call("pane.send_input", map[string]any{"pane_id": "w1:p2", "keys": []string{"Enter"}, "text": inAgentEnv(n.dir, command, shellQuote)})
 			var matching []string
 			for _, c := range f.trace("pane.send_input") {

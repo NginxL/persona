@@ -23,20 +23,20 @@ export interface AssistantLauncher {
   agent_type?: string;
   base_url?: string;
   assistant?: boolean;
+  supervision_policy?: boolean;
   source?: string;
 }
 
-/** Runs Claude Code, Codex, or an assistant-capable runtime (such as Antigravity): what the assistant can use, as the hub's
- *  `?purpose=assistant` list (assistant/launcher_mainchat.go). A compatible CLI is left out; so are a runtime's launcher that
- *  doesn't say it runs the assistant (a Paseo provider is no shell command) and a managed Codex launcher (`personad launch`
- *  runs codex past the app-server the assistant needs). */
+/** Mirrors the hub's assistant catalog: native Claude Code/Codex launchers,
+ *  managed variants of those engines, and runtimes advertising assistant support.
+ *  Other CLI adapters still need the runtime contract before being offered. */
 export function runsAssistant(l: AssistantLauncher): boolean {
   if (l.assistant) return true;
   if (l.base_url === "(traex)") return false;
   const machine = !l.source || l.source === "zshrc" || l.source === "path" || l.source === "builtin";
   if (!machine && !managedProvider(l.source)) return false;
-  if (managedProvider(l.source) && l.agent === "codex") return false;
-  return !l.agent || l.agent === "claude" || l.agent === "codex";
+  const agent = l.agent_type || l.agent;
+  return !agent || agent === "claude" || agent === "codex";
 }
 
 /** Whether the assistant's launcher list offers name. A list not loaded yet (null) offers everything: nothing is dropped

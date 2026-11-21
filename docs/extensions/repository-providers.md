@@ -16,7 +16,8 @@ GitHub and GitLab stay built in and work exactly as before (`server/internal/ass
   "id": "acme",
   "name": "Acme Code",
   "hosts": ["code.example.com"],
-  "link_kinds": [{"kind": "pull_request", "label": "MR"}, {"kind": "issue", "label": "Issue"}]
+  "link_kinds": [{"kind": "pull_request", "label": "MR"}, {"kind": "issue", "label": "Issue"}],
+  "capabilities": ["pr_status"]
 }]}
 ```
 
@@ -28,6 +29,9 @@ GitHub and GitLab stay built in and work exactly as before (`server/internal/ass
   alone.
 - `link_kinds` only relabels the two kinds every client knows, `issue` and `pull_request` (at most one label each, 1–24
   characters): there are no new kinds.
+- `capabilities` (optional) names the optional answers beyond `repo.describe`: `pr_status`, the program answers
+  `repo.pr_status` (#11584). It is not part of the permission digest: the manager sends it only addresses of links
+  it already stores.
 - The program must speak the protocol. The manager asks it only while it is enabled, without a problem, with the
   contribution switched on and its program running.
 - The install page says what it agrees to: Persona asks it to read addresses and check repositories and links on these
@@ -50,6 +54,7 @@ device or token can.
 | `repo.check` | `{contribution, canonical_url}` → `{}` | Does the repository exist for the signed-in account? Asked when a repository is saved or its address changes, as the built-in check is. |
 | `repo.link` | `{contribution, repo, url?, kind?, number?}` → `{kind, number, canonical_url, title?}` | `repo` is `{instance_url, path, canonical_url}`. Asked with a pasted `url`, or with the `kind` and `number` an Agent gave. |
 | `repo.describe` (optional) | `{contribution, canonical_url}` → `{title, state?}` | A link's title, asked when a new link has none. `state` is `open`, `closed` or `merged`; anything else is dropped. A provider without it answers `unknown_method` and the link simply has no title. |
+| `repo.pr_status` (with `capabilities: ["pr_status"]`) | `{contribution, canonical_url}` → `{state, merge_commit?, head_sha?, head_ref?, base_ref?, author?, viewer_is_author?}` | A stored pull request's state for delivery checks and the status sweep, at most about once a minute each. `state` outside `open`, `closed`, `merged` fails the answer; a commit that is not 7–64 lowercase hex digits, a merge commit on a request not merged, or a name that is not one plain line of at most 255 bytes is dropped. Never asked of a contribution without the capability. |
 
 Errors a provider answers with a code: `not_found`, `not_signed_in`, `refused` (its words are shown) and `failed`.
 Anything else is a failure with its words. An older program that does not know the method (`unknown_method`,
@@ -141,7 +146,11 @@ When the extension is switched off, fails, is not running or is uninstalled:
 With `assistant.done_needs_delivery` on, a supervisor's `accepted` waits until the task's review request is merged
 (#6428). Which code host reads it is chosen by the link's host (#11584, `server/internal/assistant/code_host.go`):
 GitHub pull requests are read by built-in GitHub, exactly as before; a request on a host a provider claims is read
-through that provider: `repo.parse`, `repo.link` (it must answer `pull_request`), then `repo.describe`'s `state`.
+through that provider: `repo.parse`, `repo.link` (it must answer `pull_request`), then `repo.pr_status` when its
+contribution declares `pr_status`, else `repo.describe`'s `state`.
+Merge requests on gitlab.com and on the GitLab instances the manager's `manager.json` names are read by built-in
+GitLab (`docs/assistant/managers.md`). The minute status sweep polls all of them, so a merged or closed request wakes
+the supervisor its merge wait parked, as a GitHub PR does.
 
 | The provider… | `accepted` |
 | --- | --- |
@@ -153,7 +162,7 @@ through that provider: `repo.parse`, `repo.link` (it must answer `pull_request`)
 A provider's request counts as a task's delivery when an Agent reports it as one; today that is an address ending in
 `/merge_requests/<n>`. Its state is read only through the manager, with the provider's own credentials; nothing of it
 reaches a model beyond the reply's one line. Code hosts have three layers kept apart: reading (above), events (none
-pushed yet) and writes (comments, reviews and merging stay connector tools behind the write gate).
+pushed; the sweep polls) and writes (comments, reviews and merging stay connector tools behind the write gate).
 
 ## Writing a provider
 

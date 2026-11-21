@@ -1128,6 +1128,11 @@ export function Dialog({
   const body = useRef<HTMLDivElement>(null);
   useSheetReveal(body, open && sheet);
   const backdrop = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (body.current) body.current.scrollTop = 0;
+    if (backdrop.current) backdrop.current.scrollTop = 0;
+  }, [open]);
   // what it showed when last open: a caller may clear what the body reads once it is closed, while it still leaves
   const kept = useRef({ title, children, footer });
   if (open) kept.current = { title, children, footer };
@@ -1169,7 +1174,7 @@ export function Dialog({
             <IconButton icon="x" label={t("ui-atoms.close")} onClick={onClose} size={26} iconSize={14} />
           </div>
         )}
-        <div ref={body} className={cx("min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-2 pb-4", !shown.footer && "max-sm:pb-[calc(16px+env(safe-area-inset-bottom))]")}>{shown.children}</div>
+        <div ref={body} data-dialog-body className={cx("min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-2 pb-4 [overflow-anchor:none]", !shown.footer && "max-sm:pb-[calc(16px+env(safe-area-inset-bottom))]")}>{shown.children}</div>
         {/* data-dialog-footer: what a toast on a phone keeps clear of (Toasts) */}
         {shown.footer && <div data-dialog-footer className="flex shrink-0 items-center justify-end gap-2 border-t border-line bg-inset px-4 py-2.5 max-sm:pb-[calc(10px+env(safe-area-inset-bottom))]">{shown.footer}</div>}
       </div>

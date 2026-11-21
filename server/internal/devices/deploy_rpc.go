@@ -459,7 +459,7 @@ func (m *Machine) nodeUpdateConnected(ctx context.Context, peer *rpc.Peer, info 
 		default:
 			pkg := nodePackage{Version: record.Target} // running it already: only confirmed
 			if info.Version != record.Target {
-				pkg, err = m.d.nodePackageFor(ctx, info.OS, info.Arch, nodeProgram(info))
+				pkg, err = m.d.nodePackageFor(ctx, info.OS, info.Arch, info.Program)
 				if err == nil && (pkg.Version != record.Target || pkg.Fallback && !record.Fallback) {
 					// The build found now is another one than the record's, or the same version now as a fallback (the
 					// hub moved to a version without a release of its own): what was queued for the hub's version

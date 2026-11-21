@@ -35,7 +35,8 @@ class NewAgentPaseoShotsTest {
     private val computers = listOf(Machine("computer", "Studio", online = true, engine = "paseo"))
     private val launchers = listOf(
         AgentLauncher("claude"), AgentLauncher("codex", agentType = "codex", promptOptional = true),
-        AgentLauncher("grok", model = "Grok 5", agentType = PaseoAgent), AgentLauncher("kimi", model = "Kimi K3", agentType = PaseoAgent))
+        AgentLauncher("grok", model = "Grok 5", agentType = PaseoAgent), AgentLauncher("kimi", model = "Kimi K3", agentType = PaseoAgent),
+        AgentLauncher("trae-cli", agentType = "trae-cli"))
     private val service = object : AgentCreationService {
         override val scope = "hub/pairing"
         override suspend fun launchers(machineId: String) = launchers
@@ -71,6 +72,8 @@ class NewAgentPaseoShotsTest {
                 rule.waitForIdle()
                 rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(other))
                 rule.onNodeWithText(other).assertIsDisplayed()
+                rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("TRAE CLI"))
+                rule.onNodeWithText("TRAE CLI").assertIsDisplayed()
                 rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("kimi"))
                 rule.onNodeWithText("grok").assertIsDisplayed()
                 // The engine's id is nowhere: not the type, not under a provider.
@@ -97,5 +100,6 @@ class NewAgentPaseoShotsTest {
         assertNull(launcherAgentLine(launchers[2]))
         assertEquals("Claude Code", launcherAgentLine(launchers[0]))
         assertEquals("Codex", launcherAgentLine(launchers[1]))
+        assertEquals("TRAE CLI", launcherAgentLine(launchers.last()))
     }
 }
