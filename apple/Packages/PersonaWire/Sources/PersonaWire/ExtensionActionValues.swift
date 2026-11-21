@@ -1,5 +1,4 @@
 import Foundation
-import PersonaWire
 
 public nonisolated enum ExtensionActionValues {
     public static func map(_ place: ExtensionShortcutPlace, text: String?, number: Double?, toggle: Bool?, choice: String?, json: String?) throws -> [String: String] {

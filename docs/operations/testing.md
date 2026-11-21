@@ -9,6 +9,7 @@ cd apple && xcodegen generate -q && xcodebuild -project Persona.xcodeproj -schem
   -destination "id=$SIM" test   # iOS unit tests (ChatStore, ScreenParser, phone tool registry)
 ./scripts/app/sim.sh [--with-watch] [-openSession <machine>/<id>]     # run in simulator, pair automatically to the real hub ("Development builds")
 cd apple/Packages/PersonaKit && swift test                             # PersonaKit unit tests: directly on Mac, no App build or simulator
+cd apple/Packages/PersonaWire && swift test -Xswiftc -warnings-as-errors # PersonaWire unit tests, warnings as errors as CI runs them
 python3 -B scripts/test/test_sim_boot.py                               # sim-boot.sh (fake xcrun / simslim, no simulator)
 n=0 failed=""; for f in $(find scripts -name 'test_*.py' -not -path '*/node_modules/*' | sort); do grep -q unittest "$f" || continue; n=$((n + 1)); (cd "$(dirname "$f")" && python3 -B -m unittest -q "$(basename "$f" .py)") || failed="$failed $f"; done; echo "$n suites, failed:${failed:- none}"; [ -z "$failed" ]   # all Python suites in scripts/, like CI (it skips files that never mention unittest); any failure exits nonzero
 ```
@@ -452,6 +453,12 @@ it isn't in `PersonaTests`; the Apple CI script runs its SwiftPM tests separatel
 - Assertions needing App types (views, `FilePaths`) stay in `PersonaTests`, also adding `import PersonaKit`.
 - Package code must build with Foundation only: no SwiftUI / UIKit imports, App `Theme` or `AppModel`. Design-system source checks (`TokenRatchetTests`, etc.) don't scan it.
 - The package declares macOS 15, so its test bundle also loads on a macOS 15 host without a target override. To check that deployment target from a newer Apple-silicon Mac, use a separate build folder: `swift test --scratch-path /tmp/personakit-macos15 -Xswiftc -target -Xswiftc arm64-apple-macosx15.0` (use `x86_64-apple-macosx15.0` on Intel). `scripts/test/test_apple_ci.py` guards the macOS floors of all tracked local Swift packages.
+
+**PersonaWire** (`apple/Packages/PersonaWire`, #7895): the Foundation-only wire layer every app target links, the watch,
+widgets and extensions included. Its tests run with `xcrun swift test --package-path apple/Packages/PersonaWire -Xswiftc
+-warnings-as-errors`, as the `packages` lane of `scripts/ci/apple.sh` runs them (#12734). The flag on the command line also
+applies to a package's dependencies, so PersonaWire must build without warnings for any package that depends on it to pass
+the same flag; a file inside the package never imports `PersonaWire` itself.
 
 **PersonaCore** (`apple/Packages/PersonaCore`, #6871): the iOS-only binding of the shared Rust continuity core. Run
 `native/app-core/scripts/build-apple.sh` before XcodeGen / package resolution, then `xcrun swift test --package-path

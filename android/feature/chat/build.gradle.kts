@@ -29,6 +29,7 @@ dependencies {
     implementation(project(":core:chatlist"))
     implementation(project(":core:navigation"))
     implementation(project(":feature:inbox"))
+    implementation(project(":feature:files"))
     implementation(libs.androidx.activity)
     implementation(libs.androidx.webkit)
     implementation(libs.compose.ui)

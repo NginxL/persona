@@ -677,6 +677,47 @@ class PersonaShellOverlayTest {
         }
     }
 
+    @Test fun assistantMainChecksAndOpensOnlyExistingBacktickPaths() {
+        val existing = "/home/user/notes/existing.txt"
+        val missing = "/home/user/notes/missing.txt"
+        val stats = mutableListOf<Triple<String, String, List<String>>>()
+        val previews = mutableListOf<Triple<String, String, String>>()
+        val files = object : SessionFiles {
+            override suspend fun stat(machineId: String, cwd: String, paths: List<String>): SessionPathStats {
+                stats += Triple(machineId, cwd, paths)
+                return SessionPathStats(paths.map { SessionPathStat(it, if (it == existing) "file" else "missing") })
+            }
+            override suspend fun file(machineId: String, cwd: String, path: String): SessionFileContent {
+                previews += Triple(machineId, cwd, path)
+                return SessionFileContent(path, "existing.txt", size = 20, mime = "text/plain", text = "assistant file opened")
+            }
+            override suspend fun directory(machineId: String, cwd: String, path: String): SessionDirectory = error("No directory in this fixture")
+            override suspend fun status(machineId: String, cwd: String): SessionGitStatus = error("No Git in this fixture")
+            override suspend fun diff(machineId: String, cwd: String, path: String, staged: Boolean): SessionGitDiff = error("No diff in this fixture")
+            override suspend fun log(machineId: String, cwd: String, skip: Int, limit: Int): SessionGitLog = error("No log in this fixture")
+            override suspend fun show(machineId: String, cwd: String, hash: String): SessionGitShow = error("No commit in this fixture")
+        }
+        val main = Session("computer", "assistant", title = "Main conversation", assistant = true, cwd = "")
+        shell(files = files, assistantReply = "`$existing`\n\n`$missing`", content = {
+            persona.feature.chat.ChatDestination(ChatRoute(main.machineId, main.sessionId, ConversationKind.Assistant),
+                unused<Navigator>(), embedded = true, showTopBar = false,
+                renderStyle = persona.feature.chat.ChatRenderStyle.Assistant, historySession = main)
+        }) {
+            awaitText(existing)
+            frames()
+            assertTrue("the Assistant's absolute paths are checked against its home directory",
+                stats.any { it.first == "computer" && it.second == "~" && it.third.containsAll(listOf(existing, missing)) })
+
+            rule.onNodeWithText(missing).performClick()
+            frames()
+            assertTrue("a missing path never opens a file", previews.isEmpty())
+
+            rule.onNodeWithText(existing).performClick()
+            awaitText("assistant file opened")
+            assertEquals(listOf(Triple("computer", "~", existing)), previews)
+        }
+    }
+
     private fun shell(agents: Boolean = false, sideInset: Int = 0, width: MutableState<Int>? = null,
         withTodos: Boolean = false, withComputers: Boolean = false, groupByTodo: Boolean = false,
         automation: Boolean = true,
@@ -685,6 +726,7 @@ class PersonaShellOverlayTest {
         larkMessagesFlow: MutableStateFlow<LarkMessagesRepository?>? = null,
         sidebarLayout: SidebarLayout? = null,
         openNavigation: MutableState<((Router) -> ResolvedRoute?)?>? = null,
+        files: SessionFiles? = null, assistantReply: String? = null,
         content: (@Composable (ShellSession) -> Unit)? = null,
         check: (ActivityScenario<ComponentActivity>) -> Unit) {
         AssistantManagerChoice.choose("hub", null, "assistant")
@@ -702,8 +744,13 @@ class PersonaShellOverlayTest {
             override suspend fun startConversation() = main.key
         }
         val chat = object : ChatRepository by chats {
-            override fun observe(session: SessionKey) = if (session == recent.key) MutableStateFlow(ChatSnapshot(loading = false,
-                items = listOf(Item("weekend", 1, role = "assistant", kind = "text", text = "The weekend plan is ready.")))) else chats.observe(session)
+            override fun observe(session: SessionKey) = when {
+                session == recent.key -> MutableStateFlow(ChatSnapshot(loading = false,
+                    items = listOf(Item("weekend", 1, role = "assistant", kind = "text", text = "The weekend plan is ready."))))
+                session == main.key && assistantReply != null -> MutableStateFlow(ChatSnapshot(loading = false,
+                    items = listOf(Item("paths", 1, role = "assistant", kind = "text", text = assistantReply))))
+                else -> chats.observe(session)
+            }
         }
         val inbox = object : persona.feature.inbox.InboxRepository {
             override val entries = MutableStateFlow(emptyList<InboxEntry>())
@@ -763,7 +810,7 @@ class PersonaShellOverlayTest {
             override val outbox = sender.outbox
             override suspend fun sendToMain(text: String, clientMessageId: String, draft: DraftSnapshot?) = error("No sends in this fixture")
         }
-        val bindings = ChatAppBindings(hubScope, scope, drafts, connection, actions, composer, unused(), management, mainSender)
+        val bindings = ChatAppBindings(hubScope, scope, drafts, connection, actions, composer, unused(), management, mainSender, files = files)
         val wiring = object : ChatWiringSource { override val current = MutableStateFlow<ChatAppBindings?>(bindings) }
         app.component = object : ChatServices, persona.feature.chat.ChatRenameServices, AgentsRenameDependencies, dagger.hilt.internal.GeneratedComponent {
             override fun sessionRenamer() = object : persona.core.domain.sort.SessionRenamer {

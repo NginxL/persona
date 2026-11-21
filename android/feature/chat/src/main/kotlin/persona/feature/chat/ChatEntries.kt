@@ -1,8 +1,13 @@
 package persona.feature.chat
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.navigation3.runtime.EntryProviderScope
 import androidx.navigation3.runtime.NavKey
@@ -29,6 +34,8 @@ import persona.core.navigation.SettingsPage
 import persona.core.navigation.ChatRoute
 import persona.core.navigation.Navigator
 import persona.core.navigation.TerminalRoute
+import persona.feature.files.SessionFilesScreen
+import persona.feature.files.insertFilePath
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -230,37 +237,66 @@ fun ChatDestination(
     val error by (editor?.error ?: remember { MutableStateFlow<Int?>(null) }).collectAsStateWithLifecycle()
     ComposerFocusAskEffect(session, composer)
     if (editor != null && composer == null) return
+    val focus = LocalFocusManager.current
+    var openedPath by androidx.compose.runtime.saveable.rememberSaveable(route.machineId, route.sessionId) { mutableStateOf<String?>(null) }
+    var openedLine by androidx.compose.runtime.saveable.rememberSaveable(route.machineId, route.sessionId) { mutableStateOf<Int?>(null) }
+    var insertionFocused by remember(route.machineId, route.sessionId) { mutableStateOf(false) }
+    val cwd = shownMetadata.firstOrNull { it.key == session }?.cwd ?: historySession?.takeIf { it.key == session }?.cwd.orEmpty()
+    val canOpenFilePath = style == ChatRenderStyle.Assistant && session.machineId.isNotBlank() && wiring?.files != null && composer != null
+    fun open(path: String, line: Int?) {
+        insertionFocused = composer?.focused == true
+        focus.clearFocus()
+        openedPath = path
+        openedLine = line
+    }
+    fun close() { openedPath = null; openedLine = null }
     // The next card another chat waits on you with, after answering here (Persona's conversation in the Assistant tab).
     val elsewhere = LocalWaitingElsewhere.current.takeUnless { historyReadOnly }
     androidx.compose.runtime.CompositionLocalProvider(LocalUsageRead provides wiring?.usage) {
-        ChatScreen(session, services.chats(), services.messages(),
-            services.interactions(), services.sessions(), onBack = onHistoryBack ?: navigator::back,
-            onTerminal = onTerminal ?: { navigator.navigate(TerminalRoute(it.machineId, it.sessionId)) },
-            onResumeInTerminal = { navigator.navigate(TerminalRoute(it.machineId, it.sessionId, resume = true)) },
-            chrome = ChatChromeBindings(actions = wiring?.actions.takeUnless { historyReadOnly }, connection = wiring?.connection,
-                childSessionId = home.childSessionId.takeIf { landedSide == null },
-                lookupRows = home.rows,
-                worktrees = wiring?.worktrees.takeUnless { historyReadOnly },
-                onOpenSession = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) },
-                onOpenSide = if (historyReadOnly) null else ({ navigator.navigate(ChatRoute(it.machineId, it.sessionId,
-                    persona.core.navigation.ConversationKind.Agent, side = true)) }),
-                onOpenAssistant = { navigator.navigate(conversationRoute(it, assistant = true)) },
-                onConnectionDetails = { navigator.navigate(SettingsPageRoute(SettingsPage.Diagnostics)) },
-                files = wiring?.files, ports = wiring?.ports,
-                tasks = wiring?.tasks?.takeIf { style == ChatRenderStyle.Assistant && !historyReadOnly },
-                assistantManagement = assistantManagement,
-                mainConversation = assistantSnapshot.mainSession?.sessionId,
-                leaderConversations = assistantSnapshot.leaders.toSet(),
-                agentShares = sharing,
-                inboxTrays = services.inboxTrays(), inboxScope = wiring?.scope?.path,
-                waiting = elsewhere?.waiting.orEmpty(), onOpenRequest = elsewhere?.open),
-            renderStyle = style,
-            embedded = embedded, showTopBar = showTopBar,
-            historyReadOnly = historyReadOnly, historyFooter = historyFooter, historySession = historySession,
-            healthChat = healthChat,
-            composerState = composer, onDraftChanged = editor?.let { it::changed },
-            composerService = wiring?.composer.takeUnless { historyReadOnly },
-            statusBindings = ChatStatusBindings(recovery = wiring?.recovery.takeUnless { historyReadOnly }, draftSaveError = error?.let { stringResource(it) }),
-            onContextCleared = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) })
+        Box(Modifier.fillMaxSize()) {
+            ChatScreen(session, services.chats(), services.messages(),
+                services.interactions(), services.sessions(), onBack = onHistoryBack ?: navigator::back,
+                onTerminal = onTerminal ?: { navigator.navigate(TerminalRoute(it.machineId, it.sessionId)) },
+                onResumeInTerminal = { navigator.navigate(TerminalRoute(it.machineId, it.sessionId, resume = true)) },
+                chrome = ChatChromeBindings(covered = openedPath != null,
+                    actions = wiring?.actions.takeUnless { historyReadOnly }, connection = wiring?.connection,
+                    childSessionId = home.childSessionId.takeIf { landedSide == null },
+                    lookupRows = home.rows,
+                    worktrees = wiring?.worktrees.takeUnless { historyReadOnly },
+                    onOpenSession = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) },
+                    onOpenSide = if (historyReadOnly) null else ({ navigator.navigate(ChatRoute(it.machineId, it.sessionId,
+                        persona.core.navigation.ConversationKind.Agent, side = true)) }),
+                    onOpenAssistant = { navigator.navigate(conversationRoute(it, assistant = true)) },
+                    onConnectionDetails = { navigator.navigate(SettingsPageRoute(SettingsPage.Diagnostics)) },
+                    files = wiring?.files, hubScope = wiring?.scope?.path.orEmpty(), ports = wiring?.ports,
+                    onOpenPath = if (canOpenFilePath) ({ path, line -> open(path, line) }) else null,
+                    tasks = wiring?.tasks?.takeIf { style == ChatRenderStyle.Assistant && !historyReadOnly },
+                    assistantManagement = assistantManagement,
+                    mainConversation = assistantSnapshot.mainSession?.sessionId,
+                    leaderConversations = assistantSnapshot.leaders.toSet(),
+                    agentShares = sharing,
+                    inboxTrays = services.inboxTrays(), inboxScope = wiring?.scope?.path,
+                    waiting = elsewhere?.waiting.orEmpty(), onOpenRequest = elsewhere?.open),
+                renderStyle = style,
+                embedded = embedded, showTopBar = showTopBar,
+                historyReadOnly = historyReadOnly, historyFooter = historyFooter, historySession = historySession,
+                healthChat = healthChat,
+                composerState = composer, onDraftChanged = editor?.let { it::changed },
+                composerService = wiring?.composer.takeUnless { historyReadOnly },
+                statusBindings = ChatStatusBindings(recovery = wiring?.recovery.takeUnless { historyReadOnly }, draftSaveError = error?.let { stringResource(it) }),
+                onContextCleared = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) })
+            if (openedPath != null && canOpenFilePath) {
+                BackHandler { close() }
+                CompositionLocalProvider(persona.core.designsystem.LocalSplitDetail provides null) {
+                    SessionFilesScreen(route.copy(sessionId = session.sessionId), cwd.ifBlank { "~" }, requireNotNull(wiring?.files), ::close, { path ->
+                        composer?.let { state ->
+                            state.value = insertFilePath(state.value, path, insertionFocused)
+                            state.focusRequest++
+                        }
+                        close()
+                    }, initialPath = openedPath, initialLine = openedLine, connection = wiring?.connection?.state)
+                }
+            }
+        }
     }
 }

@@ -704,8 +704,8 @@ private fun ChatPage(
     // Paths in messages link only when there on the machine (PathLinks.kt): asked of the session's directory.
     val pathPresence = remember(chrome.files, key, session?.cwd, chrome.onOpenPath != null) {
         val files = chrome.files
-        val cwd = session?.cwd.orEmpty()
-        if (files == null || cwd.isBlank() || chrome.onOpenPath == null) null
+        val cwd = session?.cwd.orEmpty().ifBlank { "~" }
+        if (files == null || key.machineId.isBlank() || chrome.onOpenPath == null) null
         else PathPresence(scope, { paths -> files.stat(key.machineId, cwd, paths) })
     }
     val currentSend by rememberUpdatedState<(String) -> Unit>({ send(it) })

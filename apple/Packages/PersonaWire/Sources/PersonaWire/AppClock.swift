@@ -1,5 +1,4 @@
 import Foundation
-import PersonaWire
 
 /// The Inbox display clock. DEBUG screenshot launches can pin it to one reproducible moment.
 public nonisolated enum AppClock {

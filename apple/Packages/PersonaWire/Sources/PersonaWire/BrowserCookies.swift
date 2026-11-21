@@ -50,7 +50,7 @@ public nonisolated struct BrowserCookieSite: Codable, Hashable, Sendable, Identi
 
 public extension BrowserCookieSite {
     /// Every cookie of the site has expired: its latest one is past.
-    public nonisolated func expired(at now: Date = .now) -> Bool { expires.map { $0 <= now } ?? false }
+    nonisolated func expired(at now: Date = .now) -> Bool { expires.map { $0 <= now } ?? false }
 }
 
 /// A computer's sign-ins on its page (#5821, docs/design/DESIGN_SYSTEM.md「Long lists on a detail page」): a few are
